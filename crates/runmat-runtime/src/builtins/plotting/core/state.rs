@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 use runmat_plot::plots::{Figure, LineStyle};
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::common::default_figure;
 use super::engine::render_figure;
@@ -135,6 +135,8 @@ impl Default for PlotRegistry {
 }
 
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
+type FigureObserver = dyn Fn(u32, &Figure) + Send + Sync + 'static;
+static FIGURE_OBSERVER: OnceCell<Arc<FigureObserver>> = OnceCell::new();
 
 fn registry() -> MutexGuard<'static, PlotRegistry> {
     REGISTRY
@@ -150,6 +152,18 @@ fn get_state_mut<'a>(registry: &'a mut PlotRegistry, handle: FigureHandle) -> &'
         .or_insert_with(|| FigureState::new(handle))
 }
 
+pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), String> {
+    FIGURE_OBSERVER
+        .set(observer)
+        .map_err(|_| "figure observer already installed".to_string())
+}
+
+fn notify_figure_observer(handle: FigureHandle, figure: &Figure) {
+    if let Some(observer) = FIGURE_OBSERVER.get() {
+        observer(handle.as_u32(), figure);
+    }
+}
+
 pub fn select_figure(handle: FigureHandle) {
     let mut reg = registry();
     reg.current = handle;
@@ -163,6 +177,10 @@ pub fn new_figure_handle() -> FigureHandle {
     reg.current = handle;
     get_state_mut(&mut reg, handle);
     handle
+}
+
+pub fn current_figure_handle() -> FigureHandle {
+    registry().current
 }
 
 #[derive(Clone)]
@@ -243,7 +261,8 @@ where
         (handle, state.figure.clone())
     };
 
-    let rendered = render_figure(figure_clone)?;
+    notify_figure_observer(handle, &figure_clone);
+    let rendered = render_figure(handle, figure_clone)?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
 }
 

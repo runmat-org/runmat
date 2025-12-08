@@ -20,6 +20,7 @@ use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu
 use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
+use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -111,7 +112,9 @@ register_builtin_doc_text!("bar", DOC_MD);
     keywords = "bar,barchart,plotting",
     sink = true
 )]
-pub fn bar_builtin(values: Value) -> Result<String, String> {
+pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
+    let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+    let style = parse_bar_style_args("bar", &rest, defaults)?;
     let mut input = Some(BarInput::from_value(values)?);
     let opts = PlotRenderOptions {
         title: "Bar Chart",
@@ -120,10 +123,12 @@ pub fn bar_builtin(values: Value) -> Result<String, String> {
         ..Default::default()
     };
     render_active_plot(opts, move |figure, axes| {
+        let style = style.clone();
         let arg = input.take().expect("bar input consumed once");
         if let Some(handle) = arg.gpu_handle() {
-            match build_bar_gpu_chart(handle) {
-                Ok(bar) => {
+            match build_bar_gpu_chart(handle, &style) {
+                Ok(mut bar) => {
+                    apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
                     figure.add_bar_chart_on_axes(bar, axes);
                     return Ok(());
                 }
@@ -134,13 +139,15 @@ pub fn bar_builtin(values: Value) -> Result<String, String> {
         }
         let tensor = arg.into_tensor("bar")?;
         let vector = numeric_vector(tensor);
-        let bar = build_bar_chart(vector)?;
+        let mut bar = build_bar_chart(vector)?;
+        apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
         figure.add_bar_chart_on_axes(bar, axes);
         Ok(())
     })
 }
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;
+const BAR_DEFAULT_LABEL: &str = "Series 1";
 
 fn default_bar_color() -> Vec4 {
     Vec4::new(0.2, 0.6, 0.9, 0.95)
@@ -152,14 +159,11 @@ fn build_bar_chart(values: Vec<f64>) -> Result<BarChart, String> {
     }
     let labels: Vec<String> = (1..=values.len()).map(|idx| format!("{idx}")).collect();
 
-    let bar = BarChart::new(labels, values)
-        .map_err(|err| format!("bar: {err}"))?
-        .with_style(default_bar_color(), DEFAULT_BAR_WIDTH)
-        .with_label("Series 1");
+    let bar = BarChart::new(labels, values).map_err(|err| format!("bar: {err}"))?;
     Ok(bar)
 }
 
-fn build_bar_gpu_chart(values: &GpuTensorHandle) -> Result<BarChart, String> {
+fn build_bar_gpu_chart(values: &GpuTensorHandle, style: &BarStyle) -> Result<BarChart, String> {
     let context = runmat_plot::shared_wgpu_context()
         .ok_or_else(|| "bar: plotting GPU context unavailable".to_string())?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
@@ -177,8 +181,8 @@ fn build_bar_gpu_chart(values: &GpuTensorHandle) -> Result<BarChart, String> {
         scalar,
     };
     let params = BarGpuParams {
-        color: default_bar_color(),
-        bar_width: DEFAULT_BAR_WIDTH,
+        color: style.face_rgba(),
+        bar_width: style.bar_width,
         group_index: 0,
         group_count: 1,
         orientation: BarOrientation::Vertical,
@@ -195,7 +199,7 @@ fn build_bar_gpu_chart(values: &GpuTensorHandle) -> Result<BarChart, String> {
     let bounds = build_bar_gpu_bounds(values, exported.len, params.bar_width)?;
     let vertex_count = gpu_vertices.vertex_count;
 
-    Ok(BarChart::from_gpu_buffer(
+    let mut chart = BarChart::from_gpu_buffer(
         labels,
         exported.len,
         gpu_vertices,
@@ -203,8 +207,9 @@ fn build_bar_gpu_chart(values: &GpuTensorHandle) -> Result<BarChart, String> {
         bounds,
         params.color,
         params.bar_width,
-    )
-    .with_label("Series 1"))
+    );
+    apply_bar_style(&mut chart, style, BAR_DEFAULT_LABEL);
+    Ok(chart)
 }
 
 fn build_bar_gpu_bounds(
@@ -260,6 +265,20 @@ fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &str) -> Result<Tens
     Tensor::try_from(&gathered).map_err(|e| format!("{context}: {e}"))
 }
 
+pub(crate) fn apply_bar_style(bar: &mut BarChart, style: &BarStyle, default_label: &str) {
+    let face = style.face_rgba();
+    bar.apply_face_style(face, style.bar_width);
+
+    let outline = style.edge_rgba();
+    bar.apply_outline_style(outline, style.line_width);
+
+    if let Some(label) = &style.label {
+        bar.label = Some(label.clone());
+    } else if bar.label.is_none() {
+        bar.label = Some(default_label.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,7 +301,7 @@ mod tests {
 
     #[test]
     fn bar_builtin_matches_backend_contract() {
-        let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])));
+        let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
         if let Err(msg) = out {
             assert!(
                 msg.contains("Plotting is unavailable"),

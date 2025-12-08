@@ -13,7 +13,9 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::state::{render_active_plot, PlotRenderOptions};
+use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
+use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -91,12 +93,24 @@ register_builtin_doc_text!("mesh", DOC_MD);
     keywords = "mesh,wireframe,surface,plotting",
     sink = true
 )]
-pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
+pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
     let mut y_axis = Some(y_axis);
     let mut z_input = Some(SurfaceDataInput::from_value(z, "mesh")?);
+    let style = Arc::new(parse_surface_style_args(
+        "mesh",
+        &rest,
+        SurfaceStyleDefaults::new(
+            ColorMap::Turbo,
+            ShadingMode::Faceted,
+            true,
+            1.0,
+            false,
+            true,
+        ),
+    )?);
     let opts = PlotRenderOptions {
         title: "Mesh Plot",
         x_label: "X",
@@ -110,12 +124,14 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
         let z_arg = z_input.take().expect("mesh data consumed once");
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
+            let style = Arc::clone(&style);
             match build_surface_gpu_plot(&x_axis_vec, &y_axis_vec, z_gpu) {
-                Ok(surface) => {
-                    let surface = surface
+                Ok(surface_gpu) => {
+                    let mut surface = surface_gpu
                         .with_colormap(ColorMap::Turbo)
                         .with_wireframe(true)
                         .with_shading(ShadingMode::Faceted);
+                    style.apply_to_plot(&mut surface);
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
@@ -130,7 +146,9 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
             x_axis_vec.len(),
             y_axis_vec.len(),
         )?;
-        let surface = build_mesh_surface(x_axis_vec, y_axis_vec, grid)?;
+        let mut surface = build_mesh_surface(x_axis_vec, y_axis_vec, grid)?;
+        let style = Arc::clone(&style);
+        style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
     })
@@ -179,6 +197,7 @@ mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
+            Vec::new(),
         );
         assert!(res.is_err());
     }

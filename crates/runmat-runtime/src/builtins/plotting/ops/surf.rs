@@ -16,8 +16,11 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::gpu_helpers::axis_bounds;
+use super::perf::compute_surface_lod;
 use super::state::{render_active_plot, PlotRenderOptions};
+use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -107,7 +110,7 @@ register_builtin_doc_text!("surf", DOC_MD);
     keywords = "surf,plotting,3d,surface",
     sink = true
 )]
-pub fn surf_builtin(x: Value, y: Value, z: Value) -> Result<String, String> {
+pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_tensor = Tensor::try_from(&x).map_err(|e| format!("surf: {e}"))?;
     let y_tensor = Tensor::try_from(&y).map_err(|e| format!("surf: {e}"))?;
     let x_axis = numeric_vector(x_tensor);
@@ -115,6 +118,18 @@ pub fn surf_builtin(x: Value, y: Value, z: Value) -> Result<String, String> {
     let mut x_axis = Some(x_axis);
     let mut y_axis = Some(y_axis);
     let mut z_input = Some(SurfaceDataInput::from_value(z, "surf")?);
+    let style = Arc::new(parse_surface_style_args(
+        "surf",
+        &rest,
+        SurfaceStyleDefaults::new(
+            ColorMap::Parula,
+            ShadingMode::Smooth,
+            false,
+            1.0,
+            false,
+            true,
+        ),
+    )?);
     let opts = PlotRenderOptions {
         title: "Surface Plot",
         x_label: "X",
@@ -128,8 +143,10 @@ pub fn surf_builtin(x: Value, y: Value, z: Value) -> Result<String, String> {
         let z_arg = z_input.take().expect("surf: Z consumed once");
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
+            let style = Arc::clone(&style);
             match build_surface_gpu_plot(&x_axis_vec, &y_axis_vec, z_gpu) {
-                Ok(surface) => {
+                Ok(mut surface) => {
+                    style.apply_to_plot(&mut surface);
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
@@ -144,7 +161,9 @@ pub fn surf_builtin(x: Value, y: Value, z: Value) -> Result<String, String> {
             x_axis_vec.len(),
             y_axis_vec.len(),
         )?;
-        let surface = build_surface(x_axis_vec, y_axis_vec, grid)?;
+        let mut surface = build_surface(x_axis_vec, y_axis_vec, grid)?;
+        let style = Arc::clone(&style);
+        style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
     })
@@ -210,6 +229,7 @@ pub(crate) fn build_surface_gpu_plot(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),
     );
+    let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
 
     let x_axis_f32: Vec<f32> = x_axis.iter().map(|&v| v as f32).collect();
     let y_axis_f32: Vec<f32> = y_axis.iter().map(|&v| v as f32).collect();
@@ -224,11 +244,16 @@ pub(crate) fn build_surface_gpu_plot(
         y_len: y_axis.len() as u32,
         scalar: ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64),
     };
+    let lod = compute_surface_lod(x_axis.len(), y_axis.len(), extent_hint);
     let params = runmat_plot::gpu::surface::SurfaceGpuParams {
         min_z,
         max_z,
         alpha: 1.0,
         flatten_z: false,
+        x_stride: lod.stride_x,
+        y_stride: lod.stride_y,
+        lod_x_len: lod.lod_x_len,
+        lod_y_len: lod.lod_y_len,
     };
 
     let gpu_vertices = runmat_plot::gpu::surface::pack_surface_vertices(
@@ -239,7 +264,7 @@ pub(crate) fn build_surface_gpu_plot(
     )
     .map_err(|e| format!("surf: failed to build GPU vertices: {e}"))?;
 
-    let vertex_count = expected_len;
+    let vertex_count = lod.vertex_count();
     let mut surface = SurfacePlot::from_gpu_buffer(
         x_axis.to_vec(),
         y_axis.to_vec(),
@@ -289,6 +314,7 @@ mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
+            Vec::new(),
         );
         assert!(res.is_err());
     }

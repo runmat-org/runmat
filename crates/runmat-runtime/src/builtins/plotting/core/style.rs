@@ -1,6 +1,49 @@
 use glam::Vec4;
 use runmat_builtins::{CellArray, Tensor, Value};
-use runmat_plot::plots::{LineStyle, MarkerStyle as PlotMarkerStyle};
+use runmat_plot::plots::{
+    ColorMap, LineStyle, MarkerStyle as PlotMarkerStyle, ShadingMode, SurfacePlot,
+};
+
+#[derive(Clone, Copy, Debug)]
+pub struct BarStyleDefaults {
+    pub face_color: Vec4,
+    pub bar_width: f32,
+}
+
+impl BarStyleDefaults {
+    pub fn new(face_color: Vec4, bar_width: f32) -> Self {
+        Self {
+            face_color,
+            bar_width,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BarStyle {
+    pub face_color: Vec4,
+    pub face_alpha: f32,
+    pub edge_color: Option<Vec4>,
+    pub edge_alpha: f32,
+    pub line_width: f32,
+    pub bar_width: f32,
+    pub label: Option<String>,
+}
+
+impl BarStyle {
+    pub fn face_rgba(&self) -> Vec4 {
+        let mut color = self.face_color;
+        color.w *= self.face_alpha;
+        color
+    }
+
+    pub fn edge_rgba(&self) -> Option<Vec4> {
+        self.edge_color.map(|mut color| {
+            color.w *= self.edge_alpha;
+            color
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct LineStyleParseOptions {
@@ -39,6 +82,14 @@ impl LineStyleParseOptions {
             builtin_name: "stairs",
             forbid_leading_numeric: true,
             forbid_interleaved_numeric: true,
+        }
+    }
+
+    pub const fn generic(name: &'static str) -> Self {
+        Self {
+            builtin_name: name,
+            forbid_leading_numeric: false,
+            forbid_interleaved_numeric: false,
         }
     }
 }
@@ -120,6 +171,80 @@ pub enum MarkerColor {
     None,
     Flat,
     Color(Vec4),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SurfaceStyleDefaults {
+    pub colormap: ColorMap,
+    pub shading: ShadingMode,
+    pub wireframe: bool,
+    pub alpha: f32,
+    pub flatten_z: bool,
+    pub lighting_enabled: bool,
+    pub visible: bool,
+}
+
+impl SurfaceStyleDefaults {
+    pub fn new(
+        colormap: ColorMap,
+        shading: ShadingMode,
+        wireframe: bool,
+        alpha: f32,
+        flatten_z: bool,
+        lighting_enabled: bool,
+    ) -> Self {
+        Self {
+            colormap,
+            shading,
+            wireframe,
+            alpha,
+            flatten_z,
+            lighting_enabled,
+            visible: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SurfaceStyle {
+    pub colormap: ColorMap,
+    pub shading: ShadingMode,
+    pub wireframe: bool,
+    pub alpha: f32,
+    pub flatten_z: bool,
+    pub lighting_enabled: bool,
+    pub label: Option<String>,
+    pub visible: Option<bool>,
+}
+
+impl SurfaceStyle {
+    fn from_defaults(defaults: SurfaceStyleDefaults) -> Self {
+        Self {
+            colormap: defaults.colormap,
+            shading: defaults.shading,
+            wireframe: defaults.wireframe,
+            alpha: defaults.alpha,
+            flatten_z: defaults.flatten_z,
+            lighting_enabled: defaults.lighting_enabled,
+            label: None,
+            visible: Some(defaults.visible),
+        }
+    }
+
+    pub fn apply_to_plot(&self, plot: &mut SurfacePlot) {
+        plot.colormap = self.colormap;
+        plot.shading_mode = self.shading;
+        plot.wireframe = self.wireframe;
+        plot.alpha = self.alpha;
+        plot.flatten_z = self.flatten_z;
+        plot.lighting_enabled = self.lighting_enabled;
+        if let Some(label) = &self.label {
+            plot.label = Some(label.clone());
+        }
+        if let Some(visible) = self.visible {
+            plot.visible = visible;
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -253,6 +378,69 @@ pub fn parse_line_style_args(
         line_style_explicit: options.line_style.is_some(),
         line_style_order: options.line_style_order.clone(),
     })
+}
+
+pub fn parse_surface_style_args(
+    builtin: &'static str,
+    rest: &[Value],
+    defaults: SurfaceStyleDefaults,
+) -> Result<SurfaceStyle, String> {
+    let opts = LineStyleParseOptions::generic(builtin);
+    let mut style = SurfaceStyle::from_defaults(defaults);
+    if rest.is_empty() {
+        return Ok(style);
+    }
+    if rest.len() % 2 != 0 {
+        return Err(ctx_err(
+            &opts,
+            "name-value arguments must come in pairs for surface plots",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        let key = value_as_string(&pair[0])
+            .ok_or_else(|| ctx_err(&opts, "option names must be char arrays or strings"))?;
+        let lower = key.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "colormap" => {
+                style.colormap = parse_colormap_option(&opts, &pair[1])?;
+            }
+            "shading" => {
+                style.shading = parse_shading_option(&opts, &pair[1])?;
+            }
+            "facecolor" => {
+                apply_face_color_option(&opts, &pair[1], &mut style)?;
+            }
+            "facealpha" | "alpha" => {
+                style.alpha = parse_alpha_value(&opts, &pair[1])?;
+            }
+            "edgecolor" => {
+                apply_edge_color_option(&opts, &pair[1], &mut style)?;
+            }
+            "flattenz" => {
+                style.flatten_z = parse_surface_bool(&opts, "FlattenZ", &pair[1])?;
+            }
+            "displayname" | "label" => {
+                let Some(name) = value_as_string(&pair[1]) else {
+                    return Err(ctx_err(&opts, "DisplayName must be a char array or string"));
+                };
+                style.label = Some(name);
+            }
+            "lighting" => {
+                style.lighting_enabled = parse_lighting_option(&opts, &pair[1])?;
+            }
+            "visible" => {
+                let visible = parse_surface_bool(&opts, "Visible", &pair[1])?;
+                style.visible = Some(visible);
+            }
+            other => {
+                return Err(ctx_err(
+                    &opts,
+                    format!("unsupported surface option `{other}`"),
+                ));
+            }
+        }
+    }
+    Ok(style)
 }
 
 fn begins_with_numeric(rest: &[Value]) -> bool {
@@ -561,6 +749,358 @@ pub(crate) fn value_as_f64(value: &Value) -> Option<f64> {
     }
 }
 
+pub(crate) fn value_as_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(b) => Some(*b),
+        Value::Num(v) => Some(*v != 0.0),
+        Value::Int(i) => Some(!i.is_zero()),
+        Value::CharArray(chars) => {
+            let text: String = chars.data.iter().collect();
+            bool_from_text(&text)
+        }
+        Value::String(text) => bool_from_text(text),
+        _ => None,
+    }
+}
+
+fn bool_from_text(text: &str) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" | "yes" | "y" => Some(true),
+        "off" | "false" | "no" | "n" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_colormap_option(opts: &LineStyleParseOptions, value: &Value) -> Result<ColorMap, String> {
+    if let Some(name) = value_as_string(value) {
+        if let Some(map) = parse_colormap_name(&name) {
+            return Ok(map);
+        }
+        return Err(ctx_err(opts, format!("unsupported colormap `{name}`")));
+    }
+    let color = parse_color_value(opts, value)?;
+    Ok(ColorMap::Custom(color, color))
+}
+
+fn parse_colormap_name(name: &str) -> Option<ColorMap> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "parula" => Some(ColorMap::Parula),
+        "jet" => Some(ColorMap::Jet),
+        "turbo" => Some(ColorMap::Turbo),
+        "viridis" => Some(ColorMap::Viridis),
+        "plasma" => Some(ColorMap::Plasma),
+        "inferno" => Some(ColorMap::Inferno),
+        "magma" => Some(ColorMap::Magma),
+        "hot" => Some(ColorMap::Hot),
+        "cool" => Some(ColorMap::Cool),
+        "spring" => Some(ColorMap::Spring),
+        "summer" => Some(ColorMap::Summer),
+        "autumn" => Some(ColorMap::Autumn),
+        "winter" => Some(ColorMap::Winter),
+        "gray" | "grey" => Some(ColorMap::Gray),
+        "bone" => Some(ColorMap::Bone),
+        "copper" => Some(ColorMap::Copper),
+        "pink" => Some(ColorMap::Pink),
+        "lines" => Some(ColorMap::Lines),
+        _ => None,
+    }
+}
+
+fn parse_shading_option(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+) -> Result<ShadingMode, String> {
+    let Some(text) = value_as_string(value) else {
+        return Err(ctx_err(opts, "Shading must be a string"));
+    };
+    match text.trim().to_ascii_lowercase().as_str() {
+        "flat" => Ok(ShadingMode::Flat),
+        "interp" | "gouraud" => Ok(ShadingMode::Smooth),
+        "faceted" => Ok(ShadingMode::Faceted),
+        "none" => Ok(ShadingMode::None),
+        other => Err(ctx_err(opts, format!("unsupported Shading `{other}`"))),
+    }
+}
+
+fn parse_alpha_value(opts: &LineStyleParseOptions, value: &Value) -> Result<f32, String> {
+    let alpha =
+        value_as_f64(value).ok_or_else(|| ctx_err(opts, "Alpha/FacesAlpha must be numeric"))?;
+    Ok(alpha.clamp(0.0, 1.0) as f32)
+}
+
+fn apply_face_color_option(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+    style: &mut SurfaceStyle,
+) -> Result<(), String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "none" => {
+                style.alpha = 0.0;
+                Ok(())
+            }
+            "flat" => {
+                style.shading = ShadingMode::Flat;
+                Ok(())
+            }
+            "interp" => {
+                style.shading = ShadingMode::Smooth;
+                Ok(())
+            }
+            "texturemap" => {
+                style.flatten_z = true;
+                Ok(())
+            }
+            _ => {
+                let color = parse_color_value(opts, value)?;
+                style.colormap = ColorMap::Custom(color, color);
+                style.shading = ShadingMode::None;
+                style.lighting_enabled = false;
+                Ok(())
+            }
+        };
+    }
+    let color = parse_color_value(opts, value)?;
+    style.colormap = ColorMap::Custom(color, color);
+    style.shading = ShadingMode::None;
+    style.lighting_enabled = false;
+    Ok(())
+}
+
+fn apply_edge_color_option(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+    style: &mut SurfaceStyle,
+) -> Result<(), String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "none" => {
+                style.wireframe = false;
+                Ok(())
+            }
+            "auto" | "flat" | "interp" => {
+                style.wireframe = true;
+                Ok(())
+            }
+            _ => Err(ctx_err(
+                opts,
+                "EdgeColor only supports 'auto', 'flat', or 'none' in this build",
+            )),
+        };
+    }
+    Err(ctx_err(
+        opts,
+        "EdgeColor does not support custom RGB values yet",
+    ))
+}
+
+fn parse_surface_bool(
+    opts: &LineStyleParseOptions,
+    field: &str,
+    value: &Value,
+) -> Result<bool, String> {
+    value_as_bool(value).ok_or_else(|| ctx_err(opts, format!("{field} must be logical (on/off)")))
+}
+
+fn parse_lighting_option(opts: &LineStyleParseOptions, value: &Value) -> Result<bool, String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "none" => Ok(false),
+            "flat" | "gouraud" | "phong" | "auto" => Ok(true),
+            _ => Err(ctx_err(
+                opts,
+                format!("unsupported Lighting value `{lower}`"),
+            )),
+        };
+    }
+    parse_surface_bool(opts, "Lighting", value)
+}
+
+pub fn parse_bar_style_args(
+    builtin: &'static str,
+    rest: &[Value],
+    defaults: BarStyleDefaults,
+) -> Result<BarStyle, String> {
+    let opts = LineStyleParseOptions::generic(builtin);
+    let mut style = BarStyle {
+        face_color: defaults.face_color,
+        face_alpha: 1.0,
+        edge_color: None,
+        edge_alpha: 1.0,
+        line_width: DEFAULT_LINE_WIDTH,
+        bar_width: defaults.bar_width.clamp(0.1, 1.0),
+        label: None,
+    };
+
+    if rest.is_empty() {
+        return Ok(style);
+    }
+
+    let mut idx = 0usize;
+    if let Some(token) = rest.get(0).and_then(value_as_string) {
+        if !looks_like_option_name(&token) && !token.trim().is_empty() {
+            style.face_color = parse_bar_color_literal(&opts, &token)?;
+            idx = 1;
+        }
+    }
+
+    let remaining = &rest[idx..];
+    if remaining.is_empty() {
+        return Ok(style);
+    }
+    if remaining.len() % 2 != 0 {
+        return Err(bar_ctx_err(
+            builtin,
+            "name-value arguments must come in pairs",
+        ));
+    }
+
+    for pair in remaining.chunks_exact(2) {
+        let key_value = pair[0].clone();
+        let Some(key) = value_as_string(&pair[0]) else {
+            return Err(bar_ctx_err(
+                builtin,
+                "option names must be char arrays or strings",
+            ));
+        };
+        let lower = key.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "facecolor" | "color" => match parse_bar_face_color(&opts, &pair[1])? {
+                FaceColorSpec::Auto => {}
+                FaceColorSpec::None => {
+                    style.face_alpha = 0.0;
+                }
+                FaceColorSpec::Color(color) => {
+                    style.face_color = color;
+                    style.face_alpha = 1.0;
+                }
+            },
+            "edgecolor" => {
+                style.edge_color = match parse_bar_edge_color(&opts, &pair[1])? {
+                    EdgeColorSpec::Auto => None,
+                    EdgeColorSpec::None => None,
+                    EdgeColorSpec::Color(color) => Some(color),
+                };
+            }
+            "linewidth" => {
+                let width = value_as_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "LineWidth must be numeric"))?;
+                if width <= 0.0 {
+                    return Err(bar_ctx_err(builtin, "LineWidth must be positive"));
+                }
+                style.line_width = width as f32;
+            }
+            "barwidth" => {
+                let width = value_as_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "BarWidth must be numeric"))?;
+                if width <= 0.0 {
+                    return Err(bar_ctx_err(builtin, "BarWidth must be positive"));
+                }
+                style.bar_width = width as f32;
+            }
+            "facealpha" => {
+                let alpha = value_as_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "FaceAlpha must be numeric"))?;
+                style.face_alpha = alpha.clamp(0.0, 1.0) as f32;
+            }
+            "edgealpha" => {
+                let alpha = value_as_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "EdgeAlpha must be numeric"))?;
+                style.edge_alpha = alpha.clamp(0.0, 1.0) as f32;
+            }
+            "displayname" | "label" => {
+                let Some(name) = value_as_string(&pair[1]) else {
+                    return Err(bar_ctx_err(
+                        builtin,
+                        "DisplayName must be a char array or string",
+                    ));
+                };
+                style.label = Some(name);
+            }
+            other => {
+                return Err(bar_ctx_err(
+                    builtin,
+                    format!("unsupported option `{other}`"),
+                ));
+            }
+        }
+        drop(key_value);
+    }
+
+    Ok(style)
+}
+
+enum FaceColorSpec {
+    Auto,
+    None,
+    Color(Vec4),
+}
+
+enum EdgeColorSpec {
+    Auto,
+    None,
+    Color(Vec4),
+}
+
+fn parse_bar_face_color(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+) -> Result<FaceColorSpec, String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "auto" => Ok(FaceColorSpec::Auto),
+            "none" => Ok(FaceColorSpec::None),
+            "flat" => Err(ctx_err(opts, "FaceColor 'flat' is not supported yet")),
+            _ => {
+                let color = parse_bar_color_literal(opts, &text)?;
+                Ok(FaceColorSpec::Color(color))
+            }
+        };
+    }
+    let color = parse_color_value(opts, value)?;
+    Ok(FaceColorSpec::Color(color))
+}
+
+fn parse_bar_edge_color(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+) -> Result<EdgeColorSpec, String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "auto" => Ok(EdgeColorSpec::Auto),
+            "none" => Ok(EdgeColorSpec::None),
+            "flat" => Err(ctx_err(opts, "EdgeColor 'flat' is not supported yet")),
+            _ => {
+                let color = parse_bar_color_literal(opts, &text)?;
+                Ok(EdgeColorSpec::Color(color))
+            }
+        };
+    }
+    let color = parse_color_value(opts, value)?;
+    Ok(EdgeColorSpec::Color(color))
+}
+
+fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> Result<Vec4, String> {
+    if let Some(ch) = token.trim().chars().next() {
+        if let Some(color) = color_from_token(ch) {
+            return Ok(color);
+        }
+    }
+    Err(ctx_err(
+        opts,
+        format!("unsupported color specification `{token}`"),
+    ))
+}
+
+fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> String {
+    format!("{builtin}: {}", msg.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,5 +1128,33 @@ mod tests {
         let opts = LineStyleParseOptions::plot();
         let color = parse_marker_color_value(&opts, &Value::String("flat".into())).unwrap();
         assert_eq!(color, MarkerColor::Flat);
+    }
+
+    #[test]
+    fn bar_style_parses_face_and_edge_colors() {
+        let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
+        let rest = vec![
+            Value::String("FaceColor".into()),
+            Value::String("r".into()),
+            Value::String("EdgeColor".into()),
+            Value::String("k".into()),
+            Value::String("BarWidth".into()),
+            Value::from(0.5),
+        ];
+        let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
+        assert!((style.bar_width - 0.5).abs() < f32::EPSILON);
+        assert_eq!(style.face_color, Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(style.edge_color, Some(Vec4::new(0.0, 0.0, 0.0, 1.0)));
+    }
+
+    #[test]
+    fn bar_style_accepts_label() {
+        let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
+        let rest = vec![
+            Value::String("DisplayName".into()),
+            Value::String("My Bars".into()),
+        ];
+        let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
+        assert_eq!(style.label.as_deref(), Some("My Bars"));
     }
 }

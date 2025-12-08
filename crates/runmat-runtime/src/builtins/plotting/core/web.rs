@@ -6,38 +6,60 @@ mod wasm {
     use super::*;
     use runmat_plot::web::WebRenderer;
     use std::cell::RefCell;
+    use std::collections::HashMap;
 
     thread_local! {
-        static WEB_RENDERER: RefCell<Option<WebRenderer>> = RefCell::new(None);
+        static WEB_RENDERERS: RefCell<HashMap<u32, WebRenderer>> = RefCell::new(HashMap::new());
+        static DEFAULT_RENDERER: RefCell<Option<WebRenderer>> = RefCell::new(None);
     }
 
     pub fn install_web_renderer(renderer: WebRenderer) -> Result<(), String> {
-        WEB_RENDERER.with(|slot| {
+        DEFAULT_RENDERER.with(|slot| {
             *slot.borrow_mut() = Some(renderer);
         });
         Ok(())
     }
 
-    pub fn web_renderer_ready() -> bool {
-        WEB_RENDERER.with(|slot| slot.borrow().is_some())
+    pub fn install_web_renderer_for_handle(
+        handle: u32,
+        renderer: WebRenderer,
+    ) -> Result<(), String> {
+        WEB_RENDERERS.with(|slot| {
+            slot.borrow_mut().insert(handle, renderer);
+        });
+        Ok(())
     }
 
-    pub fn render_web_canvas(mut figure: Figure) -> Result<String, String> {
-        with_renderer(|renderer| renderer.render_figure(figure))
+    pub fn web_renderer_ready() -> bool {
+        WEB_RENDERERS.with(|slot| !slot.borrow().is_empty())
+            || DEFAULT_RENDERER.with(|slot| slot.borrow().is_some())
+    }
+
+    pub fn render_web_canvas(handle: u32, figure: Figure) -> Result<String, String> {
+        with_renderer(handle, |renderer| renderer.render_figure(figure))
             .map(|_| "Plot rendered to canvas".to_string())
     }
 
-    fn with_renderer<F, R>(f: F) -> Result<R, String>
+    fn with_renderer<F, R>(handle: u32, f: F) -> Result<R, String>
     where
         F: FnOnce(&mut WebRenderer) -> Result<R, runmat_plot::web::WebRendererError>,
     {
-        WEB_RENDERER.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            let renderer = borrow.as_mut().ok_or_else(|| {
-                "RunMat plotting canvas not registered. Call registerPlotCanvas() before plotting."
-                    .to_string()
-            })?;
-            f(renderer).map_err(|err| format!("Plotting failed: {err}"))
+        WEB_RENDERERS.with(|map_cell| {
+            if let Some(result) = map_cell
+                .borrow_mut()
+                .get_mut(&handle)
+                .map(|renderer| f(renderer).map_err(|err| format!("Plotting failed: {err}")))
+            {
+                return result;
+            }
+            DEFAULT_RENDERER.with(|default_cell| {
+                let mut default = default_cell.borrow_mut();
+                let renderer = default.as_mut().ok_or_else(|| {
+                    "RunMat plotting canvas not registered. Call registerPlotCanvas() before plotting."
+                        .to_string()
+                })?;
+                f(renderer).map_err(|err| format!("Plotting failed: {err}"))
+            })
         })
     }
 
@@ -55,12 +77,19 @@ mod wasm {
         Err(ERR_PLOTTING_UNAVAILABLE.to_string())
     }
 
+    pub fn install_web_renderer_for_handle(
+        _handle: u32,
+        _renderer: RendererPlaceholder,
+    ) -> Result<(), String> {
+        Err(ERR_PLOTTING_UNAVAILABLE.to_string())
+    }
+
     pub fn web_renderer_ready() -> bool {
         false
     }
 
     #[allow(dead_code)]
-    pub fn render_web_canvas(_figure: Figure) -> Result<String, String> {
+    pub fn render_web_canvas(_handle: u32, _figure: Figure) -> Result<String, String> {
         Err(ERR_PLOTTING_UNAVAILABLE.to_string())
     }
 
@@ -73,10 +102,17 @@ pub fn install_web_renderer(renderer: wasm::RendererType) -> Result<(), String> 
     wasm::install_web_renderer(renderer)
 }
 
+pub fn install_web_renderer_for_handle(
+    handle: u32,
+    renderer: wasm::RendererType,
+) -> Result<(), String> {
+    wasm::install_web_renderer_for_handle(handle, renderer)
+}
+
 #[cfg_attr(
     not(all(target_arch = "wasm32", feature = "plot-web")),
     allow(dead_code)
 )]
-pub(crate) fn render_web_canvas(figure: Figure) -> Result<String, String> {
-    wasm::render_web_canvas(figure)
+pub(crate) fn render_web_canvas(handle: u32, figure: Figure) -> Result<String, String> {
+    wasm::render_web_canvas(handle, figure)
 }

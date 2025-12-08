@@ -24,6 +24,7 @@ use std::convert::TryFrom;
 
 use super::common::numeric_pair;
 use super::gpu_helpers::axis_bounds;
+use super::perf::scatter_target_points;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
     map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
@@ -435,6 +436,7 @@ fn build_scatter_gpu_plot(
     let len_u32 = u32::try_from(point_count)
         .map_err(|_| "scatter: point count exceeds supported range".to_string())?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
+    let lod_stride = scatter_lod_stride(len_u32);
 
     let size_buffer = build_size_buffer(style, point_count)?;
     let has_sizes = size_buffer.has_data();
@@ -452,6 +454,7 @@ fn build_scatter_gpu_plot(
         point_size: style.marker_size,
         sizes: size_buffer,
         colors: color_buffer,
+        lod_stride,
     };
 
     let gpu_vertices = runmat_plot::gpu::scatter2::pack_vertices_from_xy(
@@ -461,6 +464,7 @@ fn build_scatter_gpu_plot(
         &params,
     )
     .map_err(|e| format!("scatter: failed to build GPU vertices: {e}"))?;
+    let drawn_points = gpu_vertices.vertex_count;
 
     let bounds = build_gpu_bounds(x, y)?;
     let gpu_style = ScatterGpuStyle {
@@ -474,14 +478,25 @@ fn build_scatter_gpu_plot(
         has_per_point_colors: has_colors,
     };
 
-    let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, point_count, bounds, gpu_style)
+    let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
         .with_label("Data");
     scatter.colormap = style.colormap;
-    if let Some(values) = style.color_values.as_ref() {
-        scatter.color_values = Some(values.clone());
+    if lod_stride == 1 {
+        if let Some(values) = style.color_values.as_ref() {
+            scatter.color_values = Some(values.clone());
+        }
     }
     scatter.color_limits = style.color_limits;
     Ok(scatter)
+}
+
+fn scatter_lod_stride(point_count: u32) -> u32 {
+    let target = scatter_target_points().max(1);
+    if point_count <= target {
+        1
+    } else {
+        (point_count + target - 1) / target
+    }
 }
 
 fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<BoundingBox, String> {

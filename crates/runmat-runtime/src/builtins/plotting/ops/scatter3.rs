@@ -22,6 +22,7 @@ use std::convert::TryFrom;
 
 use super::common::numeric_triplet;
 use super::gpu_helpers::axis_bounds;
+use super::perf::scatter3_lod_stride;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
     map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
@@ -378,6 +379,9 @@ fn build_scatter3_gpu_plot(
     let len_u32 = u32::try_from(point_count)
         .map_err(|_| "scatter3: point count exceeds supported range".to_string())?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
+    let bounds = build_gpu_bounds(x, y, z)?;
+    let extent_hint = scatter3_extent_hint(&bounds);
+    let lod_stride = scatter3_lod_stride(len_u32, extent_hint);
 
     let size_buffer = build_scatter3_size_buffer(style, point_count)?;
     let color_buffer = build_scatter3_color_buffer(style, point_count)?;
@@ -394,6 +398,7 @@ fn build_scatter3_gpu_plot(
         point_size: style.point_size,
         sizes: size_buffer,
         colors: color_buffer,
+        lod_stride,
     };
 
     let gpu_vertices = runmat_plot::gpu::scatter3::pack_vertices_from_xyz(
@@ -404,11 +409,10 @@ fn build_scatter3_gpu_plot(
     )
     .map_err(|e| format!("scatter3: failed to build GPU vertices: {e}"))?;
 
-    let bounds = build_gpu_bounds(x, y, z)?;
-
+    let drawn_points = gpu_vertices.vertex_count;
     Ok(Scatter3Plot::from_gpu_buffer(
         gpu_vertices,
-        point_count,
+        drawn_points,
         style.uniform_color,
         style.point_size,
         bounds,
@@ -428,6 +432,10 @@ fn build_gpu_bounds(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),
     ))
+}
+
+fn scatter3_extent_hint(bounds: &BoundingBox) -> f32 {
+    bounds.size().length().max(1.0)
 }
 
 fn build_scatter3_size_buffer(

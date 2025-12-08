@@ -37,6 +37,7 @@ pub struct LinePlot {
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
+    gpu_topology: Option<PipelineType>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +134,7 @@ impl LinePlot {
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
+            gpu_topology: None,
         })
     }
 
@@ -142,6 +144,7 @@ impl LinePlot {
         vertex_count: usize,
         style: LineGpuStyle,
         bounds: BoundingBox,
+        pipeline: PipelineType,
         marker_buffer: Option<GpuVertexBuffer>,
     ) -> Self {
         Self {
@@ -163,6 +166,7 @@ impl LinePlot {
             marker_vertices: None,
             marker_gpu_vertices: marker_buffer,
             marker_dirty: true,
+            gpu_topology: Some(pipeline),
         }
     }
 
@@ -172,6 +176,7 @@ impl LinePlot {
         self.bounds = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
+        self.gpu_topology = None;
     }
 
     fn invalidate_marker_data(&mut self) {
@@ -424,7 +429,13 @@ impl LinePlot {
 
         // If thick polyline was generated, we must render as triangles
         let pipeline = if using_gpu {
-            PipelineType::Lines
+            self.gpu_topology.unwrap_or_else(|| {
+                if self.line_width > 1.0 {
+                    PipelineType::Triangles
+                } else {
+                    PipelineType::Lines
+                }
+            })
         } else if self.line_width > 1.0 {
             PipelineType::Triangles
         } else {
@@ -762,5 +773,15 @@ mod tests {
         let marker_data = plot.marker_render_data().expect("marker render data");
         assert_eq!(marker_data.pipeline_type, PipelineType::Points);
         assert_eq!(marker_data.draw_calls[0].vertex_count, 2);
+    }
+
+    #[test]
+    fn line_plot_handles_large_trace() {
+        let n = 50_000;
+        let x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let y: Vec<f64> = (0..n).map(|i| (i as f64 * 0.001).sin()).collect();
+        let mut plot = LinePlot::new(x, y).unwrap();
+        let render_data = plot.render_data();
+        assert_eq!(render_data.vertices.len(), (n - 1) * 2);
     }
 }

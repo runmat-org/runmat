@@ -1,8 +1,9 @@
 use runmat_plot::plots::Figure;
 
 use super::common::ERR_PLOTTING_UNAVAILABLE;
+use super::state::FigureHandle;
 
-pub fn render_figure(figure: Figure) -> Result<String, String> {
+pub fn render_figure(handle: FigureHandle, figure: Figure) -> Result<String, String> {
     #[cfg(feature = "gui")]
     {
         return native::render(figure);
@@ -10,9 +11,10 @@ pub fn render_figure(figure: Figure) -> Result<String, String> {
 
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
-        return super::web::render_web_canvas(figure);
+        return super::web::render_web_canvas(handle.as_u32(), figure);
     }
 
+    let _ = handle;
     let _ = figure;
     Err(ERR_PLOTTING_UNAVAILABLE.to_string())
 }

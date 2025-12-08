@@ -1,7 +1,7 @@
 use crate::core::renderer::Vertex;
 use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::shaders;
-use crate::gpu::{tuning, ScalarType};
+use crate::gpu::{tuning, util, ScalarType};
 use glam::Vec4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -65,6 +65,7 @@ pub struct Scatter2GpuParams {
     pub point_size: f32,
     pub sizes: ScatterAttributeBuffer,
     pub colors: ScatterColorBuffer,
+    pub lod_stride: u32,
 }
 
 #[repr(C)]
@@ -73,10 +74,10 @@ struct Scatter2Uniforms {
     color: [f32; 4],
     point_size: f32,
     count: u32,
+    lod_stride: u32,
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
-    _pad: u32,
 }
 
 /// Builds a GPU-resident vertex buffer for scatter plots directly from
@@ -91,6 +92,9 @@ pub fn pack_vertices_from_xy(
     if inputs.len == 0 {
         return Err("scatter: empty input tensors".to_string());
     }
+
+    let lod_stride = params.lod_stride.max(1);
+    let max_points = (inputs.len + lod_stride - 1) / lod_stride;
 
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
@@ -158,6 +162,16 @@ pub fn pack_vertices_from_xy(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -174,7 +188,7 @@ pub fn pack_vertices_from_xy(
         entry_point: "main",
     });
 
-    let output_size = inputs.len as u64 * std::mem::size_of::<Vertex>() as u64;
+    let output_size = max_points as u64 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scatter2-gpu-vertices"),
         size: output_size,
@@ -184,6 +198,16 @@ pub fn pack_vertices_from_xy(
         mapped_at_creation: false,
     }));
 
+    let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("scatter2-gpu-counter"),
+        size: std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&counter_buffer, 0, bytemuck::bytes_of(&0u32));
+
     let (size_buffer, has_sizes) = prepare_size_buffer(device, params);
     let (color_buffer, has_colors, color_stride) = prepare_color_buffer(device, params);
 
@@ -191,10 +215,10 @@ pub fn pack_vertices_from_xy(
         color: params.color.to_array(),
         point_size: params.point_size,
         count: inputs.len,
+        lod_stride,
         has_sizes: if has_sizes { 1 } else { 0 },
         has_colors: if has_colors { 1 } else { 0 },
         color_stride,
-        _pad: 0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("scatter2-pack-uniforms"),
@@ -230,6 +254,10 @@ pub fn pack_vertices_from_xy(
                 binding: 5,
                 resource: color_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: counter_buffer.as_entire_binding(),
+            },
         ],
     });
 
@@ -246,9 +274,24 @@ pub fn pack_vertices_from_xy(
         let workgroups = (inputs.len + workgroup_size - 1) / workgroup_size;
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
+    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("scatter2-pack-counter-readback"),
+        size: std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_buffer_to_buffer(
+        &counter_buffer,
+        0,
+        &readback_buffer,
+        0,
+        std::mem::size_of::<u32>() as u64,
+    );
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, inputs.len as usize))
+    let drawn_vertices = util::readback_u32(device, &readback_buffer)
+        .map_err(|e| format!("scatter: failed to read GPU vertex count: {e}"))?;
+    Ok(GpuVertexBuffer::new(output_buffer, drawn_vertices as usize))
 }
 
 fn prepare_size_buffer(
@@ -366,4 +409,91 @@ fn compile_shader(
         label: Some("scatter2-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
+}
+
+#[cfg(test)]
+mod stress_tests {
+    use super::*;
+    use pollster::FutureExt;
+
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let limits = adapter.limits();
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-scatter-test-device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limits,
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
+
+    #[test]
+    fn gpu_packer_handles_large_point_cloud() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let point_count = 1_200_000u32;
+        let x_data: Vec<f32> = (0..point_count).map(|i| i as f32 * 0.001).collect();
+        let y_data: Vec<f32> = x_data.iter().map(|v| v.sin()).collect();
+
+        let x_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("scatter2-test-x"),
+                contents: bytemuck::cast_slice(&x_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let y_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("scatter2-test-y"),
+                contents: bytemuck::cast_slice(&y_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+
+        let target = 250_000u32;
+        let stride = if point_count <= target {
+            1
+        } else {
+            (point_count + target - 1) / target
+        };
+        let expected_vertices = ((point_count + stride - 1) / stride) as usize;
+
+        let inputs = Scatter2GpuInputs {
+            x_buffer,
+            y_buffer,
+            len: point_count,
+            scalar: ScalarType::F32,
+        };
+        let params = Scatter2GpuParams {
+            color: Vec4::new(0.8, 0.1, 0.3, 1.0),
+            point_size: 8.0,
+            sizes: ScatterAttributeBuffer::None,
+            colors: ScatterColorBuffer::None,
+            lod_stride: stride,
+        };
+
+        let gpu_vertices =
+            pack_vertices_from_xy(&device, &queue, &inputs, &params).expect("gpu packing failed");
+        assert!(gpu_vertices.vertex_count > 0);
+        assert_eq!(gpu_vertices.vertex_count, expected_vertices);
+    }
 }

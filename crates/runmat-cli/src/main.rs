@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 mod config;
 mod telemetry;
@@ -162,6 +162,14 @@ struct Cli {
     /// Plotting backend
     #[arg(long, value_enum, env = "RUSTMAT_PLOT_BACKEND")]
     plot_backend: Option<PlotBackend>,
+
+    /// Override scatter target points for GPU decimation
+    #[arg(long)]
+    plot_scatter_target: Option<u32>,
+
+    /// Override surface vertex budget for GPU LOD
+    #[arg(long)]
+    plot_surface_vertex_budget: Option<u64>,
 
     // config_file is now handled by the config field above
     /// Generate sample configuration file
@@ -566,6 +574,8 @@ async fn main() -> Result<()> {
 
     // Configure Garbage Collector
     configure_gc_from_config(&config)?;
+    configure_plotting_from_config(&config);
+    report_plot_context_status(&config);
 
     // Initialize GUI system if needed
     let wants_gui = match config.plotting.mode {
@@ -755,6 +765,12 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
     }
+    if let Some(target) = cli.plot_scatter_target {
+        config.plotting.scatter_target_points = Some(target);
+    }
+    if let Some(budget) = cli.plot_surface_vertex_budget {
+        config.plotting.surface_vertex_budget = Some(budget);
+    }
 
     // Logging settings
     config.logging.debug = cli.debug;
@@ -805,6 +821,28 @@ fn configure_gc_from_config(config: &RunMatConfig) -> Result<()> {
     runmat_gc::gc_configure(gc_config).context("Failed to configure garbage collector")?;
 
     Ok(())
+}
+
+fn configure_plotting_from_config(config: &RunMatConfig) {
+    use runmat_runtime::builtins::plotting::{
+        set_scatter_target_points, set_surface_vertex_budget,
+    };
+    if let Some(points) = config.plotting.scatter_target_points {
+        set_scatter_target_points(points);
+    }
+    if let Some(budget) = config.plotting.surface_vertex_budget {
+        set_surface_vertex_budget(budget);
+    }
+}
+
+fn report_plot_context_status(config: &RunMatConfig) {
+    if let Err(err) = runmat_runtime::builtins::plotting::context::ensure_context_from_provider() {
+        if config.accelerate.enabled {
+            warn!("Shared plotting context unavailable: {err}");
+        } else {
+            debug!("Plotting context unavailable (GPU disabled): {err}");
+        }
+    }
 }
 
 async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) -> Result<()> {

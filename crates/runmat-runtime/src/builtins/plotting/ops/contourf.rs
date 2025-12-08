@@ -8,7 +8,7 @@ use runmat_plot::plots::ColorMap;
 use super::common::tensor_to_surface_grid;
 use super::contour::{
     build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_gpu_plot,
-    build_contour_plot, parse_contour_args, ContourArgs,
+    build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
@@ -77,6 +77,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
             y_axis,
             z_input,
             level_spec,
+            line_color,
         } = args.take().expect("contourf args consumed once");
         let color_map = ColorMap::Parula;
         let base_z = 0.0;
@@ -92,19 +93,22 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
             ) {
                 Ok(fill_plot) => {
                     figure.add_contour_fill_plot_on_axes(fill_plot, axes);
-                    if let Ok(contours) = build_contour_gpu_plot(
-                        &x_axis,
-                        &y_axis,
-                        handle,
-                        color_map,
-                        base_z,
-                        &level_spec,
-                    ) {
-                        figure.add_contour_plot_on_axes(contours, axes);
-                    } else {
-                        warn!(
-                            "contourf contour overlay unavailable: failed to build contour lines"
-                        );
+                    if !matches!(line_color, ContourLineColor::None) {
+                        if let Ok(contours) = build_contour_gpu_plot(
+                            &x_axis,
+                            &y_axis,
+                            handle,
+                            color_map,
+                            base_z,
+                            &level_spec,
+                            &line_color,
+                        ) {
+                            figure.add_contour_plot_on_axes(contours, axes);
+                        } else {
+                            warn!(
+                                "contourf contour overlay unavailable: failed to build contour lines"
+                            );
+                        }
                     }
                     return Ok(());
                 }
@@ -116,12 +120,20 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
         let fill_plot =
             build_contour_fill_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)?;
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
-        if let Ok(contours) =
-            build_contour_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)
-        {
-            figure.add_contour_plot_on_axes(contours, axes);
-        } else {
-            warn!("contourf overlay contour unavailable: failed to build contour lines");
+        if !matches!(line_color, ContourLineColor::None) {
+            if let Ok(contours) = build_contour_plot(
+                &x_axis,
+                &y_axis,
+                &grid,
+                color_map,
+                base_z,
+                &level_spec,
+                &line_color,
+            ) {
+                figure.add_contour_plot_on_axes(contours, axes);
+            } else {
+                warn!("contourf overlay contour unavailable: failed to build contour lines");
+            }
         }
         Ok(())
     })

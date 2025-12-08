@@ -1,6 +1,8 @@
 use std::cell::RefCell;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+#[cfg(target_arch = "wasm32")]
+use js_sys::{Array, Reflect};
 use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
@@ -11,6 +13,7 @@ use runmat_accelerate_api::ProviderPrecision;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{ExecutionResult, RunMatSession};
+use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use wasm_bindgen::prelude::*;
@@ -24,16 +27,23 @@ mod fs;
 #[cfg(target_arch = "wasm32")]
 use crate::fs::install_js_fs_provider;
 #[cfg(target_arch = "wasm32")]
-use js_sys::Reflect;
-#[cfg(target_arch = "wasm32")]
 use runmat_plot::{
     web::{WebRenderer, WebRendererOptions},
     SharedWgpuContext,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    context as plotting_context, install_web_renderer as runtime_install_web_renderer,
+    configure_subplot as runtime_configure_subplot,
+    context as plotting_context,
+    current_figure_handle as runtime_current_figure_handle,
+    install_figure_observer as runtime_install_figure_observer,
+    install_web_renderer as runtime_install_web_renderer,
+    install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
+    new_figure_handle as runtime_new_figure_handle,
+    select_figure as runtime_select_figure,
+    set_hold as runtime_set_hold,
     web_renderer_ready as runtime_plot_renderer_ready,
+    FigureHandle, HoldMode,
 };
 
 const MAX_DATA_PREVIEW: usize = 4096;
@@ -63,7 +73,18 @@ struct InitOptions {
     #[cfg(target_arch = "wasm32")]
     #[serde(default)]
     snapshot_stream: Option<JsValue>,
+    #[serde(default)]
+    scatter_target_points: Option<u32>,
+    #[serde(default)]
+    surface_vertex_budget: Option<u64>,
 }
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static FIGURE_EVENT_CALLBACK: RefCell<Option<js_sys::Function>> = RefCell::new(None);
+}
+#[cfg(target_arch = "wasm32")]
+static FIGURE_EVENT_OBSERVER: OnceLock<()> = OnceLock::new();
 
 #[derive(Clone)]
 struct SessionConfig {
@@ -174,18 +195,53 @@ pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerPlotCanvas)]
 pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
-    init_logging_once();
-    let options = WebRendererOptions::default();
-    let renderer_future = match shared_webgpu_context() {
-        Some(shared) => WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared),
-        None => WebRenderer::new(canvas, options),
-    };
-    let renderer = renderer_future
-        .await
-        .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
-    runtime_install_web_renderer(renderer)
-        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?;
+    install_canvas_renderer(None, canvas).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = registerFigureCanvas)]
+pub async fn register_figure_canvas(
+    handle: u32,
+    canvas: web_sys::HtmlCanvasElement,
+) -> Result<(), JsValue> {
+    install_canvas_renderer(Some(handle), canvas).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = newFigureHandle)]
+pub fn wasm_new_figure_handle() -> u32 {
+    runtime_new_figure_handle().as_u32()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = selectFigure)]
+pub fn wasm_select_figure(handle: u32) {
+    runtime_select_figure(FigureHandle::from(handle));
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = currentFigureHandle)]
+pub fn wasm_current_figure_handle() -> u32 {
+    runtime_current_figure_handle().as_u32()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = configureSubplot)]
+pub fn wasm_configure_subplot(rows: u32, cols: u32, index: u32) -> Result<(), JsValue> {
+    if rows == 0 || cols == 0 {
+        return Err(js_error(
+            "configureSubplot requires rows and cols to be at least 1",
+        ));
+    }
+    runtime_configure_subplot(rows as usize, cols as usize, index as usize);
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setHoldMode)]
+pub fn wasm_set_hold_mode(mode: JsValue) -> Result<bool, JsValue> {
+    let parsed = parse_hold_mode(mode)?;
+    Ok(runtime_set_hold(parsed))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -218,11 +274,56 @@ pub fn plot_renderer_ready() -> bool {
     runtime_plot_renderer_ready()
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = onFigureEvent)]
+pub fn on_figure_event(callback: JsValue) -> Result<(), JsValue> {
+    ensure_figure_event_bridge();
+    if callback.is_null() || callback.is_undefined() {
+        FIGURE_EVENT_CALLBACK.with(|slot| {
+            slot.borrow_mut().take();
+        });
+        return Ok(());
+    }
+    let func = callback
+        .dyn_ref::<js_sys::Function>()
+        .ok_or_else(|| js_error("onFigureEvent expects a Function or null"))?
+        .clone();
+    FIGURE_EVENT_CALLBACK.with(|slot| {
+        *slot.borrow_mut() = Some(func);
+    });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn install_canvas_renderer(
+    handle: Option<u32>,
+    canvas: web_sys::HtmlCanvasElement,
+) -> Result<(), JsValue> {
+    init_logging_once();
+    let options = WebRendererOptions::default();
+    let renderer_future = match shared_webgpu_context() {
+        Some(shared) => WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared),
+        None => WebRenderer::new(canvas, options),
+    };
+    let renderer = renderer_future
+        .await
+        .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
+    match handle {
+        Some(id) => runtime_install_web_renderer_for_handle(id, renderer)
+            .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
+        None => runtime_install_web_renderer(renderer)
+            .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
+    };
+    Ok(())
+}
+
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     init_logging_once();
     #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
+    #[cfg(target_arch = "wasm32")]
+    ensure_figure_event_bridge();
     install_fs_provider_from_options(&options)?;
     let parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
         InitOptions::default()
@@ -230,6 +331,8 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         serde_wasm_bindgen::from_value(options)
             .map_err(|err| js_error(&format!("Invalid init options: {err}")))?
     };
+
+    apply_plotting_overrides(&parsed_opts);
 
     let config = SessionConfig::from_options(&parsed_opts);
     let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await?;
@@ -255,7 +358,10 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 gpu_status.adapter = capture_gpu_adapter_info();
                 #[cfg(target_arch = "wasm32")]
                 {
-                    plotting_context::ensure_context_from_provider();
+                    if let Err(err) = plotting_context::ensure_context_from_provider() {
+                        warn!("RunMat wasm: unable to install shared plotting context: {err}");
+                        gpu_status.error = Some(err.to_string());
+                    }
                 }
             }
             Err(err) => {
@@ -285,11 +391,105 @@ fn ensure_getrandom_js() {
     }
 }
 
+fn apply_plotting_overrides(opts: &InitOptions) {
+    if let Some(points) = opts.scatter_target_points {
+        set_scatter_target_points(points);
+    }
+    if let Some(budget) = opts.surface_vertex_budget {
+        set_surface_vertex_budget(budget);
+    }
+}
+
 fn install_cpu_provider(config: &SessionConfig) {
     let mut options = config.to_accel_options();
     options.enabled = false;
     options.provider = AccelerateProviderPreference::InProcess;
     initialize_acceleration_provider_with(&options);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_figure_event_bridge() {
+    use runmat_plot::plots::Figure;
+    FIGURE_EVENT_OBSERVER.get_or_init(|| {
+        let observer: Arc<dyn Fn(u32, &Figure) + Send + Sync> =
+            Arc::new(|handle, figure| emit_js_figure_event(handle, figure));
+        let _ = runtime_install_figure_observer(observer);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_figure_event_bridge() {}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_hold_mode(value: JsValue) -> Result<HoldMode, JsValue> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(HoldMode::Toggle);
+    }
+    if let Some(flag) = value.as_bool() {
+        return Ok(if flag { HoldMode::On } else { HoldMode::Off });
+    }
+    if let Some(text) = value.as_string() {
+        let normalized = text.trim().to_ascii_lowercase();
+        return match normalized.as_str() {
+            "on" | "holdon" => Ok(HoldMode::On),
+            "off" | "holdoff" => Ok(HoldMode::Off),
+            "toggle" | "switch" => Ok(HoldMode::Toggle),
+            other => Err(js_error(&format!(
+                "Unsupported hold mode '{other}'. Expected 'on', 'off', or 'toggle'."
+            ))),
+        };
+    }
+    Err(js_error(
+        "setHoldMode expects a string ('on'|'off'|'toggle') or a boolean",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn emit_js_figure_event(handle: u32, figure: &runmat_plot::plots::Figure) {
+    FIGURE_EVENT_CALLBACK.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let payload = js_sys::Object::new();
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("handle"),
+                &JsValue::from(handle),
+            );
+            let (rows, cols) = figure.axes_grid();
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("axesRows"),
+                &JsValue::from(rows as u32),
+            );
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("axesCols"),
+                &JsValue::from(cols as u32),
+            );
+            let plot_count = figure.plot_axes_indices().len() as u32;
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("plotCount"),
+                &JsValue::from(plot_count),
+            );
+            let indices = Array::new();
+            for idx in figure.plot_axes_indices() {
+                indices.push(&JsValue::from(*idx as u32));
+            }
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("axesIndices"),
+                &JsValue::from(indices),
+            );
+            if let Some(title) = figure.title.as_ref() {
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("title"),
+                    &JsValue::from_str(title),
+                );
+            }
+            let _ = cb.call1(&JsValue::NULL, &payload);
+        }
+    });
 }
 
 #[cfg(all(feature = "gpu", target_arch = "wasm32"))]

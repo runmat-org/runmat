@@ -1,4 +1,4 @@
-pub const F32: &str = r#"override WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
     data: array<f32, 12u>;
@@ -8,10 +8,15 @@ struct Scatter3Params {
     color: vec4<f32>,
     point_size: f32,
     count: u32,
+    lod_stride: u32,
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
 };
+
+struct Counter {
+    value: atomic<u32>,
+}
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f32>;
@@ -34,10 +39,17 @@ var<storage, read> buf_sizes: array<f32>;
 @group(0) @binding(6)
 var<storage, read> buf_colors: array<f32>;
 
+@group(0) @binding(7)
+var<storage, read_write> counter: Counter;
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.count) {
+        return;
+    }
+    let stride = max(params.lod_stride, 1u);
+    if ((idx % stride) != 0u) {
         return;
     }
 
@@ -79,11 +91,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
-    out_vertices[idx] = vertex;
+    let out_idx = atomicAdd(&(counter.value), 1u);
+    out_vertices[out_idx] = vertex;
 }
 "#;
 
-pub const F64: &str = r#"override WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
     data: array<f32, 12u>;
@@ -93,10 +106,15 @@ struct Scatter3Params {
     color: vec4<f32>,
     point_size: f32,
     count: u32,
+    lod_stride: u32,
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
 };
+
+struct Counter {
+    value: atomic<u32>,
+}
 
 @group(0) @binding(0)
 var<storage, read> buf_x: array<f64>;
@@ -119,10 +137,17 @@ var<storage, read> buf_sizes: array<f32>;
 @group(0) @binding(6)
 var<storage, read> buf_colors: array<f32>;
 
+@group(0) @binding(7)
+var<storage, read_write> counter: Counter;
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.count) {
+        return;
+    }
+    let stride = max(params.lod_stride, 1u);
+    if ((idx % stride) != 0u) {
         return;
     }
 
@@ -164,6 +189,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
-    out_vertices[idx] = vertex;
+    let out_idx = atomicAdd(&(counter.value), 1u);
+    out_vertices[out_idx] = vertex;
 }
 "#;

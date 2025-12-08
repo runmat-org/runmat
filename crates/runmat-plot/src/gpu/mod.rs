@@ -9,6 +9,7 @@ pub mod shaders;
 pub mod stairs;
 pub mod surface;
 pub mod tuning;
+pub mod util;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarType {

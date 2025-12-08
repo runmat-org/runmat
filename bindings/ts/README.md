@@ -98,3 +98,30 @@ if (!await plotRendererReady()) {
 ```
 
 Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.
+
+### Plotting performance knobs
+
+Hosts can tune the GPU level-of-detail heuristics without touching environment variables. Pass either (or both) of the following when calling `initRunMat`:
+
+- `scatterTargetPoints`: preferred number of scatter/scatter3 points to retain per dispatch before compute-side decimation kicks in (default `250_000`).
+- `surfaceVertexBudget`: maximum number of surface vertices to pack before LOD sampling starts (default `400_000`).
+
+These map directly to the runtime setters (`set_scatter_target_points`, `set_surface_vertex_budget`) so native CLI builds and the wasm bindings stay in sync.
+
+### Multi-figure canvases & events
+
+- `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
+- `onFigureEvent(listener)` registers a callback that receives `{ handle, axesRows, axesCols, plotCount, axesIndices[] }` whenever a figure updates. Pass `null` to unsubscribe.
+
+The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
+
+### Figure orchestration helpers
+
+The wasm bindings now expose the same figure/axes controls that the MATLAB runtime uses so hosts can drive multi-tab canvases without issuing textual commands:
+
+- `figure(handle?)` – selects an existing figure handle (creating it if `handle` is omitted) and returns the active handle.
+- `newFigureHandle()` / `currentFigureHandle()` – explicit helpers for creating or querying handles when wiring UI tabs.
+- `setHoldMode(mode)` / `hold(mode?)` / `holdOn()` / `holdOff()` – toggle MATLAB's `hold` state from JS using `"on" | "off" | "toggle"` (boolean flags also work).
+- `configureSubplot(rows, cols, index)` / `subplot(rows, cols, index)` – mirror MATLAB's subplot grid selection so canvas layouts stay in sync with the runtime registry.
+
+Each helper forwards directly to the new wasm exports, so the zero-copy renderer stays in lock-step with MATLAB semantics even when figure switches originate from the host UI.

@@ -225,6 +225,12 @@ pub struct PlottingConfig {
     pub gui: Option<GuiConfig>,
     /// Export settings
     pub export: Option<ExportConfig>,
+    /// Target scatter point budget for GPU decimation overrides
+    #[serde(default)]
+    pub scatter_target_points: Option<u32>,
+    /// Surface vertex budget override for LOD selection
+    #[serde(default)]
+    pub surface_vertex_budget: Option<u64>,
 }
 
 /// GUI configuration
@@ -604,6 +610,8 @@ impl Default for PlottingConfig {
             backend: PlotBackend::Auto,
             gui: Some(GuiConfig::default()),
             export: Some(ExportConfig::default()),
+            scatter_target_points: None,
+            surface_vertex_budget: None,
         }
     }
 }

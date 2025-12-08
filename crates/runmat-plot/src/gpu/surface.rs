@@ -22,6 +22,10 @@ pub struct SurfaceGpuParams {
     pub max_z: f32,
     pub alpha: f32,
     pub flatten_z: bool,
+    pub x_stride: u32,
+    pub y_stride: u32,
+    pub lod_x_len: u32,
+    pub lod_y_len: u32,
 }
 
 #[repr(C)]
@@ -33,6 +37,10 @@ struct SurfaceUniforms {
     flatten: u32,
     x_len: u32,
     y_len: u32,
+    lod_x_len: u32,
+    lod_y_len: u32,
+    x_stride: u32,
+    y_stride: u32,
     color_table_len: u32,
     _pad: u32,
 }
@@ -75,9 +83,10 @@ pub fn pack_surface_vertices(
         }),
     );
 
-    let vertex_count = inputs
-        .x_len
-        .checked_mul(inputs.y_len)
+    let lod_x_len = params.lod_x_len.max(1);
+    let lod_y_len = params.lod_y_len.max(1);
+    let vertex_count = lod_x_len
+        .checked_mul(lod_y_len)
         .ok_or_else(|| "surf: grid dimensions overflowed vertex count".to_string())?;
     let output_size = vertex_count as u64 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
@@ -96,6 +105,10 @@ pub fn pack_surface_vertices(
         flatten: if params.flatten_z { 1 } else { 0 },
         x_len: inputs.x_len,
         y_len: inputs.y_len,
+        lod_x_len,
+        lod_y_len,
+        x_stride: params.x_stride.max(1),
+        y_stride: params.y_stride.max(1),
         color_table_len: inputs.color_table.len() as u32,
         _pad: 0,
     };
@@ -247,4 +260,99 @@ fn compile_shader(
         label: Some("surface-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
+}
+
+#[cfg(test)]
+mod stress_tests {
+    use super::*;
+    use pollster::FutureExt;
+
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let limits = adapter.limits();
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-surface-test-device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limits,
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
+
+    #[test]
+    fn gpu_packer_handles_large_surface() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x_len = 2048u32;
+        let y_len = 2048u32;
+        let total = (x_len * y_len) as usize;
+        let x_axis: Vec<f32> = (0..x_len).map(|i| i as f32 * 0.1).collect();
+        let y_axis: Vec<f32> = (0..y_len).map(|i| i as f32 * 0.1).collect();
+        let mut z_data = vec![0.0f32; total];
+        for (idx, value) in z_data.iter_mut().enumerate() {
+            let x = (idx % x_len as usize) as f32 * 0.01;
+            let y = (idx / x_len as usize) as f32 * 0.01;
+            *value = (x.sin() + y.cos()) * 0.5;
+        }
+        let z_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("surface-test-z"),
+                contents: bytemuck::cast_slice(&z_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+
+        let color_table: Vec<[f32; 4]> = (0..256)
+            .map(|i| {
+                let t = i as f32 / 255.0;
+                [t, 1.0 - t, 0.5, 1.0]
+            })
+            .collect();
+
+        let inputs = SurfaceGpuInputs {
+            x_axis: &x_axis,
+            y_axis: &y_axis,
+            z_buffer,
+            color_table: &color_table,
+            x_len,
+            y_len,
+            scalar: ScalarType::F32,
+        };
+        let stride = 8;
+        let lod_x_len = (x_len + stride - 1) / stride;
+        let lod_y_len = (y_len + stride - 1) / stride;
+        let params = SurfaceGpuParams {
+            min_z: -1.0,
+            max_z: 1.0,
+            alpha: 1.0,
+            flatten_z: false,
+            x_stride: stride,
+            y_stride: stride,
+            lod_x_len,
+            lod_y_len,
+        };
+
+        let gpu_vertices =
+            pack_surface_vertices(&device, &queue, &inputs, &params).expect("surface pack failed");
+        assert!(gpu_vertices.vertex_count > 0);
+        assert_eq!(gpu_vertices.vertex_count, (lod_x_len * lod_y_len) as usize);
+    }
 }

@@ -5,6 +5,7 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_plot::core::PipelineType;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 
@@ -353,7 +354,9 @@ fn build_line_gpu_plot(
     };
     let params = runmat_plot::gpu::line::LineGpuParams {
         color: appearance.color,
-        marker_size: 1.0,
+        line_width: appearance.line_width,
+        line_style: appearance.line_style,
+        marker_size: DEFAULT_LINE_MARKER_SIZE,
     };
     let marker_meta = build_marker_metadata(appearance);
 
@@ -368,10 +371,12 @@ fn build_line_gpu_plot(
     let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
             color: marker.face_color,
+            line_width: 1.0,
+            line_style: LineStyle::Solid,
             marker_size: marker.size.max(1.0),
         };
         Some(
-            runmat_plot::gpu::line::pack_vertices_from_xy(
+            runmat_plot::gpu::line::pack_marker_vertices_from_xy(
                 &context.device,
                 &context.queue,
                 &inputs,
@@ -390,11 +395,17 @@ fn build_line_gpu_plot(
         line_style: appearance.line_style,
         marker: marker_meta.clone(),
     };
+    let pipeline = if appearance.line_width > 1.0 {
+        PipelineType::Triangles
+    } else {
+        PipelineType::Lines
+    };
     let mut plot = LinePlot::from_gpu_buffer(
         gpu_vertices,
         x_ref.len,
         gpu_style,
         bounds,
+        pipeline,
         marker_gpu_vertices,
     );
     plot = plot.with_label(label);

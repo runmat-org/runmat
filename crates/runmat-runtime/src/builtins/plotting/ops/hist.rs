@@ -17,9 +17,11 @@ use crate::builtins::common::spec::{
 };
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
+use super::bar::apply_bar_style;
 use super::common::{gather_tensor_from_gpu, numeric_vector, value_as_f64};
 use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
+use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -107,6 +109,7 @@ register_builtin_doc_text!("hist", DOC_MD);
 
 const HIST_BAR_WIDTH: f32 = 0.95;
 const HIST_DEFAULT_COLOR: Vec4 = Vec4::new(0.15, 0.5, 0.8, 0.95);
+const HIST_DEFAULT_LABEL: &str = "Frequency";
 
 #[derive(Clone)]
 enum HistBinSpec {
@@ -157,7 +160,9 @@ impl Default for HistNormalization {
 pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<String, String> {
     let mut input = Some(HistInput::from_value(data)?);
     let sample_len = input.as_ref().map(|value| value.len()).unwrap_or(0);
-    let (bin_spec, normalization) = parse_hist_arguments(sample_len, rest)?;
+    let (bin_spec, normalization, style_args) = parse_hist_arguments(sample_len, &rest)?;
+    let defaults = BarStyleDefaults::new(HIST_DEFAULT_COLOR, HIST_BAR_WIDTH);
+    let bar_style = parse_bar_style_args("hist", &style_args, defaults)?;
     let y_label = match normalization {
         HistNormalization::Count => "Count",
         HistNormalization::Probability => "Probability",
@@ -173,8 +178,15 @@ pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<String, String> {
         let data_arg = input.take().expect("hist input consumed once");
         if let Some(handle) = data_arg.gpu_handle() {
             if bin_spec.is_uniform() {
-                match build_histogram_gpu_chart(handle, &bin_spec, sample_len, normalization) {
-                    Ok(bar) => {
+                match build_histogram_gpu_chart(
+                    handle,
+                    &bin_spec,
+                    sample_len,
+                    normalization,
+                    &bar_style,
+                ) {
+                    Ok(mut bar) => {
+                        apply_bar_style(&mut bar, &bar_style, HIST_DEFAULT_LABEL);
                         figure.add_bar_chart_on_axes(bar, axes);
                         return Ok(());
                     }
@@ -184,7 +196,8 @@ pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<String, String> {
         }
         let tensor = data_arg.into_tensor("hist")?;
         let samples = numeric_vector(tensor);
-        let bar = build_histogram_chart(samples, &bin_spec, normalization)?;
+        let mut bar = build_histogram_chart(samples, &bin_spec, normalization)?;
+        apply_bar_style(&mut bar, &bar_style, HIST_DEFAULT_LABEL);
         figure.add_bar_chart_on_axes(bar, axes);
         Ok(())
     })
@@ -192,35 +205,42 @@ pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<String, String> {
 
 fn parse_hist_arguments(
     sample_len: usize,
-    args: Vec<Value>,
-) -> Result<(HistBinSpec, HistNormalization), String> {
-    let mut iter = args.into_iter().peekable();
+    args: &[Value],
+) -> Result<(HistBinSpec, HistNormalization, Vec<Value>), String> {
+    let mut idx = 0usize;
     let mut bin_spec = HistBinSpec::Auto;
     let mut normalization = HistNormalization::Count;
     let mut bin_set = false;
     let mut norm_set = false;
+    let mut style_args = Vec::new();
 
-    while let Some(arg) = iter.next() {
-        if !bin_set && is_bin_candidate(&arg) {
-            bin_spec = parse_hist_bins(Some(arg), sample_len)?;
+    while idx < args.len() {
+        let arg = &args[idx];
+        if !bin_set && is_bin_candidate(arg) {
+            bin_spec = parse_hist_bins(Some(arg.clone()), sample_len)?;
             bin_set = true;
+            idx += 1;
             continue;
         }
 
         if !norm_set {
-            if let Some(result) = try_parse_norm_literal(&arg) {
+            if let Some(result) = try_parse_norm_literal(arg) {
                 normalization = result?;
                 norm_set = true;
+                idx += 1;
                 continue;
             }
         }
 
-        let key = value_as_string(&arg)
-            .ok_or_else(|| "hist: expected option name as string or char array".to_string())?;
+        let Some(key) = value_as_string(arg) else {
+            style_args.extend_from_slice(&args[idx..]);
+            break;
+        };
+        if idx + 1 >= args.len() {
+            return Err(format!("hist: missing value for '{key}' option"));
+        }
+        let value = args[idx + 1].clone();
         let lower = key.trim().to_ascii_lowercase();
-        let value = iter
-            .next()
-            .ok_or_else(|| format!("hist: missing value for '{key}' option"))?;
         match lower.as_str() {
             "normalization" => {
                 normalization = parse_hist_normalization(Some(value))?;
@@ -236,13 +256,15 @@ fn parse_hist_arguments(
                 bin_spec = HistBinSpec::Edges(edges);
                 bin_set = true;
             }
-            other => {
-                return Err(format!("hist: unrecognized option '{other}'"));
+            _ => {
+                style_args.push(arg.clone());
+                style_args.push(value);
             }
         }
+        idx += 2;
     }
 
-    Ok((bin_spec, normalization))
+    Ok((bin_spec, normalization, style_args))
 }
 
 fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> Result<HistBinSpec, String> {
@@ -497,10 +519,8 @@ fn build_empty_histogram_chart(
 }
 
 fn build_bar(labels: Vec<String>, heights: Vec<f64>) -> Result<BarChart, String> {
-    let bar = BarChart::new(labels, heights)
-        .map_err(|err| format!("hist: {err}"))?
-        .with_style(HIST_DEFAULT_COLOR, HIST_BAR_WIDTH)
-        .with_label("Frequency");
+    let mut bar = BarChart::new(labels, heights).map_err(|err| format!("hist: {err}"))?;
+    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
     Ok(bar)
 }
 
@@ -591,6 +611,7 @@ fn build_histogram_gpu_chart(
     bin_spec: &HistBinSpec,
     sample_len: usize,
     normalization: HistNormalization,
+    style: &BarStyle,
 ) -> Result<BarChart, String> {
     let context = runmat_plot::shared_wgpu_context()
         .ok_or_else(|| "hist: plotting GPU context unavailable".to_string())?;
@@ -690,8 +711,8 @@ fn build_histogram_gpu_chart(
         scalar: ScalarType::F32,
     };
     let bar_params = BarGpuParams {
-        color: HIST_DEFAULT_COLOR,
-        bar_width: HIST_BAR_WIDTH,
+        color: style.face_rgba(),
+        bar_width: style.bar_width,
         group_index: 0,
         group_count: 1,
         orientation: BarOrientation::Vertical,
@@ -707,19 +728,20 @@ fn build_histogram_gpu_chart(
 
     let bin_count = labels.len();
     let max_height = sample_len as f32 * normalization_scale;
-    let bounds = histogram_bar_bounds(bin_count, max_height);
+    let bounds = histogram_bar_bounds(bin_count, max_height, style.bar_width);
     let vertex_count = gpu_vertices.vertex_count;
 
-    Ok(BarChart::from_gpu_buffer(
+    let mut bar = BarChart::from_gpu_buffer(
         labels,
         bin_count,
         gpu_vertices,
         vertex_count,
         bounds,
-        HIST_DEFAULT_COLOR,
-        HIST_BAR_WIDTH,
-    )
-    .with_label("Frequency"))
+        style.face_rgba(),
+        style.bar_width,
+    );
+    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
+    Ok(bar)
 }
 
 fn build_degenerate_histogram(
@@ -735,16 +757,14 @@ fn build_degenerate_histogram(
         heights[bins.saturating_sub(1)] = sample_count as f64;
     }
     let labels = vec![format!("{value:.3}"); bins];
-    let bar = BarChart::new(labels, heights)
-        .map_err(|err| format!("hist: {err}"))?
-        .with_style(HIST_DEFAULT_COLOR, HIST_BAR_WIDTH)
-        .with_label("Frequency");
+    let mut bar = BarChart::new(labels, heights).map_err(|err| format!("hist: {err}"))?;
+    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
     Ok(bar)
 }
 
-fn histogram_bar_bounds(bins: usize, max_height: f32) -> BoundingBox {
-    let min_x = 1.0 - HIST_BAR_WIDTH * 0.5;
-    let max_x = bins as f32 + HIST_BAR_WIDTH * 0.5;
+fn histogram_bar_bounds(bins: usize, max_height: f32, bar_width: f32) -> BoundingBox {
+    let min_x = 1.0 - bar_width * 0.5;
+    let max_x = bins as f32 + bar_width * 0.5;
     let max_y = if max_height.is_finite() && max_height > 0.0 {
         max_height
     } else {

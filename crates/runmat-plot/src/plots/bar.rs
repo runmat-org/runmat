@@ -222,6 +222,17 @@ impl BarChart {
         self.dirty = true;
     }
 
+    /// Override the face color and width without invalidating GPU data.
+    pub fn apply_face_style(&mut self, color: Vec4, width: f32) {
+        if self.gpu_vertices.is_some() {
+            self.color = color;
+            self.bar_width = width.clamp(0.1, 1.0);
+        } else {
+            self.set_color(color);
+            self.set_bar_width(width);
+        }
+    }
+
     /// Set the outline color (enables outline if not present)
     pub fn set_outline_color(&mut self, color: Vec4) {
         if self.outline_color.is_none() {
@@ -240,6 +251,28 @@ impl BarChart {
         }
         self.dirty = true;
         self.invalidate_gpu_data();
+    }
+
+    /// Override outline styling while preserving GPU geometry when possible.
+    pub fn apply_outline_style(&mut self, color: Option<Vec4>, width: f32) {
+        match color {
+            Some(color) => {
+                if self.gpu_vertices.is_some() {
+                    self.outline_color = Some(color);
+                    self.outline_width = width.max(0.1);
+                } else {
+                    self.set_outline_color(color);
+                    self.set_outline_width(width);
+                }
+            }
+            None => {
+                if self.gpu_vertices.is_some() {
+                    self.outline_color = None;
+                } else {
+                    self.outline_color = None;
+                }
+            }
+        }
     }
 
     /// Show or hide the chart

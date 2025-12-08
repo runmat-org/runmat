@@ -8,10 +8,13 @@ use runmat_plot::plots::{ColorMap, ShadingMode};
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::contour::{
     build_contour_gpu_plot, build_contour_plot, default_level_count, ContourLevelSpec,
+    ContourLineColor,
 };
 use super::mesh::build_mesh_surface;
 use super::state::{render_active_plot, PlotRenderOptions};
+use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
+use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -58,12 +61,24 @@ register_builtin_doc_text!("meshc", DOC_MD);
     keywords = "meshc,plotting,mesh,contour",
     sink = true
 )]
-pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
+pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
     let mut y_axis = Some(y_axis);
     let mut z_input = Some(SurfaceDataInput::from_value(z, "meshc")?);
+    let style = Arc::new(parse_surface_style_args(
+        "meshc",
+        &rest,
+        SurfaceStyleDefaults::new(
+            ColorMap::Turbo,
+            ShadingMode::Faceted,
+            true,
+            1.0,
+            false,
+            true,
+        ),
+    )?);
     let opts = PlotRenderOptions {
         title: "Mesh with Contours",
         x_label: "X",
@@ -78,19 +93,22 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
         let y_vec = y_axis.take().expect("meshc Y consumed once");
         let z_arg = z_input.take().expect("meshc Z consumed once");
 
+        let style = Arc::clone(&style);
+        let contour_map = style.colormap;
         if let Some(z_gpu) = z_arg.gpu_handle() {
             match build_surface_gpu_plot(&x_vec, &y_vec, z_gpu) {
                 Ok(surface_gpu) => {
                     let mut surface = surface_gpu.with_wireframe(true);
-                    surface.shading_mode = ShadingMode::Faceted;
+                    style.apply_to_plot(&mut surface);
                     let base_z = surface.bounds().min.z;
                     match build_contour_gpu_plot(
                         &x_vec,
                         &y_vec,
                         z_gpu,
-                        ColorMap::Turbo,
+                        contour_map,
                         base_z,
                         &level_spec,
+                        &ContourLineColor::Auto,
                     ) {
                         Ok(contour) => {
                             figure.add_surface_plot_on_axes(surface, axes);
@@ -106,10 +124,17 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value) -> Result<String, String> {
 
         let grid = tensor_to_surface_grid(z_arg.into_tensor("meshc")?, x_vec.len(), y_vec.len())?;
         let mut surface = build_mesh_surface(x_vec.clone(), y_vec.clone(), grid.clone())?;
-        surface.shading_mode = ShadingMode::Faceted;
+        style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;
-        let contour =
-            build_contour_plot(&x_vec, &y_vec, &grid, ColorMap::Turbo, base_z, &level_spec)?;
+        let contour = build_contour_plot(
+            &x_vec,
+            &y_vec,
+            &grid,
+            contour_map,
+            base_z,
+            &level_spec,
+            &ContourLineColor::Auto,
+        )?;
 
         figure.add_surface_plot_on_axes(surface, axes);
         figure.add_contour_plot_on_axes(contour, axes);
@@ -143,6 +168,7 @@ mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
+            Vec::new(),
         );
         assert!(res.is_err());
     }

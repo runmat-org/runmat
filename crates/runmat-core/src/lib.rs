@@ -216,7 +216,11 @@ impl RunMatSession {
         // WebGPU device.
         #[cfg(any(target_arch = "wasm32", not(target_arch = "wasm32")))]
         {
-            let _ = runmat_runtime::builtins::plotting::context::ensure_context_from_provider();
+            if let Err(err) =
+                runmat_runtime::builtins::plotting::context::ensure_context_from_provider()
+            {
+                debug!("Plotting context unavailable during session init: {err}");
+            }
         }
 
         Ok(session)

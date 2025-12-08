@@ -59,7 +59,21 @@ export interface RunMatInitOptions {
   wasmModule?: WasmInitInput;
   fsProvider?: RunMatFilesystemProvider;
   plotCanvas?: HTMLCanvasElement;
+  scatterTargetPoints?: number;
+  surfaceVertexBudget?: number;
 }
+
+export interface FigureEvent {
+  handle: number;
+  axesRows: number;
+  axesCols: number;
+  plotCount: number;
+  axesIndices: number[];
+  title?: string;
+}
+
+export type FigureEventListener = (event: FigureEvent) => void;
+export type HoldMode = "on" | "off" | "toggle" | boolean;
 
 export interface ExecuteResult {
   valueText?: string;
@@ -113,6 +127,8 @@ interface NativeInitOptions {
   telemetryConsent?: boolean;
   wgpuPowerPreference?: string;
   wgpuForceFallbackAdapter?: boolean;
+  scatterTargetPoints?: number;
+  surfaceVertexBudget?: number;
 }
 
 interface RunMatNativeSession {
@@ -130,6 +146,13 @@ interface RunMatNativeModule {
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
   registerPlotCanvas?: (canvas: HTMLCanvasElement) => Promise<void>;
   plotRendererReady?: () => boolean;
+  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
+  onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
+  newFigureHandle?: () => number;
+  selectFigure?: (handle: number) => void;
+  currentFigureHandle?: () => number;
+  setHoldMode?: (mode: HoldMode) => boolean;
+  configureSubplot?: (rows: number, cols: number, index: number) => void;
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -178,7 +201,9 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     verbose: options.verbose ?? false,
     telemetryConsent: options.telemetryConsent ?? true,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
-    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false
+    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
+    scatterTargetPoints: options.scatterTargetPoints,
+    surfaceVertexBudget: options.surfaceVertexBudget
   });
   return new WebRunMatSession(session);
 }
@@ -197,6 +222,71 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
+}
+
+export async function registerFigureCanvas(handle: number, canvas: HTMLCanvasElement): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.registerFigureCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
+  }
+  await native.registerFigureCanvas(handle, canvas);
+}
+
+export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.onFigureEvent !== "function") {
+    throw new Error("The loaded runmat-wasm module does not expose figure events yet.");
+  }
+  native.onFigureEvent(listener ? (event: FigureEvent) => listener(event) : null);
+}
+
+export async function figure(handle?: number): Promise<number> {
+  const native = await loadNativeModule();
+  if (typeof handle === "number") {
+    requireNativeFunction(native, "selectFigure");
+    native.selectFigure(handle);
+    return handle;
+  }
+  requireNativeFunction(native, "newFigureHandle");
+  return native.newFigureHandle();
+}
+
+export async function newFigureHandle(): Promise<number> {
+  return figure();
+}
+
+export async function currentFigureHandle(): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "currentFigureHandle");
+  return native.currentFigureHandle();
+}
+
+export async function setHoldMode(mode: HoldMode = "toggle"): Promise<boolean> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setHoldMode");
+  return native.setHoldMode(mode);
+}
+
+export async function hold(mode: HoldMode = "toggle"): Promise<boolean> {
+  return setHoldMode(mode);
+}
+
+export async function holdOn(): Promise<boolean> {
+  return setHoldMode("on");
+}
+
+export async function holdOff(): Promise<boolean> {
+  return setHoldMode("off");
+}
+
+export async function configureSubplot(rows: number, cols: number, index = 0): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "configureSubplot");
+  native.configureSubplot(rows, cols, index);
+}
+
+export async function subplot(rows: number, cols: number, index = 0): Promise<void> {
+  return configureSubplot(rows, cols, index);
 }
 
 class WebRunMatSession implements RunMatSessionHandle {
@@ -239,6 +329,15 @@ function ensureFsProvider(provider: RunMatFilesystemProvider): void {
     if (typeof provider[method] !== "function") {
       throw new Error(`fsProvider.${String(method)} must be a function`);
     }
+  }
+}
+
+function requireNativeFunction<K extends keyof RunMatNativeModule>(
+  native: RunMatNativeModule,
+  method: K
+): asserts native is RunMatNativeModule & Required<Pick<RunMatNativeModule, K>> {
+  if (typeof native[method] !== "function") {
+    throw new Error(`The loaded runmat-wasm module does not expose ${String(method)} yet.`);
   }
 }
 

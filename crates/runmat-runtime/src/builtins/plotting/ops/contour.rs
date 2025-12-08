@@ -12,6 +12,7 @@ use runmat_plot::plots::contour::contour_bounds;
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
+use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -29,6 +30,7 @@ pub(crate) enum ContourLevelSpec {
     Auto,
     Count(usize),
     Values(Vec<f64>),
+    Step(f32),
 }
 
 impl Default for ContourLevelSpec {
@@ -68,7 +70,38 @@ impl ContourLevelSpec {
                 }
                 Ok(values.iter().map(|&v| v as f32).collect())
             }
+            ContourLevelSpec::Step(step) => {
+                if *step <= 0.0 || !step.is_finite() {
+                    return Err("contour: LevelStep must be a positive, finite number".to_string());
+                }
+                let mut levels = Vec::new();
+                let mut value = min_z;
+                let max = if max_z <= min_z { min_z + 1.0 } else { max_z };
+                while value <= max {
+                    levels.push(value);
+                    value += *step;
+                }
+                if levels.is_empty() {
+                    levels.push(min_z);
+                } else if *levels.last().unwrap() < max {
+                    levels.push(max);
+                }
+                Ok(levels)
+            }
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ContourLineColor {
+    Auto,
+    Color(Vec4),
+    None,
+}
+
+impl Default for ContourLineColor {
+    fn default() -> Self {
+        ContourLineColor::Auto
     }
 }
 
@@ -79,6 +112,7 @@ pub(crate) struct ContourArgs {
     pub y_axis: Vec<f64>,
     pub z_input: SurfaceDataInput,
     pub level_spec: ContourLevelSpec,
+    pub line_color: ContourLineColor,
 }
 
 pub(crate) fn parse_contour_args(
@@ -86,20 +120,38 @@ pub(crate) fn parse_contour_args(
     first: Value,
     rest: Vec<Value>,
 ) -> Result<ContourArgs, String> {
+    if rest.is_empty() {
+        return from_implicit_args(name, first, None, &[]);
+    }
+    if is_option_token(&rest[0]) {
+        return from_implicit_args(name, first, None, &rest);
+    }
     match rest.len() {
-        0 => from_implicit_args(name, first, None),
-        1 => from_implicit_args(name, first, Some(rest[0].clone())),
-        2 => from_explicit_args(name, rest[0].clone(), rest[1].clone(), first, None),
+        1 => from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]),
+        2 => from_explicit_args(
+            name,
+            rest[0].clone(),
+            rest[1].clone(),
+            first,
+            None,
+            &rest[2..],
+        ),
         3 => from_explicit_args(
             name,
             rest[0].clone(),
             rest[1].clone(),
             rest[2].clone(),
-            Some(first),
+            None,
+            &rest[3..],
         ),
-        _ => Err(format!(
-            "{name}: expected `Z`, `Z, levels`, `X, Y, Z`, or `X, Y, Z, levels`"
-        )),
+        _ => from_explicit_args(
+            name,
+            rest[0].clone(),
+            rest[1].clone(),
+            rest[2].clone(),
+            Some(rest[3].clone()),
+            &rest[4..],
+        ),
     }
 }
 
@@ -107,6 +159,7 @@ fn from_implicit_args(
     name: &'static str,
     z_value: Value,
     level_value: Option<Value>,
+    options: &[Value],
 ) -> Result<ContourArgs, String> {
     let z_input = SurfaceDataInput::from_value(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
@@ -119,13 +172,16 @@ fn from_implicit_args(
         Some(value) => parse_level_spec(value, name)?,
         None => ContourLevelSpec::Auto,
     };
-    Ok(ContourArgs {
+    let mut args = ContourArgs {
         name,
         x_axis,
         y_axis,
         z_input,
         level_spec,
-    })
+        line_color: ContourLineColor::default(),
+    };
+    apply_contour_options(&mut args, options)?;
+    Ok(args)
 }
 
 fn from_explicit_args(
@@ -134,6 +190,7 @@ fn from_explicit_args(
     y_value: Value,
     z_value: Value,
     level_value: Option<Value>,
+    options: &[Value],
 ) -> Result<ContourArgs, String> {
     let x_axis = numeric_vector(Tensor::try_from(&x_value).map_err(|e| format!("{name}: {e}"))?);
     let y_axis = numeric_vector(Tensor::try_from(&y_value).map_err(|e| format!("{name}: {e}"))?);
@@ -155,13 +212,16 @@ fn from_explicit_args(
         Some(value) => parse_level_spec(value, name)?,
         None => ContourLevelSpec::Auto,
     };
-    Ok(ContourArgs {
+    let mut args = ContourArgs {
         name,
         x_axis,
         y_axis,
         z_input,
         level_spec,
-    })
+        line_color: ContourLineColor::default(),
+    };
+    apply_contour_options(&mut args, options)?;
+    Ok(args)
 }
 
 pub(crate) fn default_level_count() -> usize {
@@ -210,11 +270,23 @@ default number of levels matches MATLAB (10).
 - The CPU fallback mirrors MATLAB semantics and produces identical iso-lines when no GPU is
   available.
 
+## Options
+- `'LevelList', vec` / `'Levels', vec` – provide an explicit, strictly increasing vector of Z values
+  to contour. `vec` may be a numeric vector (host tensor or gpuArray). If a scalar is supplied the
+  helper interprets it as the requested number of levels, matching MATLAB.
+- `'LevelStep', step` – positive finite scalar that determines the spacing between contour levels.
+- `'LevelListMode', 'auto' | 'manual'` – `'auto'` resets the helper to evenly spaced defaults;
+  `'manual'` requires the same call to also pass `'LevelList'` or `'LevelStep'`.
+- `'LineColor', spec` – accepts MATLAB color strings (`"r"`, `"magenta"`, etc.), RGB triples, or the
+  literals `'auto'`/`'flat'` (use the colormap) and `'none'` (suppress iso-line overlays when paired
+  with `contourf`).
+
 ## Examples
 ```matlab
 contour(peaks(50));
 contour(x, y, z, 20);
 contour(x, y, z, [0, 0.5, 1.0]);
+contour(x, y, z, 'LevelStep', 0.25, 'LineColor', 'none');
 ```
 "#;
 
@@ -300,10 +372,23 @@ impl ContourCall {
             y_axis,
             z_input,
             level_spec,
+            line_color,
         } = args;
 
+        if matches!(line_color, ContourLineColor::None) {
+            return Ok(());
+        }
+
         if let SurfaceDataInput::Gpu(handle) = &z_input {
-            match build_contour_gpu_plot(&x_axis, &y_axis, handle, color_map, base_z, &level_spec) {
+            match build_contour_gpu_plot(
+                &x_axis,
+                &y_axis,
+                handle,
+                color_map,
+                base_z,
+                &level_spec,
+                &line_color,
+            ) {
                 Ok(contour) => {
                     figure.add_contour_plot_on_axes(contour, axes);
                     return Ok(());
@@ -313,7 +398,18 @@ impl ContourCall {
         }
 
         let grid = tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len())?;
-        let contour = build_contour_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)?;
+        if let ContourLineColor::None = line_color {
+            return Ok(());
+        }
+        let contour = build_contour_plot(
+            &x_axis,
+            &y_axis,
+            &grid,
+            color_map,
+            base_z,
+            &level_spec,
+            &line_color,
+        )?;
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
     }
@@ -364,6 +460,118 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> Result<ContourLevelSpec
     Ok(ContourLevelSpec::Values(tensor.data))
 }
 
+fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<(), String> {
+    if options.is_empty() {
+        return Ok(());
+    }
+    if options.len() % 2 != 0 {
+        return Err(format!(
+            "{}: name-value arguments must come in pairs",
+            args.name
+        ));
+    }
+    let opts = LineStyleParseOptions::generic(args.name);
+    let mut level_override_seen = !matches!(args.level_spec, ContourLevelSpec::Auto);
+    let mut manual_requested = false;
+    for pair in options.chunks_exact(2) {
+        let Some(key) = value_as_string(&pair[0]) else {
+            return Err(format!(
+                "{}: option names must be char arrays or strings",
+                args.name
+            ));
+        };
+        let lower = key.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "levellist" | "levels" => {
+                args.level_spec = parse_level_spec(pair[1].clone(), args.name)?;
+                level_override_seen = true;
+            }
+            "levelstep" => {
+                let step = value_as_f64(&pair[1])
+                    .ok_or_else(|| format!("{}: LevelStep must be numeric", args.name))?;
+                if !step.is_finite() || step <= 0.0 {
+                    return Err(format!(
+                        "{}: LevelStep must be a positive, finite number",
+                        args.name
+                    ));
+                }
+                args.level_spec = ContourLevelSpec::Step(step as f32);
+                level_override_seen = true;
+            }
+            "linecolor" => {
+                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+            }
+            "levellistmode" => {
+                let Some(mode) = value_as_string(&pair[1]) else {
+                    return Err(format!(
+                        "{}: LevelListMode must be the string 'auto' or 'manual'",
+                        args.name
+                    ));
+                };
+                let normalized = mode.trim().to_ascii_lowercase();
+                match normalized.as_str() {
+                    "auto" => {
+                        args.level_spec = ContourLevelSpec::Auto;
+                        level_override_seen = false;
+                        manual_requested = false;
+                    }
+                    "manual" => {
+                        manual_requested = true;
+                    }
+                    other => {
+                        return Err(format!(
+                            "{}: unsupported LevelListMode `{other}` (expected 'auto' or 'manual')",
+                            args.name
+                        ));
+                    }
+                }
+            }
+            other => {
+                return Err(format!("{}: unsupported option `{other}`", args.name));
+            }
+        }
+    }
+    if manual_requested && !level_override_seen {
+        return Err(format!(
+            "{}: LevelListMode 'manual' requires LevelList or LevelStep in the same call",
+            args.name
+        ));
+    }
+    Ok(())
+}
+
+fn parse_line_color_option(
+    opts: &LineStyleParseOptions,
+    value: &Value,
+) -> Result<ContourLineColor, String> {
+    if let Some(text) = value_as_string(value) {
+        let lower = text.trim().to_ascii_lowercase();
+        return match lower.as_str() {
+            "auto" | "flat" => Ok(ContourLineColor::Auto),
+            "none" => Ok(ContourLineColor::None),
+            _ => {
+                let color = parse_color_value(opts, value)?;
+                Ok(ContourLineColor::Color(color))
+            }
+        };
+    }
+    let color = parse_color_value(opts, value)?;
+    Ok(ContourLineColor::Color(color))
+}
+
+fn is_option_token(value: &Value) -> bool {
+    value_as_string(value)
+        .map(|s| is_contour_option_name(&s))
+        .unwrap_or(false)
+}
+
+fn is_contour_option_name(token: &str) -> bool {
+    matches!(
+        token.trim().to_ascii_lowercase().as_str(),
+        "levellist" | "levels" | "levelstep" | "linecolor" | "levellistmode"
+    )
+}
+
 pub(crate) fn build_contour_gpu_plot(
     x_axis: &[f64],
     y_axis: &[f64],
@@ -371,6 +579,7 @@ pub(crate) fn build_contour_gpu_plot(
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
 ) -> Result<ContourPlot, String> {
     let context = runmat_plot::shared_wgpu_context()
         .ok_or_else(|| "contour: plotting GPU context unavailable".to_string())?;
@@ -385,7 +594,11 @@ pub(crate) fn build_contour_gpu_plot(
 
     let x_f32: Vec<f32> = x_axis.iter().map(|&v| v as f32).collect();
     let y_f32: Vec<f32> = y_axis.iter().map(|&v| v as f32).collect();
-    let color_table = build_color_lut(color_map, 512, 1.0);
+    let color_table = match line_color {
+        ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
+        ContourLineColor::Color(color) => vec![color.to_array()],
+        ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
+    };
     let bounds = contour_bounds(
         x_f32
             .iter()
@@ -446,14 +659,23 @@ pub(crate) fn build_contour_plot(
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
 ) -> Result<ContourPlot, String> {
     let (min_z, max_z) = grid_extents(grid)?;
     let levels = level_spec.resolve(min_z, max_z)?;
-    let color_table = build_color_lut(color_map, 512, 1.0);
+    let color_table = match line_color {
+        ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
+        ContourLineColor::Color(color) => vec![color.to_array()],
+        ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
+    };
     let mut vertices = Vec::new();
 
     for (level_idx, level) in levels.iter().enumerate() {
-        let color = sample_color(&color_table, level_idx, levels.len());
+        let color = match line_color {
+            ContourLineColor::Auto => sample_color(&color_table, level_idx, levels.len()),
+            ContourLineColor::Color(color) => *color,
+            ContourLineColor::None => Vec4::new(0.0, 0.0, 0.0, 0.0),
+        };
         march_cells(x_axis, y_axis, grid, *level, color, base_z, &mut vertices);
     }
 
@@ -905,6 +1127,109 @@ mod tests {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0, 1.0, 2.0]),
             _ => panic!("expected explicit levels"),
         }
+    }
+
+    #[test]
+    fn level_step_option_generates_sequence() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LevelStep".into()),
+                Value::Num(0.5),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Step(step) => assert!((step - 0.5).abs() < f32::EPSILON),
+            other => panic!("expected LevelStep, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn line_color_option_parses_literal() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LineColor".into()),
+                Value::String("r".into()),
+            ],
+        )
+        .unwrap();
+        match args.line_color {
+            ContourLineColor::Color(color) => {
+                assert!((color.x - 1.0).abs() < f32::EPSILON);
+                assert!((color.y).abs() < f32::EPSILON);
+            }
+            other => panic!("expected explicit color, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn level_list_option_accepts_explicit_vector() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LevelList".into()),
+                Value::Tensor(tensor_from(&[0.0, 0.5, 1.0], 1, 3)),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => {
+                assert_eq!(values, vec![0.0, 0.5, 1.0]);
+            }
+            other => panic!("expected explicit level list, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn line_color_none_suppresses_overlays() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LineColor".into()),
+                Value::String("none".into()),
+            ],
+        )
+        .unwrap();
+        match args.line_color {
+            ContourLineColor::None => {}
+            other => panic!("expected LineColor none, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn level_list_mode_manual_requires_explicit_levels() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let err = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![
+                Value::String("LevelListMode".into()),
+                Value::String("manual".into()),
+            ],
+        );
+        assert!(err.is_err());
+
+        let ok = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LevelListMode".into()),
+                Value::String("manual".into()),
+                Value::String("LevelStep".into()),
+                Value::Num(0.25),
+            ],
+        );
+        assert!(ok.is_ok());
     }
 }
 

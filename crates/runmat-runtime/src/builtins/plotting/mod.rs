@@ -8,6 +8,8 @@ pub mod context;
 mod engine;
 #[path = "core/gpu_helpers.rs"]
 mod gpu_helpers;
+#[path = "core/perf.rs"]
+mod perf;
 #[path = "core/point.rs"]
 mod point;
 #[path = "core/state.rs"]
@@ -48,4 +50,9 @@ mod surf;
 #[path = "ops/surfc.rs"]
 mod surfc;
 
-pub use web::{install_web_renderer, web_renderer_ready};
+pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
+pub use state::{
+    configure_subplot, current_figure_handle, install_figure_observer, new_figure_handle,
+    select_figure, set_hold, FigureHandle, HoldMode,
+};
+pub use web::{install_web_renderer, install_web_renderer_for_handle, web_renderer_ready};
