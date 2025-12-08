@@ -3,6 +3,7 @@
 //! Ensures only one interactive plot window exists at a time, avoiding
 //! winit's "EventLoop can't be recreated" error.
 
+use crate::gui::lifecycle::CloseSignal;
 use crate::gui::window::WindowConfig;
 use crate::plots::Figure;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +17,16 @@ static WINDOW_MANAGER: Mutex<()> = Mutex::new(());
 
 /// Show a plot using a single, managed window approach
 pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
+    show_plot_sequential_with_signal(figure, None)
+}
+
+/// Same as [`show_plot_sequential`], but allows callers to provide a close
+/// signal that can terminate the window externally (e.g. from a figure
+/// lifecycle event).
+pub fn show_plot_sequential_with_signal(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+) -> Result<String, String> {
     // Acquire exclusive access to the window system
     let _guard = WINDOW_MANAGER
         .lock()
@@ -29,7 +40,7 @@ pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
     // Mark window as active
     WINDOW_ACTIVE.store(true, Ordering::Release);
 
-    let result = show_plot_internal(figure);
+    let result = show_plot_internal(figure, close_signal);
 
     // Mark window as inactive when done
     WINDOW_ACTIVE.store(false, Ordering::Release);
@@ -38,7 +49,7 @@ pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
 }
 
 /// Internal function that actually creates and runs the window
-fn show_plot_internal(figure: Figure) -> Result<String, String> {
+fn show_plot_internal(figure: Figure, close_signal: Option<CloseSignal>) -> Result<String, String> {
     use crate::gui::PlotWindow;
 
     // Create window directly on the current thread (main thread)
@@ -55,6 +66,10 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                     let mut window = PlotWindow::new(config)
                         .await
                         .map_err(|e| format!("Failed to create plot window: {e}"))?;
+
+                    if let Some(signal) = close_signal.clone() {
+                        window.install_close_signal(signal);
+                    }
 
                     // Set the figure data
                     window.set_figure(figure);
@@ -78,6 +93,10 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                 let mut window = PlotWindow::new(config)
                     .await
                     .map_err(|e| format!("Failed to create plot window: {e}"))?;
+
+                if let Some(signal) = close_signal {
+                    window.install_close_signal(signal);
+                }
 
                 // Set the figure data
                 window.set_figure(figure);

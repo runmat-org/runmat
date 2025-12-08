@@ -4,6 +4,7 @@
 //! handles platform-specific requirements (especially macOS EventLoop main thread requirement)
 //! while maintaining high performance and reliability.
 
+use crate::gui::lifecycle::CloseSignal;
 use crate::plots::Figure;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread::{self, ThreadId};
@@ -15,6 +16,7 @@ pub enum GuiThreadMessage {
     ShowPlot {
         figure: Figure,
         response: mpsc::Sender<GuiOperationResult>,
+        close_signal: Option<CloseSignal>,
     },
     /// Request to close all GUI windows
     CloseAll {
@@ -277,8 +279,12 @@ impl GuiThreadManager {
         gui_context: &GuiContext,
     ) -> Option<GuiOperationResult> {
         match message {
-            GuiThreadMessage::ShowPlot { figure, response } => {
-                let result = Self::handle_show_plot(figure, gui_context);
+            GuiThreadMessage::ShowPlot {
+                figure,
+                response,
+                close_signal,
+            } => {
+                let result = Self::handle_show_plot(figure, close_signal, gui_context);
                 let _ = response.send(result.clone());
                 Some(result)
             }
@@ -301,7 +307,11 @@ impl GuiThreadManager {
 
     /// Handle show plot request
     #[cfg(feature = "gui")]
-    fn handle_show_plot(figure: Figure, _gui_context: &GuiContext) -> GuiOperationResult {
+    fn handle_show_plot(
+        figure: Figure,
+        close_signal: Option<CloseSignal>,
+        _gui_context: &GuiContext,
+    ) -> GuiOperationResult {
         use crate::gui::{window::WindowConfig, PlotWindow};
 
         // Create a new runtime for this async operation
@@ -329,6 +339,10 @@ impl GuiThreadManager {
                 }
             };
 
+            if let Some(sig) = close_signal {
+                window.install_close_signal(sig);
+            }
+
             // Set the figure data
             window.set_figure(figure);
 
@@ -345,7 +359,11 @@ impl GuiThreadManager {
     }
 
     #[cfg(not(feature = "gui"))]
-    fn handle_show_plot(_figure: Figure, _gui_context: &GuiContext) -> GuiOperationResult {
+    fn handle_show_plot(
+        _figure: Figure,
+        _close_signal: Option<CloseSignal>,
+        _gui_context: &GuiContext,
+    ) -> GuiOperationResult {
         GuiOperationResult::Error {
             message: "GUI feature not enabled".to_string(),
             error_code: GuiErrorCode::InvalidState,
@@ -361,11 +379,20 @@ impl GuiThreadManager {
 
     /// Show a plot using the GUI thread manager
     pub fn show_plot(&self, figure: Figure) -> Result<GuiOperationResult, GuiOperationResult> {
+        self.show_plot_with_signal(figure, None)
+    }
+
+    pub fn show_plot_with_signal(
+        &self,
+        figure: Figure,
+        close_signal: Option<CloseSignal>,
+    ) -> Result<GuiOperationResult, GuiOperationResult> {
         let (response_tx, response_rx) = mpsc::channel();
 
         let message = GuiThreadMessage::ShowPlot {
             figure,
             response: response_tx,
+            close_signal,
         };
 
         // Send message to GUI thread
@@ -515,6 +542,13 @@ pub fn get_gui_manager() -> Result<Arc<Mutex<Option<GuiThreadManager>>>, GuiOper
 
 /// Show a plot using the global GUI manager
 pub fn show_plot_global(figure: Figure) -> Result<GuiOperationResult, GuiOperationResult> {
+    show_plot_global_with_signal(figure, None)
+}
+
+pub fn show_plot_global_with_signal(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+) -> Result<GuiOperationResult, GuiOperationResult> {
     let manager_mutex = get_gui_manager()?;
     let manager_guard = manager_mutex
         .lock()
@@ -525,7 +559,7 @@ pub fn show_plot_global(figure: Figure) -> Result<GuiOperationResult, GuiOperati
         })?;
 
     match manager_guard.as_ref() {
-        Some(manager) => manager.show_plot(figure),
+        Some(manager) => manager.show_plot_with_signal(figure, close_signal),
         None => Err(GuiOperationResult::Error {
             message: "GUI manager not initialized".to_string(),
             error_code: GuiErrorCode::InvalidState,

@@ -49,6 +49,8 @@ pub struct PlotWindow<'window> {
     pub pixels_per_point: f32,
     /// Whether left mouse button is currently down
     pub mouse_left_down: bool,
+    /// Optional signal that lets external callers request window shutdown.
+    pub close_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 // The implementation is in window_impl.rs in the same directory
@@ -69,5 +71,9 @@ impl PlotWindow {
 
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         Err("GUI feature not enabled".into())
+    }
+
+    pub fn install_close_signal(&mut self, _signal: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        // No-op for non-GUI builds
     }
 }

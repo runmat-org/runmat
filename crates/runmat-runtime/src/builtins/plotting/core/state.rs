@@ -184,6 +184,7 @@ pub enum FigureEventKind {
     Closed,
 }
 
+#[derive(Clone, Copy)]
 pub struct FigureEventView<'a> {
     pub handle: FigureHandle,
     pub kind: FigureEventKind,
@@ -191,7 +192,42 @@ pub struct FigureEventView<'a> {
 }
 
 type FigureObserver = dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync + 'static;
-static FIGURE_OBSERVER: OnceCell<Arc<FigureObserver>> = OnceCell::new();
+
+struct FigureObserverRegistry {
+    observers: Mutex<Vec<Arc<FigureObserver>>>,
+}
+
+impl FigureObserverRegistry {
+    fn new() -> Self {
+        Self {
+            observers: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn install(&self, observer: Arc<FigureObserver>) {
+        let mut guard = self.observers.lock().expect("figure observers poisoned");
+        guard.push(observer);
+    }
+
+    fn notify(&self, view: FigureEventView<'_>) {
+        let snapshot = {
+            let guard = self.observers.lock().expect("figure observers poisoned");
+            guard.clone()
+        };
+        for observer in snapshot {
+            observer(view);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.observers
+            .lock()
+            .map(|guard| guard.is_empty())
+            .unwrap_or(true)
+    }
+}
+
+static FIGURE_OBSERVERS: OnceCell<FigureObserverRegistry> = OnceCell::new();
 
 #[derive(Clone, Copy, Debug)]
 pub struct FigureAxesState {
@@ -235,15 +271,21 @@ fn get_state_mut<'a>(registry: &'a mut PlotRegistry, handle: FigureHandle) -> &'
         .or_insert_with(|| FigureState::new(handle))
 }
 
+fn observer_registry() -> &'static FigureObserverRegistry {
+    FIGURE_OBSERVERS.get_or_init(FigureObserverRegistry::new)
+}
+
 pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), String> {
-    FIGURE_OBSERVER
-        .set(observer)
-        .map_err(|_| "figure observer already installed".to_string())
+    observer_registry().install(observer);
+    Ok(())
 }
 
 fn notify_event<'a>(view: FigureEventView<'a>) {
-    if let Some(observer) = FIGURE_OBSERVER.get() {
-        observer(view);
+    if let Some(registry) = FIGURE_OBSERVERS.get() {
+        if registry.is_empty() {
+            return;
+        }
+        registry.notify(view);
     }
 }
 

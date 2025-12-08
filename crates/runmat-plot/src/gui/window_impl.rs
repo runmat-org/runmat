@@ -11,6 +11,8 @@ use egui_winit::State as EguiState;
 #[cfg(feature = "gui")]
 use glam::{Mat4, Vec2, Vec3, Vec4};
 #[cfg(feature = "gui")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
@@ -156,6 +158,7 @@ impl<'window> PlotWindow<'window> {
             needs_initial_redraw: true,
             pixels_per_point: 1.0,
             mouse_left_down: false,
+            close_signal: None,
         })
     }
 
@@ -227,6 +230,11 @@ impl<'window> PlotWindow<'window> {
         self.plot_renderer.set_figure(figure);
     }
 
+    /// Attach a signal that lets external callers request the window to close.
+    pub fn install_close_signal(&mut self, signal: Arc<AtomicBool>) {
+        self.close_signal = Some(signal);
+    }
+
     /// Run the interactive plot window event loop
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let event_loop = self
@@ -235,8 +243,15 @@ impl<'window> PlotWindow<'window> {
             .ok_or("Event loop already consumed")?;
         let window = self.window.clone();
         let mut last_render_time = std::time::Instant::now();
+        let close_signal = self.close_signal.clone();
 
         event_loop.run(move |event, target| {
+            if let Some(signal) = close_signal.as_ref() {
+                if signal.load(Ordering::Relaxed) {
+                    target.exit();
+                    return;
+                }
+            }
             target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
             // Track current modifiers for Command/Ctrl shortcuts

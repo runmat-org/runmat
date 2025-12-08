@@ -290,5 +290,31 @@ pub fn plot_histogram(
 /// Show an interactive plot with optimal platform compatibility
 /// This is the main entry point used by the runtime
 pub fn show_interactive_platform_optimal(figure: plots::Figure) -> Result<String, String> {
-    show_plot_unified(figure, None)
+    render_interactive_with_handle(0, figure)
+}
+
+/// Show an interactive plot that is tied to a specific MATLAB figure handle.
+/// This allows embedding runtimes to request that a window close when the
+/// corresponding figure lifecycle event fires.
+pub fn render_interactive_with_handle(
+    handle: u32,
+    figure: plots::Figure,
+) -> Result<String, String> {
+    #[cfg(feature = "gui")]
+    {
+        if handle == 0 {
+            show_plot_unified(figure, None)
+        } else {
+            gui::lifecycle::render_figure(handle, figure)
+        }
+    }
+    #[cfg(not(feature = "gui"))]
+    {
+        let _ = handle;
+        let _ = figure;
+        Err(
+            "GUI feature not enabled. Build with --features gui for interactive plotting."
+                .to_string(),
+        )
+    }
 }
