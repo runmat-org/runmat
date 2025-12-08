@@ -131,13 +131,16 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     }
 
     let edge_norm = clamp(2.0 * styleU.edge_thickness_px / max(input.size_px, 1.0), 0.0, 1.0);
+    let face_rgb = mix(input.color.rgb, styleU.face_color.rgb, styleU.face_color.a);
+    let edge_mix = clamp(styleU.edge_color.a, 0.0, 1.0);
+    let edge_rgb = mix(input.color.rgb, styleU.edge_color.rgb, edge_mix);
 
     if (styleU.marker_shape == 0u) {
         if (edge_norm > 0.0 && r > (1.0 - edge_norm)) {
-            return styleU.edge_color;
+            return vec4<f32>(edge_rgb, input.color.a);
         }
     }
 
-    return vec4<f32>(mix(input.color.rgb, styleU.face_color.rgb, styleU.face_color.a), input.color.a);
+    return vec4<f32>(face_rgb, input.color.a);
 }
 "#;

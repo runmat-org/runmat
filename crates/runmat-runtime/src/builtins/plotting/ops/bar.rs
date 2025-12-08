@@ -6,7 +6,7 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
-use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarOrientation};
+use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrientation};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::BarChart;
 use std::convert::TryFrom;
@@ -20,7 +20,7 @@ use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu
 use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
+use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -127,23 +127,29 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
         let arg = input.take().expect("bar input consumed once");
         if !style.requires_cpu_path() {
             if let Some(handle) = arg.gpu_handle() {
-                match build_bar_gpu_chart(handle, &style) {
-                    Ok(mut bar) => {
-                        apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
-                        figure.add_bar_chart_on_axes(bar, axes);
+                match build_bar_gpu_series(handle, &style) {
+                    Ok(charts) if !charts.is_empty() => {
+                        let total = charts.len();
+                        for (idx, mut bar) in charts.into_iter().enumerate() {
+                            let default_label = default_series_label(idx, total);
+                            apply_bar_style(&mut bar, &style, &default_label);
+                            figure.add_bar_chart_on_axes(bar, axes);
+                        }
                         return Ok(());
                     }
-                    Err(err) => {
-                        warn!("bar GPU path unavailable: {err}");
-                    }
+                    Ok(_) => {}
+                    Err(err) => warn!("bar GPU path unavailable: {err}"),
                 }
             }
         }
         let tensor = arg.into_tensor("bar")?;
-        let vector = numeric_vector(tensor);
-        let mut bar = build_bar_chart(vector)?;
-        apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
-        figure.add_bar_chart_on_axes(bar, axes);
+        let charts = build_bar_series_from_tensor(tensor, &style)?;
+        let total = charts.len();
+        for (idx, mut bar) in charts.into_iter().enumerate() {
+            let default_label = default_series_label(idx, total);
+            apply_bar_style(&mut bar, &style, &default_label);
+            figure.add_bar_chart_on_axes(bar, axes);
+        }
         Ok(())
     })
 }
@@ -174,65 +180,208 @@ fn build_bar_chart(values: Vec<f64>) -> Result<BarChart, String> {
     Ok(bar)
 }
 
-fn build_bar_gpu_chart(values: &GpuTensorHandle, style: &BarStyle) -> Result<BarChart, String> {
+fn build_bar_gpu_series(
+    values: &GpuTensorHandle,
+    style: &BarStyle,
+) -> Result<Vec<BarChart>, String> {
     let context = runmat_plot::shared_wgpu_context()
         .ok_or_else(|| "bar: plotting GPU context unavailable".to_string())?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
         .ok_or_else(|| "bar: unable to export GPU values".to_string())?;
-
-    if exported.len == 0 {
+    let shape = BarMatrixShape::from_handle(values)?;
+    if shape.rows == 0 {
         return Err("bar: input cannot be empty".to_string());
     }
-    let len_u32 = u32::try_from(exported.len)
-        .map_err(|_| "bar: category count exceeds supported range".to_string())?;
+    if exported.len != shape.rows * shape.cols {
+        return Err("bar: gpuArray shape mismatch".to_string());
+    }
     let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
     let inputs = BarGpuInputs {
         values_buffer: exported.buffer.clone(),
-        len: len_u32,
+        row_count: shape.rows as u32,
         scalar,
     };
-    let params = BarGpuParams {
-        color: style.face_rgba(),
-        bar_width: style.bar_width,
-        group_index: 0,
-        group_count: 1,
-        orientation: BarOrientation::Vertical,
+    if shape.cols == 1 {
+        let params = BarGpuParams {
+            color: style.face_rgba(),
+            bar_width: style.bar_width,
+            series_index: 0,
+            series_count: 1,
+            group_index: 0,
+            group_count: 1,
+            orientation: BarOrientation::Vertical,
+            layout: BarLayoutMode::Grouped,
+        };
+        let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
+            &context.device,
+            &context.queue,
+            &inputs,
+            &params,
+        )
+        .map_err(|e| format!("bar: failed to build GPU vertices: {e}"))?;
+        let labels: Vec<String> = (1..=shape.rows).map(|idx| format!("{idx}")).collect();
+        let bounds = build_bar_gpu_bounds(values, shape.rows, params.bar_width)?;
+        let vertex_count = gpu_vertices.vertex_count;
+        let chart = BarChart::from_gpu_buffer(
+            labels,
+            shape.rows,
+            gpu_vertices,
+            vertex_count,
+            bounds,
+            params.color,
+            params.bar_width,
+        );
+        return Ok(vec![chart]);
+    }
+    build_bar_gpu_matrix_charts(&context, values, &inputs, shape, style)
+}
+
+fn build_bar_gpu_matrix_charts(
+    context: &runmat_plot::SharedWgpuContext,
+    values: &GpuTensorHandle,
+    inputs: &BarGpuInputs,
+    shape: BarMatrixShape,
+    style: &BarStyle,
+) -> Result<Vec<BarChart>, String> {
+    let labels: Vec<String> = (1..=shape.rows).map(|idx| format!("{idx}")).collect();
+    let layout_mode = match style.layout {
+        BarLayout::Grouped => BarLayoutMode::Grouped,
+        BarLayout::Stacked => BarLayoutMode::Stacked,
     };
-    let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| format!("bar: failed to build GPU vertices: {e}"))?;
+    let bounds = if style.layout == BarLayout::Stacked {
+        build_stacked_bar_gpu_bounds(values, shape.rows, shape.cols, style.bar_width)?
+    } else {
+        build_bar_gpu_bounds(values, shape.rows, style.bar_width)?
+    };
+    let mut charts = Vec::with_capacity(shape.cols);
+    for col in 0..shape.cols {
+        let params = BarGpuParams {
+            color: style.face_rgba(),
+            bar_width: style.bar_width,
+            series_index: col as u32,
+            series_count: shape.cols as u32,
+            group_index: if style.layout == BarLayout::Stacked {
+                0
+            } else {
+                col as u32
+            },
+            group_count: if style.layout == BarLayout::Stacked {
+                1
+            } else {
+                shape.cols as u32
+            },
+            orientation: BarOrientation::Vertical,
+            layout: layout_mode,
+        };
+        let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
+            &context.device,
+            &context.queue,
+            inputs,
+            &params,
+        )
+        .map_err(|e| format!("bar: failed to build GPU vertices: {e}"))?;
+        let vertex_count = gpu_vertices.vertex_count;
+        let mut chart = BarChart::from_gpu_buffer(
+            labels.clone(),
+            shape.rows,
+            gpu_vertices,
+            vertex_count,
+            bounds,
+            params.color,
+            params.bar_width,
+        );
+        chart = if style.layout == BarLayout::Stacked {
+            chart.with_group(0, 1)
+        } else {
+            chart.with_group(col, shape.cols)
+        };
+        charts.push(chart);
+    }
+    Ok(charts)
+}
 
-    let labels: Vec<String> = (1..=exported.len).map(|idx| format!("{idx}")).collect();
-    let bounds = build_bar_gpu_bounds(values, exported.len, params.bar_width)?;
-    let vertex_count = gpu_vertices.vertex_count;
+#[derive(Clone, Copy)]
+struct BarMatrixShape {
+    rows: usize,
+    cols: usize,
+}
 
-    let mut chart = BarChart::from_gpu_buffer(
-        labels,
-        exported.len,
-        gpu_vertices,
-        vertex_count,
-        bounds,
-        params.color,
-        params.bar_width,
-    );
-    apply_bar_style(&mut chart, style, BAR_DEFAULT_LABEL);
-    Ok(chart)
+impl BarMatrixShape {
+    fn from_handle(handle: &GpuTensorHandle) -> Result<Self, String> {
+        if handle.shape.is_empty() {
+            return Err("bar: input cannot be empty".to_string());
+        }
+        if handle.shape.len() == 1 {
+            return Ok(Self {
+                rows: handle.shape[0],
+                cols: 1,
+            });
+        }
+        if handle.shape.len() != 2 {
+            return Err("bar: matrix inputs must be 2-D".to_string());
+        }
+        let rows = handle.shape[0];
+        let cols = handle.shape[1];
+        if rows == 0 || cols == 0 {
+            return Err("bar: input cannot be empty".to_string());
+        }
+        Ok(Self { rows, cols })
+    }
 }
 
 fn build_bar_gpu_bounds(
     values: &GpuTensorHandle,
-    len: usize,
+    rows: usize,
     bar_width: f32,
 ) -> Result<BoundingBox, String> {
     let (min_y, max_y) = axis_bounds(values, "bar")?;
     let min_y = min_y.min(0.0);
     let max_y = max_y.max(0.0);
     let min_x = 1.0 - bar_width * 0.5;
-    let max_x = len as f32 + bar_width * 0.5;
+    let max_x = rows as f32 + bar_width * 0.5;
+    Ok(BoundingBox::new(
+        Vec3::new(min_x, min_y, 0.0),
+        Vec3::new(max_x, max_y, 0.0),
+    ))
+}
+
+fn build_stacked_bar_gpu_bounds(
+    values: &GpuTensorHandle,
+    rows: usize,
+    cols: usize,
+    bar_width: f32,
+) -> Result<BoundingBox, String> {
+    let tensor = gather_tensor_from_gpu(values.clone(), "bar")?;
+    if tensor.data.len() != rows * cols {
+        return Err("bar: gpuArray shape mismatch".to_string());
+    }
+    let mut pos = vec![0.0f64; rows];
+    let mut neg = vec![0.0f64; rows];
+    let mut max_pos = 0.0f64;
+    let mut min_neg = 0.0f64;
+    for col in 0..cols {
+        for row in 0..rows {
+            let value = tensor.data[row + col * rows];
+            if !value.is_finite() {
+                continue;
+            }
+            if value >= 0.0 {
+                pos[row] += value;
+                if pos[row] > max_pos {
+                    max_pos = pos[row];
+                }
+            } else {
+                neg[row] += value;
+                if neg[row] < min_neg {
+                    min_neg = neg[row];
+                }
+            }
+        }
+    }
+    let min_y = min_neg.min(0.0) as f32;
+    let max_y = max_pos.max(0.0) as f32;
+    let min_x = 1.0 - bar_width * 0.5;
+    let max_x = rows as f32 + bar_width * 0.5;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
@@ -309,6 +458,117 @@ fn generate_flat_colors(count: usize, alpha: f32) -> Vec<Vec4> {
     colors
 }
 
+fn default_series_label(index: usize, total: usize) -> String {
+    if total <= 1 {
+        BAR_DEFAULT_LABEL.to_string()
+    } else {
+        format!("Series {}", index + 1)
+    }
+}
+
+enum BarTensorInput {
+    Vector(Vec<f64>),
+    Matrix(BarMatrixData),
+}
+
+struct BarMatrixData {
+    rows: usize,
+    cols: usize,
+    data: Vec<f64>,
+}
+
+impl BarMatrixData {
+    fn value(&self, row: usize, col: usize) -> f64 {
+        self.data[row + col * self.rows]
+    }
+}
+
+fn tensor_to_bar_input(tensor: Tensor) -> Result<BarTensorInput, String> {
+    if tensor.shape.is_empty() {
+        return Err("bar: input cannot be empty".to_string());
+    }
+    if tensor.shape.len() == 1 || tensor.cols <= 1 {
+        return Ok(BarTensorInput::Vector(numeric_vector(tensor)));
+    }
+    if tensor.shape.len() != 2 {
+        return Err("bar: matrix inputs must be 2-D".to_string());
+    }
+    let rows = tensor.shape[0];
+    let cols = tensor.shape[1];
+    if rows == 0 || cols == 0 {
+        return Err("bar: input cannot be empty".to_string());
+    }
+    if rows * cols != tensor.data.len() {
+        return Err("bar: matrix inputs must be dense numeric arrays".to_string());
+    }
+    Ok(BarTensorInput::Matrix(BarMatrixData {
+        rows,
+        cols,
+        data: tensor.data,
+    }))
+}
+
+fn build_bar_series_from_tensor(tensor: Tensor, style: &BarStyle) -> Result<Vec<BarChart>, String> {
+    match tensor_to_bar_input(tensor)? {
+        BarTensorInput::Vector(values) => {
+            let bar = build_bar_chart(values)?;
+            Ok(vec![bar])
+        }
+        BarTensorInput::Matrix(matrix) => build_bar_series_from_matrix(matrix, style),
+    }
+}
+
+fn build_bar_series_from_matrix(
+    matrix: BarMatrixData,
+    style: &BarStyle,
+) -> Result<Vec<BarChart>, String> {
+    if matrix.cols == 0 {
+        return Err("bar: input cannot be empty".to_string());
+    }
+    let labels: Vec<String> = (1..=matrix.rows).map(|idx| format!("{idx}")).collect();
+    let mut charts = Vec::with_capacity(matrix.cols);
+    let mut pos_offsets = vec![0.0f64; matrix.rows];
+    let mut neg_offsets = vec![0.0f64; matrix.rows];
+    for col in 0..matrix.cols {
+        let mut values = Vec::with_capacity(matrix.rows);
+        for row in 0..matrix.rows {
+            values.push(matrix.value(row, col));
+        }
+        let mut chart =
+            BarChart::new(labels.clone(), values.clone()).map_err(|err| format!("bar: {err}"))?;
+        if style.layout == BarLayout::Stacked {
+            let offsets = compute_stack_offsets(&values, &mut pos_offsets, &mut neg_offsets);
+            chart = chart.with_stack_offsets(offsets).with_group(0, 1);
+        } else {
+            chart = chart.with_group(col, matrix.cols);
+        }
+        charts.push(chart);
+    }
+    Ok(charts)
+}
+
+fn compute_stack_offsets(
+    values: &[f64],
+    pos_offsets: &mut [f64],
+    neg_offsets: &mut [f64],
+) -> Vec<f64> {
+    let mut offsets = vec![0.0f64; values.len()];
+    for (idx, &value) in values.iter().enumerate() {
+        if !value.is_finite() {
+            offsets[idx] = 0.0;
+            continue;
+        }
+        if value >= 0.0 {
+            offsets[idx] = pos_offsets[idx];
+            pos_offsets[idx] += value;
+        } else {
+            offsets[idx] = neg_offsets[idx];
+            neg_offsets[idx] += value;
+        }
+    }
+    offsets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +580,16 @@ mod tests {
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        }
+    }
+
+    fn matrix_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
+        Tensor {
+            data: data.to_vec(),
+            shape: vec![rows, cols],
+            rows,
+            cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
     }
@@ -338,5 +608,32 @@ mod tests {
                 "unexpected error: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn bar_parser_handles_stacked_flag() {
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style =
+            parse_bar_style_args("bar", &[Value::String("stacked".into())], defaults).unwrap();
+        assert_eq!(style.layout, BarLayout::Stacked);
+    }
+
+    #[test]
+    fn bar_series_from_matrix_grouped() {
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let tensor = matrix_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        let charts = build_bar_series_from_tensor(tensor, &style).unwrap();
+        assert_eq!(charts.len(), 2);
+    }
+
+    #[test]
+    fn bar_series_from_matrix_stacked() {
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style =
+            parse_bar_style_args("bar", &[Value::String("stacked".into())], defaults).unwrap();
+        let tensor = matrix_tensor(&[1.0, -2.0, 3.0, 4.0], 2, 2);
+        let charts = build_bar_series_from_tensor(tensor, &style).unwrap();
+        assert_eq!(charts.len(), 2);
     }
 }

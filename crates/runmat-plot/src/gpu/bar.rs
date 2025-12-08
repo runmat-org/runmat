@@ -10,7 +10,7 @@ const VERTICES_PER_BAR: u32 = 6;
 /// Inputs required to pack bar vertices directly on the GPU.
 pub struct BarGpuInputs {
     pub values_buffer: Arc<wgpu::Buffer>,
-    pub len: u32,
+    pub row_count: u32,
     pub scalar: ScalarType,
 }
 
@@ -18,9 +18,27 @@ pub struct BarGpuInputs {
 pub struct BarGpuParams {
     pub color: Vec4,
     pub bar_width: f32,
+    pub series_index: u32,
+    pub series_count: u32,
     pub group_index: u32,
     pub group_count: u32,
     pub orientation: BarOrientation,
+    pub layout: BarLayoutMode,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BarLayoutMode {
+    Grouped,
+    Stacked,
+}
+
+impl BarLayoutMode {
+    fn as_u32(self) -> u32 {
+        match self {
+            BarLayoutMode::Grouped => 0,
+            BarLayoutMode::Stacked => 1,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,11 +61,14 @@ impl BarOrientation {
 struct BarUniforms {
     color: [f32; 4],
     bar_width: f32,
-    count: u32,
+    row_count: u32,
+    series_index: u32,
+    series_count: u32,
     group_index: u32,
     group_count: u32,
     orientation: u32,
-    _pad: u32,
+    layout: u32,
+    _pad: [u32; 2],
 }
 
 /// Builds a GPU-resident vertex buffer for bar charts directly from provider-owned value arrays.
@@ -57,7 +78,7 @@ pub fn pack_vertices_from_values(
     inputs: &BarGpuInputs,
     params: &BarGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
-    if inputs.len == 0 {
+    if inputs.row_count == 0 {
         return Err("bar: input cannot be empty".to_string());
     }
 
@@ -113,7 +134,7 @@ pub fn pack_vertices_from_values(
         entry_point: "main",
     });
 
-    let vertex_count = inputs.len as u64 * VERTICES_PER_BAR as u64;
+    let vertex_count = inputs.row_count as u64 * VERTICES_PER_BAR as u64;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("bar-gpu-vertices"),
@@ -127,11 +148,14 @@ pub fn pack_vertices_from_values(
     let uniforms = BarUniforms {
         color: params.color.to_array(),
         bar_width: params.bar_width,
-        count: inputs.len,
+        row_count: inputs.row_count,
+        series_index: params.series_index,
+        series_count: params.series_count.max(1),
         group_index: params.group_index,
         group_count: params.group_count.max(1),
         orientation: params.orientation.as_u32(),
-        _pad: 0,
+        layout: params.layout.as_u32(),
+        _pad: [0, 0],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("bar-pack-uniforms"),
@@ -168,7 +192,7 @@ pub fn pack_vertices_from_values(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (inputs.len + workgroup_size - 1) / workgroup_size;
+        let workgroups = (inputs.row_count + workgroup_size - 1) / workgroup_size;
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));

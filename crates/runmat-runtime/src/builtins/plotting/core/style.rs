@@ -30,6 +30,13 @@ pub struct BarStyle {
     pub bar_width: f32,
     pub label: Option<String>,
     pub face_color_flat: bool,
+    pub layout: BarLayout,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarLayout {
+    Grouped,
+    Stacked,
 }
 
 impl BarStyle {
@@ -775,6 +782,8 @@ pub fn looks_like_option_name(token: &str) -> bool {
             | "markeredgecolor"
             | "markerfacecolor"
             | "linestyleorder"
+            | "displayname"
+            | "label"
     )
 }
 
@@ -980,11 +989,15 @@ pub fn parse_bar_style_args(
         bar_width: defaults.bar_width.clamp(0.1, 1.0),
         label: None,
         face_color_flat: false,
+        layout: BarLayout::Grouped,
     };
 
     if rest.is_empty() {
         return Ok(style);
     }
+
+    let filtered = strip_bar_layout_tokens(rest, &mut style);
+    let rest = filtered.as_slice();
 
     let mut idx = 0usize;
     if let Some(token) = rest.get(0).and_then(value_as_string) {
@@ -1086,6 +1099,55 @@ pub fn parse_bar_style_args(
     }
 
     Ok(style)
+}
+
+fn strip_bar_layout_tokens(rest: &[Value], style: &mut BarStyle) -> Vec<Value> {
+    let mut filtered = Vec::with_capacity(rest.len());
+    let mut expecting_value = false;
+    for value in rest {
+        if expecting_value {
+            filtered.push(value.clone());
+            expecting_value = false;
+            continue;
+        }
+        if let Some(text) = value_as_string(value) {
+            let lower = text.trim().to_ascii_lowercase();
+            match lower.as_str() {
+                "stacked" => {
+                    style.layout = BarLayout::Stacked;
+                    continue;
+                }
+                "grouped" => {
+                    style.layout = BarLayout::Grouped;
+                    continue;
+                }
+                _ => {
+                    if is_bar_option_name(&lower) {
+                        filtered.push(value.clone());
+                        expecting_value = true;
+                        continue;
+                    }
+                }
+            }
+        }
+        filtered.push(value.clone());
+    }
+    filtered
+}
+
+fn is_bar_option_name(token: &str) -> bool {
+    matches!(
+        token,
+        "facecolor"
+            | "color"
+            | "edgecolor"
+            | "linewidth"
+            | "barwidth"
+            | "facealpha"
+            | "edgealpha"
+            | "displayname"
+            | "label"
+    )
 }
 
 impl BarStyle {

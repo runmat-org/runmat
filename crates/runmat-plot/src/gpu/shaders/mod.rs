@@ -12,10 +12,10 @@ pub mod vertex;
 /// Backwards-compatible re-export so existing code can keep referencing
 /// `shaders::histogram_counts::F32/F64`.
 pub mod histogram_counts {
-    pub use super::histogram::counts::{F32, F64};
+    pub use super::histogram::counts::{F32_UNIFORM as F32, F64_UNIFORM as F64};
 }
 
 /// Backwards-compatible wrapper around the histogram conversion shader template.
 pub mod histogram_convert {
-    pub const TEMPLATE: &str = super::histogram::CONVERT;
+    pub const TEMPLATE: &str = super::histogram::convert::TEMPLATE;
 }

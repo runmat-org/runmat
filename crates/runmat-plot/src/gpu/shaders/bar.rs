@@ -9,11 +9,13 @@ struct VertexRaw {
 struct BarParams {
     color: vec4<f32>,
     bar_width: f32,
-    count: u32,
+    row_count: u32,
+    series_index: u32,
+    series_count: u32,
     group_index: u32,
     group_count: u32,
     orientation: u32,
-    _pad: u32,
+    layout: u32,
 };
 
 @group(0) @binding(0)
@@ -51,13 +53,13 @@ fn write_vertices(base_index: u32, quad: array<vec3<f32>, 4u>) {
     out_vertices[base_index + 5u] = encode_vertex(quad[3u]);
 }
 
-fn build_vertical_quad(idx: u32, value: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
+fn build_vertical_quad(idx: u32, start: f32, end: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
     let center = (f32(idx) + 1.0) + local_offset;
     let half = per_group_width * 0.5;
     let left = center - half;
     let right = center + half;
-    let bottom = 0.0;
-    let top = value;
+    let bottom = min(start, end);
+    let top = max(start, end);
 
     return array<vec3<f32>, 4u>(
         vec3<f32>(left, bottom, 0.0),
@@ -67,13 +69,13 @@ fn build_vertical_quad(idx: u32, value: f32, per_group_width: f32, local_offset:
     );
 }
 
-fn build_horizontal_quad(idx: u32, value: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
+fn build_horizontal_quad(idx: u32, start: f32, end: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
     let center = (f32(idx) + 1.0) + local_offset;
     let half = per_group_width * 0.5;
     let bottom = center - half;
     let top = center + half;
-    let left = 0.0;
-    let right = value;
+    let left = min(start, end);
+    let right = max(start, end);
 
     return array<vec3<f32>, 4u>(
         vec3<f32>(left, bottom, 0.0),
@@ -86,7 +88,7 @@ fn build_horizontal_quad(idx: u32, value: f32, per_group_width: f32, local_offse
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
-    if (idx >= params.count) {
+    if (idx >= params.row_count) {
         return;
     }
 
@@ -96,12 +98,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_offset = group_offset_start
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
+    let stride = params.row_count;
+    let column_offset = params.series_index * stride;
+    let value = values[column_offset + idx];
 
-    let value = values[idx];
-    let quad = if (params.orientation == 0u) {
-        build_vertical_quad(idx, value, per_group_width, local_offset)
+    var base_pos = 0.0;
+    var base_neg = 0.0;
+    if (params.layout == 1u && params.series_index > 0u) {
+        var col: u32 = 0u;
+        loop {
+            if (col >= params.series_index) {
+                break;
+            }
+            let prev = values[col * stride + idx];
+            if (isFinite(prev)) {
+                if (prev >= 0.0) {
+                    base_pos += prev;
+                } else {
+                    base_neg += prev;
+                }
+            }
+            col = col + 1u;
+        }
+    }
+
+    var start = 0.0;
+    var end = 0.0;
+    if (!isFinite(value)) {
+        start = 0.0;
+        end = 0.0;
+    } else if (params.layout == 1u) {
+        if (value >= 0.0) {
+            start = base_pos;
+            end = base_pos + value;
+        } else {
+            start = base_neg + value;
+            end = base_neg;
+        }
     } else {
-        build_horizontal_quad(idx, value, per_group_width, local_offset)
+        start = 0.0;
+        end = value;
+    }
+
+    let quad = if (params.orientation == 0u) {
+        build_vertical_quad(idx, start, end, per_group_width, local_offset)
+    } else {
+        build_horizontal_quad(idx, start, end, per_group_width, local_offset)
     };
 
     let base_index = idx * VERTICES_PER_BAR;
@@ -120,11 +162,13 @@ struct VertexRaw {
 struct BarParams {
     color: vec4<f32>,
     bar_width: f32,
-    count: u32,
+    row_count: u32,
+    series_index: u32,
+    series_count: u32,
     group_index: u32,
     group_count: u32,
     orientation: u32,
-    _pad: u32,
+    layout: u32,
 };
 
 @group(0) @binding(0)
@@ -162,13 +206,13 @@ fn write_vertices(base_index: u32, quad: array<vec3<f32>, 4u>) {
     out_vertices[base_index + 5u] = encode_vertex(quad[3u]);
 }
 
-fn build_vertical_quad(idx: u32, value: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
+fn build_vertical_quad(idx: u32, start: f32, end: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
     let center = (f32(idx) + 1.0) + local_offset;
     let half = per_group_width * 0.5;
     let left = center - half;
     let right = center + half;
-    let bottom = 0.0;
-    let top = value;
+    let bottom = min(start, end);
+    let top = max(start, end);
 
     return array<vec3<f32>, 4u>(
         vec3<f32>(left, bottom, 0.0),
@@ -178,13 +222,13 @@ fn build_vertical_quad(idx: u32, value: f32, per_group_width: f32, local_offset:
     );
 }
 
-fn build_horizontal_quad(idx: u32, value: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
+fn build_horizontal_quad(idx: u32, start: f32, end: f32, per_group_width: f32, local_offset: f32) -> array<vec3<f32>, 4u> {
     let center = (f32(idx) + 1.0) + local_offset;
     let half = per_group_width * 0.5;
     let bottom = center - half;
     let top = center + half;
-    let left = 0.0;
-    let right = value;
+    let left = min(start, end);
+    let right = max(start, end);
 
     return array<vec3<f32>, 4u>(
         vec3<f32>(left, bottom, 0.0),
@@ -197,7 +241,7 @@ fn build_horizontal_quad(idx: u32, value: f32, per_group_width: f32, local_offse
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
-    if (idx >= params.count) {
+    if (idx >= params.row_count) {
         return;
     }
 
@@ -207,12 +251,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_offset = group_offset_start
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
+    let stride = params.row_count;
+    let column_offset = params.series_index * stride;
+    let value = f32(values[column_offset + idx]);
 
-    let value = f32(values[idx]);
-    let quad = if (params.orientation == 0u) {
-        build_vertical_quad(idx, value, per_group_width, local_offset)
+    var base_pos = 0.0;
+    var base_neg = 0.0;
+    if (params.layout == 1u && params.series_index > 0u) {
+        var col: u32 = 0u;
+        loop {
+            if (col >= params.series_index) {
+                break;
+            }
+            let prev = f32(values[col * stride + idx]);
+            if (isFinite(prev)) {
+                if (prev >= 0.0) {
+                    base_pos += prev;
+                } else {
+                    base_neg += prev;
+                }
+            }
+            col = col + 1u;
+        }
+    }
+
+    var start = 0.0;
+    var end = 0.0;
+    if (!isFinite(value)) {
+        start = 0.0;
+        end = 0.0;
+    } else if (params.layout == 1u) {
+        if (value >= 0.0) {
+            start = base_pos;
+            end = base_pos + value;
+        } else {
+            start = base_neg + value;
+            end = base_neg;
+        }
     } else {
-        build_horizontal_quad(idx, value, per_group_width, local_offset)
+        start = 0.0;
+        end = value;
+    }
+
+    let quad = if (params.orientation == 0u) {
+        build_vertical_quad(idx, start, end, per_group_width, local_offset)
+    } else {
+        build_horizontal_quad(idx, start, end, per_group_width, local_offset)
     };
 
     let base_index = idx * VERTICES_PER_BAR;

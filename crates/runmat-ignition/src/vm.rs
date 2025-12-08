@@ -4923,6 +4923,33 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "hist" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err.to_string()),
+                    };
+                    if let Err(err) = eval.render_plot() {
+                        vm_bail!(err.to_string());
+                    }
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.counts_value());
+                        continue;
+                    }
+                    stack.push(eval.counts_value());
+                    stack.push(eval.centers_value());
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
                 if name == "histcounts" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::stats::hist::histcounts::evaluate(
                         args[0].clone(),

@@ -171,6 +171,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Resul
 }
 
 const DEFAULT_POINT_SIZE: f32 = 6.0;
+const DEFAULT_SCATTER3_LABEL: &str = "Data";
 
 fn default_color() -> Vec4 {
     Vec4::new(0.1, 0.6, 0.9, 0.9)
@@ -188,6 +189,7 @@ struct Scatter3ResolvedStyle {
     gpu_colors: Option<PointGpuColor>,
     colormap: ColorMap,
     requires_cpu: bool,
+    label: String,
 }
 
 fn resolve_scatter3_style(
@@ -206,7 +208,12 @@ fn resolve_scatter3_style(
         gpu_colors: None,
         colormap: ColorMap::Parula,
         requires_cpu: false,
+        label: DEFAULT_SCATTER3_LABEL.to_string(),
     };
+
+    if let Some(label) = args.style.label.clone() {
+        style.label = label;
+    }
 
     let appearance = &args.style.appearance;
     style.uniform_color = appearance.color;
@@ -267,6 +274,7 @@ fn resolve_scatter3_style(
     if args.style.line_style_order.is_some() {
         style.requires_cpu = true;
     }
+    style.requires_cpu |= args.style.requires_cpu_fallback;
 
     Ok(style)
 }
@@ -294,7 +302,7 @@ fn build_scatter3_plot(
         .map_err(|err| format!("scatter3: {err}"))?
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)
-        .with_label("Data");
+        .with_label(style.label.clone());
     if let Some(sizes) = style.per_point_sizes.take() {
         scatter.set_point_sizes(sizes);
     }
@@ -417,7 +425,7 @@ fn build_scatter3_gpu_plot(
         style.point_size,
         bounds,
     )
-    .with_label("Data"))
+    .with_label(style.label.clone()))
 }
 
 fn build_gpu_bounds(
@@ -548,6 +556,7 @@ mod tests {
             gpu_colors: None,
             colormap: ColorMap::Parula,
             requires_cpu: false,
+            label: DEFAULT_SCATTER3_LABEL.to_string(),
         }
     }
 
@@ -594,5 +603,18 @@ mod tests {
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
         let style = resolve_scatter3_style(2, &args, "scatter3").expect("style");
         assert!(style.per_point_sizes.is_some());
+    }
+
+    #[test]
+    fn scatter3_applies_display_name() {
+        let rest = vec![
+            Value::String("DisplayName".into()),
+            Value::String("Cloud A".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
+        let mut style = resolve_scatter3_style(2, &args, "scatter3").expect("style");
+        let plot = build_scatter3_plot(vec![0.0, 1.0], vec![0.0, 1.0], vec![0.0, 1.0], &mut style)
+            .expect("plot");
+        assert_eq!(plot.label.as_deref(), Some("Cloud A"));
     }
 }

@@ -28,6 +28,7 @@ pub struct ScatterPlot {
     pub color_limits: Option<(f64, f64)>,
     pub colormap: ColorMap,
     pub filled: bool,
+    pub edge_color_from_vertex_colors: bool,
 
     /// Metadata
     pub label: Option<String>,
@@ -72,6 +73,7 @@ pub struct ScatterGpuStyle {
     pub filled: bool,
     pub has_per_point_sizes: bool,
     pub has_per_point_colors: bool,
+    pub edge_from_vertex_colors: bool,
 }
 
 impl ScatterPlot {
@@ -103,6 +105,7 @@ impl ScatterPlot {
             color_limits: None,
             colormap: ColorMap::Parula,
             filled: false,
+            edge_color_from_vertex_colors: false,
             label: None,
             visible: true,
             vertices: None,
@@ -136,6 +139,7 @@ impl ScatterPlot {
             color_limits: None,
             colormap: ColorMap::Parula,
             filled: style.filled,
+            edge_color_from_vertex_colors: style.edge_from_vertex_colors,
             label: None,
             visible: true,
             vertices: None,
@@ -182,6 +186,9 @@ impl ScatterPlot {
         self.edge_color = color;
         self.dirty = true;
         self.invalidate_gpu_vertices();
+    }
+    pub fn set_edge_color_from_vertex(&mut self, enabled: bool) {
+        self.edge_color_from_vertex_colors = enabled;
     }
     /// Set marker edge thickness (pixels)
     pub fn set_edge_thickness(&mut self, px: f32) {
@@ -417,6 +424,13 @@ impl ScatterPlot {
             MarkerStyle::Star => 6.0,
             MarkerStyle::Hexagon => 7.0,
         };
+        let has_vertex_colors = if using_gpu {
+            self.gpu_has_per_point_colors
+        } else {
+            self.per_point_colors.is_some() || self.color_values.is_some()
+        };
+        let use_vertex_edge_color = self.edge_color_from_vertex_colors && has_vertex_colors;
+        material.emissive.w = if use_vertex_edge_color { 0.0 } else { 1.0 };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
