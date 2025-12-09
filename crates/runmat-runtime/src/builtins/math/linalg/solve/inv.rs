@@ -14,8 +14,8 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const NAME: &str = "inv";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = NAME)]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = NAME))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "inv"
 category: "math/linalg/solve"
@@ -169,10 +169,6 @@ gathers, computes on the host, and re-uploads so the caller still receives a GPU
 ## See Also
 [pinv](./pinv), [linsolve](./linsolve), [mldivide](../ops/mldivide), [det](../ops/det), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
-
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
 
 #[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

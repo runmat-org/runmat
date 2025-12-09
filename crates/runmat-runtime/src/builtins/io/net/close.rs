@@ -17,8 +17,11 @@ use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
 const MESSAGE_ID_INVALID_ARGUMENT: &str = "MATLAB:close:InvalidArgument";
 const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:close:InvalidHandle";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "close")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "close")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "close"
 category: "io/net"

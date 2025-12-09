@@ -18,8 +18,11 @@ use std::path::{Path, PathBuf};
 const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";
 const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "genpath")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "genpath")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "genpath"
 category: "io/repl_fs"

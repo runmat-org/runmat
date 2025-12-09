@@ -13,8 +13,11 @@ use crate::builtins::common::spec::{
 use crate::gather_if_needed;
 use runmat_filesystem::OpenOptions;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "filewrite")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "filewrite")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "filewrite"
 category: "io/filetext"

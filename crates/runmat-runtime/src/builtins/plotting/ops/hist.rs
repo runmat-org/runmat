@@ -25,8 +25,11 @@ use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "hist")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "hist")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "hist"
 category: "plotting"

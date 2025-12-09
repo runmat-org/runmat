@@ -10,8 +10,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "strtrim")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "strtrim")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r###"---
 title: "strtrim"
 category: "strings/transform"

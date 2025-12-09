@@ -13,8 +13,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const EPS: f64 = 1e-12;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "conv2")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "conv2")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "conv2"
 category: "math/signal"

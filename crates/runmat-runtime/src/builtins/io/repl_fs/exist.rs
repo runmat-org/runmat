@@ -25,8 +25,11 @@ const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string s
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
 const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "exist")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "exist")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "exist"
 category: "io/repl_fs"

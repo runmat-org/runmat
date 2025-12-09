@@ -15,8 +15,11 @@ const ERR_INPUT_NOT_TEXT: &str =
 const ERR_CELL_CONTENT_NOT_TEXT: &str =
     "cellstr: cell array elements must be character vectors or string scalars";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "cellstr")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "cellstr")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cellstr"
 category: "cells/core"

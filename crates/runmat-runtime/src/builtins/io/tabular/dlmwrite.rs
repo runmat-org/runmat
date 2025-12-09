@@ -20,8 +20,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "dlmwrite")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "dlmwrite")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dlmwrite"
 category: "io/tabular"

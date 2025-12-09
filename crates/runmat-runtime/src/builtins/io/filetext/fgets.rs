@@ -17,8 +17,11 @@ use runmat_filesystem::File;
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "fgets")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "fgets")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fgets"
 category: "io/filetext"

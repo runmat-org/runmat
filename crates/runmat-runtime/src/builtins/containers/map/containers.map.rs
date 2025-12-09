@@ -20,8 +20,11 @@ use crate::gather_if_needed;
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "containers.Map")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "containers.Map")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "containers.Map"
 category: "containers/map"

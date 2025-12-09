@@ -24,8 +24,11 @@ const ERR_UNABLE_TO_GENERATE: &str = "tempname: unable to generate a unique name
 const MAX_ATTEMPTS: usize = 64;
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "tempname")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tempname")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tempname"
 category: "io/repl_fs"

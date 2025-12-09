@@ -24,8 +24,11 @@ const ERR_FOLDER_ARG: &str = "rmdir: folder name must be a character vector or s
 const ERR_FLAG_ARG: &str =
     "rmdir: flag must be the character 's' supplied as a char vector or string scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "rmdir")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "rmdir")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmdir"
 category: "io/repl_fs"

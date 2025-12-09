@@ -12,8 +12,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "corrcoef")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "corrcoef")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "corrcoef"
 category: "stats/summary"

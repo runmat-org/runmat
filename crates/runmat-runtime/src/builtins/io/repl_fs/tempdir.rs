@@ -16,8 +16,11 @@ const ERR_TOO_MANY_INPUTS: &str = "tempdir: too many input arguments";
 const ERR_UNABLE_TO_DETERMINE: &str =
     "tempdir: unable to determine temporary directory (OS returned empty path)";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "tempdir")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tempdir")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tempdir"
 category: "io/repl_fs"

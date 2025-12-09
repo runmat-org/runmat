@@ -22,8 +22,11 @@ const ERROR_EMPTY_FILENAME: &str = "savepath: filename must not be empty";
 const MESSAGE_ID_CANNOT_WRITE: &str = "MATLAB:savepath:cannotWriteFile";
 const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "savepath")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "savepath")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "savepath"
 category: "io/repl_fs"

@@ -14,8 +14,8 @@ use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "rng")]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "rng"))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rng"
 category: "stats/random"

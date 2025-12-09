@@ -17,8 +17,11 @@ const INVALID_INPUT_IDENTIFIER: &str = "MATLAB:assertion:invalidInput";
 const MIN_INPUT_IDENTIFIER: &str = "MATLAB:minrhs";
 const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "assert")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "assert")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "assert"
 category: "diagnostics"

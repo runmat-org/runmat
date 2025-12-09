@@ -133,8 +133,11 @@ pub(super) fn clear_registry_for_test() {
 #[cfg(test)]
 static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "tcpserver")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tcpserver")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tcpserver"
 category: "io/net"

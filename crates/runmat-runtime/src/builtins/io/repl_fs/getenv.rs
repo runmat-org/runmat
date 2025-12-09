@@ -21,8 +21,11 @@ const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string 
 const ERR_CHAR_MATRIX_CELL: &str =
     "getenv: cell array elements must be character vectors or string scalars";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "getenv")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "getenv")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "getenv"
 category: "io/repl_fs"

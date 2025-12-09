@@ -18,8 +18,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const NAME: &str = "pinv";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "pinv")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "pinv")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pinv"
 category: "math/linalg/solve"
@@ -172,10 +175,6 @@ remains useful for ill-conditioned or rank-deficient problems where the pseudoin
 - Found a behavioral difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose)
   with a minimal reproduction.
 "#;
-
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
 
 #[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

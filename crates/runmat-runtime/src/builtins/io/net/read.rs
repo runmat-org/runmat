@@ -21,8 +21,11 @@ const MESSAGE_ID_INVALID_COUNT: &str = "MATLAB:read:InvalidCount";
 const MESSAGE_ID_INVALID_DATATYPE: &str = "MATLAB:read:InvalidDataType";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:read:InternalError";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "read")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "read")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "read"
 category: "io/net"

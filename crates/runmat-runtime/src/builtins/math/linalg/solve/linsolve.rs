@@ -20,8 +20,11 @@ use crate::builtins::common::{
 
 const NAME: &str = "linsolve";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "linsolve")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "linsolve")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "linsolve"
 category: "math/linalg/solve"
@@ -183,10 +186,6 @@ arrays should be reshaped before calling `linsolve`, just like in MATLAB.
 ## See Also
 [mldivide](../../ops/mldivide), [mrdivide](../../ops/mrdivide), [lu](../../factor/lu), [chol](../../factor/chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
 "#;
-
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
 
 #[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

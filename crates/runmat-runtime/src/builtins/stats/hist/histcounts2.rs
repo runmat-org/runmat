@@ -16,8 +16,11 @@ const NAME: &str = "histcounts2";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "histcounts2")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "histcounts2")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "histcounts2"
 category: "stats/hist"

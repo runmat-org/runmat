@@ -22,8 +22,11 @@ const ERROR_ARG_TYPE: &str =
     "rmpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors";
 const ERROR_TOO_FEW_ARGS: &str = "rmpath: at least one folder must be specified";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "rmpath")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "rmpath")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmpath"
 category: "io/repl_fs"

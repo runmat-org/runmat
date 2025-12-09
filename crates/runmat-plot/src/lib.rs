@@ -103,6 +103,12 @@ pub fn show_plot_unified(
             // Interactive mode: Show GPU-accelerated window
             #[cfg(feature = "gui")]
             {
+                #[cfg(target_os = "macos")]
+                {
+                    if !is_main_thread() {
+                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUSTMAT_PLOT_MODE=headless for exports.".to_string());
+                    }
+                }
                 show_plot_sequential(figure)
             }
             #[cfg(not(feature = "gui"))]

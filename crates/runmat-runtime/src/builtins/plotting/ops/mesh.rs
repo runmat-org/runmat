@@ -16,8 +16,11 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "mesh")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "mesh")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mesh"
 category: "plotting"

@@ -16,8 +16,11 @@ use runmat_macros::runtime_builtin;
 
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "pagefun")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "pagefun")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pagefun"
 category: "acceleration/gpu"

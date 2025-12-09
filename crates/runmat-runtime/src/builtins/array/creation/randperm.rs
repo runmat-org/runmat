@@ -14,8 +14,11 @@ use crate::builtins::common::tensor;
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "randperm")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "randperm")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "randperm"
 category: "array/creation"

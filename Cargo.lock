@@ -5873,6 +5873,7 @@ dependencies = [
  "glam",
  "image",
  "inventory",
+ "libc",
  "log",
  "lyon",
  "nalgebra",
@@ -5905,6 +5906,7 @@ dependencies = [
  "env_logger 0.11.8",
  "log",
  "runmat-accelerate",
+ "runmat-builtins",
  "runmat-core",
  "runmat-gc",
 ]

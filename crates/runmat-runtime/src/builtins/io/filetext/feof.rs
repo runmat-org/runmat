@@ -20,8 +20,11 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 const IDENTIFIER_TYPE_ERROR: &str = "feof: file identifier must be a numeric scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "feof")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "feof")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "feof"
 category: "io/filetext"

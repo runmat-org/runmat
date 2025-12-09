@@ -17,8 +17,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const ZERO_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "acosh")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "acosh")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "acosh"
 category: "math/trigonometry"

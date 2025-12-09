@@ -16,8 +16,11 @@ const ERR_UNSUPPORTED_ARGUMENT: &str = "gpuDevice: unsupported input argument";
 const ERR_RESET_NOT_SUPPORTED: &str = "gpuDevice: reset is not supported by the active provider";
 const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive integer";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "gpuDevice")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "gpuDevice")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gpuDevice"
 category: "acceleration/gpu"

@@ -17,8 +17,11 @@ use crate::builtins::common::spec::{
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "polyfit")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "polyfit")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "polyfit"
 category: "math/poly"

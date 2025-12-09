@@ -26,8 +26,11 @@ const ERROR_TOO_FEW_ARGS: &str = "addpath: at least one folder must be specified
 const ERROR_POSITION_REPEATED: &str =
     "addpath: position option must be '-begin' or '-end' and may only appear once";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "addpath")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "addpath")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "addpath"
 category: "io/repl_fs"

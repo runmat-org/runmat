@@ -8,8 +8,11 @@ use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "rmfield")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "rmfield")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmfield"
 category: "structs/core"

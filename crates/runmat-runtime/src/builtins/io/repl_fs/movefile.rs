@@ -29,8 +29,11 @@ const ERR_DEST_ARG: &str = "movefile: destination must be a character vector or 
 const ERR_FLAG_ARG: &str =
     "movefile: flag must be the character 'f' supplied as a char vector or string scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "movefile")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "movefile")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "movefile"
 category: "io/repl_fs"

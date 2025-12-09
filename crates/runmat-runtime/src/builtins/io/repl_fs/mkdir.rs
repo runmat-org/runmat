@@ -22,8 +22,11 @@ const MESSAGE_ID_EMPTY_NAME: &str = "MATLAB:MKDIR:InvalidFolderName";
 const ERR_FOLDER_ARG: &str = "mkdir: folder name must be a character vector or string scalar";
 const ERR_PARENT_ARG: &str = "mkdir: parent folder must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "mkdir")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "mkdir")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mkdir"
 category: "io/repl_fs"

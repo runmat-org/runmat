@@ -8,8 +8,11 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "gpuInfo")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "gpuInfo")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gpuInfo"
 category: "acceleration/gpu"

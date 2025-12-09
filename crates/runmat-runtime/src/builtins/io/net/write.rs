@@ -21,8 +21,11 @@ const MESSAGE_ID_TIMEOUT: &str = "MATLAB:write:Timeout";
 const MESSAGE_ID_CONNECTION_CLOSED: &str = "MATLAB:write:ConnectionClosed";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:write:InternalError";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "write")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "write")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "write"
 category: "io/net"

@@ -26,8 +26,11 @@ const MESSAGE_ID_INTERNAL: &str = "MATLAB:tcpclient:InternalError";
 
 const DEFAULT_BUFFER_SIZE: usize = 8192;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "tcpclient")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tcpclient")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tcpclient"
 category: "io/net"

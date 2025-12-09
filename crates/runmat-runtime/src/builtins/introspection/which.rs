@@ -27,8 +27,11 @@ const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
 const ERROR_NAME_ARG: &str = "which: name must be a character vector or string scalar";
 const ERROR_OPTION_ARG: &str = "which: option must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "which")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "which")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "which"
 category: "introspection"

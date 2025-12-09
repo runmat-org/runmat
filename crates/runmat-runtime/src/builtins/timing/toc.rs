@@ -10,8 +10,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "toc")]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "toc"))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "toc"
 category: "timing"

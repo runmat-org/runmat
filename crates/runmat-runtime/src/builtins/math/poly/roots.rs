@@ -19,8 +19,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "roots")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "roots")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "roots"
 category: "math/poly"

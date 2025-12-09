@@ -25,8 +25,11 @@ const MESSAGE_VALUE_HAS_NULL: &str =
     "Environment variable values must not contain null characters.";
 const MESSAGE_OPERATION_FAILED: &str = "Unable to update environment variable: ";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "setenv")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "setenv")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "setenv"
 category: "io/repl_fs"

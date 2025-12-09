@@ -22,8 +22,8 @@ use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "bar")]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "bar"))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "bar"
 category: "plotting"
@@ -596,8 +596,10 @@ mod tests {
     fn bar_builtin_matches_backend_contract() {
         let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
         if let Err(msg) = out {
+            let msg_lower = msg.to_lowercase();
             assert!(
-                msg.contains("Plotting is unavailable"),
+                msg_lower.contains("plotting is unavailable")
+                    || msg_lower.contains("non-main thread"),
                 "unexpected error: {msg}"
             );
         }

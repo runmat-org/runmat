@@ -14,8 +14,8 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const NAME: &str = "norm";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = NAME)]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = NAME))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "norm"
 category: "math/linalg/solve"
@@ -174,10 +174,6 @@ norm kernels can keep the computation entirely on device without user-visible ch
 - The full source code for the implementation of the `norm` function is available at: [`crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs)
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
-
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
 
 #[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

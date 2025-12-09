@@ -12,8 +12,11 @@ use crate::builtins::io::filetext::registry;
 use crate::gather_if_needed;
 use runmat_filesystem::File;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "fwrite")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "fwrite")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fwrite"
 category: "io/filetext"

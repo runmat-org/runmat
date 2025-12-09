@@ -26,8 +26,11 @@ const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:DELETE:InvalidHandle";
 const ERR_FILENAME_ARG: &str =
     "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "delete")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "delete")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "delete"
 category: "io/repl_fs"

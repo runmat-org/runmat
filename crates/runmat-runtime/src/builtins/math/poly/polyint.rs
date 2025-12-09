@@ -15,8 +15,11 @@ use crate::dispatcher;
 
 const EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "polyint")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "polyint")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "polyint"
 category: "math/poly"

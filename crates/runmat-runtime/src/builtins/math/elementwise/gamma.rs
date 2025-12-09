@@ -32,8 +32,11 @@ const LANCZOS_COEFFS: [f64; 8] = [
     1.5056327351493116e-7,
 ];
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "gamma")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "gamma")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gamma"
 category: "math/elementwise"

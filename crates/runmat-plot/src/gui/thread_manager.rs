@@ -120,9 +120,22 @@ impl MainThreadDetector {
     /// Check if the current thread is the main thread
     pub fn is_main_thread(&self) -> bool {
         if let Some(main_id) = self.main_thread_id.get() {
-            thread::current().id() == *main_id
-        } else {
-            // If not registered, assume current thread is main and register it
+            return thread::current().id() == *main_id;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if is_macos_main_thread() {
+                self.register_main_thread();
+                true
+            } else {
+                false
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Other platforms do not require the GUI to live on the OS main thread.
             self.register_main_thread();
             true
         }
@@ -132,6 +145,11 @@ impl MainThreadDetector {
     pub fn main_thread_id(&self) -> Option<ThreadId> {
         self.main_thread_id.get().copied()
     }
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_main_thread() -> bool {
+    unsafe { libc::pthread_main_np() != 0 }
 }
 
 /// Global main thread detector instance

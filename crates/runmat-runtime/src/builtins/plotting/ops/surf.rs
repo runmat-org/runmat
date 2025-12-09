@@ -21,8 +21,11 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "surf")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "surf")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "surf"
 category: "plotting"

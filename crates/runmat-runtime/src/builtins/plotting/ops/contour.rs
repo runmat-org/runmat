@@ -227,8 +227,11 @@ pub(crate) fn default_level_count() -> usize {
     DEFAULT_LEVELS
 }
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "contour")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "contour")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "contour"
 category: "plotting"

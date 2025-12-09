@@ -17,8 +17,8 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const NAME: &str = "rank";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = NAME)]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = NAME))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rank"
 category: "math/linalg/solve"
@@ -192,10 +192,6 @@ LAPACK when enabled). GPU providers are free to reuse buffers or stream the comp
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/solve/rank.rs`
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
-
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
 
 #[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

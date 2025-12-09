@@ -17,8 +17,8 @@ const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_NUMERIC_ERR: &str = "size arguments must be numeric scalars or vectors";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = FN_NAME)]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = FN_NAME))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strings"
 category: "strings/core"

@@ -15,8 +15,11 @@ use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView}
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "arrayfun")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "arrayfun")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "arrayfun"
 category: "acceleration/gpu"

@@ -16,8 +16,11 @@ use runmat_macros::runtime_builtin;
 
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "gpuArray")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "gpuArray")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gpuArray"
 category: "acceleration/gpu"

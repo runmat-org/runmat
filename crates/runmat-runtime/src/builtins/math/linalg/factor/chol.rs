@@ -15,8 +15,11 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderCholResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "chol")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "chol")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "chol"
 category: "math/linalg/factor"

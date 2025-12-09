@@ -15,8 +15,11 @@ use crate::gather_if_needed;
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "num2str")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "num2str")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "num2str"
 category: "strings/core"

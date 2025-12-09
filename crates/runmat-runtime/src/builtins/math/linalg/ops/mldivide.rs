@@ -16,8 +16,11 @@ use crate::builtins::common::tensor;
 
 const NAME: &str = "mldivide";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "mldivide")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "mldivide")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mldivide"
 category: "math/linalg/ops"

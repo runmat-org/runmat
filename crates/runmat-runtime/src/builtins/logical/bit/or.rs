@@ -10,8 +10,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "or")]
+#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "or"))]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "or"
 category: "logical/bit"

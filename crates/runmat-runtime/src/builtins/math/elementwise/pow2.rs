@@ -13,8 +13,11 @@ use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
 
 const LN_2: f64 = std::f64::consts::LN_2;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "pow2")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "pow2")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pow2"
 category: "math/elementwise"

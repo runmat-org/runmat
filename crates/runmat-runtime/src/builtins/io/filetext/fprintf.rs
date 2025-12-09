@@ -22,8 +22,11 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
 const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "fprintf")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "fprintf")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fprintf"
 category: "io/filetext"

@@ -20,8 +20,11 @@ const LOOP_COUNT_LIMIT: usize = 1 << 20;
 const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "timeit")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "timeit")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "timeit"
 category: "timing"

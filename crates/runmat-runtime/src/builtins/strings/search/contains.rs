@@ -14,8 +14,11 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "contains")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "contains")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "contains"
 category: "strings/search"

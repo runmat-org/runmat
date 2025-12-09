@@ -18,8 +18,11 @@ const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:readline:NotConnected";
 const MESSAGE_ID_INVALID_ARGUMENTS: &str = "MATLAB:readline:InvalidArguments";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:readline:InternalError";
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "readline")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "readline")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "readline"
 category: "io/net"

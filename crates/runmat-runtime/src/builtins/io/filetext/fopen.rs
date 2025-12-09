@@ -14,8 +14,11 @@ use crate::builtins::io::filetext::registry::{self, FileInfo, RegisteredFile};
 use crate::{gather_if_needed, make_cell};
 use runmat_filesystem::OpenOptions;
 
-#[cfg(feature = "doc_export")]
-#[runmat_macros::register_doc_text(name = "fopen")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "fopen")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fopen"
 category: "io/filetext"
