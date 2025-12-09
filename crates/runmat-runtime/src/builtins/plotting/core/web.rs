@@ -37,6 +37,12 @@ mod wasm {
         });
     }
 
+    pub fn detach_default_renderer() {
+        DEFAULT_RENDERER.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+
     pub fn web_renderer_ready() -> bool {
         WEB_RENDERERS.with(|slot| !slot.borrow().is_empty())
             || DEFAULT_RENDERER.with(|slot| slot.borrow().is_some())
@@ -91,6 +97,8 @@ mod wasm {
 
     pub fn detach_web_renderer(_handle: u32) {}
 
+    pub fn detach_default_renderer() {}
+
     pub fn web_renderer_ready() -> bool {
         false
     }
@@ -118,6 +126,10 @@ pub fn install_web_renderer_for_handle(
 
 pub fn detach_web_renderer(handle: u32) {
     wasm::detach_web_renderer(handle)
+}
+
+pub fn detach_default_web_renderer() {
+    wasm::detach_default_renderer()
 }
 
 #[cfg_attr(

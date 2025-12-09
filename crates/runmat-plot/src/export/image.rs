@@ -8,6 +8,7 @@ use crate::plots::Figure;
 use egui::{Align2, Color32, FontId, Pos2};
 #[cfg(feature = "gui")]
 use egui_wgpu;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 use wgpu::{Device, Queue, TextureFormat};
@@ -112,6 +113,17 @@ impl ImageExporter {
         figure: &mut Figure,
         path: P,
     ) -> Result<(), String> {
+        let pixels = self.render_rgba(figure).await?;
+        self.save_png(&pixels, path).await
+    }
+
+    /// Render figure into a PNG buffer (RGBA data encoded as PNG bytes)
+    pub async fn render_png_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
+        let pixels = self.render_rgba(figure).await?;
+        self.encode_png_bytes(&pixels)
+    }
+
+    async fn render_rgba(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
         // Create an offscreen texture as color target
         let sc_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -424,16 +436,19 @@ impl ImageExporter {
         drop(data);
         output_buffer.unmap();
 
-        self.save_png(&pixels, path).await
+        Ok(pixels)
     }
 
     /// Save raw RGBA data as PNG
     async fn save_png<P: AsRef<Path>>(&self, data: &[u8], path: P) -> Result<(), String> {
         use image::{ImageBuffer, Rgba};
 
-        let image =
-            ImageBuffer::<Rgba<u8>, _>::from_raw(self.settings.width, self.settings.height, data)
-                .ok_or("Failed to create image buffer")?;
+        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
+            self.settings.width,
+            self.settings.height,
+            data.to_vec(),
+        )
+        .ok_or("Failed to create image buffer")?;
 
         image
             .save(path)
@@ -441,6 +456,23 @@ impl ImageExporter {
 
         log::debug!(target: "runmat_plot", "png export completed");
         Ok(())
+    }
+
+    fn encode_png_bytes(&self, data: &[u8]) -> Result<Vec<u8>, String> {
+        use image::{ImageBuffer, ImageOutputFormat, Rgba};
+
+        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
+            self.settings.width,
+            self.settings.height,
+            data.to_vec(),
+        )
+        .ok_or("Failed to create image buffer")?;
+
+        let mut cursor = Cursor::new(Vec::new());
+        image
+            .write_to(&mut cursor, ImageOutputFormat::Png)
+            .map_err(|e| format!("Failed to encode PNG: {e}"))?;
+        Ok(cursor.into_inner())
     }
 
     /// Update export settings

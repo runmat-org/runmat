@@ -4,9 +4,9 @@ use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex};
 use std::thread_local;
 
 use super::common::default_figure;
@@ -193,6 +193,7 @@ pub enum FigureError {
         index: usize,
     },
     InvalidAxesHandle,
+    RenderFailure(String),
 }
 
 impl fmt::Display for FigureError {
@@ -210,6 +211,9 @@ impl fmt::Display for FigureError {
                 "subplot index {index} is out of range for a {rows}x{cols} grid"
             ),
             FigureError::InvalidAxesHandle => write!(f, "invalid axes handle"),
+            FigureError::RenderFailure(message) => {
+                write!(f, "failed to render figure snapshot: {message}")
+            }
         }
     }
 }
@@ -431,6 +435,11 @@ pub fn current_axes_state() -> FigureAxesState {
 pub fn figure_handles() -> Vec<FigureHandle> {
     let reg = registry();
     reg.figures.keys().copied().collect()
+}
+
+pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
+    let reg = registry();
+    reg.figures.get(&handle).map(|state| state.figure.clone())
 }
 
 pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {

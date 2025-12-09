@@ -3,6 +3,9 @@ import * as defaultFs from "./fs/default.js";
 import {
   __internals,
   initRunMat,
+  deregisterFigureCanvas,
+  deregisterPlotCanvas,
+  renderFigureImage,
   type RunMatFilesystemProvider,
   type RunMatSnapshotSource,
   type ExecuteResult,
@@ -87,6 +90,17 @@ describe("coerceFigureError", () => {
     const err = __internals.coerceFigureError(original);
     expect(err.code).toBe("Unknown");
     expect(err.message).toBe("boom");
+  });
+
+  it("preserves render failure details", () => {
+    const payload = {
+      code: "RenderFailure",
+      message: "snapshot failed",
+      details: "adapter unavailable"
+    };
+    const err = __internals.coerceFigureError(payload);
+    expect(err.code).toBe("RenderFailure");
+    expect(err.details).toBe("adapter unavailable");
   });
 });
 
@@ -325,6 +339,34 @@ describe("initRunMat wiring", () => {
     expect(registerSpy).toHaveBeenCalledWith(canvas);
   });
 
+  it("deregisters the default plot canvas when requested", async () => {
+    const deregisterSpy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () => createMockNativeSession(),
+      deregisterPlotCanvas: deregisterSpy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await deregisterPlotCanvas();
+    expect(deregisterSpy).toHaveBeenCalledOnce();
+  });
+
+  it("deregisters figure-specific canvases", async () => {
+    const deregisterSpy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () => createMockNativeSession(),
+      deregisterFigureCanvas: deregisterSpy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await deregisterFigureCanvas(42);
+    expect(deregisterSpy).toHaveBeenCalledWith(42);
+  });
+
   it("surfaces structured errors from registerPlotCanvas", async () => {
     const native: NativeModule = {
       default: async () => {},
@@ -377,6 +419,46 @@ describe("initRunMat wiring", () => {
 
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
     await expect(session.memoryUsage()).resolves.toEqual({ bytes: 1024, pages: 16 });
+  });
+});
+
+describe("renderFigureImage", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("returns bytes from the native binding", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      renderFigureImage: vi.fn(async (handle: number | null, width: number, height: number) => {
+        expect(handle).toBeNull();
+        expect(width).toBe(0);
+        expect(height).toBe(0);
+        return new Uint8Array([1, 2, 3]);
+      })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const bytes = await renderFigureImage();
+    expect(Array.from(bytes)).toEqual([1, 2, 3]);
+    expect(native.renderFigureImage).toHaveBeenCalledWith(null, 0, 0);
+  });
+
+  it("forwards options and surfaces figure errors", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      renderFigureImage: vi.fn(async () => {
+        throw { code: "InvalidHandle", handle: 77 };
+      })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(renderFigureImage({ handle: 77, width: 640, height: 480 })).rejects.toMatchObject({
+      code: "InvalidHandle",
+      handle: 77
+    });
+    expect(native.renderFigureImage).toHaveBeenCalledWith(77, 640, 480);
   });
 });
 

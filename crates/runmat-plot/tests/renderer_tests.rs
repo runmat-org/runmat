@@ -1164,3 +1164,230 @@ mod export_parity_more_tests {
         assert!(bytes.len() > 1000);
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod gpu_stress {
+    use glam::{Vec3, Vec4};
+    use once_cell::sync::OnceCell;
+    use pollster::FutureExt;
+    use runmat_plot::{
+        export::image::{ImageExportSettings, ImageExporter},
+        install_shared_wgpu_context,
+        plots::{scatter::MarkerStyle, Figure, LinePlot, Scatter3Plot, ScatterPlot, SurfacePlot},
+        SharedWgpuContext,
+    };
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    static CONTEXT_READY: OnceCell<bool> = OnceCell::new();
+
+    struct RenderStats {
+        frames: usize,
+        avg_ms: f64,
+        max_ms: f64,
+    }
+
+    fn ensure_shared_context() -> bool {
+        *CONTEXT_READY.get_or_init(|| install_context())
+    }
+
+    fn install_context() -> bool {
+        if std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err() {
+            return false;
+        }
+        match build_shared_context() {
+            Some(ctx) => {
+                install_shared_wgpu_context(ctx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn build_shared_context() -> Option<SharedWgpuContext> {
+        let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor::default()));
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let features = adapter.features();
+        let limits = adapter.limits();
+        let adapter_info = adapter.get_info();
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-gpu-stress-device"),
+                    required_features: features,
+                    required_limits: limits.clone(),
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some(SharedWgpuContext {
+            instance,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            adapter: Arc::new(adapter),
+            adapter_info,
+            limits,
+            features,
+        })
+    }
+
+    async fn render_headless(fig: &mut Figure, iterations: usize) -> Result<RenderStats, String> {
+        if iterations == 0 {
+            return Ok(RenderStats {
+                frames: 0,
+                avg_ms: 0.0,
+                max_ms: 0.0,
+            });
+        }
+        let exporter = ImageExporter::with_settings(ImageExportSettings {
+            width: 1280,
+            height: 720,
+            ..Default::default()
+        })
+        .await?;
+        let mut total = 0.0;
+        let mut max_ms = 0.0;
+        for _ in 0..iterations {
+            let mut clone = fig.clone();
+            let start = Instant::now();
+            let bytes = exporter.render_png_bytes(&mut clone).await?;
+            assert!(
+                !bytes.is_empty(),
+                "exporter returned an empty PNG buffer during GPU stress test"
+            );
+            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+            total += elapsed;
+            if elapsed > max_ms {
+                max_ms = elapsed;
+            }
+        }
+        Ok(RenderStats {
+            frames: iterations,
+            avg_ms: total / iterations as f64,
+            max_ms,
+        })
+    }
+
+    fn build_multi_axes_figure() -> Figure {
+        let mut fig = Figure::new();
+        fig.set_subplot_grid(2, 2);
+        fig.set_title("GPU stress – multi-axes");
+        fig.set_labels(&["t".into(), "value".into()]);
+
+        let sample_count = 50_000;
+        let xs: Vec<f64> = (0..sample_count).map(|i| i as f64 * 0.0005).collect();
+        let sin_y: Vec<f64> = xs.iter().map(|t| (t * 6.0).sin()).collect();
+        let line = LinePlot::new(xs.clone(), sin_y)
+            .expect("line data must be valid")
+            .with_style(
+                Vec4::new(0.2, 0.6, 0.9, 1.0),
+                2.0,
+                runmat_plot::plots::LineStyle::Solid,
+            )
+            .with_label("sin(6t)");
+        let line_index = fig.add_line_plot(line);
+        fig.assign_plot_to_axes(line_index, 0).unwrap();
+
+        let scatter_y: Vec<f64> = xs.iter().map(|t| (t * 3.0).cos() * 0.5).collect();
+        let scatter = ScatterPlot::new(xs.clone(), scatter_y)
+            .expect("scatter data must match lengths")
+            .with_style(Vec4::new(0.9, 0.3, 0.3, 0.9), 9.0, MarkerStyle::Triangle)
+            .with_label("cos(3t)");
+        let scatter_index = fig.add_scatter_plot(scatter);
+        fig.assign_plot_to_axes(scatter_index, 1).unwrap();
+
+        let bars_x: Vec<f64> = (0..128).map(|i| i as f64).collect();
+        let bars_y: Vec<f64> = bars_x.iter().map(|x| (x / 32.0).sin() + 1.5).collect();
+        let stairs =
+            runmat_plot::plots::StairsPlot::new(bars_x, bars_y).expect("stairs data must be valid");
+        let stairs_index = fig.add_stairs_plot(stairs);
+        fig.assign_plot_to_axes(stairs_index, 2).unwrap();
+
+        let surface = build_surface_plot(96);
+        let surface_index = fig.add_surface_plot(surface);
+        fig.assign_plot_to_axes(surface_index, 3).unwrap();
+
+        fig
+    }
+
+    fn build_surface_plot(size: usize) -> SurfacePlot {
+        let x: Vec<f64> = (0..size).map(|i| i as f64 / 12.0).collect();
+        let y: Vec<f64> = (0..size).map(|i| i as f64 / 12.0).collect();
+        let mut z = Vec::with_capacity(x.len());
+        for (xi_idx, &xi) in x.iter().enumerate() {
+            let mut row = Vec::with_capacity(y.len());
+            for (yi_idx, &yi) in y.iter().enumerate() {
+                let phase = (xi_idx as f64 * 0.05) + (yi_idx as f64 * 0.08);
+                row.push((xi * 0.75).sin() * (yi * 0.5).cos() + phase.sin() * 0.1);
+            }
+            z.push(row);
+        }
+        SurfacePlot::new(x, y, z).expect("surface grid must be consistent")
+    }
+
+    fn build_scatter3_cloud(point_count: usize) -> Figure {
+        let mut fig = Figure::new();
+        fig.set_title("GPU stress – scatter3 cloud");
+        let mut points = Vec::with_capacity(point_count);
+        for i in 0..point_count {
+            let t = i as f32 * 0.00025;
+            let radius = 0.5 + (i as f32 % 1024.0) * 0.0001;
+            points.push(Vec3::new(
+                (t * 3.1).cos() * radius,
+                (t * 2.7).sin() * radius,
+                (t * 1.3).sin() * 0.75,
+            ));
+        }
+        let scatter3 = Scatter3Plot::new(points)
+            .expect("scatter3 data must be valid")
+            .with_point_size(4.0)
+            .with_label("helix cloud");
+        fig.add_scatter3_plot(scatter3);
+        fig
+    }
+
+    #[tokio::test]
+    async fn headless_multi_axes_renderer_stress() {
+        if !ensure_shared_context() {
+            eprintln!(
+                "skipping GPU stress test; set RUNMAT_PLOT_FORCE_GPU_TESTS=1 to enable headless renders"
+            );
+            return;
+        }
+        let mut fig = build_multi_axes_figure();
+        let stats = render_headless(&mut fig, 3)
+            .await
+            .expect("headless multi-axes render failed");
+        assert_eq!(stats.frames, 3);
+        eprintln!(
+            "[gpu-stress] multi-axes figure avg={:.2}ms max={:.2}ms",
+            stats.avg_ms, stats.max_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn headless_scatter3_cloud_snapshot() {
+        if !ensure_shared_context() {
+            eprintln!(
+                "skipping GPU stress test; set RUNMAT_PLOT_FORCE_GPU_TESTS=1 to enable headless renders"
+            );
+            return;
+        }
+        let mut fig = build_scatter3_cloud(600_000);
+        let stats = render_headless(&mut fig, 2)
+            .await
+            .expect("scatter3 headless render failed");
+        assert_eq!(stats.frames, 2);
+        eprintln!(
+            "[gpu-stress] scatter3 cloud avg={:.2}ms max={:.2}ms",
+            stats.avg_ms, stats.max_ms
+        );
+    }
+}

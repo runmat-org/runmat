@@ -66,6 +66,12 @@ export interface RunMatInitOptions {
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
 
+export interface FigureLegendEntry {
+  label: string;
+  plotType: string;
+  color: [number, number, number, number];
+}
+
 export interface FigureEvent {
   handle: number;
   kind: FigureEventKind;
@@ -74,6 +80,11 @@ export interface FigureEvent {
   plotCount: number;
   axesIndices: number[];
   title?: string;
+  xLabel?: string;
+  yLabel?: string;
+  gridEnabled?: boolean;
+  legendEnabled?: boolean;
+  legendEntries?: FigureLegendEntry[];
 }
 
 export type FigureEventListener = (event: FigureEvent) => void;
@@ -123,12 +134,19 @@ export interface AxesInfo {
   activeIndex: number;
 }
 
+export interface FigureImageOptions {
+  handle?: number;
+  width?: number;
+  height?: number;
+}
+
 export interface FigureBindingError extends Error {
-  code: "InvalidHandle" | "InvalidSubplotGrid" | "InvalidSubplotIndex" | "Unknown";
+  code: "InvalidHandle" | "InvalidSubplotGrid" | "InvalidSubplotIndex" | "RenderFailure" | "Unknown";
   handle?: number;
   rows?: number;
   cols?: number;
   index?: number;
+  details?: string;
 }
 
 export interface MatlabWarning {
@@ -310,8 +328,10 @@ interface RunMatNativeModule {
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
   registerPlotCanvas?: (canvas: HTMLCanvasElement) => Promise<void>;
+  deregisterPlotCanvas?: () => void;
   plotRendererReady?: () => boolean;
   registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
+  deregisterFigureCanvas?: (handle: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -321,6 +341,7 @@ interface RunMatNativeModule {
   clearFigure?: (handle: number | null) => number;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
+  renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
@@ -407,6 +428,18 @@ export async function registerFigureCanvas(handle: number, canvas: HTMLCanvasEle
     throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
   }
   await native.registerFigureCanvas(handle, canvas);
+}
+
+export async function deregisterPlotCanvas(): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "deregisterPlotCanvas");
+  native.deregisterPlotCanvas();
+}
+
+export async function deregisterFigureCanvas(handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "deregisterFigureCanvas");
+  native.deregisterFigureCanvas(handle);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
@@ -506,6 +539,23 @@ export async function currentAxesInfo(): Promise<AxesInfo> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "currentAxesInfo");
   return native.currentAxesInfo();
+}
+
+export async function renderFigureImage(options: FigureImageOptions = {}): Promise<Uint8Array> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "renderFigureImage");
+  const handle = typeof options.handle === "number" ? options.handle : null;
+  const width = options.width ?? 0;
+  const height = options.height ?? 0;
+  try {
+    const bytes = await native.renderFigureImage(handle, width, height);
+    if (bytes instanceof Uint8Array) {
+      return bytes;
+    }
+    return new Uint8Array(bytes ?? []);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
 }
 
 class WebRunMatSession implements RunMatSessionHandle {
@@ -639,6 +689,7 @@ type FigureErrorPayload = {
   rows?: number;
   cols?: number;
   index?: number;
+  details?: string;
 };
 
 function isFigureErrorPayload(value: unknown): value is FigureErrorPayload {
@@ -665,6 +716,9 @@ function coerceFigureError(value: unknown): FigureBindingError {
     }
     if (typeof value.index === "number") {
       err.index = value.index;
+    }
+    if (typeof value.details === "string") {
+      err.details = value.details;
     }
     return err;
   }

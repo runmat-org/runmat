@@ -139,10 +139,7 @@ impl SnapshotLoader {
 
         let (snapshot, _) = self.load_from_bytes(&bytes)?;
         self.stats.load_time += read_duration;
-        log::info!(
-            "Snapshot loaded successfully in {:?}",
-            self.stats.load_time
-        );
+        log::info!("Snapshot loaded successfully in {:?}", self.stats.load_time);
         Ok((snapshot, self.stats.clone()))
     }
 
@@ -745,9 +742,8 @@ impl SnapshotLoader {
 }
 
 fn parse_snapshot_header(bytes: &[u8]) -> SnapshotResult<SnapshotHeader> {
-    let header_size =
-        bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
-            .map_err(SnapshotError::Serialization)? as usize;
+    let header_size = bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
+        .map_err(SnapshotError::Serialization)? as usize;
     bincode::deserialize(&bytes[..header_size.min(bytes.len())]).map_err(|e| {
         SnapshotError::Configuration {
             message: format!("Failed to deserialize snapshot header: {e}"),

@@ -133,12 +133,15 @@ await initRunMat({ plotCanvas: canvas });
 or attach one later via the exported helpers:
 
 ```ts
-import { attachPlotCanvas, plotRendererReady } from "@runmat/wasm";
+import { attachPlotCanvas, deregisterPlotCanvas, plotRendererReady } from "@runmat/wasm";
 
 await attachPlotCanvas(canvas);
 if (!await plotRendererReady()) {
   console.warn("Plotting not initialized yet.");
 }
+
+// Later, when the canvas is unmounted:
+await deregisterPlotCanvas();
 ```
 
 Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.
@@ -159,7 +162,8 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 ### Multi-figure canvases & events
 
 - `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
-- `onFigureEvent(listener)` registers a callback that receives `{ handle, axesRows, axesCols, plotCount, axesIndices[] }` whenever a figure updates. Pass `null` to unsubscribe.
+- `deregisterFigureCanvas(handle)` detaches the renderer for a given handle when a tab is hidden or destroyed, freeing GPU resources until the UI reattaches.
+- `onFigureEvent(listener)` registers a callback that now receives rich metadata `{ handle, kind, axesRows, axesCols, plotCount, axesIndices[], title?, xLabel?, yLabel?, gridEnabled?, legendEnabled?, legendEntries[] }` whenever a figure changes. `legendEntries` mirrors MATLAB's legend labels plus RGBA colors so UI sidebars can display labels without re-rendering the plot. Pass `null` to unsubscribe.
 
 The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
 
@@ -173,7 +177,10 @@ The wasm bindings now expose the same figure/axes controls that the MATLAB runti
 - `configureSubplot(rows, cols, index)` / `subplot(rows, cols, index)` – mirror MATLAB's subplot grid selection so canvas layouts stay in sync with the runtime registry.
 - `clearFigure(handle?)` / `closeFigure(handle?)` – mirror `clf`/`close` semantics. Omit the handle (or pass `undefined`) to target the current figure.
 - `currentAxesInfo()` – returns `{ handle, axesRows, axesCols, activeIndex }` so hosts can surface the active subplot without scraping text output.
+- `renderFigureImage({ handle?, width?, height? })` – renders the active (or specified) figure into an offscreen texture and returns a `Uint8Array` containing PNG bytes. This is ideal for gallery thumbnails, history panes, or exporting snapshots without a visible canvas. Width/height default to the renderer's internal size when omitted.
 
 Each helper forwards directly to the new wasm exports, so the zero-copy renderer stays in lock-step with MATLAB semantics even when figure switches originate from the host UI.
 
 When a lifecycle call fails (bad handle, invalid subplot index, etc.) the Promise rejects with a structured error object `{ code, message, ... }`. The wrapper converts that into a real `Error` (with `.code`, `.handle`, `.rows`, `.cols`, `.index` where applicable) so host UIs can surface meaningful messages without parsing MATLAB text.
+
+If the shared WebGPU device is unavailable (adapter blocked, user disables GPU, etc.), `renderFigureImage` rejects with `code: "RenderFailure"` and a `.details` string describing the cause. Hosts should surface that warning and fall back to a placeholder thumbnail rather than attempting to draw the PNG bytes locally.

@@ -2,7 +2,7 @@ use runmat_plot::plots::Figure;
 
 #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
-use super::state::FigureHandle;
+use super::state::{clone_figure, FigureError, FigureHandle};
 
 pub fn render_figure(handle: FigureHandle, figure: Figure) -> Result<String, String> {
     #[cfg(feature = "gui")]
@@ -21,6 +21,38 @@ pub fn render_figure(handle: FigureHandle, figure: Figure) -> Result<String, Str
         let _ = figure;
         Err(ERR_PLOTTING_UNAVAILABLE.to_string())
     }
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn render_figure_png_bytes(
+    mut figure: Figure,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+
+    let exporter = ImageExporter::with_settings(settings).await?;
+    exporter.render_png_bytes(&mut figure).await
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn render_figure_snapshot(
+    handle: FigureHandle,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, FigureError> {
+    let figure = clone_figure(handle).ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    render_figure_png_bytes(figure, width, height)
+        .await
+        .map_err(FigureError::RenderFailure)
 }
 
 #[cfg(feature = "gui")]

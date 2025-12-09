@@ -42,11 +42,11 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 
 ## B. Plotting & Figure Bridge
 1. **Canvas management**
-   - [ ] Finalize `registerFigureCanvas(handle, canvas)` / `deregisterFigureCanvas` semantics (multitab support, tab-switch latency, GPU context reuse).
-   - [ ] Emit figure lifecycle events with metadata (`axes grid, titles, legend entries`) so the UI can populate the right column without re-rendering plots in JS.
+   - [x] Finalize `registerFigureCanvas(handle, canvas)` / `deregisterFigureCanvas` semantics (multitab support, tab-switch latency, GPU context reuse).
+   - [x] Emit figure lifecycle events with metadata (`axes grid, titles, legend entries`) so the UI can populate the right column without re-rendering plots in JS.
 2. **High-performance render loop**
-   - [ ] Stress-test WebGPU plotting under the shared Accelerate context (sinusoid demo, scatter3 cloud) to confirm 60fps+ on target hardware; document fallback behavior when WebGPU is unavailable.
-   - [ ] Provide a “headless” render hook so the shell can request image snapshots (for thumbnails/history) without a visible canvas.
+   - [x] Stress-test WebGPU plotting under the shared Accelerate context (sinusoid demo, scatter3 cloud) to confirm 60fps+ on target hardware; document fallback behavior when WebGPU is unavailable. `crates/runmat-plot/tests/renderer_tests.rs` now hosts two gated stress suites (`RUNMAT_PLOT_FORCE_GPU_TESTS=1`) that install a shared `SharedWgpuContext`, render multi-axes + 600k-point scatter3 figures via the offscreen exporter, and log frame timing so we can validate zero-copy pipelines on real GPUs. The README + bindings call out the `RenderFailure` error hosts receive when WebGPU is missing so UIs can display helpful fallbacks.
+   - [x] Provide a “headless” render hook so the shell can request image snapshots (for thumbnails/history) without a visible canvas. `runmat-runtime` exposes `render_figure_snapshot(handle, width, height)` (reusing the shared context), `runmat-wasm` exports it as `renderFigureImage`, and the TS bindings wrap it with a friendly API that returns PNG bytes. Errors propagate as structured `FigureBindingError`s, so hosts can distinguish invalid handles from renderer failures.
 
 ## C. Variables / Fusion Panels
 1. **Variable inspector**
@@ -80,7 +80,8 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 | ---- | ----- | ------ | ----- |
 | Session init API audit | | ☑ | Node/Vitest harness now covers fs provider registration, plot canvas wiring, telemetry IDs, and scatter/surface overrides; `npm test` runs clean once Node env sources `~/.zshrc`. |
 | Execution response contract | | ☑ | Streams + workspace payloads + stdout subscription landed; cancellation still pending |
-| Plot canvas lifecycle | | ☐ | |
+| Plot canvas lifecycle | | ☑ | Figure canvases can now be registered/deregistered per handle (plus default canvas), and figure events carry titles/labels/legend metadata for UI sidebars. |
+| GPU stress + headless snapshots | | ☑ | Headless WebGPU tests (gated by `RUNMAT_PLOT_FORCE_GPU_TESTS`) render multi-axes + scatter3 figures via the shared context, and the new `renderFigureImage` hook (runtime + wasm + TS) returns PNG bytes or a structured `RenderFailure` error when GPUs are unavailable. |
 | Variable inspector API | | ☐ | |
 | Fusion plan emission | | ☐ | |
 | FS provider selection docs | | ☐ | |

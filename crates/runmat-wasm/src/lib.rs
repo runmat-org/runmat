@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
-use js_sys::{Array, Error as JsError, Reflect};
+use js_sys::{Array, Error as JsError, Reflect, Uint8Array};
 use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
@@ -18,9 +18,9 @@ use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
     ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
-    FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse, PendingInput, RunMatSession,
-    StdinEvent, StdinEventKind, WorkspaceEntry, WorkspacePreview, WorkspaceSnapshot,
-    InputHandlerAction,
+    FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind, InputResponse,
+    PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspacePreview,
+    WorkspaceSnapshot,
 };
 use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
 use runmat_runtime::warning_store::RuntimeWarning;
@@ -38,8 +38,14 @@ mod fs;
 use crate::fs::install_js_fs_provider;
 #[cfg(target_arch = "wasm32")]
 use runmat_plot::{
+    plots::{LegendEntry, PlotType},
     web::{WebRenderer, WebRendererOptions},
     SharedWgpuContext,
+};
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::builtins::plotting::web::{
+    detach_default_web_renderer as runtime_detach_default_renderer,
+    detach_web_renderer as runtime_detach_web_renderer,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
@@ -50,12 +56,12 @@ use runmat_runtime::builtins::plotting::{
     install_figure_observer as runtime_install_figure_observer,
     install_web_renderer as runtime_install_web_renderer,
     install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
-    new_figure_handle as runtime_new_figure_handle, select_figure as runtime_select_figure,
-    set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
-    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    new_figure_handle as runtime_new_figure_handle,
+    render_figure_snapshot as runtime_render_figure_snapshot,
+    select_figure as runtime_select_figure, set_hold as runtime_set_hold,
+    web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
+    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
-#[cfg(target_arch = "wasm32")]
-use runmat_runtime::builtins::plotting::web::detach_web_renderer as runtime_detach_web_renderer;
 
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
@@ -404,6 +410,18 @@ pub async fn register_figure_canvas(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = deregisterPlotCanvas)]
+pub fn deregister_plot_canvas() {
+    runtime_detach_default_renderer();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = deregisterFigureCanvas)]
+pub fn deregister_figure_canvas(handle: u32) {
+    runtime_detach_web_renderer(handle);
+}
+
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = newFigureHandle)]
 pub fn wasm_new_figure_handle() -> u32 {
     runtime_new_figure_handle().as_u32()
@@ -455,6 +473,20 @@ pub fn wasm_close_figure(handle: JsValue) -> Result<u32, JsValue> {
 #[wasm_bindgen(js_name = currentAxesInfo)]
 pub fn wasm_current_axes_info() -> JsValue {
     axes_state_to_js(runtime_current_axes_state())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImage)]
+pub async fn wasm_render_figure_image(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+) -> Result<Uint8Array, JsValue> {
+    let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
+        .await
+        .map_err(figure_error_to_js)?;
+    Ok(Uint8Array::from(bytes.as_slice()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -750,12 +782,18 @@ async fn install_canvas_renderer(
         }
         None => WebRenderer::new(canvas, options).await,
     }
-        .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
+    .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
     match handle {
-        Some(id) => runtime_install_web_renderer_for_handle(id, renderer)
-            .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
-        None => runtime_install_web_renderer(renderer)
-            .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
+        Some(id) => {
+            runtime_detach_web_renderer(id);
+            runtime_install_web_renderer_for_handle(id, renderer)
+        }
+        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
+        None => {
+            runtime_detach_default_renderer();
+            runtime_install_web_renderer(renderer)
+        }
+        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?,
     };
     Ok(())
 }
@@ -981,6 +1019,14 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
+        FigureError::RenderFailure(details) => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("details"),
+                &JsValue::from_str(details.as_str()),
+            );
+            "RenderFailure"
+        }
     };
     let _ = Reflect::set(
         &payload,
@@ -1079,6 +1125,36 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
                         &JsValue::from_str(title),
                     );
                 }
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("gridEnabled"),
+                    &JsValue::from_bool(figure.grid_enabled),
+                );
+                if let Some(x_label) = figure.x_label.as_ref() {
+                    let _ = Reflect::set(
+                        &payload,
+                        &JsValue::from_str("xLabel"),
+                        &JsValue::from_str(x_label),
+                    );
+                }
+                if let Some(y_label) = figure.y_label.as_ref() {
+                    let _ = Reflect::set(
+                        &payload,
+                        &JsValue::from_str("yLabel"),
+                        &JsValue::from_str(y_label),
+                    );
+                }
+                let legend_entries = figure.legend_entries();
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("legendEnabled"),
+                    &JsValue::from_bool(figure.legend_enabled && !legend_entries.is_empty()),
+                );
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("legendEntries"),
+                    &legend_entries_to_js(&legend_entries),
+                );
             } else {
                 let _ = Reflect::set(
                     &payload,
@@ -1108,6 +1184,51 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn legend_entries_to_js(entries: &[LegendEntry]) -> JsValue {
+    let array = Array::new();
+    for entry in entries {
+        let item = js_sys::Object::new();
+        let _ = Reflect::set(
+            &item,
+            &JsValue::from_str("label"),
+            &JsValue::from_str(&entry.label),
+        );
+        let _ = Reflect::set(
+            &item,
+            &JsValue::from_str("plotType"),
+            &JsValue::from_str(plot_type_to_str(entry.plot_type)),
+        );
+        let color = Array::new();
+        color.push(&JsValue::from_f64(entry.color.x as f64));
+        color.push(&JsValue::from_f64(entry.color.y as f64));
+        color.push(&JsValue::from_f64(entry.color.z as f64));
+        color.push(&JsValue::from_f64(entry.color.w as f64));
+        let _ = Reflect::set(&item, &JsValue::from_str("color"), &color.into());
+        array.push(&item.into());
+    }
+    array.into()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn plot_type_to_str(plot_type: PlotType) -> &'static str {
+    match plot_type {
+        PlotType::Line => "line",
+        PlotType::Scatter => "scatter",
+        PlotType::Bar => "bar",
+        PlotType::ErrorBar => "errorbar",
+        PlotType::Stairs => "stairs",
+        PlotType::Stem => "stem",
+        PlotType::Area => "area",
+        PlotType::Quiver => "quiver",
+        PlotType::Pie => "pie",
+        PlotType::Image => "image",
+        PlotType::Scatter3 => "scatter3",
+        PlotType::Contour => "contour",
+        PlotType::ContourFill => "contourf",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn ensure_stdout_forwarder_installed() {
     let forwarder = STDOUT_FORWARDER.get_or_init(|| {
         Arc::new(dispatch_stdout_entry as fn(&runmat_runtime::console::ConsoleEntry))
@@ -1118,12 +1239,8 @@ fn ensure_stdout_forwarder_installed() {
 
 #[cfg(target_arch = "wasm32")]
 fn dispatch_stdout_entry(entry: &runmat_runtime::console::ConsoleEntry) {
-    let handlers: Vec<js_sys::Function> = STDOUT_SUBSCRIBERS.with(|cell| {
-        cell.borrow()
-            .values()
-            .cloned()
-            .collect()
-    });
+    let handlers: Vec<js_sys::Function> =
+        STDOUT_SUBSCRIBERS.with(|cell| cell.borrow().values().cloned().collect());
     if handlers.is_empty() {
         return;
     }
