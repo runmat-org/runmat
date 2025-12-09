@@ -92,7 +92,27 @@ export type InputRequest =
   | { kind: "line"; prompt: string; echo: boolean }
   | { kind: "keyPress"; prompt: string; echo: boolean };
 
-export type InputHandler = (request: InputRequest) => string | null | undefined;
+export interface ResumeInputPayload {
+  value?: string | number | boolean;
+  line?: string | number | boolean;
+  kind?: "line" | "keyPress";
+  error?: string;
+}
+
+export type ResumeInputScalar = string | number | boolean | null | undefined;
+export type ResumeInputValue = ResumeInputScalar | ResumeInputPayload;
+
+export type InputHandlerResult = ResumeInputValue | Promise<ResumeInputValue>;
+export type InputHandler = (request: InputRequest) => InputHandlerResult;
+
+export interface PendingStdinRequest {
+  id: string;
+  request: {
+    prompt: string;
+    kind: "line" | "keyPress";
+    echo: boolean;
+  };
+}
 
 export interface AxesInfo {
   handle: number;
@@ -136,6 +156,7 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
+  stdinRequested?: PendingStdinRequest;
 }
 
 export interface WorkspaceSnapshot {
@@ -233,6 +254,8 @@ export interface RunMatSessionHandle {
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
+  resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
+  pendingStdinRequests(): Promise<PendingStdinRequest[]>;
 }
 
 interface NativeInitOptions {
@@ -258,6 +281,14 @@ interface RunMatNativeSession {
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
+  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
+  pendingStdinRequests?: () => PendingStdinRequest[];
+}
+
+interface ResumeInputWireValue {
+  kind?: "line" | "keyPress";
+  value?: string;
+  error?: string;
 }
 
 interface RunMatNativeModule {
@@ -278,6 +309,8 @@ interface RunMatNativeModule {
   currentAxesInfo?: () => AxesInfo;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
+  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
+  pendingStdinRequests?: () => PendingStdinRequest[];
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -495,6 +528,19 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     this.native.setInputHandler(handler ? (request: InputRequest) => handler(request) : null);
   }
+
+  async resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult> {
+    requireNativeFunction(this.native, "resumeInput");
+    const payload = normalizeResumeInputValue(value);
+    return this.native.resumeInput(requestId, payload);
+  }
+
+  async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
+    if (typeof this.native.pendingStdinRequests !== "function") {
+      return [];
+    }
+    return this.native.pendingStdinRequests();
+  }
 }
 
 function ensureFsProvider(provider: RunMatFilesystemProvider): void {
@@ -707,8 +753,49 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
   throw new Error("Unsupported snapshot buffer type");
 }
 
+function normalizeResumeInputValue(input: ResumeInputValue): ResumeInputWireValue {
+  if (isResumeInputPayload(input)) {
+    if (typeof input.error === "string") {
+      return { error: input.error };
+    }
+    if (input.kind === "keyPress") {
+      return { kind: "keyPress" };
+    }
+    const raw = input.value ?? input.line;
+    return { kind: "line", value: coerceResumeValue(raw) };
+  }
+  if (input === null || input === undefined) {
+    return { kind: "line", value: "" };
+  }
+  return { kind: "line", value: String(input) };
+}
+
+function coerceResumeValue(value: string | number | boolean | undefined): string {
+  if (value === undefined) {
+    return "";
+  }
+  return String(value);
+}
+
+function isResumeInputPayload(value: ResumeInputValue): value is ResumeInputPayload {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+  const payload = value as Record<string, unknown>;
+  return (
+    "value" in payload ||
+    "line" in payload ||
+    "kind" in payload ||
+    "error" in payload
+  );
+}
+
 export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
-  coerceFigureError
+  coerceFigureError,
+  normalizeResumeInputValue
 };

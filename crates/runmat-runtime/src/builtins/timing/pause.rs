@@ -12,9 +12,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+#[cfg(not(test))]
+use crate::interaction;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
-use crate::{interaction, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---

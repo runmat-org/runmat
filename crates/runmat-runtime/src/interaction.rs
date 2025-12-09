@@ -1,7 +1,10 @@
 use once_cell::sync::OnceCell;
+use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::IsTerminal;
 use std::io::{self, Read, Write};
+#[cfg(feature = "interaction-test-hooks")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Copy)]
@@ -15,15 +18,55 @@ pub struct InteractionPrompt<'a> {
     pub kind: InteractionKind,
 }
 
+#[derive(Clone)]
 pub enum InteractionResponse {
     Line(String),
     KeyPress,
 }
 
+#[derive(Clone)]
+pub struct PendingInteraction {
+    pub prompt: String,
+    pub kind: InteractionKind,
+}
+
+#[derive(Clone)]
+pub enum InteractionDecision {
+    Respond(Result<InteractionResponse, String>),
+    Pending,
+}
+
 type InteractionHandler =
-    dyn for<'a> Fn(InteractionPrompt<'a>) -> Result<InteractionResponse, String> + Send + Sync;
+    dyn for<'a> Fn(InteractionPrompt<'a>) -> InteractionDecision + Send + Sync;
 
 static HANDLER: OnceCell<RwLock<Option<Arc<InteractionHandler>>>> = OnceCell::new();
+thread_local! {
+    static LAST_PENDING: RefCell<Option<PendingInteraction>> = RefCell::new(None);
+    static QUEUED_RESPONSE: RefCell<Option<Result<InteractionResponse, String>>> =
+        RefCell::new(None);
+}
+
+#[cfg(feature = "interaction-test-hooks")]
+static FORCE_INTERACTIVE_STDIN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "interaction-test-hooks")]
+pub fn force_interactive_stdin_for_tests(enable: bool) {
+    FORCE_INTERACTIVE_STDIN.store(enable, Ordering::Relaxed);
+}
+
+#[cfg(not(feature = "interaction-test-hooks"))]
+#[inline]
+fn force_interactive_stdin() -> bool {
+    false
+}
+
+#[cfg(feature = "interaction-test-hooks")]
+#[inline]
+fn force_interactive_stdin() -> bool {
+    FORCE_INTERACTIVE_STDIN.load(Ordering::Relaxed)
+}
+
+pub const PENDING_INTERACTION_ERR: &str = "__RUNMAT_PENDING_INTERACTION__";
 
 fn handler_slot() -> &'static RwLock<Option<Arc<InteractionHandler>>> {
     HANDLER.get_or_init(|| RwLock::new(None))
@@ -57,14 +100,33 @@ pub fn replace_handler(handler: Option<Arc<InteractionHandler>>) -> HandlerGuard
 }
 
 pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
+    if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
+        return match response? {
+            InteractionResponse::Line(value) => Ok(value),
+            InteractionResponse::KeyPress => {
+                Err("queued keypress response used for line request".to_string())
+            }
+        };
+    }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
         match handler(InteractionPrompt {
             prompt,
             kind: InteractionKind::Line { echo },
-        })? {
-            InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => {
-                Err("interaction handler returned keypress for line request".to_string())
+        }) {
+            InteractionDecision::Respond(result) => match result? {
+                InteractionResponse::Line(value) => Ok(value),
+                InteractionResponse::KeyPress => {
+                    Err("interaction handler returned keypress for line request".to_string())
+                }
+            },
+            InteractionDecision::Pending => {
+                LAST_PENDING.with(|slot| {
+                    *slot.borrow_mut() = Some(PendingInteraction {
+                        prompt: prompt.to_string(),
+                        kind: InteractionKind::Line { echo },
+                    });
+                });
+                Err(PENDING_INTERACTION_ERR.to_string())
             }
         }
     } else {
@@ -73,15 +135,34 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
 }
 
 pub fn wait_for_key(prompt: &str) -> Result<(), String> {
+    if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
+        return match response? {
+            InteractionResponse::Line(_) => {
+                Err("queued line response used for keypress request".to_string())
+            }
+            InteractionResponse::KeyPress => Ok(()),
+        };
+    }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
         match handler(InteractionPrompt {
             prompt,
             kind: InteractionKind::KeyPress,
-        })? {
-            InteractionResponse::Line(_) => {
-                Err("interaction handler returned line value for keypress request".to_string())
+        }) {
+            InteractionDecision::Respond(result) => match result? {
+                InteractionResponse::Line(_) => {
+                    Err("interaction handler returned line value for keypress request".to_string())
+                }
+                InteractionResponse::KeyPress => Ok(()),
+            },
+            InteractionDecision::Pending => {
+                LAST_PENDING.with(|slot| {
+                    *slot.borrow_mut() = Some(PendingInteraction {
+                        prompt: prompt.to_string(),
+                        kind: InteractionKind::KeyPress,
+                    });
+                });
+                Err(PENDING_INTERACTION_ERR.to_string())
             }
-            InteractionResponse::KeyPress => Ok(()),
         }
     } else {
         default_wait_for_key(prompt)
@@ -133,7 +214,7 @@ pub fn default_wait_for_key(prompt: &str) -> Result<(), String> {
                 .map_err(|err| format!("pause: failed to flush stdout ({err})"))?;
         }
         let stdin = io::stdin();
-        if !stdin.is_terminal() {
+        if !stdin.is_terminal() && !force_interactive_stdin() {
             return Ok(());
         }
         let mut handle = stdin.lock();
@@ -143,4 +224,14 @@ pub fn default_wait_for_key(prompt: &str) -> Result<(), String> {
             .map_err(|err| format!("pause: failed to read from stdin ({err})"))?;
         Ok(())
     }
+}
+
+pub fn take_pending_interaction() -> Option<PendingInteraction> {
+    LAST_PENDING.with(|slot| slot.borrow_mut().take())
+}
+
+pub fn push_queued_response(response: Result<InteractionResponse, String>) {
+    QUEUED_RESPONSE.with(|slot| {
+        *slot.borrow_mut() = Some(response);
+    });
 }

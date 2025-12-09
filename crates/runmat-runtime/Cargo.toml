@@ -98,6 +98,9 @@ doc_export = ["serde", "serde_yaml", "clap"]
 # Enable WGPU-backed tests (tests enable runmat-accelerate's feature through dev-dependencies)
 wgpu = []
 
+# Internal helper to make stdin/key prompts behave interactively during tests.
+interaction-test-hooks = []
+
 [dev-dependencies]
 runmat-macros = { workspace = true } 
 runmat-accelerate = { workspace = true, features = ["wgpu"] }

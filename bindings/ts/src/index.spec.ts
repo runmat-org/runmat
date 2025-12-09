@@ -78,3 +78,32 @@ describe("coerceFigureError", () => {
     expect(err.message).toBe("boom");
   });
 });
+
+describe("normalizeResumeInputValue", () => {
+  it("coerces scalar inputs into line payloads", () => {
+    expect(__internals.normalizeResumeInputValue("abc")).toEqual({
+      kind: "line",
+      value: "abc"
+    });
+    expect(__internals.normalizeResumeInputValue(42)).toEqual({
+      kind: "line",
+      value: "42"
+    });
+    expect(__internals.normalizeResumeInputValue(null)).toEqual({
+      kind: "line",
+      value: ""
+    });
+  });
+
+  it("honors keyPress payloads", () => {
+    expect(
+      __internals.normalizeResumeInputValue({ kind: "keyPress" })
+    ).toEqual({ kind: "keyPress" });
+  });
+
+  it("propagates error payloads", () => {
+    expect(
+      __internals.normalizeResumeInputValue({ error: "cancelled" })
+    ).toEqual({ error: "cancelled" });
+  });
+});

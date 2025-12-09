@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Array, Reflect};
-use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
@@ -17,8 +17,8 @@ use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
     ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
-    FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse, RunMatSession, StdinEvent,
-    StdinEventKind, WorkspaceEntry, WorkspacePreview, WorkspaceSnapshot,
+    FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse, PendingInput, RunMatSession,
+    StdinEvent, StdinEventKind, WorkspaceEntry, WorkspacePreview, WorkspaceSnapshot,
 };
 use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
 use runmat_runtime::warning_store::RuntimeWarning;
@@ -187,16 +187,13 @@ impl RunMatWasm {
         {
             if handler.is_null() || handler.is_undefined() {
                 set_js_stdin_handler(None);
-                self.session.borrow_mut().clear_input_handler();
                 return Ok(());
             }
             let func = handler
                 .dyn_into::<js_sys::Function>()
                 .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
             set_js_stdin_handler(Some(func));
-            self.session
-                .borrow_mut()
-                .install_input_handler(js_input_bridge);
+            configure_session_input_handler(&mut self.session.borrow_mut());
             return Ok(());
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -204,6 +201,54 @@ impl RunMatWasm {
             let _ = handler;
             Err(js_error(
                 "setInputHandler is only available when targeting wasm32",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = resumeInput)]
+    pub fn resume_input(&self, request_id: String, value: JsValue) -> Result<JsValue, JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let uuid = Uuid::parse_str(request_id.trim())
+                .map_err(|_| js_error("resumeInput: invalid request id"))?;
+            let response = coerce_resume_payload(value)?;
+            let mut session = self.session.borrow_mut();
+            let result = session
+                .resume_input(uuid, response)
+                .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
+            let payload = ExecutionPayload::from(result);
+            return serde_wasm_bindgen::to_value(&payload)
+                .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (request_id, value);
+            Err(js_error(
+                "resumeInput is only available when targeting wasm32",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = pendingStdinRequests)]
+    pub fn pending_stdin_requests(&self) -> Result<JsValue, JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let session = self.session.borrow();
+            let pending: Vec<PendingInputPayload> = session
+                .pending_requests()
+                .into_iter()
+                .map(PendingInputPayload::from)
+                .collect();
+            return serde_wasm_bindgen::to_value(&pending).map_err(|err| {
+                js_error(&format!(
+                    "Failed to serialize pending stdin requests: {err}"
+                ))
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Err(js_error(
+                "pendingStdinRequests is only available when targeting wasm32",
             ))
         }
     }
@@ -409,27 +454,27 @@ pub fn unsubscribe_stdout(id: u32) {
 pub fn unsubscribe_stdout(_id: u32) {}
 
 #[cfg(target_arch = "wasm32")]
-fn has_js_stdin_handler() -> bool {
-    JS_STDIN_HANDLER.with(|slot| slot.borrow().is_some())
-}
-
-#[cfg(target_arch = "wasm32")]
 fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
     JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn invoke_js_stdin_handler(request: &InputRequest) -> Result<InputResponse, String> {
-    let handler = JS_STDIN_HANDLER
-        .with(|slot| slot.borrow().clone())
-        .ok_or_else(|| "stdin input requested but no handler is registered".to_string())?;
+fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
+    let handler = match JS_STDIN_HANDLER.with(|slot| slot.borrow().clone()) {
+        Some(func) => func,
+        None => return InputHandlerAction::Pending,
+    };
     let js_request = js_sys::Object::new();
-    Reflect::set(
+    if let Err(err) = Reflect::set(
         &js_request,
         &JsValue::from_str("prompt"),
         &JsValue::from_str(&request.prompt),
-    )
-    .map_err(|err| js_value_to_string(err))?;
+    ) {
+        log::warn!(
+            "stdin handler: failed to serialize prompt: {}",
+            js_value_to_string(err)
+        );
+    }
     match request.kind {
         InputRequestKind::Line { echo } => {
             Reflect::set(
@@ -437,41 +482,31 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> Result<InputResponse, Stri
                 &JsValue::from_str("kind"),
                 &JsValue::from_str("line"),
             )
-            .map_err(|err| js_value_to_string(err))?;
+            .unwrap_or_default();
             Reflect::set(
                 &js_request,
                 &JsValue::from_str("echo"),
                 &JsValue::from_bool(echo),
             )
-            .map_err(|err| js_value_to_string(err))?;
-            let value = handler
-                .call1(&JsValue::NULL, &js_request)
-                .map_err(|err| js_value_to_string(err))?;
-            let line = if let Some(text) = value.as_string() {
-                text
-            } else if value.is_null() || value.is_undefined() {
-                String::new()
-            } else if value.is_object() {
-                let obj = js_sys::Object::from(value);
-                if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("value")) {
-                    if let Some(text) = raw.as_string() {
-                        text
-                    } else {
-                        return Err("stdin handler must return a string for line input".to_string());
-                    }
-                } else if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("line")) {
-                    if let Some(text) = raw.as_string() {
-                        text
-                    } else {
-                        return Err("stdin handler must return a string for line input".to_string());
-                    }
-                } else {
-                    return Err("stdin handler must return a string for line input".to_string());
+            .unwrap_or_default();
+            let value = match handler.call1(&JsValue::NULL, &js_request) {
+                Ok(v) => v,
+                Err(err) => {
+                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
                 }
-            } else {
-                return Err("stdin handler must return a string for line input".to_string());
             };
-            Ok(InputResponse::Line(line))
+            if value_should_pending(&value) {
+                return InputHandlerAction::Pending;
+            }
+            if let Some(err) = extract_error_message(&value) {
+                return InputHandlerAction::Respond(Err(err));
+            }
+            if let Some(text) = extract_line_value(&value) {
+                return InputHandlerAction::Respond(Ok(InputResponse::Line(text)));
+            }
+            InputHandlerAction::Respond(Err(
+                "stdin handler must return a string for line input".to_string()
+            ))
         }
         InputRequestKind::KeyPress => {
             Reflect::set(
@@ -479,29 +514,132 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> Result<InputResponse, Stri
                 &JsValue::from_str("kind"),
                 &JsValue::from_str("keyPress"),
             )
-            .map_err(|err| js_value_to_string(err))?;
-            let _ = handler
-                .call1(&JsValue::NULL, &js_request)
-                .map_err(|err| js_value_to_string(err))?;
-            Ok(InputResponse::KeyPress)
+            .unwrap_or_default();
+            let value = match handler.call1(&JsValue::NULL, &js_request) {
+                Ok(v) => v,
+                Err(err) => {
+                    return InputHandlerAction::Respond(Err(js_value_to_string(err)));
+                }
+            };
+            if value_should_pending(&value) {
+                return InputHandlerAction::Pending;
+            }
+            if let Some(err) = extract_error_message(&value) {
+                return InputHandlerAction::Respond(Err(err));
+            }
+            InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn configure_session_input_handler(session: &mut RunMatSession) {
-    if has_js_stdin_handler() {
-        session.install_input_handler(js_input_bridge);
-    } else {
-        session.clear_input_handler();
+fn value_should_pending(value: &JsValue) -> bool {
+    if value.is_null() || value.is_undefined() {
+        return true;
     }
+    if value.is_instance_of::<js_sys::Promise>() {
+        return true;
+    }
+    if value.is_object() {
+        let obj = js_sys::Object::from(value.clone());
+        if let Ok(flag) = Reflect::get(&obj, &JsValue::from_str("pending")) {
+            if flag.as_bool().unwrap_or(false) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_error_message(value: &JsValue) -> Option<String> {
+    if !value.is_object() {
+        return None;
+    }
+    let obj = js_sys::Object::from(value.clone());
+    Reflect::get(&obj, &JsValue::from_str("error"))
+        .ok()
+        .and_then(|val| val.as_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_line_value(value: &JsValue) -> Option<String> {
+    if let Some(text) = value.as_string() {
+        return Some(text);
+    }
+    if !value.is_object() {
+        return None;
+    }
+    let obj = js_sys::Object::from(value.clone());
+    if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("value")) {
+        if let Some(text) = raw.as_string() {
+            return Some(text);
+        }
+    }
+    if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("line")) {
+        if let Some(text) = raw.as_string() {
+            return Some(text);
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn coerce_resume_payload(value: JsValue) -> Result<Result<InputResponse, String>, JsValue> {
+    if value.is_object() {
+        let obj = js_sys::Object::from(value.clone());
+        if let Ok(err) = Reflect::get(&obj, &JsValue::from_str("error")) {
+            if let Some(text) = err.as_string() {
+                return Ok(Err(text));
+            }
+        }
+        if let Ok(kind) = Reflect::get(&obj, &JsValue::from_str("kind")) {
+            if let Some(text) = kind.as_string() {
+                match text.as_str() {
+                    "keyPress" => return Ok(Ok(InputResponse::KeyPress)),
+                    "line" => {}
+                    other => {
+                        return Err(js_error(&format!(
+                        "resumeInput: unsupported kind '{other}'. Expected 'line' or 'keyPress'."
+                    )))
+                    }
+                }
+            }
+        }
+    }
+    if let Some(text) = extract_line_value(&value) {
+        return Ok(Ok(InputResponse::Line(text)));
+    }
+    if value.is_null() || value.is_undefined() {
+        return Ok(Ok(InputResponse::Line(String::new())));
+    }
+    if let Some(num) = value.as_f64() {
+        if num.is_finite() {
+            return Ok(Ok(InputResponse::Line(num.to_string())));
+        }
+    }
+    if let Some(flag) = value.as_bool() {
+        return Ok(Ok(InputResponse::Line(if flag {
+            "1".to_string()
+        } else {
+            "0".to_string()
+        })));
+    }
+    Err(js_error(
+        "resumeInput expects a string, number, boolean, or { value, kind } payload",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn configure_session_input_handler(session: &mut RunMatSession) {
+    session.install_input_handler(js_input_bridge);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn configure_session_input_handler(_session: &mut RunMatSession) {}
 
 #[cfg(target_arch = "wasm32")]
-fn js_input_bridge(request: &InputRequest) -> Result<InputResponse, String> {
+fn js_input_bridge(request: &InputRequest) -> InputHandlerAction {
     invoke_js_stdin_handler(request)
 }
 
@@ -1046,6 +1184,38 @@ fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PendingInputPayload {
+    id: String,
+    request: InputRequestPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InputRequestPayload {
+    prompt: String,
+    kind: &'static str,
+    echo: bool,
+}
+
+impl From<PendingInput> for PendingInputPayload {
+    fn from(input: PendingInput) -> Self {
+        let (kind, echo) = match input.request.kind {
+            InputRequestKind::Line { echo } => ("line", echo),
+            InputRequestKind::KeyPress => ("keyPress", false),
+        };
+        Self {
+            id: input.id.to_string(),
+            request: InputRequestPayload {
+                prompt: input.request.prompt,
+                kind,
+                echo,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ExecutionPayload {
     value_text: Option<String>,
     value_json: Option<JsonValue>,
@@ -1060,6 +1230,7 @@ struct ExecutionPayload {
     stdin_events: Vec<StdinEventPayload>,
     profiling: Option<ProfilingPayload>,
     fusion_plan: Option<FusionPlanPayload>,
+    stdin_requested: Option<PendingInputPayload>,
 }
 
 impl From<ExecutionResult> for ExecutionPayload {
@@ -1092,6 +1263,7 @@ impl From<ExecutionResult> for ExecutionPayload {
                 .collect(),
             profiling: result.profiling.map(ProfilingPayload::from),
             fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
+            stdin_requested: result.stdin_requested.map(PendingInputPayload::from),
         }
     }
 }

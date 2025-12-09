@@ -80,9 +80,10 @@ if (gpu.adapter) {
 ## Execution streaming & interaction
 
 - `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `execute()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
-- `ExecuteResult.warnings` now exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, and `stdinEvents` captures every prompt/response emitted during the run for transcript panes.
+- `ExecuteResult.warnings` exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, `stdinEvents` captures every prompt/response emitted during the run for transcript panes, and `stdinRequested` is populated when the interpreter suspends while waiting for input.
 - Call `session.cancelExecution()` to cooperatively interrupt a long-running script (e.g., when users press the stop button). The runtime raises `MATLAB:runmat:ExecutionCancelled`, matching desktop builds.
-- `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and should return a string for line prompts (or `undefined` to treat it as empty input). Pass `null` to restore the default behaviour (which raises on wasm targets because stdin is unavailable).
+- `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and can return a string/number/boolean, `{ kind: "keyPress" }`, or `{ error }` to reject the prompt. Returning `null`, `undefined`, `{ pending: true }`, or a Promise signals that the handler will respond asynchronously.
+- When a handler defers, `execute()` resolves with `stdinRequested` containing `{ id, request }`. Call `session.resumeInput(id, value)` once the UI collects the user's response (value follows the same shape as the input handler). Use `session.pendingStdinRequests()` to list outstanding prompts (useful when rehydrating a UI after refresh).
 
 ## Plotting surfaces
 

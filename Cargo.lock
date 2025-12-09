@@ -5707,6 +5707,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-turbine",
+ "uuid",
 ]
 
 [[package]]
@@ -6043,6 +6044,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "thiserror 1.0.69",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

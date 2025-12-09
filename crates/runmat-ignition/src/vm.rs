@@ -10,7 +10,7 @@ use runmat_accelerate::fusion_exec::{
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, deactivate_fusion_plan, fusion_residency, prepare_fusion_plan,
-    set_current_pc,
+    set_current_pc, FusionPlan,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -27,6 +27,9 @@ use runmat_runtime::{
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::fmt;
+#[cfg(feature = "native-accel")]
+use std::sync::Arc;
 use std::sync::Once;
 #[cfg(feature = "native-accel")]
 use std::sync::OnceLock;
@@ -1152,6 +1155,95 @@ thread_local! {
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
+#[derive(Debug)]
+pub enum InterpreterOutcome {
+    Completed(Vec<Value>),
+    Pending(PendingExecution),
+}
+
+pub struct PendingExecution {
+    pub state: InterpreterState,
+    pub interaction: runmat_runtime::interaction::PendingInteraction,
+}
+
+impl fmt::Debug for PendingExecution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingExecution")
+            .field("prompt", &self.interaction.prompt)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct InterpreterState {
+    bytecode: Bytecode,
+    stack: Vec<Value>,
+    vars: Vec<Value>,
+    pc: usize,
+    context: ExecutionContext,
+    try_stack: Vec<(usize, Option<usize>)>,
+    last_exception: Option<runmat_builtins::MException>,
+    imports: Vec<(Vec<String>, bool)>,
+    global_aliases: HashMap<usize, String>,
+    persistent_aliases: HashMap<usize, String>,
+    current_function_name: String,
+    call_counts: Vec<(usize, usize)>,
+    #[cfg(feature = "native-accel")]
+    fusion_plan: Option<Arc<FusionPlan>>,
+}
+
+impl InterpreterState {
+    fn new(
+        bytecode: Bytecode,
+        initial_vars: &mut [Value],
+        current_function_name: Option<&str>,
+    ) -> Self {
+        let mut vars = initial_vars.to_vec();
+        if vars.len() < bytecode.var_count {
+            vars.resize(bytecode.var_count, Value::Num(0.0));
+        }
+        let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+        Self {
+            stack: Vec::new(),
+            context: ExecutionContext {
+                call_stack: Vec::new(),
+                locals: Vec::new(),
+                instruction_pointer: 0,
+                functions: bytecode.functions.clone(),
+            },
+            try_stack: Vec::new(),
+            last_exception: None,
+            imports: Vec::new(),
+            global_aliases: HashMap::new(),
+            persistent_aliases: HashMap::new(),
+            vars,
+            pc: 0,
+            call_counts,
+            current_function_name: current_function_name
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<main>".to_string()),
+            #[cfg(feature = "native-accel")]
+            fusion_plan: prepare_fusion_plan(
+                bytecode.accel_graph.as_ref(),
+                &bytecode.fusion_groups,
+            ),
+            bytecode,
+        }
+    }
+}
+
+fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
+    for (i, var) in vars.iter().enumerate() {
+        if i < initial.len() {
+            initial[i] = var.clone();
+        }
+    }
+}
+
+fn is_pending_interaction(err: &str) -> bool {
+    err == runmat_runtime::interaction::PENDING_INTERACTION_ERR
+}
+
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
     match (&a, &b) {
@@ -1165,18 +1257,77 @@ pub fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
-) -> Result<Vec<Value>, String> {
+) -> Result<InterpreterOutcome, String> {
+    let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
+    run_interpreter(state, initial_vars)
+}
+
+pub fn resume_with_state(
+    state: InterpreterState,
+    initial_vars: &mut [Value],
+) -> Result<InterpreterOutcome, String> {
+    run_interpreter(state, initial_vars)
+}
+
+fn run_interpreter(
+    state: InterpreterState,
+    initial_vars: &mut [Value],
+) -> Result<InterpreterOutcome, String> {
     ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
-    let fusion_plan = prepare_fusion_plan(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups);
-    #[cfg(feature = "native-accel")]
-    activate_fusion_plan(fusion_plan.clone());
+    activate_fusion_plan(state.fusion_plan.clone());
     #[cfg(feature = "native-accel")]
     let _fusion_guard = FusionPlanGuard;
-    let mut stack: Vec<Value> = Vec::new();
-    let mut vars = initial_vars.to_vec();
-    if vars.len() < bytecode.var_count {
-        vars.resize(bytecode.var_count, Value::Num(0.0));
+    let InterpreterState {
+        mut stack,
+        mut vars,
+        mut pc,
+        mut context,
+        mut try_stack,
+        mut last_exception,
+        mut imports,
+        mut global_aliases,
+        mut persistent_aliases,
+        current_function_name,
+        call_counts,
+        #[cfg(feature = "native-accel")]
+        fusion_plan,
+        bytecode,
+    } = state;
+    CALL_COUNTS.with(|cc| {
+        *cc.borrow_mut() = call_counts.clone();
+    });
+    macro_rules! suspend_pending {
+        ($restore:expr) => {{
+            $restore;
+            let pending =
+                runmat_runtime::interaction::take_pending_interaction().ok_or_else(|| {
+                    mex(
+                        "MATLAB:runmat:InteractionPending",
+                        "pending interaction missing",
+                    )
+                })?;
+            sync_initial_vars(initial_vars, &vars);
+            return Ok(InterpreterOutcome::Pending(PendingExecution {
+                state: InterpreterState {
+                    bytecode,
+                    stack,
+                    vars,
+                    pc,
+                    context,
+                    try_stack,
+                    last_exception,
+                    imports,
+                    global_aliases,
+                    persistent_aliases,
+                    current_function_name,
+                    call_counts,
+                    #[cfg(feature = "native-accel")]
+                    fusion_plan,
+                },
+                interaction: pending,
+            }));
+        }};
     }
     let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
     let _workspace_guard = pending_state.map(|(names, assigned)| {
@@ -1187,13 +1338,6 @@ pub fn interpret_with_vars(
         set_workspace_state(names, filtered_assigned, &vars)
     });
     refresh_workspace_state(&vars);
-    let mut pc: usize = 0;
-    let mut context = ExecutionContext {
-        call_stack: Vec::new(),
-        locals: Vec::new(),
-        instruction_pointer: 0,
-        functions: bytecode.functions.clone(),
-    };
     let mut _gc_context = InterpretContext::new(&stack, &vars)?;
     // Register thread-local globals/persistents as GC roots for the duration of this execution
     let mut thread_roots: Vec<Value> = Vec::new();
@@ -1214,18 +1358,6 @@ pub fn interpret_with_vars(
         }
     });
     let _ = _gc_context.register_global_values(thread_roots, "thread_globals_persistents");
-    let current_func_name_str: String = current_function_name
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "<main>".to_string());
-    // Track per-execution alias maps for globals/persistents
-    let mut global_aliases: HashMap<usize, String> = HashMap::new();
-    let mut persistent_aliases: HashMap<usize, String> = HashMap::new();
-    // Stack of (catch_pc, catch_var_global_index)
-    let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
-    // Track last caught exception for possible rethrow handling
-    let mut last_exception: Option<runmat_builtins::MException> = None;
-    // Runtime import registry for this execution
-    let mut imports: Vec<(Vec<String>, bool)> = Vec::new();
     // Helper to resolve unqualified static accesses if Class.* is imported
     let _resolve_static =
         |imports: &Vec<(Vec<String>, bool)>, name: &str| -> Option<(String, String)> {
@@ -1297,7 +1429,7 @@ pub fn interpret_with_vars(
                     interpreter_timing.flush_host_span("before_fusion", Some(detail.as_str()));
                 }
                 #[cfg(feature = "native-accel")]
-                log_fusion_span_window(&plan, bytecode, pc);
+                log_fusion_span_window(&plan, &bytecode, pc);
                 match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
                     Ok(result) => {
                         stack.push(result);
@@ -1714,7 +1846,7 @@ pub fn interpret_with_vars(
             }
             Instr::DeclarePersistent(indices) => {
                 // Initialize locals from persistent table if present
-                let func_name = current_func_name_str.clone();
+                let func_name = current_function_name.clone();
                 for i in indices.into_iter() {
                     let key = (func_name.clone(), i);
                     let val_opt = PERSISTENTS.with(|p| p.borrow().get(&key).cloned());
@@ -1728,7 +1860,7 @@ pub fn interpret_with_vars(
                 }
             }
             Instr::DeclarePersistentNamed(indices, names) => {
-                let func_name = current_func_name_str.clone();
+                let func_name = current_function_name.clone();
                 for (pos, i) in indices.into_iter().enumerate() {
                     let name = names
                         .get(pos)
@@ -2744,6 +2876,12 @@ pub fn interpret_with_vars(
                 match runmat_runtime::call_builtin(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
+                        if is_pending_interaction(&e) {
+                            for arg in args.iter().rev() {
+                                stack.push(arg.clone());
+                            }
+                            suspend_pending!({});
+                        }
                         // Specific-import matches: import pkg.foo; name == foo
                         let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
                         for (path, wildcard) in &imports {
@@ -2753,8 +2891,16 @@ pub fn interpret_with_vars(
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    specific_matches.push((qual, qual_args, value));
+                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    Ok(value) => specific_matches.push((qual, qual_args, value)),
+                                    Err(err) => {
+                                        if is_pending_interaction(&err) {
+                                            for arg in args.iter().rev() {
+                                                stack.push(arg.clone());
+                                            }
+                                            suspend_pending!({});
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2789,8 +2935,16 @@ pub fn interpret_with_vars(
                                 qual.push('.');
                                 qual.push_str(&name);
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    wildcard_matches.push((qual, qual_args, value));
+                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    Ok(value) => wildcard_matches.push((qual, qual_args, value)),
+                                    Err(err) => {
+                                        if is_pending_interaction(&err) {
+                                            for arg in args.iter().rev() {
+                                                stack.push(arg.clone());
+                                            }
+                                            suspend_pending!({});
+                                        }
+                                    }
                                 }
                             }
                             if wildcard_matches.len() > 1 {
@@ -2828,6 +2982,12 @@ pub fn interpret_with_vars(
                                     pc = catch_pc;
                                     continue;
                                 } else {
+                                    if is_pending_interaction(&e) {
+                                        for arg in args.iter().rev() {
+                                            stack.push(arg.clone());
+                                        }
+                                        suspend_pending!({});
+                                    }
                                     return Err(e);
                                 }
                             }
@@ -4929,32 +5089,41 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
-                if name == "hist" && !args.is_empty() {
-                    let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate(
-                        args[0].clone(),
-                        &args[1..],
-                    ) {
-                        Ok(eval) => eval,
-                        Err(err) => vm_bail!(err.to_string()),
-                    };
-                    if let Err(err) = eval.render_plot() {
-                        vm_bail!(err.to_string());
-                    }
-                    if out_count == 0 {
-                        continue;
-                    }
-                    if out_count == 1 {
-                        stack.push(eval.counts_value());
-                        continue;
-                    }
-                    stack.push(eval.counts_value());
-                    stack.push(eval.centers_value());
-                    if out_count > 2 {
-                        for _ in 2..out_count {
-                            stack.push(Value::Num(0.0));
+                #[cfg(feature = "plot-core")]
+                {
+                    if name == "hist" && !args.is_empty() {
+                        let eval = match runmat_runtime::builtins::plotting::ops::hist::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err.to_string()),
+                        };
+                        if let Err(err) = eval.render_plot() {
+                            vm_bail!(err.to_string());
                         }
+                        if out_count == 0 {
+                            continue;
+                        }
+                        if out_count == 1 {
+                            stack.push(eval.counts_value());
+                            continue;
+                        }
+                        stack.push(eval.counts_value());
+                        stack.push(eval.centers_value());
+                        if out_count > 2 {
+                            for _ in 2..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                        continue;
                     }
-                    continue;
+                }
+                #[cfg(not(feature = "plot-core"))]
+                {
+                    if name == "hist" {
+                        vm_bail!("hist requires plot-core feature".to_string());
+                    }
                 }
                 if name == "histcounts" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::stats::hist::histcounts::evaluate(
@@ -10087,12 +10256,8 @@ pub fn interpret_with_vars(
         pc += 1;
     }
     interpreter_timing.flush_host_span("loop_complete", None);
-    for (i, var) in vars.iter().enumerate() {
-        if i < initial_vars.len() {
-            initial_vars[i] = var.clone();
-        }
-    }
-    Ok(vars)
+    sync_initial_vars(initial_vars, &vars);
+    Ok(InterpreterOutcome::Completed(vars))
 }
 
 fn stochastic_evolution_dispatch(
@@ -11140,7 +11305,13 @@ fn parse_exception(err: &str) -> runmat_builtins::MException {
 /// Interpret bytecode with default variable initialization
 pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    interpret_with_vars(bytecode, &mut vars, Some("<main>"))
+    match interpret_with_vars(bytecode, &mut vars, Some("<main>")) {
+        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(InterpreterOutcome::Pending(_)) => {
+            Err("interaction pending is unsupported in interpret".to_string())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, String> {
@@ -11162,6 +11333,13 @@ fn interpret_function_with_counts(
         cc.borrow_mut().pop();
         r
     });
+    let res = match res {
+        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(InterpreterOutcome::Pending(_)) => {
+            Err("interaction pending is unsupported in interpret_function".to_string())
+        }
+        Err(e) => Err(e),
+    }?;
     // Persist any variables declared persistent in this bytecode under the given function name
     let func_name = name.to_string();
     for instr in &bytecode.instructions {
@@ -11200,5 +11378,5 @@ fn interpret_function_with_counts(
             _ => {}
         }
     }
-    res
+    Ok(res)
 }

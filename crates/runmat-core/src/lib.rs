@@ -19,6 +19,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Instant;
+use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod fusion_snapshot;
@@ -58,6 +59,7 @@ pub struct RunMatSession {
     is_executing: bool,
     /// Optional session-level input handler supplied by the host.
     input_handler: Option<SharedInputHandler>,
+    pending_executions: HashMap<Uuid, PendingFrame>,
 }
 
 #[derive(Debug, Default)]
@@ -102,7 +104,13 @@ pub enum InputResponse {
     KeyPress,
 }
 
-type SharedInputHandler = Arc<dyn Fn(&InputRequest) -> Result<InputResponse, String> + Send + Sync>;
+#[derive(Debug, Clone)]
+pub enum InputHandlerAction {
+    Respond(Result<InputResponse, String>),
+    Pending,
+}
+
+type SharedInputHandler = Arc<dyn Fn(&InputRequest) -> InputHandlerAction + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionStreamKind {
@@ -210,6 +218,41 @@ pub struct ExecutionResult {
     pub fusion_plan: Option<FusionPlanSnapshot>,
     /// Recorded stdin interactions (prompts, values) during execution.
     pub stdin_events: Vec<StdinEvent>,
+    /// Pending stdin request if the execution is waiting for input.
+    pub stdin_requested: Option<PendingInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingInput {
+    pub id: Uuid,
+    pub request: InputRequest,
+}
+
+struct PendingFrame {
+    plan: ExecutionPlan,
+    pending: runmat_ignition::PendingExecution,
+    streams: Vec<ExecutionStreamEntry>,
+}
+
+struct ExecutionPlan {
+    assigned_this_execution: HashSet<String>,
+    id_to_name: HashMap<usize, String>,
+    prev_assigned_snapshot: HashSet<String>,
+    updated_functions: HashMap<String, runmat_hir::HirStmt>,
+    execution_bytecode: runmat_ignition::Bytecode,
+    single_assign_var: Option<usize>,
+    single_stmt_non_assign: bool,
+    is_expression_stmt: bool,
+    is_semicolon_suppressed: bool,
+    result_value: Option<Value>,
+    suppressed_value: Option<Value>,
+    error: Option<String>,
+    workspace_updates: Vec<WorkspaceEntry>,
+    fusion_snapshot: Option<FusionPlanSnapshot>,
+    start_time: Instant,
+    used_jit: bool,
+    stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
+    workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
 }
 
 /// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
@@ -368,6 +411,7 @@ impl RunMatSession {
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
             input_handler: None,
+            pending_executions: HashMap::new(),
         };
 
         // Cache the shared plotting context (if a GPU provider is active) so the
@@ -407,7 +451,7 @@ impl RunMatSession {
     /// Install a session-scoped handler for stdin-style interaction prompts.
     pub fn install_input_handler<F>(&mut self, handler: F)
     where
-        F: Fn(&InputRequest) -> Result<InputResponse, String> + Send + Sync + 'static,
+        F: Fn(&InputRequest) -> InputHandlerAction + Send + Sync + 'static,
     {
         self.input_handler = Some(Arc::new(handler));
     }
@@ -415,6 +459,179 @@ impl RunMatSession {
     /// Remove any previously installed stdin handler.
     pub fn clear_input_handler(&mut self) {
         self.input_handler = None;
+    }
+
+    pub fn pending_requests(&self) -> Vec<PendingInput> {
+        self.pending_executions
+            .iter()
+            .map(|(id, frame)| PendingInput {
+                id: *id,
+                request: pending_interaction_to_request(&frame.pending.interaction),
+            })
+            .collect()
+    }
+
+    /// Cancel a specific pending stdin request by ID. Returns true if the request existed.
+    pub fn cancel_pending_request(&mut self, request_id: Uuid) -> bool {
+        self.pending_executions.remove(&request_id).is_some()
+    }
+
+    /// Drop all pending stdin requests (useful when the host wants to hard-reset a session).
+    pub fn cancel_all_pending_requests(&mut self) {
+        self.pending_executions.clear();
+    }
+
+    pub fn resume_input(
+        &mut self,
+        request_id: Uuid,
+        response: Result<InputResponse, String>,
+    ) -> Result<ExecutionResult> {
+        let mut frame = self
+            .pending_executions
+            .remove(&request_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown pending request {request_id}"))?;
+        let _active = ActiveExecutionGuard::new(self)?;
+        runmat_runtime::interaction::push_queued_response(response.map(map_input_response));
+        let stdin_events = Arc::clone(&frame.plan.stdin_events);
+        let runtime_handler = self.build_runtime_input_handler(stdin_events);
+        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
+        let _interrupt_guard =
+            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+        match runmat_ignition::resume_with_state(frame.pending.state, &mut self.variable_array) {
+            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
+                let mut streams = frame.streams;
+                streams.extend(drain_console_streams());
+                self.finalize_pending_execution(frame.plan, values, streams)
+            }
+            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
+                let chunk = drain_console_streams();
+                frame.streams.extend(chunk.clone());
+                frame.pending = next_pending;
+                let new_id = Uuid::new_v4();
+                let elapsed_ms = frame.plan.start_time.elapsed().as_millis() as u64;
+                let fusion_plan = frame.plan.fusion_snapshot.clone();
+                let stdin_arc = Arc::clone(&frame.plan.stdin_events);
+                let used_jit = frame.plan.used_jit;
+                let pending_input = PendingInput {
+                    id: new_id,
+                    request: pending_interaction_to_request(&frame.pending.interaction),
+                };
+                let stdin_events = stdin_arc
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                self.pending_executions.insert(new_id, frame);
+                Ok(ExecutionResult {
+                    value: None,
+                    execution_time_ms: elapsed_ms,
+                    used_jit,
+                    error: None,
+                    type_info: None,
+                    streams: chunk,
+                    workspace: WorkspaceSnapshot {
+                        full: false,
+                        values: Vec::new(),
+                    },
+                    figures_touched: Vec::new(),
+                    warnings: Vec::new(),
+                    profiling: None,
+                    fusion_plan,
+                    stdin_events,
+                    stdin_requested: Some(pending_input),
+                })
+            }
+            Err(err) => Err(anyhow::anyhow!(err)),
+        }
+    }
+
+    fn build_runtime_input_handler(
+        &self,
+        stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
+    ) -> Arc<
+        dyn for<'a> Fn(
+                runmat_runtime::interaction::InteractionPrompt<'a>,
+            ) -> runmat_runtime::interaction::InteractionDecision
+            + Send
+            + Sync,
+    > {
+        let session_handler = self.input_handler.clone();
+        Arc::new(move |prompt| {
+            let request_kind = match prompt.kind {
+                runmat_runtime::interaction::InteractionKind::Line { echo } => {
+                    InputRequestKind::Line { echo }
+                }
+                runmat_runtime::interaction::InteractionKind::KeyPress => {
+                    InputRequestKind::KeyPress
+                }
+            };
+            let request = InputRequest {
+                prompt: prompt.prompt.to_string(),
+                kind: request_kind,
+            };
+            let (event_kind, echo_flag) = match &request.kind {
+                InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
+                InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
+            };
+            let mut event = StdinEvent {
+                prompt: request.prompt.clone(),
+                kind: event_kind,
+                echo: echo_flag,
+                value: None,
+                error: None,
+            };
+            let action = if let Some(handler) = &session_handler {
+                handler(&request)
+            } else {
+                match &request.kind {
+                    InputRequestKind::Line { echo } => InputHandlerAction::Respond(
+                        runmat_runtime::interaction::default_read_line(&request.prompt, *echo)
+                            .map(InputResponse::Line)
+                            .map_err(|e| e),
+                    ),
+                    InputRequestKind::KeyPress => InputHandlerAction::Respond(
+                        runmat_runtime::interaction::default_wait_for_key(&request.prompt)
+                            .map(|_| InputResponse::KeyPress)
+                            .map_err(|e| e),
+                    ),
+                }
+            };
+            match action {
+                InputHandlerAction::Respond(result) => {
+                    let mapped = result
+                        .map_err(|err| {
+                            event.error = Some(err.clone());
+                            if let Ok(mut guard) = stdin_events.lock() {
+                                guard.push(event.clone());
+                            }
+                            err
+                        })
+                        .and_then(|resp| match resp {
+                            InputResponse::Line(value) => {
+                                event.value = Some(value.clone());
+                                if let Ok(mut guard) = stdin_events.lock() {
+                                    guard.push(event);
+                                }
+                                Ok(runmat_runtime::interaction::InteractionResponse::Line(
+                                    value,
+                                ))
+                            }
+                            InputResponse::KeyPress => {
+                                if let Ok(mut guard) = stdin_events.lock() {
+                                    guard.push(event);
+                                }
+                                Ok(runmat_runtime::interaction::InteractionResponse::KeyPress)
+                            }
+                        });
+                    runmat_runtime::interaction::InteractionDecision::Respond(mapped)
+                }
+                InputHandlerAction::Pending => {
+                    if let Ok(mut guard) = stdin_events.lock() {
+                        guard.push(event);
+                    }
+                    runmat_runtime::interaction::InteractionDecision::Pending
+                }
+            }
+        })
     }
 
     /// Request cooperative cancellation for the currently running execution.
@@ -441,6 +658,11 @@ impl RunMatSession {
 
     /// Execute MATLAB/Octave code
     pub fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
+        if !self.pending_executions.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Cannot execute new code while pending stdin requests exist"
+            ));
+        }
         let _active = ActiveExecutionGuard::new(self)?;
         self.execute_internal(input)
     }
@@ -457,63 +679,7 @@ impl RunMatSession {
         self.stats.total_executions += 1;
         let debug_trace = std::env::var("RUNMAT_DEBUG_REPL").is_ok();
         let stdin_events: Arc<Mutex<Vec<StdinEvent>>> = Arc::new(Mutex::new(Vec::new()));
-        let event_sink = Arc::clone(&stdin_events);
-        let session_handler = self.input_handler.clone();
-        let runtime_handler = Arc::new(move |prompt: runmat_runtime::interaction::InteractionPrompt<'_>| -> Result<runmat_runtime::interaction::InteractionResponse, String> {
-            let request_kind = match prompt.kind {
-                runmat_runtime::interaction::InteractionKind::Line { echo } => InputRequestKind::Line { echo },
-                runmat_runtime::interaction::InteractionKind::KeyPress => InputRequestKind::KeyPress,
-            };
-            let request = InputRequest {
-                prompt: prompt.prompt.to_string(),
-                kind: request_kind,
-            };
-            let (event_kind, echo_flag) = match &request.kind {
-                InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
-                InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
-            };
-            let mut event = StdinEvent {
-                prompt: request.prompt.clone(),
-                kind: event_kind,
-                echo: echo_flag,
-                value: None,
-                error: None,
-            };
-            let response = if let Some(handler) = &session_handler {
-                handler(&request)
-            } else {
-                match &request.kind {
-                    InputRequestKind::Line { echo } => runmat_runtime::interaction::default_read_line(&request.prompt, *echo)
-                        .map(InputResponse::Line)
-                        .map_err(|e| e),
-                    InputRequestKind::KeyPress => runmat_runtime::interaction::default_wait_for_key(&request.prompt)
-                        .map(|_| InputResponse::KeyPress)
-                        .map_err(|e| e),
-                }
-            };
-            match response {
-                Ok(InputResponse::Line(value)) => {
-                    event.value = Some(value.clone());
-                    if let Ok(mut guard) = event_sink.lock() {
-                        guard.push(event);
-                    }
-                    Ok(runmat_runtime::interaction::InteractionResponse::Line(value))
-                }
-                Ok(InputResponse::KeyPress) => {
-                    if let Ok(mut guard) = event_sink.lock() {
-                        guard.push(event);
-                    }
-                    Ok(runmat_runtime::interaction::InteractionResponse::KeyPress)
-                }
-                Err(err) => {
-                    event.error = Some(err.clone());
-                    if let Ok(mut guard) = event_sink.lock() {
-                        guard.push(event);
-                    }
-                    Err(err)
-                }
-            }
-        });
+        let runtime_handler = self.build_runtime_input_handler(Arc::clone(&stdin_events));
         let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
 
         if self.verbose {
@@ -561,11 +727,22 @@ impl RunMatSession {
         if debug_trace {
             println!("assigned_snapshot: {:?}", assigned_snapshot);
         }
-        let _pending_workspace_guard =
-            runmat_ignition::push_pending_workspace(updated_vars.clone(), assigned_snapshot);
+        let mut pending_workspace_guard = Some(runmat_ignition::push_pending_workspace(
+            updated_vars.clone(),
+            assigned_snapshot.clone(),
+        ));
         if self.verbose {
             debug!("HIR generated successfully");
         }
+
+        let (single_assign_var, single_stmt_non_assign) = if hir.body.len() == 1 {
+            match &hir.body[0] {
+                runmat_hir::HirStmt::Assign(var_id, _, _) => (Some(var_id.0), false),
+                _ => (None, true),
+            }
+        } else {
+            (None, false)
+        };
 
         // Compile to bytecode with existing function definitions
         let existing_functions = self.convert_hir_functions_to_user_functions();
@@ -779,7 +956,7 @@ impl RunMatSession {
             }
 
             match self.interpret_with_context(&execution_bytecode) {
-                Ok(results) => {
+                Ok(runmat_ignition::InterpreterOutcome::Completed(results)) => {
                     // Only increment interpreter_fallback if JIT wasn't attempted
                     if !self.has_jit() || is_expression_stmt {
                         self.stats.interpreter_fallback += 1;
@@ -858,6 +1035,33 @@ impl RunMatSession {
                         "Interpreter execution successful, variable_array: {:?}",
                         self.variable_array
                     );
+                }
+                Ok(runmat_ignition::InterpreterOutcome::Pending(pending_exec)) => {
+                    let plan = self.capture_execution_plan(
+                        &assigned_this_execution,
+                        &id_to_name,
+                        &prev_assigned_snapshot,
+                        &updated_functions,
+                        &execution_bytecode,
+                        single_assign_var,
+                        single_stmt_non_assign,
+                        is_expression_stmt,
+                        is_semicolon_suppressed,
+                        &result_value,
+                        &suppressed_value,
+                        &error,
+                        &workspace_updates,
+                        &fusion_snapshot,
+                        start_time,
+                        used_jit,
+                        Arc::clone(&stdin_events),
+                        debug_trace,
+                        pending_workspace_guard.take(),
+                    );
+                    let console_streams = drain_console_streams();
+                    let pending_result =
+                        self.defer_pending_execution(plan, pending_exec, console_streams)?;
+                    return Ok(pending_result);
                 }
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
@@ -996,6 +1200,7 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: fusion_snapshot,
             stdin_events,
+            stdin_requested: None,
         })
     }
 
@@ -1026,29 +1231,255 @@ impl RunMatSession {
     fn interpret_with_context(
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
-    ) -> Result<Vec<Value>, String> {
-        // Variable array should already be prepared by prepare_variable_array_for_execution
+    ) -> Result<runmat_ignition::InterpreterOutcome, String> {
+        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
+    }
 
-        // Use the main Ignition interpreter which has full function and scoping support
-        match runmat_ignition::interpret_with_vars(
-            bytecode,
-            &mut self.variable_array,
-            Some("<repl>"),
-        ) {
-            Ok(result) => {
-                // Update the variables HashMap for display purposes
-                self.variables.clear();
-                for (i, value) in self.variable_array.iter().enumerate() {
-                    if !matches!(value, Value::Num(0.0)) {
-                        // Only store non-zero values to avoid clutter
-                        self.variables.insert(format!("var_{i}"), value.clone());
+    fn capture_execution_plan(
+        &self,
+        assigned_this_execution: &HashSet<String>,
+        id_to_name: &HashMap<usize, String>,
+        prev_assigned_snapshot: &HashSet<String>,
+        updated_functions: &HashMap<String, runmat_hir::HirStmt>,
+        execution_bytecode: &runmat_ignition::Bytecode,
+        single_assign_var: Option<usize>,
+        single_stmt_non_assign: bool,
+        is_expression_stmt: bool,
+        is_semicolon_suppressed: bool,
+        result_value: &Option<Value>,
+        suppressed_value: &Option<Value>,
+        error: &Option<String>,
+        workspace_updates: &[WorkspaceEntry],
+        fusion_snapshot: &Option<FusionPlanSnapshot>,
+        start_time: Instant,
+        used_jit: bool,
+        stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
+        _debug_trace: bool,
+        workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
+    ) -> ExecutionPlan {
+        ExecutionPlan {
+            assigned_this_execution: assigned_this_execution.clone(),
+            id_to_name: id_to_name.clone(),
+            prev_assigned_snapshot: prev_assigned_snapshot.clone(),
+            updated_functions: updated_functions.clone(),
+            execution_bytecode: execution_bytecode.clone(),
+            single_assign_var,
+            single_stmt_non_assign,
+            is_expression_stmt,
+            is_semicolon_suppressed,
+            result_value: result_value.clone(),
+            suppressed_value: suppressed_value.clone(),
+            error: error.clone(),
+            workspace_updates: workspace_updates.to_vec(),
+            fusion_snapshot: fusion_snapshot.clone(),
+            start_time,
+            used_jit,
+            stdin_events,
+            workspace_guard,
+        }
+    }
+
+    fn defer_pending_execution(
+        &mut self,
+        plan: ExecutionPlan,
+        pending: runmat_ignition::PendingExecution,
+        new_streams: Vec<ExecutionStreamEntry>,
+    ) -> Result<ExecutionResult> {
+        let request = pending_interaction_to_request(&pending.interaction);
+        let id = Uuid::new_v4();
+        let elapsed_ms = plan.start_time.elapsed().as_millis() as u64;
+        let fusion_plan = plan.fusion_snapshot.clone();
+        let stdin_arc = Arc::clone(&plan.stdin_events);
+        let used_jit = plan.used_jit;
+        let frame = PendingFrame {
+            plan,
+            pending,
+            streams: new_streams.clone(),
+        };
+        self.pending_executions.insert(id, frame);
+        let stdin_events = stdin_arc
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        let pending_input = PendingInput { id, request };
+        Ok(ExecutionResult {
+            value: None,
+            execution_time_ms: elapsed_ms,
+            used_jit,
+            error: None,
+            type_info: None,
+            streams: new_streams,
+            workspace: WorkspaceSnapshot {
+                full: false,
+                values: Vec::new(),
+            },
+            figures_touched: Vec::new(),
+            warnings: Vec::new(),
+            profiling: None,
+            fusion_plan,
+            stdin_events,
+            stdin_requested: Some(pending_input),
+        })
+    }
+
+    fn finalize_pending_execution(
+        &mut self,
+        mut plan: ExecutionPlan,
+        interpreter_values: Vec<Value>,
+        mut streams: Vec<ExecutionStreamEntry>,
+    ) -> Result<ExecutionResult> {
+        // Drop the pending workspace guard now that the interpreter has resumed.
+        let _ = plan.workspace_guard.take();
+
+        if !self.has_jit() || plan.is_expression_stmt {
+            self.stats.interpreter_fallback += 1;
+        }
+
+        if let Some(var_id) = plan.single_assign_var {
+            if let Some(name) = plan.id_to_name.get(&var_id) {
+                plan.assigned_this_execution.insert(name.clone());
+            }
+            if var_id < self.variable_array.len() {
+                let assignment_value = self.variable_array[var_id].clone();
+                if !plan.is_semicolon_suppressed {
+                    plan.result_value = Some(assignment_value);
+                } else {
+                    plan.suppressed_value = Some(assignment_value);
+                }
+            }
+        } else if plan.single_stmt_non_assign
+            && !plan.is_expression_stmt
+            && !interpreter_values.is_empty()
+            && !plan.is_semicolon_suppressed
+        {
+            plan.result_value = Some(interpreter_values[0].clone());
+        }
+
+        if plan.is_expression_stmt && plan.result_value.is_none() && plan.suppressed_value.is_none()
+        {
+            if plan.execution_bytecode.var_count > 0 {
+                let temp_var_id = plan.execution_bytecode.var_count - 1;
+                if temp_var_id < self.variable_array.len() {
+                    let expression_value = self.variable_array[temp_var_id].clone();
+                    if !plan.is_semicolon_suppressed {
+                        plan.result_value = Some(expression_value);
+                    } else {
+                        plan.suppressed_value = Some(expression_value);
                     }
                 }
-
-                Ok(result)
             }
-            Err(e) => Err(e),
+        } else if !plan.is_semicolon_suppressed && plan.result_value.is_none() {
+            plan.result_value = interpreter_values.into_iter().last();
         }
+
+        let execution_time = plan.start_time.elapsed();
+        let execution_time_ms = execution_time.as_millis() as u64;
+        self.stats.total_execution_time_ms += execution_time_ms;
+        self.stats.average_execution_time_ms =
+            self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
+
+        if plan.error.is_none() {
+            if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
+            {
+                self.variable_names = mutated_names.clone();
+                let mut new_assigned: HashSet<String> = assigned
+                    .difference(&plan.prev_assigned_snapshot)
+                    .cloned()
+                    .collect();
+                new_assigned.extend(plan.assigned_this_execution.iter().cloned());
+                for (name, var_id) in &mutated_names {
+                    if *var_id >= self.variable_array.len() {
+                        continue;
+                    }
+                    let new_value = &self.variable_array[*var_id];
+                    let changed = match self.workspace_values.get(name) {
+                        Some(old_value) => old_value != new_value,
+                        None => true,
+                    };
+                    if changed {
+                        new_assigned.insert(name.clone());
+                    }
+                }
+                for name in new_assigned {
+                    let var_id = mutated_names.get(&name).copied().or_else(|| {
+                        plan.id_to_name
+                            .iter()
+                            .find_map(|(vid, n)| if n == &name { Some(*vid) } else { None })
+                    });
+                    if let Some(var_id) = var_id {
+                        if var_id < self.variable_array.len() {
+                            let value_clone = self.variable_array[var_id].clone();
+                            self.workspace_values
+                                .insert(name.clone(), value_clone.clone());
+                            plan.workspace_updates
+                                .push(workspace_entry(&name, &value_clone));
+                        }
+                    }
+                }
+            } else {
+                for name in &plan.assigned_this_execution {
+                    if let Some(var_id) =
+                        plan.id_to_name
+                            .iter()
+                            .find_map(|(vid, n)| if n == name { Some(*vid) } else { None })
+                    {
+                        if var_id < self.variable_array.len() {
+                            let value_clone = self.variable_array[var_id].clone();
+                            self.workspace_values
+                                .insert(name.clone(), value_clone.clone());
+                            plan.workspace_updates
+                                .push(workspace_entry(name, &value_clone));
+                        }
+                    }
+                }
+            }
+            self.function_definitions = plan.updated_functions.clone();
+        }
+
+        if plan.is_semicolon_suppressed && plan.suppressed_value.is_some() {
+            // keep
+        }
+        let type_info = plan.suppressed_value.as_ref().map(format_type_info);
+        if !plan.is_semicolon_suppressed && plan.result_value.is_none() {
+            if let Some(v) = self
+                .variable_array
+                .iter()
+                .rev()
+                .find(|v| !matches!(v, Value::Num(0.0)))
+                .cloned()
+            {
+                plan.result_value = Some(v);
+            }
+        }
+
+        streams.extend(drain_console_streams());
+        let workspace_snapshot = WorkspaceSnapshot {
+            full: false,
+            values: plan.workspace_updates,
+        };
+        let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
+        let stdin_events = plan
+            .stdin_events
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        let warnings = runmat_runtime::warning_store::take_all();
+
+        Ok(ExecutionResult {
+            value: plan.result_value,
+            execution_time_ms,
+            used_jit: plan.used_jit,
+            error: plan.error,
+            type_info,
+            streams,
+            workspace: workspace_snapshot,
+            figures_touched,
+            warnings,
+            profiling: gather_profiling(execution_time_ms),
+            fusion_plan: plan.fusion_snapshot,
+            stdin_events,
+            stdin_requested: None,
+        })
     }
 
     /// Prepare variable array for execution by populating with existing values
@@ -1227,6 +1658,42 @@ fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         is_gpu: matches!(value, Value::GpuTensor(_)),
         size_bytes: approximate_size_bytes(value),
         preview,
+    }
+}
+
+fn drain_console_streams() -> Vec<ExecutionStreamEntry> {
+    runmat_runtime::console::take_thread_buffer()
+        .into_iter()
+        .map(|entry| ExecutionStreamEntry {
+            stream: match entry.stream {
+                runmat_runtime::console::ConsoleStream::Stdout => ExecutionStreamKind::Stdout,
+                runmat_runtime::console::ConsoleStream::Stderr => ExecutionStreamKind::Stderr,
+            },
+            text: entry.text,
+            timestamp_ms: entry.timestamp_ms,
+        })
+        .collect()
+}
+
+fn pending_interaction_to_request(
+    interaction: &runmat_runtime::interaction::PendingInteraction,
+) -> InputRequest {
+    let kind = match interaction.kind {
+        runmat_runtime::interaction::InteractionKind::Line { echo } => {
+            InputRequestKind::Line { echo }
+        }
+        runmat_runtime::interaction::InteractionKind::KeyPress => InputRequestKind::KeyPress,
+    };
+    InputRequest {
+        prompt: interaction.prompt.clone(),
+        kind,
+    }
+}
+
+fn map_input_response(response: InputResponse) -> runmat_runtime::interaction::InteractionResponse {
+    match response {
+        InputResponse::Line(value) => runmat_runtime::interaction::InteractionResponse::Line(value),
+        InputResponse::KeyPress => runmat_runtime::interaction::InteractionResponse::KeyPress,
     }
 }
 

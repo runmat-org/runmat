@@ -20,6 +20,7 @@ runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }
 anyhow = "1.0"
 log = "0.4"
+uuid = { version = "1", features = ["v4"], default-features = false }
 
 [features]
 default = ["jit"]
@@ -32,3 +33,6 @@ runmat-snapshot = { workspace = true, default-features = false, features = ["com
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false, features = ["plot-web"] }
 runmat-snapshot = { workspace = true, default-features = false, features = ["compression-wasm", "validation"] }
+
+[dev-dependencies]
+runmat-runtime = { workspace = true, features = ["interaction-test-hooks"] }

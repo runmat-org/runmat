@@ -26,8 +26,9 @@ runmat-lexer = { workspace = true }
 anyhow = { workspace = true }
 
 [features]
-default = ["native-accel"]
+default = ["native-accel", "plot-core"]
 # Enabling this feature also enables the dependency feature on runmat-runtime
 # so the test-only builtins and registry seeders are available.
 test-classes = ["runmat-runtime/test-classes"]
 native-accel = ["runmat-accelerate", "runmat-accelerate-api"]
+plot-core = ["runmat-runtime/plot-core"]

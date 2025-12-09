@@ -1,11 +1,9 @@
-#![cfg(test)]
-
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-use crate::call_builtin;
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
+use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
+use runmat_runtime::call_builtin;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;

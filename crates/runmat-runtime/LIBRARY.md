@@ -117,6 +117,7 @@
 |     ✅     | io/repl-fs   | cd, pwd, ls/dir, mkdir, rmdir, movefile, copyfile, delete, exist, which, path, addpath, rmpath, genpath, savepath, tempdir, tempname, getenv, setenv | REPL ergonomics & FS  | —   | —      | —                | Covers cd and friends.                     |
 |     ✅     | io/filetext  | fileread, filewrite, fopen, fclose, fread, fwrite, feof, fgets, fprintf                              | Text/binary I/O        | —   | —      | —                |                                            |
 |     ✅     | io/core       |  disp                                                                                               | Display to stdout      | —   | —      | —                | sink builtin                             |
+|     ✅     | io/interactive | input                                                                                               | Prompt for numeric/text input | — | — | — | Blocks on stdin, supports `'s'` text mode, integrates with async suspend/resume. |
 |     ✅     | io/tabular   | readmatrix, writematrix, csvread, csvwrite, dlmread, dlmwrite                                        | Simple tabular I/O     | —   | —      | —                | CSV/TSV focus; tables package later.        |
 |     ✅     | io/mat       | save, load                                                                                            | MAT‑like persistence  | —   | —      | —                | Must completely support all semantics. |
 
