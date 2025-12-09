@@ -247,6 +247,11 @@ export interface GpuAdapterInfo {
   precision?: "single" | "double";
 }
 
+export interface MemoryUsage {
+  bytes: number;
+  pages: number;
+}
+
 export interface RunMatSessionHandle {
   execute(source: string): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
@@ -254,6 +259,7 @@ export interface RunMatSessionHandle {
   clearWorkspace(): void;
   dispose(): void;
   telemetryConsent(): boolean;
+  memoryUsage(): Promise<MemoryUsage>;
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
@@ -284,6 +290,7 @@ interface RunMatNativeSession {
   clearWorkspace(): void;
   dispose?: () => void;
   telemetryConsent(): boolean;
+  memoryUsage?: () => MemoryUsage;
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
@@ -553,6 +560,14 @@ class WebRunMatSession implements RunMatSessionHandle {
       return undefined;
     }
     return this.native.telemetryClientId() ?? undefined;
+  }
+
+  async memoryUsage(): Promise<MemoryUsage> {
+    this.ensureActive();
+    if (typeof this.native.memoryUsage !== "function") {
+      return { bytes: 0, pages: 0 };
+    }
+    return this.native.memoryUsage();
   }
 
   gpuStatus(): GpuStatus {

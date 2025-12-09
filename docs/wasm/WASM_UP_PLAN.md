@@ -6,8 +6,8 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 
 ## A. Runtime / WASM Core
 1. **Session bring-up**
-   - [ ] Verify `RunMatSession::init` (wasm) exposes all required knobs: snapshot streaming, filesystem provider selection, telemetry flags, optional plot canvas registration.
-   - [ ] Provide deterministic error reporting (`InitError` enum) so hosts can surface GPU/FS issues without parsing strings.
+   - [x] Verify `RunMatSession::init` (wasm) exposes all required knobs: snapshot streaming, filesystem provider selection, telemetry flags (consent + `telemetryId`), optional plot canvas registration. `bindings/ts/README.md` now documents the full option matrix so hosts know what to pass.
+   - [x] Provide deterministic error reporting (`InitError` enum) so hosts can surface GPU/FS issues without parsing strings.
      - ✅ `registerFsProvider`, `registerPlotCanvas`, and `registerFigureCanvas` now wrap failures in structured `InitError` payloads (`FilesystemProvider` / `PlotCanvas`) so hosts get consistent error codes even when prereqs are invoked outside `initRunMat`.
    - ✅ `telemetryConsent` now feeds `RunMatSession::telemetry_consent`; browsers can opt out during `initRunMat`, and the CLI threads its config into the same flag so analytics collectors stay honest. Hosts can also provide a stable `telemetryId` so any future runtime-level telemetry reuses the same CID that the UI already knows about.
 2. **Execution contract**
@@ -33,9 +33,10 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
   - `stdinRequested`/`session.resumeInput()`/`session.pendingStdinRequests()` to complete the async handshake when hosts can't answer immediately. ✅ Implemented end-to-end (VM suspension, Rust API, wasm bridge, TS helpers, docs, tests).
      - `materializeVariable(name, options)` for lazy previews when the user expands a large tensor.
 3. **Resource lifecycle**
-   - [ ] Expose `reset()`, `dispose()`, and snapshot reload paths so the shell can soft-reset sessions without reloading WASM modules.
-     - ✅ `RunMatWasm` now exposes `dispose()` (mirrored by the TypeScript wrapper) which cancels executions, drops stdin handlers, and prevents hosts from reusing dead sessions. Hosts can call `session.dispose()` when unmounting a REPL tab to free memory without reloading the wasm blob.
-   - [ ] Validate memory growth (wasm `memory.grow`) stays within limits and document thresholds for hosts.
+   - [x] Expose `reset()`, `dispose()`, and snapshot reload paths so the shell can soft-reset sessions without reloading WASM modules.
+     - ✅ `RunMatWasm` exposes `dispose()` (mirrored by the TypeScript wrapper) which cancels executions, drops stdin handlers, and prevents hosts from reusing dead sessions. Hosts can call `session.dispose()` when unmounting a REPL tab to free memory without reloading the wasm blob.
+   - [x] Validate memory growth (wasm `memory.grow`) stays within limits and document thresholds for hosts.
+     - ✅ `RunMatWasm::memoryUsage()` (surfaced as `session.memoryUsage()` in TS) reports the current heap size in bytes/pages so hosts can monitor growth. The README now explains how to use the API and which init options control GPU/memory budgets.
 
 ## B. Plotting & Figure Bridge
 1. **Canvas management**

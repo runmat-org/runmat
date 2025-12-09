@@ -322,6 +322,15 @@ impl RunMatWasm {
             .map(|value| value.to_string())
     }
 
+    #[wasm_bindgen(js_name = memoryUsage)]
+    pub fn memory_usage(&self) -> Result<JsValue, JsValue> {
+        let stats = capture_memory_usage().map_err(|err| {
+            js_error(&format!("Failed to capture wasm memory usage: {err}"))
+        })?;
+        serde_wasm_bindgen::to_value(&stats)
+            .map_err(|err| js_error(&format!("Failed to serialize memory stats: {err}")))
+    }
+
     #[wasm_bindgen(js_name = dispose)]
     pub fn dispose(&self) {
         if self.disposed.replace(true) {
@@ -1244,6 +1253,25 @@ fn js_error(message: &str) -> JsValue {
     JsValue::from_str(message)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn capture_memory_usage() -> Result<MemoryUsagePayload, JsValue> {
+    let memory = wasm_bindgen::memory()
+        .dyn_into::<js_sys::WebAssembly::Memory>()
+        .map_err(|_| js_error("Active wasm memory handle unavailable"))?;
+    let buffer = memory.buffer();
+    let bytes = buffer.byte_length() as u64;
+    let pages = (bytes / 65_536) as u32;
+    Ok(MemoryUsagePayload { bytes, pages })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn capture_memory_usage() -> Result<MemoryUsagePayload, JsValue> {
+    Ok(MemoryUsagePayload {
+        bytes: 0,
+        pages: 0,
+    })
+}
+
 fn init_error(code: InitErrorCode, message: impl Into<String>) -> JsValue {
     init_error_with_details(code, message, None)
 }
@@ -1369,6 +1397,13 @@ struct ExecutionPayload {
     profiling: Option<ProfilingPayload>,
     fusion_plan: Option<FusionPlanPayload>,
     stdin_requested: Option<PendingInputPayload>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryUsagePayload {
+    bytes: u64,
+    pages: u32,
 }
 
 impl From<ExecutionResult> for ExecutionPayload {

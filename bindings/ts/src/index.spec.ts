@@ -98,6 +98,8 @@ interface NativeSession {
   stats(): SessionStats;
   clearWorkspace(): void;
   telemetryConsent(): boolean;
+  telemetryClientId?: () => string | undefined;
+  memoryUsage?: () => { bytes: number; pages: number };
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
@@ -129,6 +131,7 @@ function createMockNativeSession(overrides: Partial<NativeSession> = {}): Native
     clearWorkspace: () => {},
     telemetryConsent: () => true,
     telemetryClientId: () => undefined,
+    memoryUsage: () => ({ bytes: 0, pages: 0 }),
     gpuStatus: () => ({ requested: false, active: false }),
     pendingStdinRequests: () => [],
     ...overrides
@@ -335,6 +338,21 @@ describe("initRunMat wiring", () => {
     // dispose is idempotent
     session.dispose();
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes memory usage stats from the native session", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          memoryUsage: () => ({ bytes: 1024, pages: 16 })
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    await expect(session.memoryUsage()).resolves.toEqual({ bytes: 1024, pages: 16 });
   });
 });
 

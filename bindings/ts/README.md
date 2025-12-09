@@ -77,6 +77,23 @@ if (gpu.adapter) {
 }
 ```
 
+## Initialization options
+
+`initRunMat` accepts the following options so hosts can tailor the runtime to their environment:
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `snapshot` | `{ bytes \| url \| stream \| fetcher }` | Preload the standard library. Streams avoid copying large buffers. |
+| `fsProvider` | `RunMatFilesystemProvider` | Install a custom filesystem (remote, IndexedDB, etc.). Defaults to `createDefaultFsProvider()`. |
+| `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
+| `enableJit` | `boolean` | Toggle the JIT tier. |
+| `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
+| `telemetryId` | `string` | Existing analytics client ID to reuse. |
+| `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
+| `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
+| `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
+| `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
+
 ## Telemetry consent
 
 Browser hosts must decide whether anonymous telemetry is allowed before booting the runtime. Pass `telemetryConsent: false` to `initRunMat` to opt out:
@@ -91,6 +108,10 @@ const session = await initRunMat({
 When consent is disabled the runtime simply refrains from emitting analytics events (profiling data and fusion statistics are still returned locally so performance panes work). The CLI mirrors this behavior automatically by forwarding the user’s `telemetry.enabled` setting into the session, and wasm hosts can query `session.telemetryConsent()` to keep their UI in sync.
 
 If you already have a telemetry/analytics identifier (e.g., the ID that the surrounding UI uses), pass it via `telemetryId`. The runtime stores it internally (accessible via `session.telemetryClientId()`) so any future telemetry sinks can reuse the existing CID instead of minting a second identifier.
+
+## Monitoring memory usage
+
+Call `await session.memoryUsage()` to inspect the current WebAssembly heap. The method returns `{ bytes, pages }`, where `pages` are 64 KiB units. Hosts can poll this to detect runaway `memory.grow` usage and decide when to reset or dispose of sessions.
 
 ## Execution streaming & interaction
 
