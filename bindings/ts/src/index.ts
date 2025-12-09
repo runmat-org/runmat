@@ -112,6 +112,7 @@ export interface PendingStdinRequest {
     kind: "line" | "keyPress";
     echo: boolean;
   };
+  waitingMs: number;
 }
 
 export interface AxesInfo {

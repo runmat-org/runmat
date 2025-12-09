@@ -1187,6 +1187,7 @@ fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
 struct PendingInputPayload {
     id: String,
     request: InputRequestPayload,
+    waiting_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -1210,6 +1211,7 @@ impl From<PendingInput> for PendingInputPayload {
                 kind,
                 echo,
             },
+            waiting_ms: input.waiting_ms,
         }
     }
 }

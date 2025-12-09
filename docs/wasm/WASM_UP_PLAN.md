@@ -13,7 +13,7 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
    - [x] Ensure long-running executions can be cancelled (runtime interrupt flag + `session.cancelExecution()` in wasm bindings).
    - **Design Draft — `ExecutePayload` additions**
      - `stdout`: ordered list of `{ stream: "stdout" | "stderr", text: string, timestampMs: number }`. Populated incrementally; every run also returns the buffered lines.
-     - `stdinRequested`: optional `{ prompt: string, echo: boolean, requestId: string }` when MATLAB code calls `input`. The host resumes execution with a new `resumeInput(requestId, value)` binding.
+     - ✅ `stdinRequested`: optional `{ prompt: string, echo: boolean, requestId: string, waitingMs: number }` when MATLAB code calls `input`. `waitingMs` starts at 0 and grows while the request is outstanding so hosts can surface "still waiting" notices without forcing a timeout. The host resumes execution with `resumeInput(requestId, value)`. The MATLAB-compatible `input` builtin rides this path (numeric parsing via `str2double`, `'s'` text mode), and the single-threaded async-stdin tests now cover numeric prompts, `'s'` mode, and `pause`/keypress flows.
      - `workspace`: `{ full: boolean, values: WorkspaceEntry[] }`, where each entry is `{ name, className, dtype, shape, isGpu, sizeBytes?, preview?: number[], truncated?: boolean }`. `full = false` when only the mutated variables are included.
      - `figuresTouched`: array of figure handles that changed during the run so the UI can switch tabs.
      - `stdinEvents`: ordered log of `{ prompt, kind, echo, value?, error? }` emitted during execution so the UI can render transcripts or debugging panes.
@@ -24,10 +24,11 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
        - `decisions`: structured log replacing the benchmark harness text `{ nodeId, fused: bool, reason, thresholds }`.
      - `profiling`: `{ totalMs, cpuMs, gpuMs, kernelCount }`.
      - `warnings`: array of MATLAB warning objects `{ identifier, message }`.
-   - **Streaming API hooks**
-     - `subscribeStdout(listener)` + `unsubscribeStdout(id)` to drive the xterm pane in real time. ✅ Implemented via `runmat_runtime::console` forwarder + wasm/TS bindings.
-     - `cancelExecution()` to stop a running script (e.g., when a user presses Ctrl+C). ✅ Wired through the runtime interrupt flag.
-     - `setInputHandler(handler)` to service `input`/`pause` prompts synchronously from JS. ✅ Initial synchronous bridge (async resume flow still pending).
+- **Streaming API hooks**
+  - `subscribeStdout(listener)` + `unsubscribeStdout(id)` to drive the xterm pane in real time. ✅ Implemented via `runmat_runtime::console` forwarder + wasm/TS bindings.
+  - `cancelExecution()` to stop a running script (e.g., when a user presses Ctrl+C). ✅ Wired through the runtime interrupt flag.
+  - `setInputHandler(handler)` to service `input`/`pause` prompts synchronously from JS. ✅ Handlers can return scalars/objects for immediate responses or `null`/`{ pending: true }` to defer.
+  - `stdinRequested`/`session.resumeInput()`/`session.pendingStdinRequests()` to complete the async handshake when hosts can't answer immediately. ✅ Implemented end-to-end (VM suspension, Rust API, wasm bridge, TS helpers, docs, tests).
      - `materializeVariable(name, options)` for lazy previews when the user expands a large tensor.
 3. **Resource lifecycle**
    - [ ] Expose `reset()`, `dispose()`, and snapshot reload paths so the shell can soft-reset sessions without reloading WASM modules.

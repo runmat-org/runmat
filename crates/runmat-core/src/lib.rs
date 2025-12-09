@@ -226,12 +226,14 @@ pub struct ExecutionResult {
 pub struct PendingInput {
     pub id: Uuid,
     pub request: InputRequest,
+    pub waiting_ms: u64,
 }
 
 struct PendingFrame {
     plan: ExecutionPlan,
     pending: runmat_ignition::PendingExecution,
     streams: Vec<ExecutionStreamEntry>,
+    pending_since: Instant,
 }
 
 struct ExecutionPlan {
@@ -462,11 +464,15 @@ impl RunMatSession {
     }
 
     pub fn pending_requests(&self) -> Vec<PendingInput> {
+        let now = Instant::now();
         self.pending_executions
             .iter()
             .map(|(id, frame)| PendingInput {
                 id: *id,
                 request: pending_interaction_to_request(&frame.pending.interaction),
+                waiting_ms: now
+                    .saturating_duration_since(frame.pending_since)
+                    .as_millis() as u64,
             })
             .collect()
     }
@@ -515,11 +521,13 @@ impl RunMatSession {
                 let pending_input = PendingInput {
                     id: new_id,
                     request: pending_interaction_to_request(&frame.pending.interaction),
+                    waiting_ms: 0,
                 };
                 let stdin_events = stdin_arc
                     .lock()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                frame.pending_since = Instant::now();
                 self.pending_executions.insert(new_id, frame);
                 Ok(ExecutionResult {
                     value: None,
@@ -1295,13 +1303,18 @@ impl RunMatSession {
             plan,
             pending,
             streams: new_streams.clone(),
+            pending_since: Instant::now(),
         };
         self.pending_executions.insert(id, frame);
         let stdin_events = stdin_arc
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
-        let pending_input = PendingInput { id, request };
+        let pending_input = PendingInput {
+            id,
+            request,
+            waiting_ms: 0,
+        };
         Ok(ExecutionResult {
             value: None,
             execution_time_ms: elapsed_ms,
