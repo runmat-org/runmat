@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import { __internals, type RunMatSnapshotSource } from "./index.js";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import * as defaultFs from "./fs/default.js";
+import {
+  __internals,
+  initRunMat,
+  type RunMatFilesystemProvider,
+  type RunMatSnapshotSource,
+  type ExecuteResult,
+  type GpuStatus,
+  type SessionStats,
+  type PendingStdinRequest,
+  type InputRequest
+} from "./index.js";
 
 async function readStream(stream: ReadableStream<Uint8Array> | undefined): Promise<number[]> {
   if (!stream) {
@@ -79,6 +90,254 @@ describe("coerceFigureError", () => {
   });
 });
 
+type NativeModule = Parameters<typeof __internals.setNativeModuleOverride>[0];
+
+interface NativeSession {
+  execute(source: string): ExecuteResult;
+  resetSession(): void;
+  stats(): SessionStats;
+  clearWorkspace(): void;
+  telemetryConsent(): boolean;
+  gpuStatus(): GpuStatus;
+  cancelExecution?: () => void;
+  setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
+  resumeInput?: (requestId: string, value: unknown) => ExecuteResult;
+  pendingStdinRequests?: () => PendingStdinRequest[];
+}
+
+const baseExecuteResult: ExecuteResult = {
+  executionTimeMs: 0,
+  usedJit: false,
+  stdout: [],
+  workspace: { full: false, values: [] },
+  figuresTouched: [],
+  warnings: [],
+  stdinEvents: []
+};
+
+function createMockNativeSession(overrides: Partial<NativeSession> = {}): NativeSession {
+  return {
+    execute: () => baseExecuteResult,
+    resetSession: () => {},
+    stats: () => ({
+      totalExecutions: 0,
+      jitCompiled: 0,
+      interpreterFallback: 0,
+      totalExecutionTimeMs: 0,
+      averageExecutionTimeMs: 0
+    }),
+    clearWorkspace: () => {},
+    telemetryConsent: () => true,
+    telemetryClientId: () => undefined,
+    gpuStatus: () => ({ requested: false, active: false }),
+    pendingStdinRequests: () => [],
+    ...overrides
+  };
+}
+
+function createFsProviderStub(): RunMatFilesystemProvider {
+  return {
+    readFile: () => new Uint8Array(),
+    writeFile: () => {},
+    removeFile: () => {},
+    metadata: () => ({ fileType: "file", len: 0, readonly: false }),
+    readDir: () => []
+  };
+}
+
+describe("initRunMat wiring", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("registers provided fs provider before native init", async () => {
+    const order: string[] = [];
+    const options: any[] = [];
+    const fsProvider = createFsProviderStub();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: (provider: RunMatFilesystemProvider) => {
+        order.push("registerFsProvider");
+        expect(provider).toBe(fsProvider);
+      },
+      initRunMat: async (opts: any) => {
+        order.push("initRunMat");
+        options.push(opts);
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await initRunMat({ snapshot: { bytes: new Uint8Array([1, 2, 3]) }, fsProvider, enableGpu: false });
+
+    expect(order).toEqual(["registerFsProvider", "initRunMat"]);
+    expect(options[0].snapshotBytes).toBeDefined();
+  });
+
+  it("passes snapshot bytes and telemetry flag through to native init", async () => {
+    const captured: any[] = [];
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async (opts: any) => {
+        captured.push(opts);
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const snapshot = new Uint8Array([9, 9, 9]);
+    await initRunMat({ snapshot: { bytes: snapshot }, telemetryConsent: false, enableGpu: false });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].snapshotBytes).toBe(snapshot);
+    expect(captured[0].telemetryConsent).toBe(false);
+  });
+
+  it("passes telemetry id and exposes telemetryClientId()", async () => {
+    const captured: any[] = [];
+    const nativeSession = createMockNativeSession({
+      telemetryClientId: () => "cid-native"
+    });
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async (opts: any) => {
+        captured.push(opts);
+        return nativeSession;
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({
+      snapshot: { bytes: new Uint8Array([2]) },
+      telemetryId: "cid-host",
+      enableGpu: false
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].telemetryId).toBe("cid-host");
+    expect(session.telemetryClientId()).toBe("cid-native");
+  });
+
+  it("disables GPU when navigator.gpu is unavailable", async () => {
+    const captured: any[] = [];
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async (opts: any) => {
+        captured.push(opts);
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const originalNavigator = (globalThis as any).navigator;
+    Object.defineProperty(globalThis, "navigator", {
+      value: {},
+      configurable: true
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: true });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].enableGpu).toBe(false);
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    Object.defineProperty(globalThis, "navigator", {
+      value: originalNavigator,
+      configurable: true
+    });
+  });
+
+  it("auto-registers the default filesystem provider when none is supplied", async () => {
+    const autoProvider = createFsProviderStub();
+    const defaultSpy = vi
+      .spyOn(defaultFs, "createDefaultFsProvider")
+      .mockResolvedValue(autoProvider);
+    const registerSpy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: registerSpy,
+      initRunMat: async (opts: any) => {
+        expect(opts.snapshotBytes).toBeDefined();
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await initRunMat({ snapshot: { bytes: new Uint8Array([7]) }, enableGpu: false });
+
+    expect(defaultSpy).toHaveBeenCalledOnce();
+    expect(registerSpy).toHaveBeenCalledWith(autoProvider);
+  });
+
+  it("registers plotCanvas before calling initRunMat", async () => {
+    const order: string[] = [];
+    const registerSpy = vi.fn(async () => {
+      order.push("registerPlotCanvas");
+    });
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      registerPlotCanvas: registerSpy,
+      initRunMat: async () => {
+        order.push("initRunMat");
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const canvas = { id: "canvas" } as unknown as HTMLCanvasElement;
+    await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, plotCanvas: canvas, enableGpu: false });
+
+    expect(order).toEqual(["registerPlotCanvas", "initRunMat"]);
+    expect(registerSpy).toHaveBeenCalledWith(canvas);
+  });
+
+  it("surfaces structured errors from registerPlotCanvas", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      registerPlotCanvas: async () => {
+        const err = new Error("canvas failed") as Error & { code?: string };
+        err.code = "PlotCanvas";
+        throw err;
+      },
+      initRunMat: async () => createMockNativeSession()
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(
+      initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, plotCanvas: {} as HTMLCanvasElement, enableGpu: false })
+    ).rejects.toMatchObject({ code: "PlotCanvas" });
+  });
+
+  it("disposes the session and blocks further calls", async () => {
+    const disposeSpy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          dispose: disposeSpy
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    session.dispose();
+    expect(disposeSpy).toHaveBeenCalledOnce();
+    expect(() => session.telemetryConsent()).toThrow(/disposed/);
+    // dispose is idempotent
+    session.dispose();
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("normalizeResumeInputValue", () => {
   it("coerces scalar inputs into line payloads", () => {
     expect(__internals.normalizeResumeInputValue("abc")).toEqual({
@@ -105,5 +364,37 @@ describe("normalizeResumeInputValue", () => {
     expect(
       __internals.normalizeResumeInputValue({ error: "cancelled" })
     ).toEqual({ error: "cancelled" });
+  });
+});
+
+describe("ExecuteResult passthroughs", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("preserves stdinRequested.waitingMs from the native session", async () => {
+    const request = {
+      id: "req",
+      request: { prompt: ">> ", kind: "line", echo: true },
+      waitingMs: 1500
+    };
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          execute: () => ({
+            ...baseExecuteResult,
+            stdinRequested: request
+          })
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const result = await session.execute("disp('prompt')");
+    expect(result.stdinRequested).toEqual(request);
+    expect(result.stdinRequested?.waitingMs).toBe(1500);
   });
 });

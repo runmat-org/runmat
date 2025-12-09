@@ -54,6 +54,7 @@ export interface RunMatInitOptions {
   enableJit?: boolean;
   verbose?: boolean;
   telemetryConsent?: boolean;
+  telemetryId?: string;
   wgpuPowerPreference?: "auto" | "high-performance" | "low-power";
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
@@ -251,7 +252,9 @@ export interface RunMatSessionHandle {
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
   clearWorkspace(): void;
+  dispose(): void;
   telemetryConsent(): boolean;
+  telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
@@ -267,6 +270,7 @@ interface NativeInitOptions {
   enableJit?: boolean;
   verbose?: boolean;
   telemetryConsent?: boolean;
+  telemetryId?: string;
   wgpuPowerPreference?: string;
   wgpuForceFallbackAdapter?: boolean;
   scatterTargetPoints?: number;
@@ -278,7 +282,9 @@ interface RunMatNativeSession {
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
+  dispose?: () => void;
   telemetryConsent(): boolean;
+  telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
@@ -315,8 +321,12 @@ interface RunMatNativeModule {
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
+let nativeModuleOverride: RunMatNativeModule | null = null;
 
 async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativeModule> {
+  if (nativeModuleOverride) {
+    return nativeModuleOverride;
+  }
   if (!loadPromise) {
     loadPromise = (async () => {
       const native = (await import("../pkg/runmat_wasm.js")) as unknown as RunMatNativeModule;
@@ -359,6 +369,7 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
     telemetryConsent: options.telemetryConsent ?? true,
+    telemetryId: options.telemetryId,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
@@ -491,39 +502,75 @@ export async function currentAxesInfo(): Promise<AxesInfo> {
 }
 
 class WebRunMatSession implements RunMatSessionHandle {
+  private disposed = false;
+
   constructor(private readonly native: RunMatNativeSession) {}
 
+  private ensureActive(): void {
+    if (this.disposed) {
+      throw new Error("RunMat session has been disposed");
+    }
+  }
+
   async execute(source: string): Promise<ExecuteResult> {
+    this.ensureActive();
     return this.native.execute(source);
   }
 
   async resetSession(): Promise<void> {
+    this.ensureActive();
     this.native.resetSession();
   }
 
   async stats(): Promise<SessionStats> {
+    this.ensureActive();
     return this.native.stats();
   }
 
   clearWorkspace(): void {
+    this.ensureActive();
     this.native.clearWorkspace();
   }
 
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    if (typeof this.native.dispose === "function") {
+      this.native.dispose();
+    }
+    this.disposed = true;
+  }
+
   telemetryConsent(): boolean {
+    this.ensureActive();
     return this.native.telemetryConsent();
   }
 
+  telemetryClientId(): string | undefined {
+    this.ensureActive();
+    if (typeof this.native.telemetryClientId !== "function") {
+      return undefined;
+    }
+    return this.native.telemetryClientId() ?? undefined;
+  }
+
   gpuStatus(): GpuStatus {
+    this.ensureActive();
     return this.native.gpuStatus();
   }
 
   cancelExecution(): void {
+    if (this.disposed) {
+      return;
+    }
     if (typeof this.native.cancelExecution === "function") {
       this.native.cancelExecution();
     }
   }
 
   async setInputHandler(handler: InputHandler | null): Promise<void> {
+    this.ensureActive();
     if (typeof this.native.setInputHandler !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose setInputHandler yet.");
     }
@@ -531,12 +578,14 @@ class WebRunMatSession implements RunMatSessionHandle {
   }
 
   async resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult> {
+    this.ensureActive();
     requireNativeFunction(this.native, "resumeInput");
     const payload = normalizeResumeInputValue(value);
     return this.native.resumeInput(requestId, payload);
   }
 
   async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
+    this.ensureActive();
     if (typeof this.native.pendingStdinRequests !== "function") {
       return [];
     }
@@ -798,5 +847,11 @@ export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
   coerceFigureError,
-  normalizeResumeInputValue
+  normalizeResumeInputValue,
+  setNativeModuleOverride(module: RunMatNativeModule | null): void {
+    nativeModuleOverride = module;
+    if (!module) {
+      loadPromise = null;
+    }
+  }
 };

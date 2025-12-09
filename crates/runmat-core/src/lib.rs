@@ -60,6 +60,8 @@ pub struct RunMatSession {
     /// Optional session-level input handler supplied by the host.
     input_handler: Option<SharedInputHandler>,
     pending_executions: HashMap<Uuid, PendingFrame>,
+    telemetry_consent: bool,
+    telemetry_client_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -414,6 +416,8 @@ impl RunMatSession {
             is_executing: false,
             input_handler: None,
             pending_executions: HashMap::new(),
+            telemetry_consent: true,
+            telemetry_client_id: None,
         };
 
         // Cache the shared plotting context (if a GPU provider is active) so the
@@ -461,6 +465,22 @@ impl RunMatSession {
     /// Remove any previously installed stdin handler.
     pub fn clear_input_handler(&mut self) {
         self.input_handler = None;
+    }
+
+    pub fn telemetry_consent(&self) -> bool {
+        self.telemetry_consent
+    }
+
+    pub fn set_telemetry_consent(&mut self, consent: bool) {
+        self.telemetry_consent = consent;
+    }
+
+    pub fn telemetry_client_id(&self) -> Option<&str> {
+        self.telemetry_client_id.as_deref()
+    }
+
+    pub fn set_telemetry_client_id(&mut self, cid: Option<String>) {
+        self.telemetry_client_id = cid;
     }
 
     pub fn pending_requests(&self) -> Vec<PendingInput> {

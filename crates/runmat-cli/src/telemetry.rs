@@ -62,6 +62,11 @@ pub fn capture_provider_snapshot() -> Option<ProviderSnapshot> {
     })
 }
 
+/// Surface the stable client id used for analytics so other components can reuse it.
+pub fn telemetry_client_id() -> Option<String> {
+    stable_client_id()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeExecutionCounters {
     pub total_executions: u64,

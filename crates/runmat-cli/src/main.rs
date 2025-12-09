@@ -24,8 +24,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use telemetry::{
-    capture_provider_snapshot, emit_runtime_value, emit_session_start, RuntimeExecutionCounters,
-    RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
+    capture_provider_snapshot, emit_runtime_value, emit_session_start, telemetry_client_id,
+    RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
 };
 
 #[derive(Parser)]
@@ -939,6 +939,10 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         config.runtime.snapshot_path.as_ref(),
     )
     .context("Failed to create REPL engine")?;
+    engine.set_telemetry_consent(config.telemetry.enabled);
+    if let Some(cid) = telemetry_client_id() {
+        engine.set_telemetry_client_id(Some(cid));
+    }
 
     info!("RunMat REPL ready");
 
@@ -1216,7 +1220,10 @@ async fn execute_script_with_args(
         config.runtime.snapshot_path.as_ref(),
     )
     .context("Failed to create execution engine")?;
-
+    engine.set_telemetry_consent(config.telemetry.enabled);
+    if let Some(cid) = telemetry_client_id() {
+        engine.set_telemetry_client_id(Some(cid));
+    }
     let start_time = std::time::Instant::now();
     let result = engine
         .execute(&content)
@@ -1489,6 +1496,10 @@ async fn execute_benchmark(
 
     let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
+    engine.set_telemetry_consent(config.telemetry.enabled);
+    if let Some(cid) = telemetry_client_id() {
+        engine.set_telemetry_client_id(Some(cid));
+    }
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;

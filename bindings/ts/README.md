@@ -77,6 +77,21 @@ if (gpu.adapter) {
 }
 ```
 
+## Telemetry consent
+
+Browser hosts must decide whether anonymous telemetry is allowed before booting the runtime. Pass `telemetryConsent: false` to `initRunMat` to opt out:
+
+```ts
+const session = await initRunMat({
+  telemetryConsent: false,
+  snapshot: { url: "/snapshots/core.bin" }
+});
+```
+
+When consent is disabled the runtime simply refrains from emitting analytics events (profiling data and fusion statistics are still returned locally so performance panes work). The CLI mirrors this behavior automatically by forwarding the user’s `telemetry.enabled` setting into the session, and wasm hosts can query `session.telemetryConsent()` to keep their UI in sync.
+
+If you already have a telemetry/analytics identifier (e.g., the ID that the surrounding UI uses), pass it via `telemetryId`. The runtime stores it internally (accessible via `session.telemetryClientId()`) so any future telemetry sinks can reuse the existing CID instead of minting a second identifier.
+
 ## Execution streaming & interaction
 
 - `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `execute()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
@@ -106,6 +121,10 @@ if (!await plotRendererReady()) {
 ```
 
 Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.
+
+## Lifecycle
+
+Each `RunMatSessionHandle` now exposes `session.dispose()`. Call it when tearing down the editor/REPL view so the runtime can cancel pending executions, release stdin handlers, and drop any registered plot canvases. The wrapper marks the instance as disposed and throws helpful errors if a host accidentally calls `execute()` afterwards. `dispose()` is idempotent, so repeated calls are safe.
 
 ### Plotting performance knobs
 

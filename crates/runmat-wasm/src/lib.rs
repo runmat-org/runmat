@@ -1,11 +1,11 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
-use js_sys::{Array, Reflect};
+use js_sys::{Array, Error as JsError, Reflect};
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
@@ -57,6 +57,29 @@ use runmat_runtime::builtins::plotting::{
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
 const MAX_OBJECT_FIELDS: usize = 64;
+
+#[derive(Clone, Copy)]
+enum InitErrorCode {
+    InvalidOptions,
+    SnapshotResolution,
+    FilesystemProvider,
+    SessionCreation,
+    GpuInitialization,
+    PlotCanvas,
+}
+
+impl InitErrorCode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            InitErrorCode::InvalidOptions => "InvalidOptions",
+            InitErrorCode::SnapshotResolution => "SnapshotResolution",
+            InitErrorCode::FilesystemProvider => "FilesystemProvider",
+            InitErrorCode::SessionCreation => "SessionCreation",
+            InitErrorCode::GpuInitialization => "GpuInitialization",
+            InitErrorCode::PlotCanvas => "PlotCanvas",
+        }
+    }
+}
 const MAX_RECURSION_DEPTH: usize = 2;
 
 #[derive(Debug, Deserialize, Default)]
@@ -85,6 +108,8 @@ struct InitOptions {
     scatter_target_points: Option<u32>,
     #[serde(default)]
     surface_vertex_budget: Option<u64>,
+    #[serde(default)]
+    telemetry_id: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -106,6 +131,7 @@ struct SessionConfig {
     enable_jit: bool,
     verbose: bool,
     telemetry_consent: bool,
+    telemetry_client_id: Option<String>,
     enable_gpu: bool,
     wgpu_power_preference: AccelPowerPreference,
     wgpu_force_fallback_adapter: bool,
@@ -118,6 +144,7 @@ impl SessionConfig {
             enable_jit: opts.enable_jit.unwrap_or(false) && cfg!(feature = "jit"),
             verbose: opts.verbose.unwrap_or(false),
             telemetry_consent: opts.telemetry_consent.unwrap_or(true),
+            telemetry_client_id: opts.telemetry_id.clone(),
             enable_gpu: opts.enable_gpu.unwrap_or(true),
             wgpu_power_preference: parse_power_preference(opts.wgpu_power_preference.as_deref()),
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
@@ -147,6 +174,7 @@ pub struct RunMatWasm {
     snapshot_seed: Option<Vec<u8>>,
     config: SessionConfig,
     gpu_status: GpuStatus,
+    disposed: Cell<bool>,
 }
 
 #[wasm_bindgen]
@@ -164,6 +192,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = resetSession)]
     pub fn reset_session(&self) -> Result<(), JsValue> {
+        let consent = self.config.telemetry_consent;
         let mut session = RunMatSession::with_snapshot_bytes(
             self.config.enable_jit,
             self.config.verbose,
@@ -171,6 +200,12 @@ impl RunMatWasm {
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
         configure_session_input_handler(&mut session);
+        session.set_telemetry_consent(consent);
+        if let Some(cid) = self.config.telemetry_client_id.clone() {
+            session.set_telemetry_client_id(Some(cid));
+        } else {
+            session.set_telemetry_client_id(None);
+        }
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -270,7 +305,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = telemetryConsent)]
     pub fn telemetry_consent(&self) -> bool {
-        self.config.telemetry_consent
+        self.session.borrow().telemetry_consent()
     }
 
     #[wasm_bindgen(js_name = gpuStatus)]
@@ -278,17 +313,57 @@ impl RunMatWasm {
         serde_wasm_bindgen::to_value(&self.gpu_status)
             .map_err(|err| js_error(&format!("Failed to serialize GPU status: {err}")))
     }
+
+    #[wasm_bindgen(js_name = telemetryClientId)]
+    pub fn telemetry_client_id(&self) -> Option<String> {
+        self.session
+            .borrow()
+            .telemetry_client_id()
+            .map(|value| value.to_string())
+    }
+
+    #[wasm_bindgen(js_name = dispose)]
+    pub fn dispose(&self) {
+        if self.disposed.replace(true) {
+            return;
+        }
+        {
+            let mut session = self.session.borrow_mut();
+            session.cancel_execution();
+            session.cancel_all_pending_requests();
+            session.clear_variables();
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            set_js_stdin_handler(None);
+            FIGURE_EVENT_CALLBACK.with(|slot| {
+                slot.replace(None);
+            });
+        }
+    }
 }
 
 #[wasm_bindgen(js_name = registerFsProvider)]
 pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
-    install_fs_provider_value(bindings)
+    install_fs_provider_value(bindings).map_err(|err| {
+        init_error_with_details(
+            InitErrorCode::FilesystemProvider,
+            "Failed to register filesystem provider",
+            Some(err),
+        )
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerPlotCanvas)]
 pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
-    install_canvas_renderer(None, canvas).await
+    install_canvas_renderer(None, canvas).await.map_err(|err| {
+        init_error_with_details(
+            InitErrorCode::PlotCanvas,
+            "Failed to register plot canvas",
+            Some(err),
+        )
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -297,7 +372,15 @@ pub async fn register_figure_canvas(
     handle: u32,
     canvas: web_sys::HtmlCanvasElement,
 ) -> Result<(), JsValue> {
-    install_canvas_renderer(Some(handle), canvas).await
+    install_canvas_renderer(Some(handle), canvas)
+        .await
+        .map_err(|err| {
+            init_error_with_details(
+                InitErrorCode::PlotCanvas,
+                "Failed to register figure canvas",
+                Some(err),
+            )
+        })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -673,26 +756,48 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     ensure_getrandom_js();
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
-    install_fs_provider_from_options(&options)?;
+    install_fs_provider_from_options(&options).map_err(|err| {
+        init_error_with_details(
+            InitErrorCode::FilesystemProvider,
+            "Failed to install filesystem provider",
+            Some(err),
+        )
+    })?;
     let parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
         InitOptions::default()
     } else {
-        serde_wasm_bindgen::from_value(options)
-            .map_err(|err| js_error(&format!("Invalid init options: {err}")))?
+        serde_wasm_bindgen::from_value(options).map_err(|err| {
+            init_error(
+                InitErrorCode::InvalidOptions,
+                format!("Invalid init options: {err}"),
+            )
+        })?
     };
 
     apply_plotting_overrides(&parsed_opts);
 
     let config = SessionConfig::from_options(&parsed_opts);
-    let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await?;
+    let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await.map_err(|err| {
+        let message = js_value_to_string(err.clone());
+        init_error_with_details(InitErrorCode::SnapshotResolution, message, Some(err))
+    })?;
 
     let mut session = RunMatSession::with_snapshot_bytes(
         config.enable_jit,
         config.verbose,
         snapshot_seed.as_deref(),
     )
-    .map_err(|err| js_error(&format!("Failed to initialize RunMat session: {err}")))?;
+    .map_err(|err| {
+        init_error(
+            InitErrorCode::SessionCreation,
+            format!("Failed to initialize RunMat session: {err}"),
+        )
+    })?;
     configure_session_input_handler(&mut session);
+    session.set_telemetry_consent(config.telemetry_consent);
+    if let Some(cid) = config.telemetry_client_id.clone() {
+        session.set_telemetry_client_id(Some(cid));
+    }
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -715,7 +820,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 }
             }
             Err(err) => {
-                let message = js_value_to_string(err);
+                let message = js_value_to_string(err.clone());
                 warn!("RunMat wasm: GPU initialization failed (falling back to CPU): {message}");
                 gpu_status.error = Some(message);
                 install_cpu_provider(&config);
@@ -730,6 +835,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         snapshot_seed,
         config,
         gpu_status,
+        disposed: Cell::new(false),
     })
 }
 
@@ -1136,6 +1242,36 @@ fn parse_power_preference(input: Option<&str>) -> AccelPowerPreference {
 
 fn js_error(message: &str) -> JsValue {
     JsValue::from_str(message)
+}
+
+fn init_error(code: InitErrorCode, message: impl Into<String>) -> JsValue {
+    init_error_with_details(code, message, None)
+}
+
+fn init_error_with_details(
+    code: InitErrorCode,
+    message: impl Into<String>,
+    details: Option<JsValue>,
+) -> JsValue {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let msg = message.into();
+        let error = JsError::new(&msg);
+        let _ = Reflect::set(
+            error.as_ref(),
+            &JsValue::from_str("code"),
+            &JsValue::from_str(code.as_str()),
+        );
+        if let Some(detail) = details {
+            let _ = Reflect::set(error.as_ref(), &JsValue::from_str("details"), &detail);
+        }
+        error.into()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let msg = message.into();
+        JsValue::from_str(&format!("{}: {msg}", code.as_str()))
+    }
 }
 
 fn init_logging_once() {
