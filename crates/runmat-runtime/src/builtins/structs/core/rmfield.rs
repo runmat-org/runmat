@@ -4,14 +4,12 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "rmfield")]
 pub const DOC_MD: &str = r#"---
 title: "rmfield"
 category: "structs/core"
@@ -167,6 +165,7 @@ the device until another operation decides otherwise.
 [fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [orderfields](./orderfields)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmfield",
     op_kind: GpuOpKind::Custom("rmfield"),
@@ -182,8 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only struct metadata update; acceleration providers are not consulted.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmfield",
     shape: ShapeRequirements::Any,
@@ -193,11 +191,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Metadata mutation forces fusion planners to flush pending groups on the host.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rmfield", DOC_MD);
 
 #[runtime_builtin(
     name = "rmfield",
@@ -390,7 +383,6 @@ mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -631,7 +623,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

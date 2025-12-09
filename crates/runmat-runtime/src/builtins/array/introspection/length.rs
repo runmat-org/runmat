@@ -6,13 +6,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::containers::map::map_length;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "length")]
 pub const DOC_MD: &str = r#"---
 title: "length"
 category: "array/introspection"
@@ -163,6 +161,7 @@ won't break fusion plans.
 [size](./size), [numel (MathWorks)](https://www.mathworks.com/help/matlab/ref/numel.html), [strlength (MathWorks)](https://www.mathworks.com/help/matlab/ref/strlength.html)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "length",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -178,8 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads tensor metadata from handles; falls back to gathering only when provider metadata is absent.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "length",
     shape: ShapeRequirements::Any,
@@ -189,11 +187,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Metadata query; fusion planner treats this as a host scalar lookup.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("length", DOC_MD);
 
 #[runtime_builtin(
     name = "length",
@@ -331,7 +324,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

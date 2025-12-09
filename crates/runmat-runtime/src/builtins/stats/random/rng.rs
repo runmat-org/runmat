@@ -8,16 +8,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
 use log::debug;
 use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "rng")]
 pub const DOC_MD: &str = r#"---
 title: "rng"
 category: "stats/random"
@@ -209,6 +207,7 @@ consume the current stream but do not reseed it.
 - Found a bug or behavioural gap? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rng",
     op_kind: GpuOpKind::Custom("state-control"),
@@ -225,8 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Not a numeric kernel; synchronises provider RNG state via set_rng_state when available.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rng",
     shape: ShapeRequirements::Any,
@@ -236,11 +234,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control builtin; fusion planner never embeds rng in generated kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rng", DOC_MD);
 
 #[runtime_builtin(
     name = "rng",
@@ -697,7 +690,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn rng_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

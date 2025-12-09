@@ -4,16 +4,12 @@ use once_cell::sync::OnceCell;
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
+use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -172,6 +168,7 @@ pub(super) fn remove_client_for_test(id: u64) {
 }
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "accept")]
 pub const DOC_MD: &str = r#"---
 title: "accept"
 category: "io/net"
@@ -326,6 +323,7 @@ Not yet. TLS will be layered on top of the same client identifier once RunMat’
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "accept",
     op_kind: GpuOpKind::Custom("network"),
@@ -341,8 +339,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only networking builtin; GPU inputs are gathered to CPU before accepting clients.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "accept",
     shape: ShapeRequirements::Any,
@@ -352,11 +349,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Networking builtin executed eagerly on the CPU.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("accept", DOC_MD);
 
 #[runtime_builtin(
     name = "accept",
@@ -663,7 +655,6 @@ mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpStream;
@@ -777,7 +768,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

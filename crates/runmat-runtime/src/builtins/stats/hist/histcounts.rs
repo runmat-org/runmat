@@ -12,14 +12,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "histcounts")]
 pub const DOC_MD: &str = r#"---
 title: "histcounts"
 category: "stats/hist"
@@ -182,6 +180,7 @@ already in host memory.
 - Found a discrepancy? Please open an issue with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histcounts",
     op_kind: GpuOpKind::Custom("histcounts"),
@@ -197,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement device-side histogramming via the custom hook; current builds gather to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "histcounts",
     shape: ShapeRequirements::Any,
@@ -208,11 +206,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Histogram binning materialises counts on the host and terminates fusion chains.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("histcounts", DOC_MD);
 
 #[runtime_builtin(
     name = "histcounts",
@@ -1274,7 +1267,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -5,10 +5,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::register_builtin_fusion_spec;
-use crate::register_builtin_gpu_spec;
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -17,6 +13,7 @@ use runmat_macros::runtime_builtin;
 use super::lu::PivotMode;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "qr")]
 pub const DOC_MD: &str = r#"---
 title: "qr"
 category: "math/linalg/factor"
@@ -136,6 +133,7 @@ Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `
 - Issues & feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "qr",
     op_kind: GpuOpKind::Custom("qr-factor"),
@@ -151,8 +149,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "qr",
     shape: ShapeRequirements::Any,
@@ -162,11 +159,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "QR factorisation executes eagerly and does not participate in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("qr", DOC_MD);
 
 #[runtime_builtin(
     name = "qr",
@@ -1124,7 +1116,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

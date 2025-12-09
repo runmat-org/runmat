@@ -4,14 +4,9 @@ use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -19,6 +14,7 @@ use crate::builtins::common::spec::{
 };
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "eraseBetween")]
 pub const DOC_MD: &str = r#"---
 title: "eraseBetween"
 category: "strings/transform"
@@ -195,6 +191,7 @@ the string length, and start positions that lie beyond the text leave the elemen
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eraseBetween",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -210,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; GPU-resident inputs are gathered before deletion and outputs remain on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eraseBetween",
     shape: ShapeRequirements::Any,
@@ -221,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Pure string manipulation builtin; excluded from fusion plans and gathers GPU inputs immediately.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("eraseBetween", DOC_MD);
 
 const FN_NAME: &str = "eraseBetween";
 const ARG_TYPE_ERROR: &str = "eraseBetween: first argument must be a string array, character array, or cell array of character vectors";
@@ -863,7 +854,6 @@ mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
@@ -1197,7 +1187,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn eraseBetween_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

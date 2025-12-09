@@ -19,17 +19,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    dispatcher::gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::dispatcher::gather_if_needed;
 
 const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
 const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "exist")]
 pub const DOC_MD: &str = r#"---
 title: "exist"
 category: "io/repl_fs"
@@ -170,6 +167,7 @@ No. `exist` gathers any GPU-resident string inputs transparently. The lookup, fi
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exist",
     op_kind: GpuOpKind::Custom("io"),
@@ -185,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem and workspace lookup run on the host; arguments are gathered from the GPU when necessary.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exist",
     shape: ShapeRequirements::Any,
@@ -196,11 +193,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "I/O builtins are not eligible for fusion; metadata registered for completeness.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("exist", DOC_MD);
 
 #[runtime_builtin(
     name = "exist",
@@ -699,7 +691,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -13,10 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "imfilter")]
 pub const DOC_MD: &str = r#"---
 title: "imfilter"
 category: "image/filters"
@@ -168,6 +165,7 @@ Yes. Logical arrays are promoted to double precision (0.0/1.0) during filtering,
 - Report issues or differences at https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imfilter",
     op_kind: GpuOpKind::Custom("imfilter"),
@@ -183,8 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side filtering when available; otherwise gathers to host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imfilter",
     shape: ShapeRequirements::Any,
@@ -194,11 +191,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not a fusion candidate; emits standalone correlation kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("imfilter", DOC_MD);
 
 #[runtime_builtin(
     name = "imfilter",
@@ -981,7 +973,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let sections = test_support::doc_examples(DOC_MD);
         assert!(!sections.is_empty());

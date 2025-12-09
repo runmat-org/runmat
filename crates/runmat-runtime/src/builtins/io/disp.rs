@@ -15,11 +15,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
 use crate::console::{record_console_output, ConsoleStream};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "disp")]
 pub const DOC_MD: &str = r#"---
 title: "disp"
 category: "io"
@@ -177,6 +176,7 @@ Use `fprintf` instead. `disp` always terminates the output with a newline.
 [fprintf](../filetext/fprintf), [sprintf](../../strings/core/sprintf), [string](../../strings/core/string), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "disp",
     op_kind: GpuOpKind::Custom("sink"),
@@ -192,8 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always formats on the CPU; GPU tensors are gathered via the active provider before display.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "disp",
     shape: ShapeRequirements::Any,
@@ -203,11 +202,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Side-effecting sink; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("disp", DOC_MD);
 
 /// Minimum column width (in characters) for numeric and logical displays.
 const NUMERIC_MIN_COLUMN_WIDTH: usize = 6;
@@ -1002,7 +996,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

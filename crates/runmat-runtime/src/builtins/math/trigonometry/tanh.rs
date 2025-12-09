@@ -11,10 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "tanh")]
 pub const DOC_MD: &str = r#"---
 title: "tanh"
 category: "math/trigonometry"
@@ -186,6 +183,7 @@ Yes. The autograd infrastructure recognises `tanh` as a primitive and records it
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tanh",
     op_kind: GpuOpKind::Elementwise,
@@ -202,8 +200,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute tanh directly on the device; runtimes gather to the host when unary_tanh is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tanh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -220,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Fusion planner emits WGSL `tanh` calls; providers may override with specialised kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tanh", DOC_MD);
 
 #[runtime_builtin(
     name = "tanh",
@@ -421,7 +413,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

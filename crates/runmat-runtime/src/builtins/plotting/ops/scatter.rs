@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use std::convert::TryFrom;
 
 use super::common::numeric_pair;
@@ -34,9 +34,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "scatter")]
 pub const DOC_MD: &str = r#"---
 title: "scatter"
 category: "plotting"
@@ -86,6 +84,7 @@ device is active, their buffers are consumed zero-copy by the renderer. Otherwis
 gathered before plotting, matching MATLAB semantics.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -101,8 +100,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "2-D scatter rendering happens outside fusion; tensors are gathered first.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "scatter",
     shape: ShapeRequirements::Any,
@@ -112,11 +110,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "scatter performs I/O and terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("scatter", DOC_MD);
 
 #[runtime_builtin(
     name = "scatter",

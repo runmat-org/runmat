@@ -16,10 +16,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "ismember")]
 pub const DOC_MD: &str = r#"---
 title: "ismember"
 category: "array/sorting_sets"
@@ -201,6 +198,7 @@ Otherwise the data is gathered to the host with no behavioural differences.
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismember",
     op_kind: GpuOpKind::Custom("ismember"),
@@ -216,8 +214,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply dedicated membership kernels; until then RunMat gathers GPU tensors to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismember",
     shape: ShapeRequirements::Any,
@@ -227,11 +224,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Membership queries execute via host set lookups; the fusion planner treats ismember as a residency sink.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ismember", DOC_MD);
 
 #[runtime_builtin(
     name = "ismember",
@@ -1168,7 +1160,6 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 0.0]);
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

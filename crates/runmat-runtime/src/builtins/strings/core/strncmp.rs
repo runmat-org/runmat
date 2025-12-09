@@ -10,13 +10,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const FN_NAME: &str = "strncmp";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "strncmp")]
 pub const DOC_MD: &str = r#"---
 title: "strncmp"
 category: "strings/core"
@@ -152,6 +151,7 @@ Yes. Scalar comparisons yield logical scalars; array inputs produce logical arra
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
     op_kind: GpuOpKind::Custom("string-prefix-compare"),
@@ -167,8 +167,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs host-side prefix comparisons; GPU inputs are gathered before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strncmp",
     shape: ShapeRequirements::Any,
@@ -178,11 +177,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Produces logical host results and is not eligible for GPU fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strncmp", DOC_MD);
 
 #[runtime_builtin(
     name = "strncmp",
@@ -327,7 +321,6 @@ fn parse_prefix_length_from_float(value: f64) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -582,7 +575,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -14,9 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -24,6 +22,7 @@ const ERR_CHAR_MATRIX_CELL: &str =
     "getenv: cell array elements must be character vectors or string scalars";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "getenv")]
 pub const DOC_MD: &str = r#"---
 title: "getenv"
 category: "io/repl_fs"
@@ -203,6 +202,7 @@ Yes. The builtin reports every variable visible to the RunMat process, including
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "getenv",
     op_kind: GpuOpKind::Custom("io"),
@@ -218,8 +218,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host environment query with no GPU participation; providers do not implement hooks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "getenv",
     shape: ShapeRequirements::Any,
@@ -229,11 +228,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Environment lookups break fusion graphs and always execute on the CPU.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("getenv", DOC_MD);
 
 #[runtime_builtin(
     name = "getenv",
@@ -595,7 +589,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

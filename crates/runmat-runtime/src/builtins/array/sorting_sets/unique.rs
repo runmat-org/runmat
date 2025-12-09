@@ -22,10 +22,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "unique")]
 pub const DOC_MD: &str = r#"---
 title: "unique"
 category: "array/sorting_sets"
@@ -281,6 +278,7 @@ Sorting is stable where applicable; ties preserve their relative order. You can 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "unique",
     op_kind: GpuOpKind::Custom("unique"),
@@ -296,8 +294,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement the `unique` hook; default providers download tensors and reuse the CPU implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "unique",
     shape: ShapeRequirements::Any,
@@ -307,11 +304,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "`unique` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("unique", DOC_MD);
 
 #[runtime_builtin(
     name = "unique",
@@ -1819,7 +1811,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

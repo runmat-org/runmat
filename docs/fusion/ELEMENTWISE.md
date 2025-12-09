@@ -15,7 +15,7 @@ Elementwise chains represent one of the most common patterns in numerical comput
 
 ## Supported Operations
 
-- MATLAB primitives: `+`, `-`, `.*`, `./`, `.\`, `.ˆ`, unary `-`, unary `+`, `abs`, `sign`, comparison ops, and many others registered via `register_builtin_fusion_spec`.
+- MATLAB primitives: `+`, `-`, `.*`, `./`, `.\`, `.ˆ`, unary `-`, unary `+`, `abs`, `sign`, comparison ops, and many others annotated with `#[runmat_macros::register_fusion_spec]`.
 - Builtins covering transcendental math: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `exp`, `log`, `log10`, `log1p`, `sqrt`, `rsqrt`, `pow2`, `pow10`, etc.
 - Elementwise logical ops (`~`, `&`, `|`) as long as the inputs resolve to numeric/logical tensors.
 - Scalar constants (`single`, `double`, literal numbers) are folded directly into the generated expression.

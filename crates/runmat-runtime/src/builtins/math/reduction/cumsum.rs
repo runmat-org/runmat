@@ -10,10 +10,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "cumsum")]
 pub const DOC_MD: &str = r#"---
 title: "cumsum"
 category: "math/reduction"
@@ -149,6 +146,7 @@ If the active provider does not natively handle `"omitnan"`, RunMat gathers back
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cumsum",
     op_kind: GpuOpKind::Custom("scan"),
@@ -164,8 +162,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose device prefix-sum kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cumsum",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -175,11 +172,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner currently lowers cumsum to the runtime implementation; providers can substitute specialised scan kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cumsum", DOC_MD);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CumsumDirection {
@@ -881,7 +873,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

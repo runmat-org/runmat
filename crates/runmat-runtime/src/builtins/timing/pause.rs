@@ -15,10 +15,7 @@ use crate::builtins::common::spec::{
 #[cfg(not(test))]
 use crate::interaction;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "pause")]
 pub const DOC_MD: &str = r#"---
 title: "pause"
 category: "timing"
@@ -108,6 +105,7 @@ pause([]);   % equivalent to calling pause with no arguments
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pause",
     op_kind: GpuOpKind::Custom("timer"),
@@ -123,8 +121,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "pause executes entirely on the host. Acceleration providers are never queried.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pause",
     shape: ShapeRequirements::Any,
@@ -134,11 +131,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "pause suspends host execution and is excluded from fusion pipelines.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pause", DOC_MD);
 
 static PAUSE_STATE: Lazy<RwLock<PauseState>> = Lazy::new(|| RwLock::new(PauseState::default()));
 
@@ -553,7 +545,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);

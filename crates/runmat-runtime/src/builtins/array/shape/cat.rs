@@ -7,9 +7,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
@@ -17,6 +14,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "cat")]
 pub const DOC_MD: &str = r#"---
 title: "cat"
 category: "array/shape"
@@ -229,6 +227,7 @@ dimension.
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -244,8 +243,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to gather + upload when providers lack a native concatenation kernel.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cat",
     shape: ShapeRequirements::Any,
@@ -255,11 +253,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Concatenation is a sink and terminates fusion pipelines.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cat", DOC_MD);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CatCategory {
@@ -1152,7 +1145,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

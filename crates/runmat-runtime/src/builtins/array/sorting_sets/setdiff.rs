@@ -22,10 +22,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "setdiff")]
 pub const DOC_MD: &str = r#"---
 title: "setdiff"
 category: "array/sorting_sets"
@@ -188,6 +185,7 @@ No. RunMat implements the modern semantics only. Passing `'legacy'` or `'R2012a'
 - Issues / feedback: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "setdiff",
     op_kind: GpuOpKind::Custom("setdiff"),
@@ -203,8 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement `setdiff`; until then tensors are gathered and processed on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "setdiff",
     shape: ShapeRequirements::Any,
@@ -214,11 +211,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "`setdiff` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered if needed.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("setdiff", DOC_MD);
 
 #[runtime_builtin(
     name = "setdiff",
@@ -1516,7 +1508,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

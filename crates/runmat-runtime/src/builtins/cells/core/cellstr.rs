@@ -8,12 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{
-    make_cell, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::{make_cell, make_cell_with_shape};
 
 const ERR_INPUT_NOT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
@@ -21,6 +16,7 @@ const ERR_CELL_CONTENT_NOT_TEXT: &str =
     "cellstr: cell array elements must be character vectors or string scalars";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "cellstr")]
 pub const DOC_MD: &str = r#"---
 title: "cellstr"
 category: "cells/core"
@@ -203,6 +199,7 @@ Elements that are already character vectors are cloned so that downstream code c
 result without mutating the source cell.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellstr",
     op_kind: GpuOpKind::Custom("text-convert"),
@@ -218,8 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text conversion. Inputs originating on the GPU are gathered before processing, and the output is always a host cell array.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellstr",
     shape: ShapeRequirements::Any,
@@ -230,11 +226,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Terminates fusion because the result is a host-resident cell array of character vectors.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cellstr", DOC_MD);
 
 #[runtime_builtin(
     name = "cellstr",
@@ -399,7 +390,6 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn cell_to_strings(cell: &CellArray) -> Vec<String> {
@@ -597,7 +587,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

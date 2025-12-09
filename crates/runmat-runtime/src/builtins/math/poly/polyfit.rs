@@ -7,10 +7,6 @@ use runmat_builtins::{ComplexTensor, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use crate::dispatcher;
 
 use crate::builtins::common::spec::{
@@ -22,6 +18,7 @@ const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "polyfit")]
 pub const DOC_MD: &str = r#"---
 title: "polyfit"
 category: "math/poly"
@@ -201,6 +198,7 @@ raising an error unless the degree is zero.
 - Found an issue? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyfit",
     op_kind: GpuOpKind::Custom("polyfit"),
@@ -217,8 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyfit",
     shape: ShapeRequirements::Any,
@@ -228,11 +225,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a sink node—polynomial fitting materialises results eagerly and terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyfit", DOC_MD);
 
 #[runtime_builtin(
     name = "polyfit",
@@ -1324,7 +1316,6 @@ mod tests {
 
     #[test]
     fn doc_examples_present() {
-        #[cfg(feature = "doc_export")]
         {
             let blocks = test_support::doc_examples(DOC_MD);
             assert!(!blocks.is_empty());

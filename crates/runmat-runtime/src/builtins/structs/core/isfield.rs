@@ -9,10 +9,7 @@ use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "isfield")]
 pub const DOC_MD: &str = r#"---
 title: "isfield"
 category: "structs/core"
@@ -159,6 +156,7 @@ No. The builtin only inspects field metadata and leaves GPU-resident tensors unt
 [fieldnames](./fieldnames), [struct](./struct), [isprop](../../introspection/isprop), [getfield](./getfield), [setfield](./setfield)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfield",
     op_kind: GpuOpKind::Custom("isfield"),
@@ -174,8 +172,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata check; acceleration providers do not participate.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isfield",
     shape: ShapeRequirements::Any,
@@ -185,11 +182,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a fusion barrier because it inspects struct metadata on the host.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isfield", DOC_MD);
 
 #[runtime_builtin(
     name = "isfield",
@@ -451,7 +443,6 @@ mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -579,7 +570,6 @@ mod tests {
         assert!(err.contains("field names must be strings"));
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

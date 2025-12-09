@@ -10,17 +10,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "arrayfun")]
 pub const DOC_MD: &str = r#"---
 title: "arrayfun"
 category: "acceleration/gpu"
@@ -185,6 +181,7 @@ back into a logical array automatically.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "arrayfun",
     op_kind: GpuOpKind::Elementwise,
@@ -223,8 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement the listed kernels can run supported callbacks entirely on the GPU; unsupported callbacks fall back to the host path with re-upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "arrayfun",
     shape: ShapeRequirements::Any,
@@ -234,11 +230,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a fusion barrier because the callback can run arbitrary MATLAB code.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("arrayfun", DOC_MD);
 
 #[runtime_builtin(
     name = "arrayfun",
@@ -1413,7 +1404,6 @@ mod tests {
         Ok(seed)
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn arrayfun_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -12,13 +12,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::dispatcher;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "polyint")]
 pub const DOC_MD: &str = r#"---
 title: "polyint"
 category: "math/poly"
@@ -190,6 +188,7 @@ All arithmetic uses IEEE 754 double precision (`f64`), mirroring MATLAB's defaul
 [polyder](./polyder), [polyval](./polyval), [polyfit](./polyfit), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyint",
     op_kind: GpuOpKind::Custom("polynomial-integral"),
@@ -205,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers implement the polyint hook for real coefficient vectors; complex inputs fall back to the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyint",
     shape: ShapeRequirements::Any,
@@ -216,11 +214,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Symbolic operation on coefficient vectors; fusion does not apply.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyint", DOC_MD);
 
 #[runtime_builtin(
     name = "polyint",
@@ -778,7 +771,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -11,16 +11,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(name = "jsondecode")]
 pub const DOC_MD: &str = r#"---
 title: "jsondecode"
 category: "io/json"
@@ -194,6 +191,7 @@ remains valid JSON.
 [jsonencode](./jsonencode), [struct](../../structs/constructors/struct), [cell](../../array/constructors/cell), [fileread](../filetext/fileread)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsondecode",
     op_kind: GpuOpKind::Custom("parse"),
@@ -209,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsondecode",
     shape: ShapeRequirements::Any,
@@ -220,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "jsondecode is a residency sink; it always runs on the CPU and breaks fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("jsondecode", DOC_MD);
 
 #[runtime_builtin(
     name = "jsondecode",
@@ -600,7 +592,6 @@ mod tests {
     use super::*;
     use runmat_builtins::{IntValue, Tensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn char_row(text: &str) -> Value {
@@ -841,7 +832,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn jsondecode_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

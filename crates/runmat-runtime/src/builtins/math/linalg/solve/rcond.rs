@@ -12,14 +12,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "rcond";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = NAME)]
 pub const DOC_MD: &str = r#"---
 title: "rcond"
 category: "math/linalg/solve"
@@ -169,6 +166,7 @@ downloads the matrix, computes the estimate on the host, and re-uploads the scal
 #[allow(dead_code)]
 const DOC_MD: &str = "";
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("rcond"),
@@ -184,8 +182,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may reuse dense solver factorizations to expose rcond; current backends gather to the host and re-upload a scalar value when possible.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -195,11 +192,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not fusible; rcond consumes an entire matrix and returns a scalar estimate.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
 
 #[runtime_builtin(
     name = "rcond",
@@ -537,7 +529,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let snippets = test_support::doc_examples(DOC_MD);
         assert!(!snippets.is_empty());

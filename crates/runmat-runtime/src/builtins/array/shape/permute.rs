@@ -9,14 +9,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "permute")]
 pub const DOC_MD: &str = r#"---
 title: "permute"
 category: "array/shape"
@@ -166,6 +164,7 @@ ans = logical 1
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "permute",
     op_kind: GpuOpKind::Custom("permute"),
@@ -187,8 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement a custom permute hook; the runtime falls back to gather→permute→upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "permute",
     shape: ShapeRequirements::Any,
@@ -198,11 +196,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("permute", DOC_MD);
 
 #[runtime_builtin(
     name = "permute",
@@ -688,7 +681,6 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn permute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

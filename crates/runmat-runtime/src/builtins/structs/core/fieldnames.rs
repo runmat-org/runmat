@@ -11,10 +11,7 @@ use runmat_macros::runtime_builtin;
 use std::collections::BTreeSet;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "fieldnames")]
 pub const DOC_MD: &str = r#"---
 title: "fieldnames"
 category: "structs/core"
@@ -193,6 +190,7 @@ No. Passing anything other than a struct, struct array, or object raises
 - Found a bug or behaviour mismatch? Open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fieldnames",
     op_kind: GpuOpKind::Custom("fieldnames"),
@@ -208,8 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only introspection; providers do not participate.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fieldnames",
     shape: ShapeRequirements::Any,
@@ -219,11 +216,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner treats fieldnames as a host inspector; it terminates any pending fusion group.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fieldnames", DOC_MD);
 
 #[runtime_builtin(
     name = "fieldnames",
@@ -338,7 +330,6 @@ mod tests {
     };
     use std::collections::HashMap;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -528,7 +519,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

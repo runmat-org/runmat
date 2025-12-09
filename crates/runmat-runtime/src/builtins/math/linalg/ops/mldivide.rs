@@ -13,13 +13,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const NAME: &str = "mldivide";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "mldivide")]
 pub const DOC_MD: &str = r#"---
 title: "mldivide"
 category: "math/linalg/ops"
@@ -183,6 +181,7 @@ NaNs will typically produce NaNs in the corresponding output entries.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mldivide",
     op_kind: GpuOpKind::Custom("solve"),
@@ -198,8 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider mldivide hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mldivide",
     shape: ShapeRequirements::Any,
@@ -209,11 +207,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Left-division is a terminal solve and does not fuse with surrounding kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mldivide", DOC_MD);
 
 #[runtime_builtin(
     name = "mldivide",
@@ -727,7 +720,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

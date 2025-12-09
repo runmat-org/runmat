@@ -72,6 +72,3 @@ runmat-accelerate-api = { version = "=0.2.7", path = "crates/runmat-accelerate-a
 runmat-gc-api = { version = "=0.2.7", path = "crates/runmat-gc-api" }
 runmat-core = { version = "=0.2.7", path = "crates/runmat-core" }
 runmat-filesystem = { version = "=0.2.7", path = "crates/runmat-filesystem" }
-
-[patch.crates-io]
-# Ensure no accidental cycle via crates.io variants

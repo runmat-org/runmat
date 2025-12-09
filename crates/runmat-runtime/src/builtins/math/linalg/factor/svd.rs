@@ -14,15 +14,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "svd")]
 pub const DOC_MD: &str = r#"---
 title: "svd"
 category: "math/linalg/factor"
@@ -172,6 +170,7 @@ device-resident once GPU kernels land.
 - Feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "svd",
     op_kind: GpuOpKind::Custom("svd-factor"),
@@ -188,8 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "GPU inputs are gathered to the host until a provider implements the reserved `svd` hook.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "svd",
     shape: ShapeRequirements::Any,
@@ -199,11 +197,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "SVD executes eagerly and does not participate in fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("svd", DOC_MD);
 
 #[runtime_builtin(
     name = "svd",
@@ -1082,7 +1075,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

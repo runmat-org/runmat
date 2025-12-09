@@ -10,13 +10,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "error")]
 pub const DOC_MD: &str = r#"---
 title: "error"
 category: "diagnostics"
@@ -123,6 +121,7 @@ end
 8. **Does formatting follow MATLAB rules?** Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `MATLAB:error` if the format string is invalid or under-specified.
 #"#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "error",
     op_kind: GpuOpKind::Custom("control"),
@@ -138,8 +137,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; never dispatched to GPU backends.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "error",
     shape: ShapeRequirements::Any,
@@ -149,11 +147,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("error", DOC_MD);
 
 #[runtime_builtin(
     name = "error",
@@ -380,7 +373,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;
         let blocks = test_support::doc_examples(DOC_MD);

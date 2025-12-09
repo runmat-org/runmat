@@ -11,10 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "cov")]
 pub const DOC_MD: &str = r#"---
 title: "cov"
 category: "stats/summary"
@@ -194,6 +191,7 @@ covariance is computed, matching MATLAB's behaviour.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cov",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -209,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU execution is available when rows='all' and no weight vector is supplied; other cases fall back to the CPU path.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cov",
     shape: ShapeRequirements::Any,
@@ -220,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "The covariance builtin is treated as a fusion boundary and executes via dedicated kernels or the host reference.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cov", DOC_MD);
 
 #[runtime_builtin(
     name = "cov",
@@ -1128,7 +1120,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use std::convert::TryFrom;
 
 use super::common::numeric_triplet;
@@ -32,9 +32,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "scatter3")]
 pub const DOC_MD: &str = r#"---
 title: "scatter3"
 category: "plotting"
@@ -83,6 +81,7 @@ implementations zero-copy. Until that lands, expect the builtin to behave like M
 to the host, rendering completes, and execution returns immediately.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter3",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -98,8 +97,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Rendering executes outside fusion; gpuArray inputs are gathered prior to plotting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "scatter3",
     shape: ShapeRequirements::Any,
@@ -109,11 +107,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "scatter3 terminates fusion graphs and performs host/WebGPU rendering.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("scatter3", DOC_MD);
 
 #[runtime_builtin(
     name = "scatter3",

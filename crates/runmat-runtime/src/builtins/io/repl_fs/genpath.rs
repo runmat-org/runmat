@@ -8,9 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -21,6 +19,7 @@ const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or s
 const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector or string scalar";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "genpath")]
 pub const DOC_MD: &str = r#"---
 title: "genpath"
 category: "io/repl_fs"
@@ -162,6 +161,7 @@ savepath();
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "genpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -177,8 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem traversal is a host-only operation; inputs are gathered before processing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "genpath",
     shape: ShapeRequirements::Any,
@@ -189,11 +188,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "I/O-oriented builtins are not eligible for fusion; metadata registered for completeness.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("genpath", DOC_MD);
 
 #[runtime_builtin(
     name = "genpath",
@@ -560,7 +554,6 @@ mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
@@ -905,7 +898,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

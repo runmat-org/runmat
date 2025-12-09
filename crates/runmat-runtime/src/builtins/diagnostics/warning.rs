@@ -13,14 +13,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 use crate::warning_store;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "warning")]
 pub const DOC_MD: &str = r#"---
 title: "warning"
 category: "diagnostics"
@@ -148,6 +146,7 @@ warning("default", "verbose");   % restore the default verbosity
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "warning",
     op_kind: GpuOpKind::Custom("control"),
@@ -163,8 +162,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU backends are never invoked.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "warning",
     shape: ShapeRequirements::Any,
@@ -174,11 +172,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("warning", DOC_MD);
 
 static MANAGER: Lazy<Mutex<WarningManager>> = Lazy::new(|| Mutex::new(WarningManager::default()));
 
@@ -1260,7 +1253,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
     mod doc_tests {
         use super::*;
         use crate::builtins::common::test_support;

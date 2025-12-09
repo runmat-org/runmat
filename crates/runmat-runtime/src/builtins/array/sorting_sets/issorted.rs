@@ -12,10 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "issorted")]
 pub const DOC_MD: &str = r#"---
 title: "issorted"
 category: "array/sorting_sets"
@@ -200,6 +197,7 @@ Empty slices are considered sorted. Passing a dimension larger than `ndims(A)` a
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issorted",
     op_kind: GpuOpKind::Custom("predicate"),
@@ -215,8 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU inputs gather to the host until providers implement dedicated predicate kernels.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issorted",
     shape: ShapeRequirements::Any,
@@ -226,11 +223,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("issorted", DOC_MD);
 
 #[runtime_builtin(
     name = "issorted",
@@ -1467,7 +1459,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn issorted_doc_examples() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

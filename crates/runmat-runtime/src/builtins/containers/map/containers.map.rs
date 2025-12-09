@@ -15,14 +15,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "containers.Map")]
 pub const DOC_MD: &str = r#"---
 title: "containers.Map"
 category: "containers/map"
@@ -210,6 +209,7 @@ error pointing to the offending argument.
 [remove](./containers.Map.remove), [length](../../array/introspection/length)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "containers.Map",
     op_kind: GpuOpKind::Custom("map"),
@@ -225,8 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Map storage is host-resident; GPU inputs are gathered only when split into multiple entries.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "containers.Map",
     shape: ShapeRequirements::Any,
@@ -236,11 +235,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Handles act as fusion sinks; map construction terminates GPU fusion plans.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("containers.Map", DOC_MD);
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
@@ -1772,7 +1766,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

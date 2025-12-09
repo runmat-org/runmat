@@ -15,14 +15,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "pinv";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "pinv")]
 pub const DOC_MD: &str = r#"---
 title: "pinv"
 category: "math/linalg/solve"
@@ -180,6 +177,7 @@ remains useful for ill-conditioned or rank-deficient problems where the pseudoin
 #[allow(dead_code)]
 const DOC_MD: &str = "";
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pinv",
     op_kind: GpuOpKind::Custom("pinv"),
@@ -195,8 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pinv",
     shape: ShapeRequirements::Any,
@@ -206,11 +203,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Pseudoinverses are standalone solves and do not participate in fusion plans.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pinv", DOC_MD);
 
 #[runtime_builtin(
     name = "pinv",
@@ -514,7 +506,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

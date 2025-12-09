@@ -1,9 +1,16 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use syn::parse::{Parse, ParseStream};
 use syn::{
-    parse_macro_input, AttributeArgs, Expr, FnArg, ItemFn, Lit, Meta, MetaNameValue, NestedMeta,
-    Pat,
+    parse_macro_input, AttributeArgs, Expr, FnArg, ItemConst, ItemFn, Lit, LitStr, Meta,
+    MetaNameValue, NestedMeta, Pat,
 };
+
+static WASM_REGISTRY_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static WASM_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// Attribute used to mark functions as implementing a runtime builtin.
 ///
@@ -246,40 +253,52 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let sink_bool = sink_flag;
 
-    let register = quote! {
-        runmat_builtins::inventory::submit! {
-            runmat_builtins::BuiltinFunction::new(
-                #name_str,
-                #summary_tok,
-                #category_tok,
-                "",
-                "",
-                vec![#(#inferred_param_types),*],
-                #inferred_return_type,
-                #wrapper_ident,
-                #accel_slice,
-                #sink_bool,
-            )
-        }
-        runmat_builtins::inventory::submit! {
-            runmat_builtins::BuiltinDoc {
-                name: #name_str,
-                category: #category_opt_tok,
-                summary: #summary_opt_tok,
-                keywords: #keywords_opt_tok,
-                errors: #errors_opt_tok,
-                related: #related_opt_tok,
-                introduced: #introduced_opt_tok,
-                status: #status_opt_tok,
-                examples: #examples_opt_tok,
-            }
+    let builtin_expr = quote! {
+        runmat_builtins::BuiltinFunction::new(
+            #name_str,
+            #summary_tok,
+            #category_tok,
+            "",
+            "",
+            vec![#(#inferred_param_types),*],
+            #inferred_return_type,
+            #wrapper_ident,
+            #accel_slice,
+            #sink_bool,
+        )
+    };
+
+    let doc_expr = quote! {
+        runmat_builtins::BuiltinDoc {
+            name: #name_str,
+            category: #category_opt_tok,
+            summary: #summary_opt_tok,
+            keywords: #keywords_opt_tok,
+            errors: #errors_opt_tok,
+            related: #related_opt_tok,
+            introduced: #introduced_opt_tok,
+            status: #status_opt_tok,
+            examples: #examples_opt_tok,
         }
     };
 
+    let register_native = quote! {
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #builtin_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #doc_expr }
+    };
+    append_wasm_block(quote! {
+        runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr);
+        runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr);
+    });
+
     TokenStream::from(quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #func
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #wrapper
-        #register
+        #register_native
     })
 }
 
@@ -333,22 +352,245 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let item = parse_macro_input!(input as syn::Item);
 
-    let register = {
-        quote! {
-            #[allow(non_upper_case_globals)]
-            runmat_builtins::inventory::submit! {
-                runmat_builtins::Constant {
-                    name: #name,
-                    value: runmat_builtins::Value::Num(#value),
-                }
-            }
+    let constant_expr = quote! {
+        runmat_builtins::Constant {
+            name: #name,
+            value: runmat_builtins::Value::Num(#value),
         }
     };
 
+    let register_native = quote! {
+        #[cfg(not(target_arch = "wasm32"))]
+        #[allow(non_upper_case_globals)]
+        runmat_builtins::inventory::submit! { #constant_expr }
+    };
+
+    append_wasm_block(quote! {
+        runmat_builtins::wasm_registry::submit_constant(#constant_expr);
+    });
+
     TokenStream::from(quote! {
         #item
-        #register
+        #register_native
     })
+}
+
+struct RegisterConstantArgs {
+    name: LitStr,
+    value: Expr,
+}
+
+impl syn::parse::Parse for RegisterConstantArgs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let name: LitStr = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        let value: Expr = input.parse()?;
+        if input.peek(syn::Token![,]) {
+            input.parse::<syn::Token![,]>()?;
+        }
+        Ok(RegisterConstantArgs { name, value })
+    }
+}
+
+#[proc_macro]
+pub fn register_constant(input: TokenStream) -> TokenStream {
+    let RegisterConstantArgs { name, value } = parse_macro_input!(input as RegisterConstantArgs);
+    let constant_expr = quote! {
+        runmat_builtins::Constant {
+            name: #name,
+            value: #value,
+        }
+    };
+    append_wasm_block(quote! {
+        runmat_builtins::wasm_registry::submit_constant(#constant_expr);
+    });
+    TokenStream::from(quote! {
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #constant_expr }
+    })
+}
+
+struct RegisterSpecAttrArgs {
+    spec_expr: Option<Expr>,
+}
+
+impl Parse for RegisterSpecAttrArgs {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut spec_expr = None;
+        while !input.is_empty() {
+            let ident: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            if ident == "spec" {
+                spec_expr = Some(input.parse()?);
+            } else {
+                return Err(syn::Error::new(ident.span(), "unknown attribute argument"));
+            }
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(Self { spec_expr })
+    }
+}
+
+struct RegisterDocAttrArgs {
+    name: Expr,
+    text: Option<Expr>,
+}
+
+impl Parse for RegisterDocAttrArgs {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut name = None;
+        let mut text = None;
+        while !input.is_empty() {
+            let ident: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            if ident == "name" {
+                name = Some(input.parse()?);
+            } else if ident == "text" {
+                text = Some(input.parse()?);
+            } else {
+                return Err(syn::Error::new(ident.span(), "unknown attribute argument"));
+            }
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            name: name.ok_or_else(|| input.error("missing `name` argument"))?,
+            text,
+        })
+    }
+}
+
+#[proc_macro_attribute]
+pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterSpecAttrArgs);
+    let RegisterSpecAttrArgs { spec_expr } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let spec_for_native = spec_tokens.clone();
+    append_wasm_block(quote! {
+        crate::builtins::common::spec::wasm_registry::submit_gpu_spec(#spec_tokens);
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #[cfg(not(target_arch = "wasm32"))]
+        inventory::submit! {
+            crate::builtins::common::spec::GpuSpecInventory { spec: &#spec_for_native }
+        }
+    };
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterSpecAttrArgs);
+    let RegisterSpecAttrArgs { spec_expr } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let spec_for_native = spec_tokens.clone();
+    append_wasm_block(quote! {
+        crate::builtins::common::spec::wasm_registry::submit_fusion_spec(#spec_tokens);
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #[cfg(not(target_arch = "wasm32"))]
+        inventory::submit! {
+            crate::builtins::common::spec::FusionSpecInventory { spec: &#spec_for_native }
+        }
+    };
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn register_doc_text(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterDocAttrArgs);
+    let RegisterDocAttrArgs { name, text } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let name_tokens = quote! { #name };
+    let text_tokens = text.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let wasm_name = name_tokens.clone();
+    let wasm_text = text_tokens.clone();
+    append_wasm_block(quote! {
+                {
+            const ENTRY: crate::builtins::common::spec::DocTextInventory =
+                crate::builtins::common::spec::DocTextInventory {
+                    name: #wasm_name,
+                    text: #wasm_text,
+                };
+            crate::builtins::common::spec::wasm_registry::submit_doc_text(&ENTRY);
+        }
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
+        inventory::submit! {
+            crate::builtins::common::spec::DocTextInventory { name: #name_tokens, text: #text_tokens }
+        }
+    };
+    expanded.into()
+}
+
+fn append_wasm_block(block: proc_macro2::TokenStream) {
+    if !building_for_wasm_target() {
+        return;
+    }
+    let path = match wasm_registry_path() {
+        Some(p) => p,
+        None => return,
+    };
+    let _guard = wasm_registry_lock().lock().unwrap();
+    let mut contents = fs::read_to_string(path).unwrap_or_else(|_| "{\n}\n".to_string());
+    let insertion = format!("    {}\n", block);
+    if let Some(pos) = contents.rfind('}') {
+        contents.insert_str(pos, &insertion);
+    } else {
+        contents.push_str(&insertion);
+        contents.push_str("}\n");
+    }
+    fs::write(path, contents).expect("failed to update wasm registry file");
+}
+
+fn building_for_wasm_target() -> bool {
+    matches!(
+        std::env::var("CARGO_CFG_TARGET_ARCH"),
+        Ok(ref arch) if arch == "wasm32"
+    )
+}
+
+fn wasm_registry_path() -> Option<&'static PathBuf> {
+    WASM_REGISTRY_PATH
+        .get_or_init(workspace_registry_path)
+        .as_ref()
+}
+
+fn wasm_registry_lock() -> &'static Mutex<()> {
+    WASM_REGISTRY_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn workspace_registry_path() -> Option<PathBuf> {
+    let mut dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
+    loop {
+        if dir.join("Cargo.lock").exists() {
+            return Some(dir.join("target").join("runmat_wasm_registry.rs"));
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum

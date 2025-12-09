@@ -52,7 +52,7 @@ crates/runmat-runtime/
 
 ## GPU & Fusion Spec Types
 - Authoritative implementations of types live in `crates/runmat-runtime/src/builtins/common/spec.rs`. The Function Manager links against the same module to stay in sync.
-- `register_builtin_*` macros submit the specs into inventory so Accelerate and the Function Manager can discover them.
+- Spec constants must carry `#[runmat_macros::register_gpu_spec]` / `#[runmat_macros::register_fusion_spec]` so Accelerate and the Function Manager can discover them (inventory on native targets, generated registry on wasm).
 - Provider hooks map to methods exposed by `runmat-accelerate-api`. For reductions, add `ProviderHook::Reduction { name: "reduce_sum" }`.
 - `notes` must stay concise (one or two sentences) and focus on actionable implementation details: provider prerequisites, fallbacks, precision caveats, or residency expectations. Avoid repeating long-form documentation that already exists in `DOC_MD`.
 

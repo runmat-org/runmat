@@ -5,16 +5,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
 use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "orderfields")]
 pub const DOC_MD: &str = r#"---
 title: "orderfields"
 category: "structs/core"
@@ -190,6 +188,7 @@ Only the top-level struct passed to `orderfields` is reordered. Nested structs r
 - Found a behavioural mismatch? Please open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "orderfields",
     op_kind: GpuOpKind::Custom("orderfields"),
@@ -205,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata manipulation; struct values that live on the GPU remain resident.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "orderfields",
     shape: ShapeRequirements::Any,
@@ -216,11 +214,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Reordering fields is a metadata operation and does not participate in fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("orderfields", DOC_MD);
 
 #[runtime_builtin(
     name = "orderfields",
@@ -570,7 +563,6 @@ mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn field_order(struct_value: &StructValue) -> Vec<String> {
@@ -882,7 +874,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

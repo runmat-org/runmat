@@ -6,14 +6,12 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "any")]
 pub const DOC_MD: &str = r#"---
 title: "any"
 category: "math/reduction"
@@ -197,6 +195,7 @@ Providers may expose specialised OR-reduction kernels (`reduce_any_dim`, `reduce
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "any",
     op_kind: GpuOpKind::Reduction,
@@ -219,8 +218,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side OR reductions; runtimes gather to host when hooks are unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "any",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -238,11 +236,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion reductions short-circuit on the first nonzero (or NaN) element; providers can substitute native kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("any", DOC_MD);
 
 #[runtime_builtin(
     name = "any",
@@ -1075,7 +1068,6 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

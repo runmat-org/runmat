@@ -16,9 +16,7 @@ use super::surf::{build_surface, build_surface_gpu_plot};
 use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "surfc")]
 pub const DOC_MD: &str = r#"---
 title: "surfc"
 category: "plotting"
@@ -50,9 +48,6 @@ RunMat reuses the same surface renderer as `surf` and complements it with GPU-ge
 - Single-precision gpuArrays stream directly into the shared WebGPU renderer.
 - Double-precision data falls back to the CPU path until SHADER_F64 is available.
 "#;
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("surfc", DOC_MD);
 
 #[runtime_builtin(
     name = "surfc",

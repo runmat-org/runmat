@@ -11,10 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "toc")]
 pub const DOC_MD: &str = r#"---
 title: "toc"
 category: "timing"
@@ -149,6 +146,7 @@ resolution depends on your operating system.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "toc",
     op_kind: GpuOpKind::Custom("timer"),
@@ -164,8 +162,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for toc.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "toc",
     shape: ShapeRequirements::Any,
@@ -175,11 +172,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Timing builtins execute eagerly on the host and do not participate in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("toc", DOC_MD);
 
 const ERR_NO_MATCHING_TIC: &str = "MATLAB:toc:NoMatchingTic";
 const ERR_INVALID_HANDLE: &str = "MATLAB:toc:InvalidTimerHandle";
@@ -221,7 +213,6 @@ mod tests {
     use crate::builtins::timing::tic::{encode_instant, record_tic, take_latest_start, TEST_GUARD};
     use std::time::Duration;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn clear_tic_stack() {
@@ -309,7 +300,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);

@@ -15,9 +15,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const PI: f64 = std::f64::consts::PI;
 const SQRT_TWO_PI: f64 = 2.506_628_274_631_000_5;
@@ -36,6 +33,7 @@ const LANCZOS_COEFFS: [f64; 8] = [
 ];
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "gamma")]
 pub const DOC_MD: &str = r#"---
 title: "gamma"
 category: "math/elementwise"
@@ -207,6 +205,7 @@ the host; GPU prototypes must be real.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gamma",
     op_kind: GpuOpKind::Elementwise,
@@ -223,8 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute gamma directly on device buffers via unary_gamma; runtimes gather to the host when the hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gamma",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -234,11 +232,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner currently falls back to host evaluation; providers may supply specialised kernels in the future.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gamma", DOC_MD);
 
 #[runtime_builtin(
     name = "gamma",
@@ -787,7 +780,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn gamma_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

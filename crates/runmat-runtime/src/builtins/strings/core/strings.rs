@@ -8,9 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
@@ -20,6 +18,7 @@ const SIZE_NUMERIC_ERR: &str = "size arguments must be numeric scalars or vector
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = FN_NAME)]
 pub const DOC_MD: &str = r#"---
 title: "strings"
 category: "strings/core"
@@ -206,6 +205,7 @@ Yes. `strings(0)` returns the same 0-by-0 empty string array as `string.empty`.
 `string`, `char`, `zeros`, `string.empty`
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: FN_NAME,
     op_kind: GpuOpKind::Custom("array_creation"),
@@ -221,8 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; size arguments pulled from the GPU are gathered before allocation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: FN_NAME,
     shape: ShapeRequirements::Any,
@@ -232,11 +231,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Preallocates host string arrays; no fusion-supported kernels are generated.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(FN_NAME, DOC_MD);
 
 struct ParsedStrings {
     shape: Vec<usize>,
@@ -788,7 +782,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

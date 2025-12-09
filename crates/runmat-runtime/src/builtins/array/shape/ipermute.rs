@@ -14,14 +14,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "ipermute")]
 pub const DOC_MD: &str = r#"---
 title: "ipermute"
 category: "array/shape"
@@ -175,6 +173,7 @@ ans = logical 1
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ipermute",
     op_kind: GpuOpKind::Custom("permute"),
@@ -196,8 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the same provider permute hook as `permute`; falls back to gather→permute→upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ipermute",
     shape: ShapeRequirements::Any,
@@ -207,11 +205,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ipermute", DOC_MD);
 
 #[runtime_builtin(
     name = "ipermute",
@@ -425,7 +418,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn ipermute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

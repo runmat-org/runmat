@@ -9,7 +9,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -18,9 +17,7 @@ use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "mesh")]
 pub const DOC_MD: &str = r#"---
 title: "mesh"
 category: "plotting"
@@ -54,6 +51,7 @@ mode enabled and no fill, matching MATLAB's default mesh aesthetics.
 - Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather automatically.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mesh",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -69,8 +67,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Wireframe rendering happens on the host/WebGPU path.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mesh",
     shape: ShapeRequirements::Any,
@@ -80,11 +77,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "mesh terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mesh", DOC_MD);
 
 #[runtime_builtin(
     name = "mesh",

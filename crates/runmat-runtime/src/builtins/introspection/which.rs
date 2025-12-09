@@ -20,12 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    dispatcher::gather_if_needed, make_cell, register_builtin_fusion_spec,
-    register_builtin_gpu_spec,
-};
+use crate::{dispatcher::gather_if_needed, make_cell};
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
@@ -33,6 +28,7 @@ const ERROR_NAME_ARG: &str = "which: name must be a character vector or string s
 const ERROR_OPTION_ARG: &str = "which: option must be a character vector or string scalar";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "which")]
 pub const DOC_MD: &str = r#"---
 title: "which"
 category: "introspection"
@@ -161,6 +157,7 @@ Expected output (example):
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "which",
     op_kind: GpuOpKind::Custom("io"),
@@ -177,8 +174,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "which",
     shape: ShapeRequirements::Any,
@@ -188,11 +184,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "I/O lookup; not eligible for fusion. Metadata registered for diagnostics.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("which", DOC_MD);
 
 #[runtime_builtin(
     name = "which",
@@ -747,7 +738,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

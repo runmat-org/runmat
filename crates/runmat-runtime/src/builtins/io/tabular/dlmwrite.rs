@@ -1,13 +1,16 @@
 //! MATLAB-compatible `dlmwrite` builtin for delimiter-separated exports.
 
-use std::ffi::CString;
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-
-use libc::{c_char, size_t};
+#[cfg(not(target_arch = "wasm32"))]
+use core::ffi::{c_char, c_int};
+#[cfg(not(target_arch = "wasm32"))]
+use libc;
 use runmat_builtins::{Tensor, Value};
 use runmat_filesystem::{self as vfs, File, OpenOptions};
 use runmat_macros::runtime_builtin;
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::CString;
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -15,11 +18,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "dlmwrite")]
 pub const DOC_MD: &str = r#"---
 title: "dlmwrite"
 category: "io/tabular"
@@ -200,6 +202,7 @@ Prefer `writematrix` for new code. Use `dlmwrite` only when maintaining legacy s
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmwrite",
     op_kind: GpuOpKind::Custom("io-dlmwrite"),
@@ -215,8 +218,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before formatting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dlmwrite",
     shape: ShapeRequirements::Any,
@@ -226,11 +228,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not eligible for fusion; performs synchronous file I/O.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("dlmwrite", DOC_MD);
 
 #[runtime_builtin(
     name = "dlmwrite",
@@ -795,6 +792,7 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, Strin
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn c_format(value: f64, spec: &str) -> Result<String, String> {
     let fmt = CString::new(spec.as_bytes()).map_err(|_| {
         "dlmwrite: precision format must not contain embedded null bytes".to_string()
@@ -805,7 +803,7 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
         let written = unsafe {
             platform_snprintf(
                 buffer.as_mut_ptr() as *mut c_char,
-                size as size_t,
+                size,
                 fmt.as_ptr(),
                 value,
             )
@@ -824,39 +822,382 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_arch = "wasm32")]
+fn c_format(value: f64, spec: &str) -> Result<String, String> {
+    wasm_format_float(value, spec)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
-    size: size_t,
+    size: usize,
     fmt: *const c_char,
     value: f64,
-) -> libc::c_int {
-    libc::snprintf(buffer, size, fmt, value)
+) -> c_int {
+    libc::snprintf(buffer, size as libc::size_t, fmt, value)
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
 extern "C" {
-    fn _snprintf(buffer: *mut c_char, size: size_t, fmt: *const c_char, ...) -> libc::c_int;
+    fn _snprintf(buffer: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
-    size: size_t,
+    size: usize,
     fmt: *const c_char,
     value: f64,
-) -> libc::c_int {
+) -> c_int {
     _snprintf(buffer, size, fmt, value)
 }
 
 #[cfg(all(windows, target_env = "gnu"))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
-    size: size_t,
+    size: usize,
     fmt: *const c_char,
     value: f64,
-) -> libc::c_int {
-    libc::snprintf(buffer, size, fmt, value)
+) -> c_int {
+    libc::snprintf(buffer, size as libc::size_t, fmt, value)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn wasm_format_float(value: f64, spec: &str) -> Result<String, String> {
+    let parsed = ParsedFormat::parse(spec)?;
+    Ok(parsed.render(value))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FloatSpecifier {
+    Fixed,
+    Exponent,
+    General,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SignFlag {
+    None,
+    Plus,
+    Space,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy, Debug)]
+struct ParsedFormat {
+    specifier: FloatSpecifier,
+    uppercase: bool,
+    alternate: bool,
+    sign: SignFlag,
+    left_adjust: bool,
+    zero_pad: bool,
+    width: Option<usize>,
+    precision: Option<usize>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl ParsedFormat {
+    fn parse(input: &str) -> Result<Self, String> {
+        use std::iter::Peekable;
+        use std::str::Chars;
+
+        fn parse_number(
+            chars: &mut Peekable<Chars<'_>>,
+            label: &str,
+        ) -> Result<Option<usize>, String> {
+            let mut value: usize = 0;
+            let mut saw_digit = false;
+            while let Some(&ch) = chars.peek() {
+                if ch.is_ascii_digit() {
+                    saw_digit = true;
+                    value = value
+                        .checked_mul(10)
+                        .and_then(|v| v.checked_add((ch as u8 - b'0') as usize))
+                        .ok_or_else(|| {
+                            format!("dlmwrite: {label} too large in precision format")
+                        })?;
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(if saw_digit { Some(value) } else { None })
+        }
+
+        let mut chars = input.chars().peekable();
+        match chars.next() {
+            Some('%') => {}
+            _ => {
+                return Err("dlmwrite: precision format must start with '%'".to_string());
+            }
+        }
+
+        let mut left_adjust = false;
+        let mut sign = SignFlag::None;
+        let mut zero_pad = false;
+        let mut alternate = false;
+        while let Some(&ch) = chars.peek() {
+            match ch {
+                '-' => {
+                    left_adjust = true;
+                    zero_pad = false;
+                    chars.next();
+                }
+                '+' => {
+                    sign = SignFlag::Plus;
+                    chars.next();
+                }
+                ' ' => {
+                    if sign != SignFlag::Plus {
+                        sign = SignFlag::Space;
+                    }
+                    chars.next();
+                }
+                '0' => {
+                    if !left_adjust {
+                        zero_pad = true;
+                    }
+                    chars.next();
+                }
+                '#' => {
+                    alternate = true;
+                    chars.next();
+                }
+                _ => break,
+            }
+        }
+
+        let width = parse_number(&mut chars, "field width")?;
+        let precision = if matches!(chars.peek(), Some('.')) {
+            chars.next();
+            parse_number(&mut chars, "precision")?.or(Some(0))
+        } else {
+            None
+        };
+
+        if matches!(chars.peek(), Some('l' | 'L' | 'h')) {
+            return Err(
+                "dlmwrite: length modifiers are not supported in precision formats".to_string(),
+            );
+        }
+
+        let spec_ch = chars
+            .next()
+            .ok_or_else(|| "dlmwrite: incomplete precision format".to_string())?;
+        if chars.next().is_some() {
+            return Err("dlmwrite: unexpected trailing characters in precision format".to_string());
+        }
+
+        let (specifier, uppercase) = match spec_ch {
+            'f' => (FloatSpecifier::Fixed, false),
+            'F' => (FloatSpecifier::Fixed, true),
+            'e' => (FloatSpecifier::Exponent, false),
+            'E' => (FloatSpecifier::Exponent, true),
+            'g' => (FloatSpecifier::General, false),
+            'G' => (FloatSpecifier::General, true),
+            other => {
+                return Err(format!(
+                    "dlmwrite: unsupported precision format specifier '{other}'"
+                ));
+            }
+        };
+
+        Ok(Self {
+            specifier,
+            uppercase,
+            alternate,
+            sign,
+            left_adjust,
+            zero_pad: zero_pad && !left_adjust,
+            width,
+            precision,
+        })
+    }
+
+    fn render(&self, value: f64) -> String {
+        let negative = value.is_sign_negative();
+        let magnitude = if negative { -value } else { value };
+        let mut body = match self.specifier {
+            FloatSpecifier::Fixed => {
+                format_fixed_body(magnitude, self.precision.unwrap_or(6), self.alternate)
+            }
+            FloatSpecifier::Exponent => format_exponential_body(
+                magnitude,
+                self.precision.unwrap_or(6),
+                self.alternate,
+                self.uppercase,
+            ),
+            FloatSpecifier::General => format_general_body(
+                magnitude,
+                self.precision.unwrap_or(6),
+                self.alternate,
+                self.uppercase,
+            ),
+        };
+        if self.uppercase {
+            body.make_ascii_uppercase();
+        }
+
+        let mut prefix = String::new();
+        if negative {
+            prefix.push('-');
+        } else {
+            match self.sign {
+                SignFlag::Plus => prefix.push('+'),
+                SignFlag::Space => prefix.push(' '),
+                SignFlag::None => {}
+            }
+        }
+
+        let total_len = prefix.len() + body.len();
+        if let Some(width) = self.width {
+            if width > total_len {
+                let pad = width - total_len;
+                if self.left_adjust {
+                    let mut result = prefix;
+                    result.push_str(&body);
+                    result.extend(std::iter::repeat(' ').take(pad));
+                    return result;
+                } else if self.zero_pad {
+                    let mut result = String::with_capacity(width);
+                    result.push_str(&prefix);
+                    result.extend(std::iter::repeat('0').take(pad));
+                    result.push_str(&body);
+                    return result;
+                } else {
+                    let mut result = String::with_capacity(width);
+                    result.extend(std::iter::repeat(' ').take(pad));
+                    result.push_str(&prefix);
+                    result.push_str(&body);
+                    return result;
+                }
+            }
+        }
+
+        let mut result = prefix;
+        result.push_str(&body);
+        result
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn format_fixed_body(value: f64, precision: usize, alternate: bool) -> String {
+    let mut s = format!("{:.*}", precision, value);
+    if precision == 0 && alternate && !s.contains('.') {
+        s.push('.');
+    }
+    s
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn format_exponential_body(
+    value: f64,
+    precision: usize,
+    alternate: bool,
+    uppercase: bool,
+) -> String {
+    let mut s = format!("{:.*e}", precision, value);
+    if uppercase {
+        s.make_ascii_uppercase();
+    }
+    if precision == 0 && alternate {
+        insert_decimal_point(&mut s);
+    }
+    s
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase: bool) -> String {
+    let effective_precision = precision.max(1);
+    let abs_val = value.abs();
+    if abs_val == 0.0 {
+        return if alternate {
+            let mut s = "0.".to_string();
+            s.extend(std::iter::repeat('0').take(effective_precision - 1));
+            s
+        } else {
+            "0".to_string()
+        };
+    }
+
+    let exponent = abs_val.log10().floor() as i32;
+    let use_exponent = exponent < -4 || exponent >= effective_precision as i32;
+    let mut s = if use_exponent {
+        let frac = effective_precision.saturating_sub(1);
+        let mut out = format!("{:.*e}", frac, abs_val);
+        if uppercase {
+            out.make_ascii_uppercase();
+        }
+        out
+    } else {
+        let frac = {
+            let diff = effective_precision as isize - (exponent + 1) as isize;
+            if diff < 0 {
+                0
+            } else {
+                diff as usize
+            }
+        };
+        let mut out = format!("{:.*}", frac, abs_val);
+        if uppercase {
+            out.make_ascii_uppercase();
+        }
+        out
+    };
+
+    if alternate {
+        insert_decimal_point(&mut s);
+    } else {
+        trim_trailing_zeros(&mut s);
+    }
+    s
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn insert_decimal_point(s: &mut String) {
+    if s.contains('.') {
+        return;
+    }
+    if let Some(idx) = find_exponent_index(s) {
+        s.insert(idx, '.');
+    } else {
+        s.push('.');
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn trim_trailing_zeros(s: &mut String) {
+    if let Some(idx) = find_exponent_index(s) {
+        let exponent = s[idx..].to_string();
+        let mut mantissa = s[..idx].to_string();
+        trim_fraction(&mut mantissa);
+        s.clear();
+        s.push_str(&mantissa);
+        s.push_str(&exponent);
+    } else {
+        trim_fraction(s);
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn trim_fraction(s: &mut String) {
+    if let Some(dot_idx) = s.find('.') {
+        let mut idx = s.len();
+        while idx > dot_idx + 1 && matches!(s.as_bytes().get(idx - 1), Some(b'0')) {
+            idx -= 1;
+        }
+        if idx == dot_idx + 1 {
+            idx -= 1;
+        }
+        s.truncate(idx);
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn find_exponent_index(s: &str) -> Option<usize> {
+    s.find('e').or_else(|| s.find('E'))
 }
 
 #[cfg(test)]
@@ -891,6 +1232,21 @@ mod tests {
             ext
         ));
         path
+    }
+
+    #[test]
+    fn wasm_precision_parser_handles_common_specs() {
+        fn fmt(value: f64, spec: &str) -> String {
+            super::wasm_format_float(value, spec).expect("formatting failed")
+        }
+
+        assert_eq!(fmt(12.3456, "%.2f"), "12.35");
+        assert_eq!(fmt(-12.3456, "%+08.1f"), "-00012.3");
+        assert_eq!(fmt(0.001234, "%.4g"), "0.001234");
+        assert_eq!(fmt(12345.0, "%.3g"), "1.23e+04");
+        assert_eq!(fmt(1.5, "%#.0f"), "2.");
+        assert_eq!(fmt(1.5, "%#.2e"), "1.50e+00");
+        assert_eq!(fmt(1.5, "%#.2G"), "1.5E+00");
     }
 
     fn platform_newline() -> &'static str {
@@ -1210,7 +1566,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

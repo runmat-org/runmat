@@ -1,3 +1,4 @@
+#[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use runmat_plot::plots::Figure;
 
@@ -51,13 +52,11 @@ mod wasm {
         F: FnOnce(&mut WebRenderer) -> Result<R, runmat_plot::web::WebRendererError>,
     {
         WEB_RENDERERS.with(|map_cell| {
-            if let Some(result) = map_cell
-                .borrow_mut()
-                .get_mut(&handle)
-                .map(|renderer| f(renderer).map_err(|err| format!("Plotting failed: {err}")))
-            {
-                return result;
+            let mut map = map_cell.borrow_mut();
+            if let Some(renderer) = map.get_mut(&handle) {
+                return f(renderer).map_err(|err| format!("Plotting failed: {err}"));
             }
+            drop(map);
             DEFAULT_RENDERER.with(|default_cell| {
                 let mut default = default_cell.borrow_mut();
                 let renderer = default.as_mut().ok_or_else(|| {

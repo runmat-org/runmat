@@ -11,12 +11,10 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::NumericDType;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "zeros")]
 pub const DOC_MD: &str = r#"---
 title: "zeros"
 category: "array/creation"
@@ -182,6 +180,7 @@ Absolutely. Preallocating with `zeros` (or `ones`) and then filling in values is
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "zeros",
     op_kind: GpuOpKind::Custom("generator"),
@@ -200,8 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device zeros when providers expose dedicated hooks; otherwise falls back to host upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
     shape: ShapeRequirements::Any,
@@ -222,11 +220,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner materialises zeros as literal constants; providers may substitute inexpensive fill kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("zeros", DOC_MD);
 
 #[runtime_builtin(
     name = "zeros",
@@ -750,7 +743,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

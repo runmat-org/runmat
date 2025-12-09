@@ -8,13 +8,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "strrep")]
 pub const DOC_MD: &str = r#"---
 title: "strrep"
 category: "strings/transform"
@@ -188,6 +185,7 @@ and returning a cell array of the same shape.
 [replace](./replace), [regexprep](../../regex/regexprep), [string](../core/string), [char](../core/char), [join](./join)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strrep",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -203,8 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered before replacements are applied.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strrep",
     shape: ShapeRequirements::Any,
@@ -214,11 +211,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "String transformation builtin; marked as a sink so fusion skips GPU residency.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strrep", DOC_MD);
 
 const ARGUMENT_TYPE_ERROR: &str =
     "strrep: first argument must be a string array, character array, or cell array of character vectors";
@@ -356,7 +348,6 @@ fn strrep_cell_element(value: &Value, old: &str, new: &str) -> Result<Value, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -661,7 +652,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_smoke() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

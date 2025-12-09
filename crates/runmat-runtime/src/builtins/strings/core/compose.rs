@@ -9,11 +9,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "compose")]
 pub const DOC_MD: &str = r#"---
 title: "compose"
 category: "strings/core"
@@ -181,6 +180,7 @@ Yes, as long as non-scalar arguments all share the same number of elements or ma
 `string`, `sprintf`, `strcat`, `join`
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "compose",
     op_kind: GpuOpKind::Custom("format"),
@@ -196,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting always executes on the CPU; GPU tensors are gathered before substitution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "compose",
     shape: ShapeRequirements::Any,
@@ -207,11 +206,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Formatting builtin; not eligible for fusion and materialises host string arrays.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("compose", DOC_MD);
 
 #[runtime_builtin(
     name = "compose",
@@ -356,7 +350,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

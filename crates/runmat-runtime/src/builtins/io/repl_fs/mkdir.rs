@@ -11,9 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -25,6 +23,7 @@ const ERR_FOLDER_ARG: &str = "mkdir: folder name must be a character vector or s
 const ERR_PARENT_ARG: &str = "mkdir: parent folder must be a character vector or string scalar";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "mkdir")]
 pub const DOC_MD: &str = r#"---
 title: "mkdir"
 category: "io/repl_fs"
@@ -174,6 +173,7 @@ status =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mkdir",
     op_kind: GpuOpKind::Custom("io"),
@@ -190,8 +190,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. GPU-resident path arguments are gathered automatically before directory creation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mkdir",
     shape: ShapeRequirements::Any,
@@ -201,11 +200,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Filesystem side-effects terminate fusion; metadata registered for completeness.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mkdir", DOC_MD);
 
 #[runtime_builtin(
     name = "mkdir",
@@ -580,7 +574,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

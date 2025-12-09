@@ -18,13 +18,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::gather_if_needed;
 use crate::workspace;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "save")]
 pub const DOC_MD: &str = r#"---
 title: "save"
 category: "io/mat"
@@ -160,6 +158,7 @@ No. Parent folders must already exist; otherwise the builtin raises an error fro
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "save",
     op_kind: GpuOpKind::Custom("io-save"),
@@ -175,8 +174,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host I/O; no GPU execution path is involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "save",
     shape: ShapeRequirements::Any,
@@ -186,11 +184,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Sink operation that terminates fusion graphs before serialisation.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("save", DOC_MD);
 
 #[runtime_builtin(
     name = "save",
@@ -1278,7 +1271,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;
         let blocks = test_support::doc_examples(DOC_MD);

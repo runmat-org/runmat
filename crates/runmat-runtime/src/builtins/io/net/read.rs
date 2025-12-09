@@ -9,12 +9,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:read:InvalidTcpClient";
 const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:read:NotConnected";
@@ -25,6 +22,7 @@ const MESSAGE_ID_INVALID_DATATYPE: &str = "MATLAB:read:InvalidDataType";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:read:InternalError";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "read")]
 pub const DOC_MD: &str = r#"---
 title: "read"
 category: "io/net"
@@ -174,6 +172,7 @@ assuming UTF-8 (non-UTF-8 sequences fall back to byte-wise decoding).
 - Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with repro steps if you observe a behavioural difference from MATLAB.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "read",
     op_kind: GpuOpKind::Custom("network"),
@@ -189,8 +188,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "read",
     shape: ShapeRequirements::Any,
@@ -200,11 +198,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Networking builtin executed eagerly on the CPU.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("read", DOC_MD);
 
 #[runtime_builtin(
     name = "read",
@@ -744,7 +737,6 @@ impl Drop for NonBlockingGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
@@ -851,7 +843,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

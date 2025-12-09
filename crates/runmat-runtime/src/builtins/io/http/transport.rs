@@ -1,3 +1,5 @@
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use std::time::Duration;
 
 use encoding_rs::Encoding;

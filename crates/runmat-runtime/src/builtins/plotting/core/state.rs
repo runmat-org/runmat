@@ -3,7 +3,10 @@ use runmat_plot::plots::{Figure, LineStyle};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::MutexGuard;
 use std::thread_local;
 
 use super::common::default_figure;
@@ -137,7 +140,42 @@ impl Default for PlotRegistry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static REGISTRY: RefCell<PlotRegistry> = RefCell::new(PlotRegistry::default());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type RegistryBackendGuard<'a> = MutexGuard<'a, PlotRegistry>;
+#[cfg(target_arch = "wasm32")]
+type RegistryBackendGuard<'a> = std::cell::RefMut<'a, PlotRegistry>;
+
+struct PlotRegistryGuard<'a> {
+    inner: RegistryBackendGuard<'a>,
+}
+
+impl<'a> PlotRegistryGuard<'a> {
+    fn new(inner: RegistryBackendGuard<'a>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<'a> Deref for PlotRegistryGuard<'a> {
+    type Target = PlotRegistry;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<'a> DerefMut for PlotRegistryGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 const AXES_INDEX_BITS: u32 = 20;
 const AXES_INDEX_MASK: u64 = (1 << AXES_INDEX_BITS) - 1;
@@ -263,11 +301,26 @@ pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureErr
     Ok((FigureHandle::from(figure_id as u32), axes_index))
 }
 
-fn registry() -> MutexGuard<'static, PlotRegistry> {
-    REGISTRY
+#[cfg(not(target_arch = "wasm32"))]
+fn registry() -> PlotRegistryGuard<'static> {
+    let guard = REGISTRY
         .get_or_init(|| Mutex::new(PlotRegistry::default()))
         .lock()
-        .expect("plot registry poisoned")
+        .expect("plot registry poisoned");
+    PlotRegistryGuard::new(guard)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn registry() -> PlotRegistryGuard<'static> {
+    REGISTRY.with(|cell| {
+        let guard = cell.borrow_mut();
+        // SAFETY: the thread-local RefCell lives for the program lifetime and the borrow
+        // guard is dropped when PlotRegistryGuard is dropped, so extending the lifetime
+        // to 'static is sound.
+        let guard_static: std::cell::RefMut<'static, PlotRegistry> =
+            unsafe { std::mem::transmute::<std::cell::RefMut<'_, PlotRegistry>, _>(guard) };
+        PlotRegistryGuard::new(guard_static)
+    })
 }
 
 fn get_state_mut<'a>(registry: &'a mut PlotRegistry, handle: FigureHandle) -> &'a mut FigureState {

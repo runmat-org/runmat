@@ -9,12 +9,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use runmat_filesystem as fs;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "fileread")]
 pub const DOC_MD: &str = r#"---
 title: "fileread"
 category: "io/filetext"
@@ -145,6 +144,7 @@ Relative paths are evaluated against the current working directory of the RunMat
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fileread",
     op_kind: GpuOpKind::Custom("io-file-read"),
@@ -160,8 +160,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; acceleration providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fileread",
     shape: ShapeRequirements::Any,
@@ -171,11 +170,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not eligible for fusion; executes as a standalone host operation.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fileread", DOC_MD);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
@@ -382,7 +376,6 @@ mod tests {
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -637,7 +630,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(

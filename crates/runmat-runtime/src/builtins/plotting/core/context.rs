@@ -7,22 +7,47 @@
 //! is initialized; subsequent callers can query [`shared_wgpu_context`] to
 //! determine whether zero-copy rendering is possible.
 
+#[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind, WgpuContextHandle};
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::fmt;
 
 /// Process-wide WGPU context exported by the acceleration provider (if any).
+#[cfg(not(target_arch = "wasm32"))]
 static SHARED_WGPU_CONTEXT: OnceCell<WgpuContextHandle> = OnceCell::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static SHARED_WGPU_CONTEXT: RefCell<Option<WgpuContextHandle>> = RefCell::new(None);
+}
 
 /// Returns the cached shared WGPU context, if one has been installed.
 pub fn shared_wgpu_context() -> Option<WgpuContextHandle> {
-    SHARED_WGPU_CONTEXT.get().cloned()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        SHARED_WGPU_CONTEXT.get().cloned()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        SHARED_WGPU_CONTEXT.with(|cell| cell.borrow().clone())
+    }
 }
 
 /// Install a shared context that was exported out-of-band (e.g. from a host
 /// application that already called `export_context`).
 pub fn install_wgpu_context(context: &WgpuContextHandle) {
-    let _ = SHARED_WGPU_CONTEXT.set(context.clone());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = SHARED_WGPU_CONTEXT.set(context.clone());
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        SHARED_WGPU_CONTEXT.with(|cell| {
+            *cell.borrow_mut() = Some(context.clone());
+        });
+    }
     propagate_to_plot_crate(context);
 }
 
@@ -37,8 +62,7 @@ pub fn ensure_context_from_provider() -> Result<WgpuContextHandle, PlotContextEr
         .ok_or(PlotContextError::Unavailable)?;
     match handle {
         AccelContextHandle::Wgpu(ctx) => {
-            let _ = SHARED_WGPU_CONTEXT.set(ctx.clone());
-            propagate_to_plot_crate(&ctx);
+            install_wgpu_context(&ctx);
             Ok(ctx)
         }
     }

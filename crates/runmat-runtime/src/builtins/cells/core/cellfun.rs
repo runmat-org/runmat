@@ -10,14 +10,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "cellfun")]
 pub const DOC_MD: &str = r#"---
 title: "cellfun"
 category: "cells/core"
@@ -220,6 +216,7 @@ Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write
 - Issue tracker: [RunMat GitHub Issues](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellfun",
     op_kind: GpuOpKind::Custom("host-cell-map"),
@@ -235,8 +232,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host and gathers GPU-resident inputs before evaluating callbacks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellfun",
     shape: ShapeRequirements::Any,
@@ -246,11 +242,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Callback execution happens on the host; fusion planners should treat cellfun as a fusion barrier.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cellfun", DOC_MD);
 
 #[runtime_builtin(
     name = "cellfun",
@@ -1193,7 +1184,6 @@ mod tests {
         Ok(value)
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

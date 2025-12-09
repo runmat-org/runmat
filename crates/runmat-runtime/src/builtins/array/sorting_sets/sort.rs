@@ -15,10 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "sort")]
 pub const DOC_MD: &str = r#"---
 title: "sort"
 category: "array/sorting_sets"
@@ -186,6 +183,7 @@ Yes. Logical inputs are promoted to double precision automatically. Scalars are 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sort",
     op_kind: GpuOpKind::Custom("sort"),
@@ -201,8 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may add a dedicated sort kernel in the future; today tensors are gathered to host memory before sorting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sort",
     shape: ShapeRequirements::Any,
@@ -212,11 +209,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Sorting breaks fusion chains and acts as a residency sink; upstream tensors are gathered to host memory.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sort", DOC_MD);
 
 #[runtime_builtin(
     name = "sort",
@@ -1057,7 +1049,6 @@ mod tests {
         assert_eq!(gpu_indices_tensor.data, cpu_indices_tensor.data);
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

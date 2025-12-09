@@ -2,6 +2,7 @@ use once_cell::sync::OnceCell;
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::IsTerminal;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, Read, Write};
 #[cfg(feature = "interaction-test-hooks")]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,21 +47,21 @@ thread_local! {
         RefCell::new(None);
 }
 
-#[cfg(feature = "interaction-test-hooks")]
+#[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
 static FORCE_INTERACTIVE_STDIN: AtomicBool = AtomicBool::new(false);
 
-#[cfg(feature = "interaction-test-hooks")]
+#[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
 pub fn force_interactive_stdin_for_tests(enable: bool) {
     FORCE_INTERACTIVE_STDIN.store(enable, Ordering::Relaxed);
 }
 
-#[cfg(not(feature = "interaction-test-hooks"))]
+#[cfg(all(not(feature = "interaction-test-hooks"), not(target_arch = "wasm32")))]
 #[inline]
 fn force_interactive_stdin() -> bool {
     false
 }
 
-#[cfg(feature = "interaction-test-hooks")]
+#[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
 #[inline]
 fn force_interactive_stdin() -> bool {
     FORCE_INTERACTIVE_STDIN.load(Ordering::Relaxed)

@@ -6,6 +6,70 @@ use std::fmt;
 
 use indexmap::IndexMap;
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_registry {
+    use super::{BuiltinDoc, BuiltinFunction, Constant};
+    use once_cell::sync::{Lazy, OnceCell};
+    use std::sync::Mutex;
+
+    static FUNCTIONS: Lazy<Mutex<Vec<&'static BuiltinFunction>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+    static CONSTANTS: Lazy<Mutex<Vec<&'static Constant>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static DOCS: Lazy<Mutex<Vec<&'static BuiltinDoc>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static INIT: OnceCell<()> = OnceCell::new();
+
+    fn ensure_initialized() {
+        INIT.get_or_init(|| {
+            generated::register_all();
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    mod generated {
+        #[allow(dead_code)]
+        pub fn register_all() {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../target/runmat_wasm_registry.rs"
+            ));
+        }
+    }
+
+    fn leak<T>(value: T) -> &'static T {
+        Box::leak(Box::new(value))
+    }
+
+    pub fn submit_builtin_function(func: BuiltinFunction) {
+        let leaked = leak(func);
+        FUNCTIONS.lock().unwrap().push(leaked);
+    }
+
+    pub fn submit_constant(constant: Constant) {
+        let leaked = leak(constant);
+        CONSTANTS.lock().unwrap().push(leaked);
+    }
+
+    pub fn submit_builtin_doc(doc: BuiltinDoc) {
+        let leaked = leak(doc);
+        DOCS.lock().unwrap().push(leaked);
+    }
+
+    pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
+        ensure_initialized();
+        FUNCTIONS.lock().unwrap().clone()
+    }
+
+    pub fn constants() -> Vec<&'static Constant> {
+        ensure_initialized();
+        CONSTANTS.lock().unwrap().clone()
+    }
+
+    pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
+        ensure_initialized();
+        DOCS.lock().unwrap().clone()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(IntValue),
@@ -995,15 +1059,29 @@ impl std::fmt::Debug for Constant {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(BuiltinFunction);
+#[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(Constant);
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
     inventory::iter::<BuiltinFunction>().collect()
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
+    wasm_registry::builtin_functions()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn constants() -> Vec<&'static Constant> {
     inventory::iter::<Constant>().collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn constants() -> Vec<&'static Constant> {
+    wasm_registry::constants()
 }
 
 // ----------------------
@@ -1023,10 +1101,17 @@ pub struct BuiltinDoc {
     pub examples: Option<&'static str>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(BuiltinDoc);
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
     inventory::iter::<BuiltinDoc>().collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
+    wasm_registry::builtin_docs()
 }
 
 // ----------------------

@@ -15,7 +15,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::common::numeric_pair;
 use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
@@ -27,9 +26,7 @@ use super::style::{
 use std::convert::TryFrom;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "stairs")]
 pub const DOC_MD: &str = r#"---
 title: "stairs"
 category: "plotting"
@@ -71,6 +68,7 @@ stairs(t, cumsum(rand(size(t))));
 ```
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "stairs",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -86,8 +84,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stairs plots terminate fusion graphs and render out-of-band.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "stairs",
     shape: ShapeRequirements::Any,
@@ -97,11 +94,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "stairs performs I/O and therefore terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("stairs", DOC_MD);
 
 #[runtime_builtin(
     name = "stairs",

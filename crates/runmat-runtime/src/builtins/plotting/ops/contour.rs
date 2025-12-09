@@ -17,7 +17,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -229,9 +228,7 @@ pub(crate) fn default_level_count() -> usize {
 }
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "contour")]
 pub const DOC_MD: &str = r#"---
 title: "contour"
 category: "plotting"
@@ -290,6 +287,7 @@ contour(x, y, z, 'LevelStep', 0.25, 'LineColor', 'none');
 ```
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contour",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -305,8 +303,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Contour rendering consumes tensors for plotting and terminates fusion graphs.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "contour",
     shape: ShapeRequirements::Any,
@@ -316,11 +313,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "contour performs I/O and stops fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("contour", DOC_MD);
 
 #[runtime_builtin(
     name = "contour",

@@ -13,10 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor::{self, value_to_string};
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "corrcoef")]
 pub const DOC_MD: &str = r#"---
 title: "corrcoef"
 category: "stats/summary"
@@ -180,6 +177,7 @@ Yes. Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "corrcoef",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -195,8 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side corrcoef kernels when rows='all'; other cases fall back to host execution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "corrcoef",
     shape: ShapeRequirements::Any,
@@ -206,11 +203,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Fusion planner treats corrcoef as a non-fusible boundary; GPU execution is provided via a custom provider hook.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("corrcoef", DOC_MD);
 
 #[runtime_builtin(
     name = "corrcoef",
@@ -1003,7 +995,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(

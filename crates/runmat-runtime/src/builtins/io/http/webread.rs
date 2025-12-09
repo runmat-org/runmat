@@ -18,15 +18,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(name = "webread")]
 pub const DOC_MD: &str = r#"---
 title: "webread"
 category: "io/http"
@@ -181,6 +178,7 @@ results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks ope
 [webwrite](./webwrite), [weboptions](./weboptions), [jsondecode](../json/jsondecode), [websave](../filetext/filewrite)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "webread",
     op_kind: GpuOpKind::Custom("http-get"),
@@ -196,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP requests always execute on the CPU; gpuArray inputs are gathered eagerly.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "webread",
     shape: ShapeRequirements::Any,
@@ -207,11 +204,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "webread performs network I/O and terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("webread", DOC_MD);
 
 #[runtime_builtin(
     name = "webread",
@@ -708,7 +700,6 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn spawn_server<F>(handler: F) -> String
@@ -1020,7 +1011,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

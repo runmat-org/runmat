@@ -6,9 +6,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -16,6 +13,7 @@ use runmat_macros::runtime_builtin;
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "kron")]
 pub const DOC_MD: &str = r#"---
 title: "kron"
 category: "array/shape"
@@ -178,6 +176,7 @@ host, computes the product, and re-uploads the result when a provider is availab
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/kron.rs`
 - Found an issue? Please open an issue with a minimal reproduction."#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "kron",
     op_kind: GpuOpKind::Custom("kronecker"),
@@ -193,8 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on-device when the provider implements `kron`; otherwise the runtime gathers inputs, computes on the host, and re-uploads the result when possible.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "kron",
     shape: ShapeRequirements::Any,
@@ -204,11 +202,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("kron", DOC_MD);
 
 #[derive(Clone)]
 enum KronNumericResult {
@@ -781,7 +774,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }

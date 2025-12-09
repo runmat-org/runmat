@@ -8,15 +8,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::interaction;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    call_builtin, gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{call_builtin, gather_if_needed};
 
 const DEFAULT_PROMPT: &str = "Input: ";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "input")]
 pub const DOC_MD: &str = r#"---
 title: "input"
 category: "io"
@@ -97,6 +94,7 @@ Yes. Prompts always flow through the host console/UI. GPU-resident prompt argume
 once before display, and the response itself is always a host value.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "input",
     op_kind: GpuOpKind::Custom("interaction"),
@@ -112,8 +110,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prompts execute on the host. Input text is always delivered via the host handler; GPU tensors are only gathered when used as prompt strings.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "input",
     shape: ShapeRequirements::Any,
@@ -123,11 +120,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Side-effecting builtin; excluded from fusion plans.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("input", DOC_MD);
 
 #[runtime_builtin(name = "input")]
 fn input_builtin(args: Vec<Value>) -> Result<Value, String> {

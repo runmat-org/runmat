@@ -1,7 +1,7 @@
-#[cfg(target_arch = "wasm32")]
-use once_cell::unsync::OnceCell;
 #[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
+#[cfg(target_arch = "wasm32")]
+use once_cell::unsync::OnceCell;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::sync::Arc;

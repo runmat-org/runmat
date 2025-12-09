@@ -7,13 +7,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "erase")]
 pub const DOC_MD: &str = r#"---
 title: "erase"
 category: "strings/transform"
@@ -171,6 +168,7 @@ removal rather than literal substring erasure.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "erase",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -187,8 +185,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before substrings are removed.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "erase",
     shape: ShapeRequirements::Any,
@@ -199,11 +196,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "String manipulation builtin; not eligible for fusion plans and always gathers GPU inputs before execution.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("erase", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "erase: first argument must be a string array, character array, or cell array of character vectors";
@@ -380,7 +372,6 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> Result<Value, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -596,7 +587,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -8,11 +8,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::make_cell;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "regexpi")]
 pub const DOC_MD: &str = r#"---
 title: "regexpi"
 category: "strings/regex"
@@ -181,6 +180,7 @@ that must treat scalar and array inputs uniformly.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexpi",
     op_kind: GpuOpKind::Custom("regex"),
@@ -196,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU inputs are gathered before evaluation and results stay on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "regexpi",
     shape: ShapeRequirements::Any,
@@ -207,11 +206,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control-flow-heavy regex evaluation is not eligible for fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("regexpi", DOC_MD);
 
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
 pub fn evaluate(
@@ -277,7 +271,6 @@ mod tests {
     use super::*;
     use runmat_builtins::{CellArray, StringArray};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -534,7 +527,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

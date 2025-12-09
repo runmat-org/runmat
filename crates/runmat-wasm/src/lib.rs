@@ -324,9 +324,8 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = memoryUsage)]
     pub fn memory_usage(&self) -> Result<JsValue, JsValue> {
-        let stats = capture_memory_usage().map_err(|err| {
-            js_error(&format!("Failed to capture wasm memory usage: {err}"))
-        })?;
+        let stats = capture_memory_usage()
+            .map_err(|err| js_error(&format!("Failed to capture wasm memory usage: {err}")))?;
         serde_wasm_bindgen::to_value(&stats)
             .map_err(|err| js_error(&format!("Failed to serialize memory stats: {err}")))
     }
@@ -1266,10 +1265,7 @@ fn capture_memory_usage() -> Result<MemoryUsagePayload, JsValue> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn capture_memory_usage() -> Result<MemoryUsagePayload, JsValue> {
-    Ok(MemoryUsagePayload {
-        bytes: 0,
-        pages: 0,
-    })
+    Ok(MemoryUsagePayload { bytes: 0, pages: 0 })
 }
 
 fn init_error(code: InitErrorCode, message: impl Into<String>) -> JsValue {

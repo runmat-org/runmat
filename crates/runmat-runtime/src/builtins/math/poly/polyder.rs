@@ -12,13 +12,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{tensor, tensor::tensor_into_value};
 use crate::dispatcher;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "polyder")]
 pub const DOC_MD: &str = r#"---
 title: "polyder"
 category: "math/poly"
@@ -216,6 +214,7 @@ All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB’s defau
 [polyval](./polyval), [polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyder",
     op_kind: GpuOpKind::Custom("polynomial-derivative"),
@@ -235,8 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on-device when providers expose polyder hooks; falls back to the host for complex coefficients or unsupported shapes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyder",
     shape: ShapeRequirements::Any,
@@ -246,11 +244,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Symbolic operation on coefficient vectors; fusion bypasses this builtin.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyder", DOC_MD);
 
 #[runtime_builtin(
     name = "polyder",
@@ -1001,7 +994,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

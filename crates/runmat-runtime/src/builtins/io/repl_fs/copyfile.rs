@@ -13,9 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
@@ -33,6 +31,7 @@ const ERR_FLAG_ARG: &str =
     "copyfile: flag must be the character 'f' supplied as a char vector or string scalar";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "copyfile")]
 pub const DOC_MD: &str = r#"---
 title: "copyfile"
 category: "io/repl_fs"
@@ -173,6 +172,7 @@ MATLAB:COPYFILE:FileDoesNotExist
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "copyfile",
     op_kind: GpuOpKind::Custom("io"),
@@ -189,8 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path and flag arguments are gathered automatically before performing the copy.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "copyfile",
     shape: ShapeRequirements::Any,
@@ -201,11 +200,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Filesystem side effects materialise immediately; metadata is registered for completeness.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("copyfile", DOC_MD);
 
 #[runtime_builtin(
     name = "copyfile",
@@ -1125,7 +1119,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

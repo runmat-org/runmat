@@ -9,15 +9,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{CellArray, ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "flipud")]
 pub const DOC_MD: &str = r#"---
 title: "flipud"
 category: "array/shape"
@@ -185,6 +183,7 @@ Yes. The function only reorders elements; values are never modified, so it is nu
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "flipud",
     op_kind: GpuOpKind::Custom("flip"),
@@ -205,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the generic flip hook with axis=0; falls back to host mirror when the hook is missing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "flipud",
     shape: ShapeRequirements::Any,
@@ -216,11 +214,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through flipud.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("flipud", DOC_MD);
 
 #[runtime_builtin(
     name = "flipud",
@@ -518,7 +511,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -19,15 +19,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::call_builtin;
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(name = "webwrite")]
 pub const DOC_MD: &str = r#"---
 title: "webwrite"
 category: "io/http"
@@ -185,6 +182,7 @@ the payload, and results are created on the host. Manually gathering is unnecess
 [webread](./webread), [jsonencode](../json/jsonencode), [jsondecode](../json/jsondecode), [gpuArray](../../acceleration/gpu/gpuArray)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "webwrite",
     op_kind: GpuOpKind::Custom("http-write"),
@@ -200,8 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP uploads run on the CPU and gather gpuArray inputs before serialisation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "webwrite",
     shape: ShapeRequirements::Any,
@@ -211,11 +208,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "webwrite performs network I/O and terminates fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("webwrite", DOC_MD);
 
 #[runtime_builtin(
     name = "webwrite",
@@ -999,7 +991,6 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn spawn_server<F>(handler: F) -> String
@@ -1282,7 +1273,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

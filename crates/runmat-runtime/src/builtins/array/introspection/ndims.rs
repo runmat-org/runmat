@@ -5,13 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "ndims")]
 pub const DOC_MD: &str = r#"---
 title: "ndims"
 category: "array/introspection"
@@ -169,6 +167,7 @@ use inside expressions that also run on the GPU because it does not allocate dev
 [size](./size), [length](./length), [numel](./numel), [MathWorks ndims reference](https://www.mathworks.com/help/matlab/ref/ndims.html)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ndims",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -184,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata-only query; relies on tensor handle shapes and gathers only when provider metadata is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ndims",
     shape: ShapeRequirements::Any,
@@ -195,11 +193,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Metadata query; fusion planner bypasses this builtin and emits a host scalar.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ndims", DOC_MD);
 
 #[runtime_builtin(
     name = "ndims",
@@ -320,7 +313,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

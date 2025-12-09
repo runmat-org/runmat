@@ -10,14 +10,13 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "num2str")]
 pub const DOC_MD: &str = r#"---
 title: "num2str"
 category: "strings/core"
@@ -170,6 +169,7 @@ numeric form first or use `string` for rich text conversions.
 `sprintf`, `string`, `mat2str`, `str2double`
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "num2str",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -185,8 +185,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always gathers GPU data to host memory before formatting numeric text.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "num2str",
     shape: ShapeRequirements::Any,
@@ -197,11 +196,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Conversion builtin; not eligible for fusion and always materialises host character arrays.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("num2str", DOC_MD);
 
 #[cfg_attr(
     feature = "doc_export",
@@ -1096,7 +1090,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

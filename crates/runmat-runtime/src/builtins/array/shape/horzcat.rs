@@ -1,8 +1,5 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -12,6 +9,7 @@ use crate::builtins::common::spec::{
 };
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "horzcat")]
 pub const DOC_MD: &str = r#"---
 title: "horzcat"
 category: "array/shape"
@@ -143,6 +141,7 @@ Scalars and row vectors remain in their natural dimensionality. Higher-dimension
 - Found an issue or behavioural difference? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "horzcat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -158,8 +157,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to cat(dim=2); providers without cat fall back to host gather + upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "horzcat",
     shape: ShapeRequirements::Any,
@@ -169,11 +167,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("horzcat", DOC_MD);
 
 #[runtime_builtin(
     name = "horzcat",
@@ -453,7 +446,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -9,17 +9,15 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "pagefun")]
 pub const DOC_MD: &str = r#"---
 title: "pagefun"
 category: "acceleration/gpu"
@@ -157,6 +155,7 @@ barrier. Upstream expressions are evaluated before entering `pagefun`.
 [gpuArray](./gpuarray), [arrayfun](./arrayfun), [gather](./gather)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pagefun",
     op_kind: GpuOpKind::Custom("pagefun"),
@@ -172,8 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider accelerates batched @mtimes; runtimes gather to host when no provider hook is available.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pagefun",
     shape: ShapeRequirements::Any,
@@ -183,11 +181,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a fusion barrier because pagefun can invoke arbitrary MATLAB operators.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pagefun", DOC_MD);
 
 #[runtime_builtin(
     name = "pagefun",
@@ -1281,7 +1274,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

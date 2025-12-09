@@ -13,9 +13,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
 const MAX_BATCH_SECONDS: f64 = 0.25;
@@ -24,6 +21,7 @@ const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "timeit")]
 pub const DOC_MD: &str = r#"---
 title: "timeit"
 category: "timing"
@@ -129,6 +127,7 @@ t = timeit(makeMatrix);
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "timeit",
     op_kind: GpuOpKind::Custom("timer"),
@@ -144,8 +143,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-side helper; GPU kernels execute only if invoked by the timed function.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "timeit",
     shape: ShapeRequirements::Any,
@@ -155,11 +153,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Timing helper; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("timeit", DOC_MD);
 
 #[runtime_builtin(
     name = "timeit",
@@ -370,7 +363,6 @@ mod tests {
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
@@ -495,7 +487,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

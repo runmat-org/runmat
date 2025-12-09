@@ -10,9 +10,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -20,6 +17,7 @@ use runmat_macros::runtime_builtin;
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "gpuArray")]
 pub const DOC_MD: &str = r#"---
 title: "gpuArray"
 category: "acceleration/gpu"
@@ -212,6 +210,7 @@ numeric or logical types.
 - Found a bug or behavior mismatch? Please open an issue with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuArray",
     op_kind: GpuOpKind::Custom("upload"),
@@ -227,8 +226,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Invokes the provider `upload` hook, reuploading gpuArray inputs when dtype conversion is requested. Handles class strings, size vectors, and `'like'` prototypes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuArray",
     shape: ShapeRequirements::Any,
@@ -239,11 +237,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Acts as a residency boundary; fusion graphs never cross explicit host↔device transfers.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gpuArray", DOC_MD);
 
 #[runtime_builtin(
     name = "gpuArray",
@@ -1084,7 +1077,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -8,9 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
@@ -136,6 +134,7 @@ pub(super) fn clear_registry_for_test() {
 static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "tcpserver")]
 pub const DOC_MD: &str = r#"---
 title: "tcpserver"
 category: "io/net"
@@ -274,6 +273,7 @@ No. `tcpserver` is a host-side operation. RunMat transparently gathers GPU scala
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
     op_kind: GpuOpKind::Custom("network"),
@@ -289,8 +289,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tcpserver",
     shape: ShapeRequirements::Any,
@@ -300,11 +299,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Networking builtin executed eagerly on the CPU.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tcpserver", DOC_MD);
 
 #[runtime_builtin(
     name = "tcpserver",
@@ -599,7 +593,6 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};
     use std::net::TcpStream;
@@ -802,7 +795,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

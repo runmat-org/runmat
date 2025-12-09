@@ -10,10 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "tic")]
 pub const DOC_MD: &str = r#"---
 title: "tic"
 category: "timing"
@@ -144,6 +141,7 @@ any GPU-resident tensors are gathered automatically by surrounding code when nec
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tic",
     op_kind: GpuOpKind::Custom("timer"),
@@ -159,8 +157,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for tic/toc.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tic",
     shape: ShapeRequirements::Any,
@@ -170,11 +167,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Timing builtins are executed eagerly on the host and do not participate in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tic", DOC_MD);
 
 static MONOTONIC_ORIGIN: Lazy<Instant> = Lazy::new(Instant::now);
 static STOPWATCH: Lazy<Mutex<StopwatchState>> = Lazy::new(|| Mutex::new(StopwatchState::default()));
@@ -247,7 +239,6 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn reset_stopwatch() {
@@ -302,7 +293,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);

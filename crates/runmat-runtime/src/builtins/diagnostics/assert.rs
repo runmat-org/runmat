@@ -9,9 +9,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:assertion:failed";
 const DEFAULT_MESSAGE: &str = "Assertion failed.";
@@ -21,6 +18,7 @@ const MIN_INPUT_IDENTIFIER: &str = "MATLAB:minrhs";
 const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "assert")]
 pub const DOC_MD: &str = r#"---
 title: "assert"
 category: "diagnostics"
@@ -141,6 +139,7 @@ If the dimensions disagree, the assertion stops execution before any costly matr
 - Report issues: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "assert",
     op_kind: GpuOpKind::Custom("control"),
@@ -156,8 +155,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "assert",
     shape: ShapeRequirements::Any,
@@ -167,11 +165,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control-flow builtin with no fusion support.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("assert", DOC_MD);
 
 #[runtime_builtin(
     name = "assert",
@@ -634,7 +627,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

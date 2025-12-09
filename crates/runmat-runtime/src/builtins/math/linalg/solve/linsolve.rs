@@ -17,14 +17,11 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "linsolve";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "linsolve")]
 pub const DOC_MD: &str = r#"---
 title: "linsolve"
 category: "math/linalg/solve"
@@ -191,6 +188,7 @@ arrays should be reshaped before calling `linsolve`, just like in MATLAB.
 #[allow(dead_code)]
 const DOC_MD: &str = "";
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "linsolve",
     op_kind: GpuOpKind::Custom("solve"),
@@ -206,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider linsolve hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linsolve",
     shape: ShapeRequirements::Any,
@@ -217,11 +214,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Linear solves are terminal operations and do not fuse with surrounding kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("linsolve", DOC_MD);
 
 #[runtime_builtin(
     name = "linsolve",
@@ -1263,7 +1255,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

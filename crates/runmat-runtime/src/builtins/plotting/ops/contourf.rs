@@ -13,9 +13,7 @@ use super::contour::{
 use super::state::{render_active_plot, PlotRenderOptions};
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "contourf")]
 pub const DOC_MD: &str = r#"---
 title: "contourf"
 category: "plotting"
@@ -50,9 +48,6 @@ behaviour (10).
 - When GPU support is unavailable, tensors gather to host memory and rendering proceeds on the CPU
   path with identical results.
 "#;
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("contourf", DOC_MD);
 
 #[runtime_builtin(
     name = "contourf",

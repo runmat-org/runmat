@@ -12,13 +12,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "filter")]
 pub const DOC_MD: &str = r#"---
 title: "filter"
 category: "math/signal"
@@ -196,6 +194,7 @@ The planner leverages the same provider hook under the hood. As long as the oper
 [conv](./conv), [deconv](./deconv), [fft](../fft/fft), [filtfilt](https://www.mathworks.com/help/matlab/ref/filtfilt.html)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter",
     op_kind: GpuOpKind::Custom("iir-filter"),
@@ -211,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses the provider hook `iir_filter` when available. Complex filters or missing hooks fall back to the host implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filter",
     shape: ShapeRequirements::Any,
@@ -222,11 +220,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Filtering is handled via dedicated runtime logic; fusion does not currently optimise IIR/FIR chains.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("filter", DOC_MD);
 
 #[runtime_builtin(
     name = "filter",
@@ -1582,7 +1575,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }

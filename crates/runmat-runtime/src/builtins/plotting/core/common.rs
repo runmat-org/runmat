@@ -3,6 +3,7 @@ use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
 
 /// Default error message when no plotting backend is available.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const ERR_PLOTTING_UNAVAILABLE: &str =
     "Plotting is unavailable in this build (enable the `gui` or `plot-web` feature).";
 

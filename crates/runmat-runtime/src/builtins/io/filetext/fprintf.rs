@@ -15,9 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
 use crate::console::{record_console_output, ConsoleStream};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -25,6 +23,7 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
 const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "fprintf")]
 pub const DOC_MD: &str = r#"---
 title: "fprintf"
 category: "io/filetext"
@@ -213,6 +212,7 @@ Ignore it, just as in MATLAB. Omitting the output argument does not change the w
   with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fprintf",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -228,8 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fprintf",
     shape: ShapeRequirements::Any,
@@ -239,11 +238,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Formatting is a side-effecting sink and never participates in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fprintf", DOC_MD);
 
 /// Result of evaluating `fprintf`.
 #[derive(Debug)]
@@ -847,7 +841,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn fprintf_doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

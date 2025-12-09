@@ -8,15 +8,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "endsWith")]
 pub const DOC_MD: &str = r#"---
 title: "endsWith"
 category: "strings/search"
@@ -190,6 +189,7 @@ contains exactly one element, the builtin returns a logical scalar.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "endsWith",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -205,8 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on the host; inputs are gathered from the GPU before evaluating suffix checks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "endsWith",
     shape: ShapeRequirements::Any,
@@ -216,11 +215,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Text operation; not eligible for fusion and materialises host logical results.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("endsWith", DOC_MD);
 
 #[runtime_builtin(
     name = "endsWith",
@@ -686,7 +680,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

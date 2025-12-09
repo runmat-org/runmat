@@ -8,9 +8,6 @@ use crate::builtins::common::tensor;
 use crate::call_builtin;
 use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
     ObjectInstance, StructValue, Tensor, Value,
@@ -18,6 +15,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "getfield")]
 pub const DOC_MD: &str = r#"---
 title: "getfield"
 category: "structs/core"
@@ -186,6 +184,7 @@ RunMat mirrors MATLAB by raising `Invalid or deleted handle object 'ClassName'.`
 [fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [class](../../introspection/class)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "getfield",
     op_kind: GpuOpKind::Custom("getfield"),
@@ -201,8 +200,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Pure metadata operation; acceleration providers do not participate.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "getfield",
     shape: ShapeRequirements::Any,
@@ -212,11 +210,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Acts as a fusion barrier because it inspects metadata on the host.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("getfield", DOC_MD);
 
 #[runtime_builtin(
     name = "getfield",
@@ -889,7 +882,6 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -984,7 +976,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

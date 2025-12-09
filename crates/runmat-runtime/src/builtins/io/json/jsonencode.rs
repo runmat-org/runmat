@@ -13,10 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
 const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
@@ -24,8 +21,8 @@ const INF_NAN_ERROR: &str = "jsonencode: ConvertInfAndNaN must be true to encode
 const UNSUPPORTED_TYPE_ERROR: &str =
     "jsonencode: unsupported input type; expected numeric, logical, string, struct, cell, or object data";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(name = "jsonencode")]
 pub const DOC_MD: &str = r#"---
 title: "jsonencode"
 category: "io/json"
@@ -211,6 +208,7 @@ standard JSON escape sequences.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsonencode",
     op_kind: GpuOpKind::Custom("serialization"),
@@ -227,6 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
 
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsonencode",
     shape: ShapeRequirements::Any,
@@ -236,12 +235,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "jsonencode is a residency sink and never participates in fusion planning.",
 };
-
-register_builtin_gpu_spec!(GPU_SPEC);
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("jsonencode", DOC_MD);
 
 #[derive(Debug, Clone)]
 struct JsonEncodeOptions {
@@ -1078,7 +1071,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

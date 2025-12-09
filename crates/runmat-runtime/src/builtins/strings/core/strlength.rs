@@ -9,11 +9,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "strlength")]
 pub const DOC_MD: &str = r#"---
 title: "strlength"
 category: "strings/core"
@@ -151,6 +150,7 @@ No. The builtin inspects metadata and operates on host strings. If your data alr
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strlength",
     op_kind: GpuOpKind::Custom("string-metadata"),
@@ -166,8 +166,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Measures string lengths on the CPU; any GPU-resident inputs are gathered before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strlength",
     shape: ShapeRequirements::Any,
@@ -177,11 +176,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Metadata-only builtin; not eligible for fusion and never emits GPU kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strlength", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "strlength: first argument must be a string array, character array, or cell array of character vectors";
@@ -279,7 +273,6 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     #[test]
@@ -421,7 +414,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

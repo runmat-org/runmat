@@ -12,7 +12,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::gpu_helpers::axis_bounds;
@@ -23,9 +22,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 #[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "surf")]
 pub const DOC_MD: &str = r#"---
 title: "surf"
 category: "plotting"
@@ -71,6 +68,7 @@ surf(x, y, sin(x)' * cos(y));
 ```
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "surf",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -86,8 +84,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Surface rendering runs on the host/WebGPU pipeline; single-precision gpuArray inputs stay on device.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "surf",
     shape: ShapeRequirements::Any,
@@ -97,11 +94,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "surf terminates fusion graphs and performs rendering.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("surf", DOC_MD);
 
 #[runtime_builtin(
     name = "surf",

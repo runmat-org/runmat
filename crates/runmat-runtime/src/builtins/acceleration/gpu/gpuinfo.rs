@@ -5,13 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "gpuInfo")]
 pub const DOC_MD: &str = r#"---
 title: "gpuInfo"
 category: "acceleration/gpu"
@@ -141,6 +139,7 @@ back into MATLAB code without breaking literal syntax.
 [gpuDevice](./gpuDevice), [gpuArray](./gpuArray), [gather](./gather)
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuInfo",
     op_kind: GpuOpKind::Custom("device-summary"),
@@ -156,8 +155,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formats metadata reported by the active provider; no GPU kernels are launched.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuInfo",
     shape: ShapeRequirements::Any,
@@ -167,11 +165,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not eligible for fusion—returns a host-resident string.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gpuInfo", DOC_MD);
 
 #[runtime_builtin(
     name = "gpuInfo",
@@ -325,7 +318,6 @@ mod tests {
 
     #[test]
     #[allow(non_snake_case)]
-    #[cfg(feature = "doc_export")]
     fn gpuInfo_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty(), "expected at least one MATLAB example");

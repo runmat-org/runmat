@@ -61,7 +61,7 @@ These heuristics let front-end code remain MATLAB-friendly while opportunistical
 
 ## 6. Runtime Builtins & GPU Specs
 
-New-style builtins inside `crates/runmat-runtime/src/builtins` record their GPU capabilities using inventory macros (`register_builtin_gpu_spec!`) and describe fusion templates via `BuiltinFusionSpec` (`crates/runmat-runtime/src/builtins/common/spec.rs`). For example:
+New-style builtins inside `crates/runmat-runtime/src/builtins` annotate their spec constants with proc-macros (`#[runmat_macros::register_gpu_spec]`, `#[runmat_macros::register_fusion_spec]`). These attributes either submit specs to `inventory` (native builds) or append entries to the wasm registry. For example:
 
 - `math/elementwise/exp.rs` declares an elementwise GPU spec that points to the provider hook `unary_exp` and a fusion template that emits WGSL for single-input exponentials.
 - `math/reduction/sum.rs` registers a reduction spec referencing `reduce_sum_dim`, marks omit-nan requirements, and exposes metadata used by the fusion planner (e.g., preferred workgroup size).

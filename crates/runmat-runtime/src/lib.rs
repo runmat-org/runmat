@@ -34,6 +34,7 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
+pub use runmat_macros::{register_doc_text, register_fusion_spec, register_gpu_spec};
 
 // Transitional public shim for tests using matrix_transpose
 pub use crate::matrix::matrix_transpose;

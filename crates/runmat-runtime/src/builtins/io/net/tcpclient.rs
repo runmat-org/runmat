@@ -3,20 +3,16 @@
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use super::accept::{configure_stream, insert_client, parse_timeout_value, CLIENT_HANDLE_FIELD};
 use super::tcpserver::{
     canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
     HANDLE_ID_FIELD,
 };
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::gather_if_needed;
 
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -31,6 +27,7 @@ const MESSAGE_ID_INTERNAL: &str = "MATLAB:tcpclient:InternalError";
 const DEFAULT_BUFFER_SIZE: usize = 8192;
 
 #[cfg(feature = "doc_export")]
+#[runmat_macros::register_doc_text(name = "tcpclient")]
 pub const DOC_MD: &str = r#"---
 title: "tcpclient"
 category: "io/net"
@@ -156,6 +153,7 @@ No. RunMat automatically gathers GPU scalars before opening sockets. The returne
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpclient",
     op_kind: GpuOpKind::Custom("network"),
@@ -171,8 +169,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. Inputs backed by GPU memory are gathered before connecting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tcpclient",
     shape: ShapeRequirements::Any,
@@ -182,11 +179,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Networking builtin executed eagerly on the CPU.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tcpclient", DOC_MD);
 
 #[runtime_builtin(
     name = "tcpclient",
@@ -536,7 +528,6 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 mod tests {
     use super::super::accept::remove_client_for_test;
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpListener;
@@ -676,7 +667,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
