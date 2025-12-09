@@ -4,6 +4,7 @@
 //! Optimized for fast decompression during runtime startup.
 
 use std::collections::HashMap;
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
 use std::convert::TryFrom;
 #[cfg(all(feature = "compression", target_arch = "wasm32"))]
 use std::io::{Cursor, Read};
@@ -512,29 +513,26 @@ fn decompress_lz4_block(data: &[u8], original_size: usize) -> SnapshotResult<Vec
     }
 }
 
-#[cfg(feature = "compression")]
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
 fn decompress_zstd_block(data: &[u8]) -> SnapshotResult<Vec<u8>> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let cursor = Cursor::new(data);
-        let mut decoder =
-            StreamingDecoder::new(cursor).map_err(|e| SnapshotError::Compression {
-                message: format!("ZSTD decompression failed: {e}"),
-            })?;
-        let mut output = Vec::new();
-        decoder
-            .read_to_end(&mut output)
-            .map_err(|e| SnapshotError::Compression {
-                message: format!("ZSTD decompression failed: {e}"),
-            })?;
-        Ok(output)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        zstd::decode_all(data).map_err(|e| SnapshotError::Compression {
+    let cursor = Cursor::new(data);
+    let mut decoder = StreamingDecoder::new(cursor).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD decompression failed: {e}"),
+    })?;
+    let mut output = Vec::new();
+    decoder
+        .read_to_end(&mut output)
+        .map_err(|e| SnapshotError::Compression {
             message: format!("ZSTD decompression failed: {e}"),
-        })
-    }
+        })?;
+    Ok(output)
+}
+
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
+fn decompress_zstd_block(data: &[u8]) -> SnapshotResult<Vec<u8>> {
+    zstd::decode_all(data).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD decompression failed: {e}"),
+    })
 }
 
 #[cfg(feature = "compression")]
@@ -565,20 +563,18 @@ fn compress_lz4_block(data: &[u8], fast: bool) -> SnapshotResult<Vec<u8>> {
     }
 }
 
-#[cfg(feature = "compression")]
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
+fn compress_zstd_block(_data: &[u8], _level: i32) -> SnapshotResult<Vec<u8>> {
+    Err(SnapshotError::Configuration {
+        message: "ZSTD compression is not supported on wasm targets".to_string(),
+    })
+}
+
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
 fn compress_zstd_block(data: &[u8], level: i32) -> SnapshotResult<Vec<u8>> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        Err(SnapshotError::Configuration {
-            message: "ZSTD compression is not supported on wasm targets".to_string(),
-        })
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        zstd::encode_all(data, level).map_err(|e| SnapshotError::Compression {
-            message: format!("ZSTD compression failed: {e}"),
-        })
-    }
+    zstd::encode_all(data, level).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD compression failed: {e}"),
+    })
 }
 
 #[cfg(test)]

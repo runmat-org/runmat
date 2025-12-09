@@ -1,11 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Array, Error as JsError, Reflect};
+use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
@@ -19,6 +20,7 @@ use runmat_core::{
     ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
     FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse, PendingInput, RunMatSession,
     StdinEvent, StdinEventKind, WorkspaceEntry, WorkspacePreview, WorkspaceSnapshot,
+    InputHandlerAction,
 };
 use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
 use runmat_runtime::warning_store::RuntimeWarning;
@@ -45,14 +47,15 @@ use runmat_runtime::builtins::plotting::{
     configure_subplot as runtime_configure_subplot, context as plotting_context,
     current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
-    detach_web_renderer as runtime_detach_web_renderer,
     install_figure_observer as runtime_install_figure_observer,
     install_web_renderer as runtime_install_web_renderer,
     install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
     new_figure_handle as runtime_new_figure_handle, select_figure as runtime_select_figure,
     set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
-    FigureAxesState, FigureError, FigureEventKind, FigureHandle, HoldMode,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::builtins::plotting::web::detach_web_renderer as runtime_detach_web_renderer;
 
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
@@ -64,7 +67,6 @@ enum InitErrorCode {
     SnapshotResolution,
     FilesystemProvider,
     SessionCreation,
-    GpuInitialization,
     PlotCanvas,
 }
 
@@ -75,7 +77,6 @@ impl InitErrorCode {
             InitErrorCode::SnapshotResolution => "SnapshotResolution",
             InitErrorCode::FilesystemProvider => "FilesystemProvider",
             InitErrorCode::SessionCreation => "SessionCreation",
-            InitErrorCode::GpuInitialization => "GpuInitialization",
             InitErrorCode::PlotCanvas => "PlotCanvas",
         }
     }
@@ -102,7 +103,7 @@ struct InitOptions {
     #[serde(default)]
     wgpu_force_fallback_adapter: Option<bool>,
     #[cfg(target_arch = "wasm32")]
-    #[serde(default)]
+    #[serde(skip)]
     snapshot_stream: Option<JsValue>,
     #[serde(default)]
     scatter_target_points: Option<u32>,
@@ -122,8 +123,15 @@ static FIGURE_EVENT_OBSERVER: OnceLock<()> = OnceLock::new();
 thread_local! {
     static JS_STDIN_HANDLER: RefCell<Option<js_sys::Function>> = RefCell::new(None);
 }
-static STDOUT_SUBSCRIBERS: OnceLock<Mutex<HashMap<u32, js_sys::Function>>> = OnceLock::new();
-static STDOUT_FORWARDER: OnceLock<()> = OnceLock::new();
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
+        RefCell::new(HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static STDOUT_FORWARDER: OnceLock<
+    Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
+> = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone)]
@@ -324,8 +332,12 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = memoryUsage)]
     pub fn memory_usage(&self) -> Result<JsValue, JsValue> {
-        let stats = capture_memory_usage()
-            .map_err(|err| js_error(&format!("Failed to capture wasm memory usage: {err}")))?;
+        let stats = capture_memory_usage().map_err(|err| {
+            js_error(&format!(
+                "Failed to capture wasm memory usage: {}",
+                js_value_to_string(err.clone())
+            ))
+        })?;
         serde_wasm_bindgen::to_value(&stats)
             .map_err(|err| js_error(&format!("Failed to serialize memory stats: {err}")))
     }
@@ -502,19 +514,11 @@ pub fn subscribe_stdout(callback: JsValue) -> Result<u32, JsValue> {
     let function = callback
         .dyn_into::<js_sys::Function>()
         .map_err(|_| js_error("subscribeStdout expects a Function"))?;
-    let subscribers = STDOUT_SUBSCRIBERS
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .map_err(|_| js_error("failed to install stdout subscriber"))?;
-    drop(subscribers);
     ensure_stdout_forwarder_installed();
     let id = STDOUT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let mut guard = STDOUT_SUBSCRIBERS
-        .get()
-        .expect("stdout subscriber registry")
-        .lock()
-        .map_err(|_| js_error("failed to register stdout subscriber"))?;
-    guard.insert(id, function);
+    STDOUT_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().insert(id, function);
+    });
     Ok(id)
 }
 
@@ -529,14 +533,13 @@ pub fn subscribe_stdout(_callback: JsValue) -> Result<u32, JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = unsubscribeStdout)]
 pub fn unsubscribe_stdout(id: u32) {
-    if let Some(lock) = STDOUT_SUBSCRIBERS.get() {
-        if let Ok(mut guard) = lock.lock() {
-            guard.remove(&id);
-            if guard.is_empty() {
-                runmat_runtime::console::install_forwarder(None);
-                let _ = STDOUT_FORWARDER.take();
-            }
-        }
+    let is_empty = STDOUT_SUBSCRIBERS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        map.remove(&id);
+        map.is_empty()
+    });
+    if is_empty {
+        runmat_runtime::console::install_forwarder(None);
     }
 }
 
@@ -741,12 +744,12 @@ async fn install_canvas_renderer(
 ) -> Result<(), JsValue> {
     init_logging_once();
     let options = WebRendererOptions::default();
-    let renderer_future = match shared_webgpu_context() {
-        Some(shared) => WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared),
-        None => WebRenderer::new(canvas, options),
-    };
-    let renderer = renderer_future
-        .await
+    let renderer = match shared_webgpu_context() {
+        Some(shared) => {
+            WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
+        }
+        None => WebRenderer::new(canvas, options).await,
+    }
         .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
     match handle {
         Some(id) => runtime_install_web_renderer_for_handle(id, renderer)
@@ -771,16 +774,26 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             Some(err),
         )
     })?;
-    let parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
+    let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
         InitOptions::default()
     } else {
-        serde_wasm_bindgen::from_value(options).map_err(|err| {
+        serde_wasm_bindgen::from_value(options.clone()).map_err(|err| {
             init_error(
                 InitErrorCode::InvalidOptions,
                 format!("Invalid init options: {err}"),
             )
         })?
     };
+    #[cfg(target_arch = "wasm32")]
+    {
+        if !options.is_null() && !options.is_undefined() {
+            if let Ok(stream_value) = Reflect::get(&options, &JsValue::from_str("snapshotStream")) {
+                if !stream_value.is_null() && !stream_value.is_undefined() {
+                    parsed_opts.snapshot_stream = Some(stream_value);
+                }
+            }
+        }
+    }
 
     apply_plotting_overrides(&parsed_opts);
 
@@ -873,7 +886,6 @@ fn install_cpu_provider(config: &SessionConfig) {
 
 #[cfg(target_arch = "wasm32")]
 fn ensure_figure_event_bridge() {
-    use runmat_plot::plots::Figure;
     FIGURE_EVENT_OBSERVER.get_or_init(|| {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
             Arc::new(|event| emit_js_figure_event(event));
@@ -968,6 +980,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             );
             "InvalidSubplotIndex"
         }
+        FigureError::InvalidAxesHandle => "InvalidAxesHandle",
     };
     let _ = Reflect::set(
         &payload,
@@ -1096,27 +1109,29 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
 
 #[cfg(target_arch = "wasm32")]
 fn ensure_stdout_forwarder_installed() {
-    STDOUT_FORWARDER.get_or_init(|| {
-        let forwarder: Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static> =
-            Arc::new(|entry| dispatch_stdout_entry(entry));
-        runmat_runtime::console::install_forwarder(Some(forwarder));
+    let forwarder = STDOUT_FORWARDER.get_or_init(|| {
+        Arc::new(dispatch_stdout_entry as fn(&runmat_runtime::console::ConsoleEntry))
+            as Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>
     });
+    runmat_runtime::console::install_forwarder(Some(forwarder.clone()));
 }
 
 #[cfg(target_arch = "wasm32")]
 fn dispatch_stdout_entry(entry: &runmat_runtime::console::ConsoleEntry) {
-    if let Some(lock) = STDOUT_SUBSCRIBERS.get() {
-        if let Ok(guard) = lock.lock() {
-            if guard.is_empty() {
-                return;
-            }
-            if let Ok(payload) =
-                serde_wasm_bindgen::to_value(&ConsoleStreamPayload::from_console_entry(entry))
-            {
-                for handler in guard.values() {
-                    let _ = handler.call1(&JsValue::NULL, &payload);
-                }
-            }
+    let handlers: Vec<js_sys::Function> = STDOUT_SUBSCRIBERS.with(|cell| {
+        cell.borrow()
+            .values()
+            .cloned()
+            .collect()
+    });
+    if handlers.is_empty() {
+        return;
+    }
+    if let Ok(payload) =
+        serde_wasm_bindgen::to_value(&ConsoleStreamPayload::from_console_entry(entry))
+    {
+        for handler in handlers {
+            let _ = handler.call1(&JsValue::NULL, &payload);
         }
     }
 }
@@ -1167,8 +1182,7 @@ async fn resolve_snapshot_bytes(opts: &InitOptions) -> Result<Option<Vec<u8>>, J
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_snapshot_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
-    use js_sys::{Reflect, Uint8Array};
-    use web_sys::{ReadableStream, ReadableStreamDefaultReader};
+    use js_sys::Uint8Array;
 
     let window = web_sys::window().ok_or_else(|| js_error("window is unavailable"))?;
     let resp_value = JsFuture::from(window.fetch_with_str(url)).await?;
@@ -1193,13 +1207,11 @@ async fn fetch_snapshot_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn read_stream(stream: ReadableStream) -> Result<Vec<u8>, JsValue> {
+async fn read_stream(stream: web_sys::ReadableStream) -> Result<Vec<u8>, JsValue> {
     use js_sys::{Reflect, Uint8Array};
     use web_sys::ReadableStreamDefaultReader;
 
-    let reader_value = stream
-        .get_reader()
-        .map_err(|_| js_error("ReadableStream.getReader() failed"))?;
+    let reader_value = stream.get_reader();
     let reader: ReadableStreamDefaultReader = reader_value
         .dyn_into()
         .map_err(|_| js_error("Failed to cast reader"))?;
@@ -1257,7 +1269,10 @@ fn capture_memory_usage() -> Result<MemoryUsagePayload, JsValue> {
     let memory = wasm_bindgen::memory()
         .dyn_into::<js_sys::WebAssembly::Memory>()
         .map_err(|_| js_error("Active wasm memory handle unavailable"))?;
-    let buffer = memory.buffer();
+    let buffer: js_sys::ArrayBuffer = memory
+        .buffer()
+        .dyn_into()
+        .map_err(|_| js_error("Active wasm memory buffer unavailable"))?;
     let bytes = buffer.byte_length() as u64;
     let pages = (bytes / 65_536) as u32;
     Ok(MemoryUsagePayload { bytes, pages })

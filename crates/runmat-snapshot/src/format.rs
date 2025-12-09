@@ -374,6 +374,7 @@ impl PlatformInfo {
     }
 
     /// Detect available CPU features
+    #[allow(unused_mut)]
     fn detect_cpu_features() -> Vec<String> {
         let mut features = Vec::new();
 

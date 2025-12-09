@@ -9,10 +9,10 @@ keywords = ["matlab", "octave", "snapshot", "serialization", "performance"]
 categories = ["science", "development-tools", "compilers"]
 
 [features]
-default = ["compression-native", "validation"]
+default = ["compression-native", "compression-wasm", "validation"]
 compression = []
-compression-native = ["compression", "lz4", "zstd"]
-compression-wasm = ["compression", "lz4_flex", "ruzstd"]
+compression-native = ["compression", "dep:lz4", "dep:zstd"]
+compression-wasm = ["compression", "dep:lz4_flex", "dep:ruzstd"]
 validation = ["sha2", "blake3", "crc32fast"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 
@@ -23,17 +23,12 @@ runmat-hir = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-gc = { workspace = true }
+runmat-filesystem = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 anyhow = "1.0"
 log = "0.4"
 thiserror = "1.0"
-
-# Compression support
-lz4 = { version = "1.24", optional = true }
-zstd = { version = "0.13", optional = true }
-lz4_flex = { version = "0.12", optional = true }
-ruzstd = { version = "0.8", optional = true, default-features = false, features = ["std"] }
 
 # Validation support  
 sha2 = { version = "0.10", optional = true }
@@ -75,3 +70,10 @@ name = "runmat_snapshot"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 memmap2 = "0.9"
 tokio = { version = "1.0", features = ["full"] }
+lz4 = { version = "1.24", optional = true }
+zstd = { version = "0.13", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+lz4_flex = { version = "0.12", optional = true }
+ruzstd = { version = "0.8", optional = true, default-features = false, features = ["std"] }
+getrandom = { version = "0.2", features = ["js"] }

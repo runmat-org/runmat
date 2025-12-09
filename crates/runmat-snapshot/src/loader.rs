@@ -3,19 +3,22 @@
 //! Optimized for fast startup times with parallel loading, compression,
 //! and integration with the RunMat runtime.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::compression::CompressionConfig;
 use anyhow::Context;
 #[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
 #[cfg(target_arch = "wasm32")]
 type Mmap = ();
 use parking_lot::RwLock;
+#[cfg(target_arch = "wasm32")]
+use runmat_filesystem;
 
 use crate::compression::CompressionEngine;
 use crate::format::*;
@@ -42,6 +45,7 @@ pub struct SnapshotLoader {
 }
 
 /// Loader for specific snapshot format
+#[cfg(not(target_arch = "wasm32"))]
 struct FormatLoader {
     /// File handle
     file: File,
@@ -121,6 +125,27 @@ impl SnapshotLoader {
         Ok((snapshot, self.stats.clone()))
     }
 
+    /// Load snapshot from file (not supported on wasm targets).
+    #[cfg(target_arch = "wasm32")]
+    pub fn load<P: AsRef<Path>>(&mut self, path: P) -> SnapshotResult<(Snapshot, LoadingStats)> {
+        let start_time = Instant::now();
+        let path_ref = path.as_ref();
+        log::info!(
+            "Loading snapshot via filesystem provider from {}",
+            path_ref.display()
+        );
+        let bytes = runmat_filesystem::read(path_ref)?;
+        let read_duration = start_time.elapsed();
+
+        let (snapshot, _) = self.load_from_bytes(&bytes)?;
+        self.stats.load_time += read_duration;
+        log::info!(
+            "Snapshot loaded successfully in {:?}",
+            self.stats.load_time
+        );
+        Ok((snapshot, self.stats.clone()))
+    }
+
     /// Load snapshot from an in-memory byte slice (supports wasm streaming scenarios)
     pub fn load_from_bytes(&mut self, bytes: &[u8]) -> SnapshotResult<(Snapshot, LoadingStats)> {
         let start_time = Instant::now();
@@ -133,13 +158,7 @@ impl SnapshotLoader {
             )));
         }
 
-        let header_size =
-            bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
-                .map_err(SnapshotError::Serialization)? as usize;
-        let header: SnapshotHeader = bincode::deserialize(&bytes[..header_size.min(bytes.len())])
-            .map_err(|e| SnapshotError::Configuration {
-            message: format!("Failed to deserialize snapshot header: {e}"),
-        })?;
+        let header = parse_snapshot_header(bytes)?;
 
         header.validate()?;
 
@@ -160,17 +179,19 @@ impl SnapshotLoader {
         let compressed_data = &bytes[data_start..data_end];
         self.stats.compressed_size = compressed_data.len();
 
-        let decompressed = if header.data_info.compression.algorithm != CompressionAlgorithm::None {
-            let compression_engine = CompressionEngine::new(CompressionConfig::default());
-            compression_engine.decompress(compressed_data, &header.data_info.compression)?
-        } else {
+        let decompression_start = Instant::now();
+        let decompressed = if matches!(
+            header.data_info.compression.algorithm,
+            CompressionAlgorithm::None
+        ) {
             compressed_data.to_vec()
+        } else {
+            self.compression
+                .decompress(compressed_data, &header.data_info.compression)?
         };
+        self.stats.decompression_time = decompression_start.elapsed();
 
-        let snapshot: Snapshot =
-            bincode::deserialize(&decompressed).map_err(|e| SnapshotError::Configuration {
-                message: format!("Failed to deserialize snapshot data: {e}"),
-            })?;
+        let snapshot = self.deserialize_snapshot(&decompressed)?;
 
         #[cfg(feature = "validation")]
         if self.config.validation_enabled {
@@ -223,15 +244,7 @@ impl SnapshotLoader {
         }
 
         // Parse header
-        let header_size =
-            bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
-                .map_err(SnapshotError::Serialization)? as usize;
-        let header: SnapshotHeader = bincode::deserialize(
-            &file_contents[..header_size.min(file_contents.len())],
-        )
-        .map_err(|e| SnapshotError::Configuration {
-            message: format!("Failed to deserialize snapshot header: {e}"),
-        })?;
+        let header = parse_snapshot_header(&file_contents)?;
 
         // Validate header
         header.validate()?;
@@ -251,19 +264,20 @@ impl SnapshotLoader {
         self.stats.compressed_size = compressed_data.len();
 
         // Decompress data if needed
-        let decompressed_data =
-            if header.data_info.compression.algorithm != CompressionAlgorithm::None {
-                let compression_engine = CompressionEngine::new(CompressionConfig::default());
-                compression_engine.decompress(compressed_data, &header.data_info.compression)?
-            } else {
-                compressed_data.to_vec()
-            };
+        let decompression_start = Instant::now();
+        let decompressed_data = if matches!(
+            header.data_info.compression.algorithm,
+            CompressionAlgorithm::None
+        ) {
+            compressed_data.to_vec()
+        } else {
+            self.compression
+                .decompress(compressed_data, &header.data_info.compression)?
+        };
+        self.stats.decompression_time = decompression_start.elapsed();
 
         // Deserialize snapshot
-        let snapshot: Snapshot =
-            bincode::deserialize(&decompressed_data).map_err(|e| SnapshotError::Configuration {
-                message: format!("Failed to deserialize snapshot data: {e}"),
-            })?;
+        let snapshot = self.deserialize_snapshot(&decompressed_data)?;
 
         // Validate snapshot if enabled
         if self.config.validation_enabled {
@@ -701,6 +715,44 @@ impl SnapshotLoader {
         let header = Self::peek_header(path)?;
         Ok(header.estimated_load_time())
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SnapshotLoader {
+    pub fn peek_header<P: AsRef<Path>>(path: P) -> SnapshotResult<SnapshotHeader> {
+        let bytes = runmat_filesystem::read(path.as_ref()).map_err(SnapshotError::Io)?;
+        let header = parse_snapshot_header(&bytes)?;
+        header.validate()?;
+        Ok(header)
+    }
+
+    pub fn quick_validate<P: AsRef<Path>>(path: P) -> SnapshotResult<bool> {
+        match Self::peek_header(path) {
+            Ok(header) => Ok(header.validate().is_ok()),
+            Err(_) => Ok(false),
+        }
+    }
+
+    pub fn get_metadata<P: AsRef<Path>>(path: P) -> SnapshotResult<SnapshotMetadata> {
+        let header = Self::peek_header(path)?;
+        Ok(header.metadata)
+    }
+
+    pub fn estimate_load_time<P: AsRef<Path>>(path: P) -> SnapshotResult<Duration> {
+        let header = Self::peek_header(path)?;
+        Ok(header.estimated_load_time())
+    }
+}
+
+fn parse_snapshot_header(bytes: &[u8]) -> SnapshotResult<SnapshotHeader> {
+    let header_size =
+        bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
+            .map_err(SnapshotError::Serialization)? as usize;
+    bincode::deserialize(&bytes[..header_size.min(bytes.len())]).map_err(|e| {
+        SnapshotError::Configuration {
+            message: format!("Failed to deserialize snapshot header: {e}"),
+        }
+    })
 }
 
 #[cfg(test)]

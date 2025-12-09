@@ -224,6 +224,30 @@ describe("initRunMat wiring", () => {
     expect(session.telemetryClientId()).toBe("cid-native");
   });
 
+  it("passes scatter/surface overrides to native init", async () => {
+    const captured: any[] = [];
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async (opts: any) => {
+        captured.push(opts);
+        return createMockNativeSession();
+      }
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await initRunMat({
+      snapshot: { bytes: new Uint8Array([3]) },
+      scatterTargetPoints: 250_000,
+      surfaceVertexBudget: 1_000_000,
+      enableGpu: false
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].scatterTargetPoints).toBe(250_000);
+    expect(captured[0].surfaceVertexBudget).toBe(1_000_000);
+  });
+
   it("disables GPU when navigator.gpu is unavailable", async () => {
     const captured: any[] = [];
     const native: NativeModule = {

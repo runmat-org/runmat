@@ -9,6 +9,7 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
    - [x] Verify `RunMatSession::init` (wasm) exposes all required knobs: snapshot streaming, filesystem provider selection, telemetry flags (consent + `telemetryId`), optional plot canvas registration. `bindings/ts/README.md` now documents the full option matrix so hosts know what to pass.
    - [x] Provide deterministic error reporting (`InitError` enum) so hosts can surface GPU/FS issues without parsing strings.
      - ✅ `registerFsProvider`, `registerPlotCanvas`, and `registerFigureCanvas` now wrap failures in structured `InitError` payloads (`FilesystemProvider` / `PlotCanvas`) so hosts get consistent error codes even when prereqs are invoked outside `initRunMat`.
+   - ✅ Node/Vitest harness now exercises the init surface directly (`bindngs/ts/src/index.spec.ts`), covering fs registration, plot canvas sequencing, telemetry IDs, and the new `scatterTargetPoints` / `surfaceVertexBudget` knobs via a dedicated spec. `npm test` runs clean (24 specs) under Node once the shell sources `~/.zshrc`, giving us fast regression coverage without rebuilding the wasm blob for every tweak.
    - ✅ `telemetryConsent` now feeds `RunMatSession::telemetry_consent`; browsers can opt out during `initRunMat`, and the CLI threads its config into the same flag so analytics collectors stay honest. Hosts can also provide a stable `telemetryId` so any future runtime-level telemetry reuses the same CID that the UI already knows about.
 2. **Execution contract**
    - [x] Define the JSON shape returned by `execute(script, opts)` for wasm usage: stdout/stderr arrays, final value preview, workspace diff, figure handles touched, profiler summaries.
@@ -37,6 +38,7 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
      - ✅ `RunMatWasm` exposes `dispose()` (mirrored by the TypeScript wrapper) which cancels executions, drops stdin handlers, and prevents hosts from reusing dead sessions. Hosts can call `session.dispose()` when unmounting a REPL tab to free memory without reloading the wasm blob.
    - [x] Validate memory growth (wasm `memory.grow`) stays within limits and document thresholds for hosts.
      - ✅ `RunMatWasm::memoryUsage()` (surfaced as `session.memoryUsage()` in TS) reports the current heap size in bytes/pages so hosts can monitor growth. The README now explains how to use the API and which init options control GPU/memory budgets.
+   - ✅ `cargo check -p runmat-wasm --target wasm32-unknown-unknown` now succeeds after aligning the wasm bindings with the plotting/runtime refactor: `detach_web_renderer` comes from the `plotting::web` module, figure errors cover `InvalidAxesHandle`, stdout subscriptions live in a wasm-only thread-local registry (no `Send + Sync` requirements on `js_sys::Function`), snapshot streams use the correct `ReadableStream` API, and the filesystem parser builds `FsMetadata`/`DirEntry` via new constructors instead of touching private fields. This unblocks the remaining “Session bring-up” verification work in Section A.
 
 ## B. Plotting & Figure Bridge
 1. **Canvas management**
@@ -76,7 +78,7 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 
 | Item | Owner | Status | Notes |
 | ---- | ----- | ------ | ----- |
-| Session init API audit | | ☐ | |
+| Session init API audit | | ☑ | Node/Vitest harness now covers fs provider registration, plot canvas wiring, telemetry IDs, and scatter/surface overrides; `npm test` runs clean once Node env sources `~/.zshrc`. |
 | Execution response contract | | ☑ | Streams + workspace payloads + stdout subscription landed; cancellation still pending |
 | Plot canvas lifecycle | | ☐ | |
 | Variable inspector API | | ☐ | |

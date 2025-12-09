@@ -1,7 +1,6 @@
 use js_sys::{Array, ArrayBuffer, Function, Reflect, Uint8Array};
-use runmat_filesystem::{
-    DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags, OpenOptions,
-};
+use runmat_filesystem::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -232,6 +231,9 @@ pub(crate) struct JsFsProvider {
     funcs: JsFsFuncs,
 }
 
+unsafe impl Send for JsFsProvider {}
+unsafe impl Sync for JsFsProvider {}
+
 impl FsProvider for JsFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut initial = Vec::new();
@@ -369,6 +371,9 @@ struct JsFileHandle {
     inner: Arc<Mutex<JsFileState>>,
 }
 
+unsafe impl Send for JsFileHandle {}
+unsafe impl Sync for JsFileHandle {}
+
 impl Read for JsFileHandle {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut state = self.inner.lock().unwrap();
@@ -398,14 +403,16 @@ impl Write for JsFileHandle {
         if state.append {
             state.cursor = state.buffer.len();
         }
-        if state.cursor > state.buffer.len() {
-            state.buffer.resize(state.cursor, 0);
+        let cursor = state.cursor;
+        if cursor > state.buffer.len() {
+            state.buffer.resize(cursor, 0);
         }
-        if state.cursor + buf.len() > state.buffer.len() {
-            state.buffer.resize(state.cursor + buf.len(), 0);
+        let end = cursor + buf.len();
+        if end > state.buffer.len() {
+            state.buffer.resize(end, 0);
         }
-        state.buffer[state.cursor..state.cursor + buf.len()].copy_from_slice(buf);
-        state.cursor += buf.len();
+        state.buffer[cursor..end].copy_from_slice(buf);
+        state.cursor = end;
         state.dirty = true;
         Ok(buf.len())
     }
@@ -541,12 +548,7 @@ fn parse_metadata(value: JsValue) -> Option<FsMetadata> {
         .ok()
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    Some(FsMetadata {
-        file_type,
-        len,
-        modified,
-        readonly,
-    })
+    Some(FsMetadata::new(file_type, len, modified, readonly))
 }
 
 fn parse_dir_entries(value: JsValue) -> io::Result<Vec<DirEntry>> {
@@ -578,11 +580,11 @@ fn parse_dir_entries(value: JsValue) -> io::Result<Vec<DirEntry>> {
             .and_then(|v| v.as_string())
             .and_then(map_file_type)
             .unwrap_or(FsFileType::Unknown);
-        entries.push(DirEntry {
-            path: PathBuf::from(path),
-            file_name: file_name.into(),
+        entries.push(DirEntry::new(
+            PathBuf::from(path),
+            OsString::from(file_name),
             file_type,
-        });
+        ));
     }
     Ok(entries)
 }
@@ -599,20 +601,4 @@ fn map_file_type(text: String) -> Option<FsFileType> {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-impl FsMetadata {
-    pub fn new(
-        file_type: FsFileType,
-        len: u64,
-        modified: Option<std::time::SystemTime>,
-        readonly: bool,
-    ) -> Self {
-        Self {
-            file_type,
-            len,
-            modified,
-            readonly,
-        }
-    }
 }

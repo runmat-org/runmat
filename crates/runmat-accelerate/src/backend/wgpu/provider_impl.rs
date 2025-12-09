@@ -148,6 +148,11 @@ pub struct WgpuProvider {
     moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
 }
 
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for WgpuProvider {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for WgpuProvider {}
+
 #[derive(Clone)]
 struct BufferEntry {
     buffer: Arc<wgpu::Buffer>,
@@ -2471,27 +2476,26 @@ impl WgpuProvider {
                 _ => None,
             });
 
-        let mut precision = forced_precision.unwrap_or(NumericPrecision::F32);
-
         #[cfg(target_arch = "wasm32")]
-        {
+        let precision = {
             if forced_precision == Some(NumericPrecision::F64) {
                 warn!("RunMat Accelerate: f64 precision is unavailable on WebGPU/wasm builds; using f32");
             }
-            precision = NumericPrecision::F32;
-        }
+            NumericPrecision::F32
+        };
 
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if precision == NumericPrecision::F64
-                && !adapter_features.contains(wgpu::Features::SHADER_F64)
+        let precision = {
+            let mut p = forced_precision.unwrap_or(NumericPrecision::F32);
+            if p == NumericPrecision::F64 && !adapter_features.contains(wgpu::Features::SHADER_F64)
             {
                 warn!(
                     "RunMat Accelerate: requested f64 precision but adapter lacks SHADER_F64; falling back to f32"
                 );
-                precision = NumericPrecision::F32;
+                p = NumericPrecision::F32;
             }
-        }
+            p
+        };
 
         if forced_precision.is_none() {
             info!(
@@ -2532,6 +2536,7 @@ impl WgpuProvider {
         };
         let limits = adapter.limits();
 
+        #[cfg(not(target_arch = "wasm32"))]
         let (device_raw, queue_raw) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -2542,6 +2547,18 @@ impl WgpuProvider {
                 None,
             )
             .await?;
+        #[cfg(target_arch = "wasm32")]
+        let (device_raw, queue_raw) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("RunMat WGPU Device"),
+                    required_features,
+                    required_limits: limits.clone(),
+                },
+                None,
+            )
+            .await
+            .map_err(|err| anyhow!(err.to_string()))?;
         let device = Arc::new(device_raw);
         let queue = Arc::new(queue_raw);
         let adapter = Arc::new(adapter);

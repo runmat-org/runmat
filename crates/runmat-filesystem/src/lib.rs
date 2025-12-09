@@ -113,6 +113,20 @@ pub struct FsMetadata {
 }
 
 impl FsMetadata {
+    pub fn new(
+        file_type: FsFileType,
+        len: u64,
+        modified: Option<SystemTime>,
+        readonly: bool,
+    ) -> Self {
+        Self {
+            file_type,
+            len,
+            modified,
+            readonly,
+        }
+    }
+
     pub fn file_type(&self) -> FsFileType {
         self.file_type
     }
@@ -150,6 +164,14 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
+    pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
+        Self {
+            path,
+            file_name,
+            file_type,
+        }
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
