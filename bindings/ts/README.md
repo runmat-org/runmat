@@ -93,6 +93,7 @@ if (gpu.adapter) {
 | `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
 | `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
 | `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
+| `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
 
 ## Telemetry consent
 
@@ -120,6 +121,31 @@ Call `await session.memoryUsage()` to inspect the current WebAssembly heap. The 
 - Call `session.cancelExecution()` to cooperatively interrupt a long-running script (e.g., when users press the stop button). The runtime raises `MATLAB:runmat:ExecutionCancelled`, matching desktop builds.
 - `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and can return a string/number/boolean, `{ kind: "keyPress" }`, or `{ error }` to reject the prompt. Returning `null`, `undefined`, `{ pending: true }`, or a Promise signals that the handler will respond asynchronously.
 - When a handler defers, `execute()` resolves with `stdinRequested` containing `{ id, request, waitingMs }`. Call `session.resumeInput(id, value)` once the UI collects the user's response (value follows the same shape as the input handler). `waitingMs` starts at zero and grows until the prompt is satisfied so UIs can show “still waiting…” nudges without forcing a timeout. Use `session.pendingStdinRequests()` to list outstanding prompts (useful when rehydrating a UI after refresh) — each entry carries the same `waitingMs` counter.
+
+## Workspace metadata & variable inspection
+
+Every `ExecuteResult.workspace` now carries `{ full, version, values[] }`, where each entry exposes:
+
+- `name`, `className`, `dtype`, `shape`, `sizeBytes` (when known) so table views can show MATLAB-style summaries.
+- `residency`: `"cpu"`, `"gpu"`, or `"unknown"` so hosts can flag gpuArray residency without parsing class names.
+- `preview`: small inline numeric previews (up to 16 elements) for scalars/vectors.
+- `previewToken`: UUID that identifies this snapshot of the variable for lazy materialization.
+
+Hosts can ask the runtime for richer previews without disturbing the MATLAB session via `await session.materializeVariable(selector, options?)`. The selector accepts either a preview token string or `{ previewToken, name }` (name is only used when no token is available). Options currently support `{ limit }` to cap numeric previews (default 4 096 elements, matching the REPL hover limit).
+
+The Promise resolves with `{ name, className, dtype?, shape, isGpu, residency, sizeBytes?, preview?, valueText, valueJson }`. `valueJson` reuses the same summary format as `ExecuteResult.valueJson`, complete with truncation flags, so variable panes can display matrices, structs, or cell arrays without issuing textual commands. `valueText` mirrors MATLAB’s default display for quick tooltips.
+
+Preview tokens are regenerated on every execution so stale handles naturally expire; hosts can fall back to `{ name: "A" }` selectors if they need to inspect a value that predates the latest run.
+
+For Monaco-based editors, the package now exposes `createWorkspaceHoverProvider({ monaco, session, language })`, which registers a hover provider that shows the latest class/shape/residency data inline. Feed it every `ExecuteResult.workspace` via `hover.updateWorkspace(result.workspace)` and it will lazily call `session.materializeVariable(...)` (using the per-entry `previewToken`) whenever the inline preview is truncated. Dispose the helper whenever you tear down the Monaco instance to unregister the hover provider and clear cached previews.
+
+## Fusion plan snapshots
+
+Accelerate already emits detailed fusion graphs (nodes, edges, shader metadata, decision logs) and the wasm bindings expose them via `ExecuteResult.fusionPlan`. Because these payloads can be sizable, they are opt-in — pass `emitFusionPlan: true` to `initRunMat` or call `session.setFusionPlanEnabled(true)` when showing the “Fusion Plan” pane. Toggle the flag off again when the UI hides that inspector to keep executions lean.
+
+Each snapshot mirrors the native CLI payload `{ nodes, edges, shaders, decisions }`, making it trivial to feed graph visualizers or shader viewers without scraping textual logs.
+
+To simplify UI plumbing, use `createFusionPlanAdapter({ session, onPlanChange })`. It keeps track of whether emission is enabled, forwards `session.setFusionPlanEnabled(...)` for you, and exposes `handleExecutionResult(result)` plus a `subscribe(listener)` hook so fusion panes can update whenever `ExecuteResult.fusionPlan` changes. Call `adapter.setEnabled(true)` when the pane is visible, `adapter.setEnabled(false)` when it hides, and read the latest snapshot via `adapter.plan`.
 
 ## Plotting surfaces
 

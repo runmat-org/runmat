@@ -2,6 +2,7 @@ import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 export {
   createInMemoryFsProvider,
   createIndexedDbFsHandle,
@@ -23,6 +24,17 @@ export type {
   RunMatFilesystemMetadata,
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
+export { createWorkspaceHoverProvider } from "./workspace-hover.js";
+export type {
+  WorkspaceHoverOptions,
+  WorkspaceHoverController,
+  HoverFormatState
+} from "./workspace-hover.js";
+export { createFusionPlanAdapter } from "./fusion-plan.js";
+export type {
+  FusionPlanAdapter,
+  FusionPlanAdapterOptions
+} from "./fusion-plan.js";
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -62,6 +74,7 @@ export interface RunMatInitOptions {
   plotCanvas?: HTMLCanvasElement;
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
+  emitFusionPlan?: boolean;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -179,8 +192,11 @@ export interface ExecuteResult {
   stdinRequested?: PendingStdinRequest;
 }
 
+export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
+
 export interface WorkspaceSnapshot {
   full: boolean;
+  version: number;
   values: WorkspaceEntry[];
 }
 
@@ -192,11 +208,37 @@ export interface WorkspaceEntry {
   isGpu: boolean;
   sizeBytes?: number;
   preview?: WorkspacePreview;
+  residency: WorkspaceResidency;
+  previewToken?: string;
 }
 
 export interface WorkspacePreview {
   values: number[];
   truncated: boolean;
+}
+
+export type WorkspaceMaterializeSelector =
+  | string
+  | {
+      name?: string;
+      previewToken?: string;
+    };
+
+export interface MaterializeVariableOptions {
+  limit?: number;
+}
+
+export interface MaterializedVariable {
+  name: string;
+  className: string;
+  dtype?: string;
+  shape: number[];
+  isGpu: boolean;
+  residency: WorkspaceResidency;
+  sizeBytes?: number;
+  preview?: WorkspacePreview;
+  valueText: string;
+  valueJson: unknown;
 }
 
 export interface ProfilingSummary {
@@ -284,6 +326,11 @@ export interface RunMatSessionHandle {
   setInputHandler(handler: InputHandler | null): Promise<void>;
   resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
   pendingStdinRequests(): Promise<PendingStdinRequest[]>;
+  materializeVariable(
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable>;
+  setFusionPlanEnabled(enabled: boolean): void;
 }
 
 interface NativeInitOptions {
@@ -299,6 +346,7 @@ interface NativeInitOptions {
   wgpuForceFallbackAdapter?: boolean;
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
+  emitFusionPlan?: boolean;
 }
 
 interface RunMatNativeSession {
@@ -315,12 +363,29 @@ interface RunMatNativeSession {
   setInputHandler?: (handler: InputHandler | null) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
+  materializeVariable?: (
+    selector: WorkspaceMaterializeSelectorWire,
+    options?: MaterializeVariableOptionsWire
+  ) => MaterializedVariable;
+  setFusionPlanEnabled?: (enabled: boolean) => void;
 }
 
 interface ResumeInputWireValue {
   kind?: "line" | "keyPress";
   value?: string;
   error?: string;
+}
+
+type WorkspaceMaterializeSelectorWire =
+  | string
+  | {
+      name?: string;
+      token?: string;
+      previewToken?: string;
+    };
+
+interface MaterializeVariableOptionsWire {
+  limit?: number;
 }
 
 interface RunMatNativeModule {
@@ -401,7 +466,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
-    surfaceVertexBudget: options.surfaceVertexBudget
+    surfaceVertexBudget: options.surfaceVertexBudget,
+    emitFusionPlan: options.emitFusionPlan ?? false
   });
   return new WebRunMatSession(session);
 }
@@ -656,6 +722,26 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     return this.native.pendingStdinRequests();
   }
+
+  async materializeVariable(
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable> {
+    this.ensureActive();
+    requireNativeFunction(this.native, "materializeVariable");
+    const wireSelector = normalizeMaterializeSelector(selector);
+    const wireOptions = normalizeMaterializeOptions(options);
+    return this.native.materializeVariable(
+      wireSelector,
+      wireOptions as MaterializeVariableOptionsWire | undefined
+    );
+  }
+
+  setFusionPlanEnabled(enabled: boolean): void {
+    this.ensureActive();
+    requireNativeFunction(this.native, "setFusionPlanEnabled");
+    this.native.setFusionPlanEnabled(enabled);
+  }
 }
 
 function ensureFsProvider(provider: RunMatFilesystemProvider): void {
@@ -889,6 +975,48 @@ function normalizeResumeInputValue(input: ResumeInputValue): ResumeInputWireValu
   return { kind: "line", value: String(input) };
 }
 
+function normalizeMaterializeSelector(
+  selector: WorkspaceMaterializeSelector
+): WorkspaceMaterializeSelectorWire {
+  if (typeof selector === "string") {
+    const trimmed = selector.trim();
+    if (!trimmed) {
+      throw new Error("materializeVariable selector string must not be empty");
+    }
+    return trimmed;
+  }
+  if (!selector || typeof selector !== "object") {
+    throw new Error("materializeVariable selector must be a string or object");
+  }
+  if (typeof selector.previewToken === "string" && selector.previewToken.trim()) {
+    return { previewToken: selector.previewToken.trim() };
+  }
+  const payload: { name?: string } = {};
+  if (typeof selector.name === "string" && selector.name.trim()) {
+    payload.name = selector.name.trim();
+  }
+  if (!payload.name) {
+    throw new Error("materializeVariable selector requires name or previewToken");
+  }
+  return payload;
+}
+
+function normalizeMaterializeOptions(
+  options?: MaterializeVariableOptions
+): MaterializeVariableOptionsWire | undefined {
+  if (!options) {
+    return undefined;
+  }
+  const payload: MaterializeVariableOptionsWire = {};
+  if (typeof options.limit === "number" && Number.isFinite(options.limit)) {
+    const limit = Math.floor(options.limit);
+    if (limit > 0) {
+      payload.limit = limit;
+    }
+  }
+  return payload;
+}
+
 function coerceResumeValue(value: string | number | boolean | undefined): string {
   if (value === undefined) {
     return "";
@@ -917,6 +1045,7 @@ export const __internals = {
   fetchSnapshotFromUrl,
   coerceFigureError,
   normalizeResumeInputValue,
+  workspaceHover: workspaceHoverInternals,
   setNativeModuleOverride(module: RunMatNativeModule | null): void {
     nativeModuleOverride = module;
     if (!module) {

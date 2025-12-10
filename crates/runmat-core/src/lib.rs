@@ -7,6 +7,7 @@ use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
+use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 #[cfg(feature = "jit")]
@@ -62,6 +63,9 @@ pub struct RunMatSession {
     pending_executions: HashMap<Uuid, PendingFrame>,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
+    workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
+    workspace_version: u64,
+    emit_fusion_plan: bool,
 }
 
 #[derive(Debug, Default)]
@@ -133,6 +137,23 @@ pub struct WorkspacePreview {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceResidency {
+    Cpu,
+    Gpu,
+    Unknown,
+}
+
+impl WorkspaceResidency {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WorkspaceResidency::Cpu => "cpu",
+            WorkspaceResidency::Gpu => "gpu",
+            WorkspaceResidency::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkspaceEntry {
     pub name: String,
@@ -142,12 +163,47 @@ pub struct WorkspaceEntry {
     pub is_gpu: bool,
     pub size_bytes: Option<u64>,
     pub preview: Option<WorkspacePreview>,
+    pub residency: WorkspaceResidency,
+    pub preview_token: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceSnapshot {
     pub full: bool,
+    pub version: u64,
     pub values: Vec<WorkspaceEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MaterializedVariable {
+    pub name: String,
+    pub class_name: String,
+    pub dtype: Option<String>,
+    pub shape: Vec<usize>,
+    pub is_gpu: bool,
+    pub residency: WorkspaceResidency,
+    pub size_bytes: Option<u64>,
+    pub preview: Option<WorkspacePreview>,
+    pub value: Value,
+}
+
+#[derive(Debug, Clone)]
+pub enum WorkspaceMaterializeTarget {
+    Name(String),
+    Token(Uuid),
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceMaterializeOptions {
+    pub max_elements: usize,
+}
+
+impl Default for WorkspaceMaterializeOptions {
+    fn default() -> Self {
+        Self {
+            max_elements: MATERIALIZE_DEFAULT_LIMIT,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -236,6 +292,11 @@ struct PendingFrame {
     pending: runmat_ignition::PendingExecution,
     streams: Vec<ExecutionStreamEntry>,
     pending_since: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspaceMaterializeTicket {
+    name: String,
 }
 
 struct ExecutionPlan {
@@ -418,6 +479,9 @@ impl RunMatSession {
             pending_executions: HashMap::new(),
             telemetry_consent: true,
             telemetry_client_id: None,
+            workspace_preview_tokens: HashMap::new(),
+            workspace_version: 0,
+            emit_fusion_plan: false,
         };
 
         // Cache the shared plotting context (if a GPU provider is active) so the
@@ -556,10 +620,7 @@ impl RunMatSession {
                     error: None,
                     type_info: None,
                     streams: chunk,
-                    workspace: WorkspaceSnapshot {
-                        full: false,
-                        values: Vec::new(),
-                    },
+                    workspace: self.build_workspace_snapshot(Vec::new(), false),
                     figures_touched: Vec::new(),
                     warnings: Vec::new(),
                     profiling: None,
@@ -784,8 +845,11 @@ impl RunMatSession {
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        let fusion_snapshot =
-            build_fusion_snapshot(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups);
+        let fusion_snapshot = if self.emit_fusion_plan {
+            build_fusion_snapshot(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups)
+        } else {
+            None
+        };
         #[cfg(target_arch = "wasm32")]
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
@@ -1203,10 +1267,7 @@ impl RunMatSession {
                 timestamp_ms: entry.timestamp_ms,
             })
             .collect();
-        let workspace_snapshot = WorkspaceSnapshot {
-            full: false,
-            values: workspace_updates,
-        };
+        let workspace_snapshot = self.build_workspace_snapshot(workspace_updates, false);
         let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
         let stdin_events = stdin_events
             .lock()
@@ -1248,6 +1309,63 @@ impl RunMatSession {
         self.variable_array.clear();
         self.variable_names.clear();
         self.workspace_values.clear();
+        self.workspace_preview_tokens.clear();
+    }
+
+    /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
+    pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
+        self.emit_fusion_plan = enabled;
+    }
+
+    /// Materialize a workspace variable for inspection (optionally identified by preview token).
+    pub fn materialize_variable(
+        &mut self,
+        target: WorkspaceMaterializeTarget,
+        options: WorkspaceMaterializeOptions,
+    ) -> Result<MaterializedVariable> {
+        let name = match target {
+            WorkspaceMaterializeTarget::Name(name) => name,
+            WorkspaceMaterializeTarget::Token(id) => self
+                .workspace_preview_tokens
+                .get(&id)
+                .map(|ticket| ticket.name.clone())
+                .ok_or_else(|| anyhow::anyhow!("Unknown workspace preview token"))?,
+        };
+        let value = self
+            .workspace_values
+            .get(&name)
+            .or_else(|| self.variables.get(&name))
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
+
+        let is_gpu = matches!(value, Value::GpuTensor(_));
+        let residency = if is_gpu {
+            WorkspaceResidency::Gpu
+        } else {
+            WorkspaceResidency::Cpu
+        };
+        let host_value = if is_gpu {
+            gpu_helpers::gather_value(&value).map_err(|err| {
+                anyhow::anyhow!("Failed to gather gpuArray '{name}' for preview: {err}")
+            })?
+        } else {
+            value.clone()
+        };
+
+        let max_elements = options.max_elements.max(1).min(MATERIALIZE_DEFAULT_LIMIT);
+        let preview = preview_numeric_values(&host_value, max_elements)
+            .map(|(values, truncated)| WorkspacePreview { values, truncated });
+        Ok(MaterializedVariable {
+            name,
+            class_name: matlab_class_name(&host_value),
+            dtype: numeric_dtype_label(&host_value).map(|label| label.to_string()),
+            shape: value_shape(&host_value).unwrap_or_else(|| vec![]),
+            is_gpu,
+            residency,
+            size_bytes: approximate_size_bytes(&host_value),
+            preview,
+            value: host_value,
+        })
     }
 
     /// Get a copy of current variables
@@ -1342,10 +1460,7 @@ impl RunMatSession {
             error: None,
             type_info: None,
             streams: new_streams,
-            workspace: WorkspaceSnapshot {
-                full: false,
-                values: Vec::new(),
-            },
+            workspace: self.build_workspace_snapshot(Vec::new(), false),
             figures_touched: Vec::new(),
             warnings: Vec::new(),
             profiling: None,
@@ -1486,10 +1601,7 @@ impl RunMatSession {
         }
 
         streams.extend(drain_console_streams());
-        let workspace_snapshot = WorkspaceSnapshot {
-            full: false,
-            values: plan.workspace_updates,
-        };
+        let workspace_snapshot = self.build_workspace_snapshot(plan.workspace_updates, false);
         let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
         let stdin_events = plan
             .stdin_events
@@ -1675,14 +1787,47 @@ impl RunMatSession {
     fn has_jit(&self) -> bool {
         false
     }
+
+    fn build_workspace_snapshot(
+        &mut self,
+        entries: Vec<WorkspaceEntry>,
+        full: bool,
+    ) -> WorkspaceSnapshot {
+        self.workspace_version = self.workspace_version.wrapping_add(1);
+        let version = self.workspace_version;
+        self.workspace_preview_tokens.clear();
+        let mut values = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            let token = Uuid::new_v4();
+            self.workspace_preview_tokens.insert(
+                token,
+                WorkspaceMaterializeTicket {
+                    name: entry.name.clone(),
+                },
+            );
+            entry.preview_token = Some(token);
+            values.push(entry);
+        }
+        WorkspaceSnapshot {
+            full,
+            version,
+            values,
+        }
+    }
 }
 
 const WORKSPACE_PREVIEW_LIMIT: usize = 16;
+const MATERIALIZE_DEFAULT_LIMIT: usize = 4096;
 
 fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
     let dtype = numeric_dtype_label(value).map(|label| label.to_string());
     let preview = preview_numeric_values(value, WORKSPACE_PREVIEW_LIMIT)
         .map(|(values, truncated)| WorkspacePreview { values, truncated });
+    let residency = if matches!(value, Value::GpuTensor(_)) {
+        WorkspaceResidency::Gpu
+    } else {
+        WorkspaceResidency::Cpu
+    };
     WorkspaceEntry {
         name: name.to_string(),
         class_name: matlab_class_name(value),
@@ -1691,6 +1836,8 @@ fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         is_gpu: matches!(value, Value::GpuTensor(_)),
         size_bytes: approximate_size_bytes(value),
         preview,
+        residency,
+        preview_token: None,
     }
 }
 

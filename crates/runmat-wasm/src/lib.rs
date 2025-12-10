@@ -21,8 +21,8 @@ use runmat_core::{
     matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
     ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
     FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind, InputResponse,
-    PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspacePreview,
-    WorkspaceSnapshot,
+    MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
 };
 use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
 use runmat_runtime::warning_store::RuntimeWarning;
@@ -119,6 +119,8 @@ struct InitOptions {
     surface_vertex_budget: Option<u64>,
     #[serde(default)]
     telemetry_id: Option<String>,
+    #[serde(default)]
+    emit_fusion_plan: Option<bool>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -152,6 +154,7 @@ struct SessionConfig {
     wgpu_power_preference: AccelPowerPreference,
     wgpu_force_fallback_adapter: bool,
     auto_offload: AutoOffloadOptions,
+    emit_fusion_plan: bool,
 }
 
 impl SessionConfig {
@@ -165,6 +168,7 @@ impl SessionConfig {
             wgpu_power_preference: parse_power_preference(opts.wgpu_power_preference.as_deref()),
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
             auto_offload: AutoOffloadOptions::default(),
+            emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
         }
     }
 
@@ -188,7 +192,7 @@ impl SessionConfig {
 pub struct RunMatWasm {
     session: RefCell<RunMatSession>,
     snapshot_seed: Option<Vec<u8>>,
-    config: SessionConfig,
+    config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
 }
@@ -208,20 +212,22 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = resetSession)]
     pub fn reset_session(&self) -> Result<(), JsValue> {
-        let consent = self.config.telemetry_consent;
+        let config = self.config.borrow();
+        let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_snapshot_bytes(
-            self.config.enable_jit,
-            self.config.verbose,
+            config.enable_jit,
+            config.verbose,
             self.snapshot_seed.as_deref(),
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
         configure_session_input_handler(&mut session);
         session.set_telemetry_consent(consent);
-        if let Some(cid) = self.config.telemetry_client_id.clone() {
+        if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));
         } else {
             session.set_telemetry_client_id(None);
         }
+        session.set_emit_fusion_plan(config.emit_fusion_plan);
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -300,6 +306,44 @@ impl RunMatWasm {
         {
             Err(js_error(
                 "pendingStdinRequests is only available when targeting wasm32",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = setFusionPlanEnabled)]
+    pub fn set_fusion_plan_enabled(&self, enabled: bool) {
+        self.session.borrow_mut().set_emit_fusion_plan(enabled);
+        if let Ok(mut cfg) = self.config.try_borrow_mut() {
+            cfg.emit_fusion_plan = enabled;
+        }
+    }
+
+    #[wasm_bindgen(js_name = materializeVariable)]
+    pub fn materialize_variable(
+        &self,
+        selector: JsValue,
+        options: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let target = parse_materialize_target(selector)?;
+            let opts = parse_materialize_options(options)?;
+            let mut session = self.session.borrow_mut();
+            let value = session
+                .materialize_variable(target, opts)
+                .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
+            let payload = MaterializedVariablePayload::from(value);
+            return serde_wasm_bindgen::to_value(&payload).map_err(|err| {
+                js_error(&format!(
+                    "Failed to serialize materialized workspace value: {err}"
+                ))
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (selector, options);
+            Err(js_error(
+                "materializeVariable is only available when targeting wasm32",
             ))
         }
     }
@@ -859,6 +903,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
     }
+    session.set_emit_fusion_plan(config.emit_fusion_plan);
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -894,7 +939,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     Ok(RunMatWasm {
         session: RefCell::new(session),
         snapshot_seed,
-        config,
+        config: RefCell::new(config),
         gpu_status,
         disposed: Cell::new(false),
     })
@@ -1484,6 +1529,21 @@ struct PendingInputPayload {
     waiting_ms: u64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeSelectorPayload {
+    name: Option<String>,
+    #[serde(alias = "previewToken")]
+    token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeOptionsPayload {
+    limit: Option<usize>,
+    slices: Option<JsonValue>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InputRequestPayload {
@@ -1653,6 +1713,7 @@ impl From<StdinEvent> for StdinEventPayload {
 #[serde(rename_all = "camelCase")]
 struct WorkspacePayload {
     full: bool,
+    version: u64,
     values: Vec<WorkspaceEntryPayload>,
 }
 
@@ -1660,6 +1721,7 @@ impl From<WorkspaceSnapshot> for WorkspacePayload {
     fn from(snapshot: WorkspaceSnapshot) -> Self {
         Self {
             full: snapshot.full,
+            version: snapshot.version,
             values: snapshot
                 .values
                 .into_iter()
@@ -1679,6 +1741,8 @@ struct WorkspaceEntryPayload {
     is_gpu: bool,
     size_bytes: Option<u64>,
     preview: Option<WorkspacePreviewPayload>,
+    residency: &'static str,
+    preview_token: Option<String>,
 }
 
 impl From<WorkspaceEntry> for WorkspaceEntryPayload {
@@ -1691,6 +1755,8 @@ impl From<WorkspaceEntry> for WorkspaceEntryPayload {
             is_gpu: entry.is_gpu,
             size_bytes: entry.size_bytes,
             preview: entry.preview.map(WorkspacePreviewPayload::from),
+            residency: entry.residency.as_str(),
+            preview_token: entry.preview_token.map(|id| id.to_string()),
         }
     }
 }
@@ -1707,6 +1773,38 @@ impl From<WorkspacePreview> for WorkspacePreviewPayload {
         Self {
             values: preview.values,
             truncated: preview.truncated,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializedVariablePayload {
+    name: String,
+    class_name: String,
+    dtype: Option<String>,
+    shape: Vec<usize>,
+    is_gpu: bool,
+    residency: &'static str,
+    size_bytes: Option<u64>,
+    preview: Option<WorkspacePreviewPayload>,
+    value_text: String,
+    value_json: JsonValue,
+}
+
+impl From<MaterializedVariable> for MaterializedVariablePayload {
+    fn from(value: MaterializedVariable) -> Self {
+        Self {
+            name: value.name,
+            class_name: value.class_name,
+            dtype: value.dtype,
+            shape: value.shape,
+            is_gpu: value.is_gpu,
+            residency: value.residency.as_str(),
+            size_bytes: value.size_bytes,
+            preview: value.preview.map(WorkspacePreviewPayload::from),
+            value_text: value.value.to_string(),
+            value_json: value_to_json(&value.value, 0),
         }
     }
 }
@@ -1867,6 +1965,65 @@ impl From<&runmat_core::ExecutionStats> for StatsPayload {
             average_execution_time_ms: stats.average_execution_time_ms,
         }
     }
+}
+
+fn parse_materialize_target(value: JsValue) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Err(js_error(
+            "materializeVariable requires a selector (name or previewToken)",
+        ));
+    }
+    if let Some(token) = value.as_string() {
+        return parse_materialize_token_str(&token);
+    }
+    let payload: MaterializeSelectorPayload = serde_wasm_bindgen::from_value(value.clone())
+        .map_err(|err| js_error(&format!("materializeVariable selector: {err}")))?;
+    if let Some(token) = payload.token {
+        return parse_materialize_token_str(&token);
+    }
+    if let Some(name) = payload.name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(js_error(
+                "materializeVariable selector.name must not be empty",
+            ));
+        }
+        return Ok(WorkspaceMaterializeTarget::Name(trimmed.to_string()));
+    }
+    Err(js_error(
+        "materializeVariable selector must include a name or previewToken",
+    ))
+}
+
+fn parse_materialize_token_str(token: &str) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    let parsed = Uuid::parse_str(token.trim())
+        .map_err(|_| js_error("materializeVariable previewToken must be a UUID string"))?;
+    Ok(WorkspaceMaterializeTarget::Token(parsed))
+}
+
+fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptions, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(WorkspaceMaterializeOptions::default());
+    }
+    if !value.is_object() {
+        return Err(js_error("materializeVariable options must be an object"));
+    }
+    let payload: MaterializeOptionsPayload =
+        serde_wasm_bindgen::from_value(value).map_err(|err| {
+            js_error(&format!(
+                "materializeVariable options could not be parsed: {err}"
+            ))
+        })?;
+    if payload.slices.is_some() {
+        return Err(js_error(
+            "materializeVariable slices are not supported yet; omit the 'slices' option",
+        ));
+    }
+    let mut opts = WorkspaceMaterializeOptions::default();
+    if let Some(limit) = payload.limit {
+        opts.max_elements = limit.max(1).min(MAX_DATA_PREVIEW);
+    }
+    Ok(opts)
 }
 
 #[derive(Clone, Serialize)]

@@ -50,11 +50,14 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 
 ## C. Variables / Fusion Panels
 1. **Variable inspector**
-   - [ ] Extend the execution response with workspace metadata (name, shape, dtype, residency, sample preview pointer). Ensure GPU tensors can be previewed via lazy gather APIs (`materializeVariable(handle, slices)`).
-   - [ ] Add hover/peek helpers wired to the in-flight LSP service so Monaco can show shapes/dtypes inline.
+   - [x] Extend the execution response with workspace metadata (name, shape, dtype, residency, sample preview pointer). Ensure GPU tensors can be previewed via lazy gather APIs (`materializeVariable(handle, slices)`).
+     - _Status_: `ExecuteResult.workspace` now includes `version`, `residency`, `sizeBytes`, and per-entry `previewToken`s; `RunMatSession::materialize_variable` downloads CPU/GPU tensors on demand, wasm exports `materializeVariable(selector, { limit })`, and the TS bindings/tests/README cover the new API.
+   - [x] Add hover/peek helpers wired to the in-flight LSP service so Monaco can show shapes/dtypes inline.
+     - _Status_: `createWorkspaceHoverProvider({ monaco, session })` (bindings/ts) registers a Monaco hover provider that streams the latest workspace snapshot and lazily calls `session.materializeVariable(...)` when previews are truncated, so editor hovers show class/shape/residency data without bespoke plumbing.
 2. **Fusion plan / shader view**
-   - [ ] Surface the fusion DAG + selected GPU shaders via a structured JSON emitted after each execution. Include timestamps and compiled shader IDs so the UI can sync the lower-pane diagrams.
-   - [ ] Guarantee the emission is optional (flag) to keep smaller hosts lightweight.
+   - [x] Surface the fusion DAG + selected GPU shaders via a structured JSON emitted after each execution. Include timestamps and compiled shader IDs so the UI can sync the lower-pane diagrams.
+   - [x] Guarantee the emission is optional (flag) to keep smaller hosts lightweight.
+     - _Status_: `initRunMat({ emitFusionPlan })` seeds `RunMatSession::set_emit_fusion_plan`, wasm exposes `setFusionPlanEnabled(bool)`, and the TS wrapper/README document the toggle so hosts can opt-in only when the fusion pane is visible. The payload shape is unchanged (`nodes/edges/shaders/decisions`) but now covered in the README/plan.
 
 ## D. Filesystem & Remote Providers
 1. **Provider selection**
@@ -82,8 +85,8 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 | Execution response contract | | ☑ | Streams + workspace payloads + stdout subscription landed; cancellation still pending |
 | Plot canvas lifecycle | | ☑ | Figure canvases can now be registered/deregistered per handle (plus default canvas), and figure events carry titles/labels/legend metadata for UI sidebars. |
 | GPU stress + headless snapshots | | ☑ | Headless WebGPU tests (gated by `RUNMAT_PLOT_FORCE_GPU_TESTS`) render multi-axes + scatter3 figures via the shared context, and the new `renderFigureImage` hook (runtime + wasm + TS) returns PNG bytes or a structured `RenderFailure` error when GPUs are unavailable. |
-| Variable inspector API | | ☐ | |
-| Fusion plan emission | | ☐ | |
+| Variable inspector API | | ☑ | Workspace snapshots now expose residency/preview tokens + `materializeVariable`, and the new `createWorkspaceHoverProvider` helper feeds Monaco hovers straight from the session cache. |
+| Fusion plan emission | | ☑ | `emitFusionPlan` init option + `setFusionPlanEnabled` toggle gate the existing fusion DAG payload so UIs can opt in only when needed. |
 | FS provider selection docs | | ☐ | |
 | WASM build script + CI | | ☐ | |
 | Integration guide | | ☐ | |

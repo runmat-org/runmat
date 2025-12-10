@@ -6,6 +6,9 @@ import {
   deregisterFigureCanvas,
   deregisterPlotCanvas,
   renderFigureImage,
+  createWorkspaceHoverProvider,
+  createFusionPlanAdapter,
+  type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type RunMatSnapshotSource,
   type ExecuteResult,
@@ -31,6 +34,79 @@ async function readStream(stream: ReadableStream<Uint8Array> | undefined): Promi
     }
   }
   return chunks;
+}
+
+const defaultStats: SessionStats = {
+  totalExecutions: 0,
+  jitCompiled: 0,
+  interpreterFallback: 0,
+  totalExecutionTimeMs: 0,
+  averageExecutionTimeMs: 0
+};
+
+function createExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
+  return {
+    ...baseExecuteResult,
+    ...overrides,
+    workspace: overrides.workspace ?? baseExecuteResult.workspace
+  };
+}
+
+function createSessionHandleMock(
+  overrides: Partial<RunMatSessionHandle> = {}
+): RunMatSessionHandle {
+  const stub: Partial<RunMatSessionHandle> = {
+    execute: vi.fn(async () => baseExecuteResult),
+    resetSession: vi.fn(async () => {}),
+    stats: vi.fn(async () => ({ ...defaultStats })),
+    clearWorkspace: vi.fn(),
+    dispose: vi.fn(),
+    telemetryConsent: vi.fn(() => true),
+    memoryUsage: vi.fn(async () => ({ bytes: 0, pages: 0 })),
+    telemetryClientId: vi.fn(() => undefined),
+    gpuStatus: vi.fn(() => ({ requested: false, active: false })),
+    cancelExecution: vi.fn(),
+    setInputHandler: vi.fn(async () => {}),
+    resumeInput: vi.fn(async () => baseExecuteResult),
+    pendingStdinRequests: vi.fn(async () => []),
+    materializeVariable: vi.fn(async () => undefined),
+    setFusionPlanEnabled: vi.fn(),
+    ...overrides
+  };
+  return stub as RunMatSessionHandle;
+}
+
+function createHoverHarness(
+  options: { session?: RunMatSessionHandle; word?: string } = {}
+): {
+  controller: ReturnType<typeof createWorkspaceHoverProvider>;
+  provider: { provideHover: (model: any, position: any) => Promise<any> | any };
+  model: { getWordAtPosition: () => { word: string } | null };
+  position: { lineNumber: number; column: number };
+} {
+  let providerImpl: { provideHover: (model: any, position: any) => Promise<any> | any } | undefined;
+  const monacoStub = {
+    languages: {
+      registerHoverProvider: vi.fn((_language: string, provider) => {
+        providerImpl = provider;
+        return { dispose: vi.fn() };
+      })
+    }
+  };
+  const controller = createWorkspaceHoverProvider({
+    monaco: monacoStub,
+    language: "matlab",
+    session: options.session
+  });
+  const word = options.word ?? "A";
+  const model = {
+    getWordAtPosition: () => ({ word })
+  };
+  const position = { lineNumber: 1, column: 1 };
+  if (!providerImpl) {
+    throw new Error("Hover provider was not registered");
+  }
+  return { controller, provider: providerImpl, model, position };
 }
 
 describe("resolveSnapshotSource", () => {
@@ -125,7 +201,7 @@ const baseExecuteResult: ExecuteResult = {
   executionTimeMs: 0,
   usedJit: false,
   stdout: [],
-  workspace: { full: false, values: [] },
+  workspace: { full: false, version: 0, values: [] },
   figuresTouched: [],
   warnings: [],
   stdinEvents: []
@@ -520,5 +596,183 @@ describe("ExecuteResult passthroughs", () => {
     const result = await session.execute("disp('prompt')");
     expect(result.stdinRequested).toEqual(request);
     expect(result.stdinRequested?.waitingMs).toBe(1500);
+  });
+});
+
+describe("workspace hover provider", () => {
+  it("formats workspace metadata in hover tooltips", async () => {
+    const harness = createHoverHarness();
+    harness.controller.updateWorkspace({
+      full: true,
+      version: 1,
+      values: [
+        {
+          name: "A",
+          className: "double",
+          dtype: "double",
+          shape: [2, 2],
+          isGpu: false,
+          sizeBytes: 64,
+          preview: { values: [1, 2, 3], truncated: false },
+          residency: "cpu"
+        }
+      ]
+    });
+    const hover = await harness.provider.provideHover(harness.model, harness.position);
+    expect(hover?.contents[0].value).toContain("Class: `double`");
+    expect(hover?.contents[0].value).toContain("Shape: 2×2");
+  });
+
+  it("materializes truncated previews only once", async () => {
+    const session = createSessionHandleMock({
+      materializeVariable: vi.fn(async () => ({
+        name: "B",
+        className: "double",
+        dtype: "double",
+        shape: [1, 3],
+        isGpu: true,
+        residency: "gpu",
+        sizeBytes: 24,
+        preview: { values: [4, 5, 6], truncated: false },
+        valueText: "[4 5 6]",
+        valueJson: [4, 5, 6]
+      }))
+    });
+    const harness = createHoverHarness({ session, word: "B" });
+    harness.controller.updateWorkspace({
+      full: true,
+      version: 1,
+      values: [
+        {
+          name: "B",
+          className: "double",
+          dtype: "double",
+          shape: [1, 3],
+          isGpu: true,
+          sizeBytes: 24,
+          preview: { values: [], truncated: true },
+          residency: "gpu",
+          previewToken: "token-b"
+        }
+      ]
+    });
+    const hover = await harness.provider.provideHover(harness.model, harness.position);
+    expect(session.materializeVariable).toHaveBeenCalledTimes(1);
+    expect(hover?.contents[0].value).toContain("Preview (materialized)");
+    await harness.provider.provideHover(harness.model, harness.position);
+    expect(session.materializeVariable).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fusion plan adapter", () => {
+  it("toggles emission and notifies listeners", () => {
+    const session = createSessionHandleMock();
+    const onPlanChange = vi.fn();
+    const adapter = createFusionPlanAdapter({ session, onPlanChange });
+    adapter.setEnabled(true);
+    expect(session.setFusionPlanEnabled).toHaveBeenCalledWith(true);
+    const listener = vi.fn();
+    const unsubscribe = adapter.subscribe(listener);
+    const plan = { nodes: [], edges: [], shaders: [], decisions: [] };
+    adapter.handleExecutionResult(createExecuteResult({ fusionPlan: plan }));
+    expect(onPlanChange).toHaveBeenLastCalledWith(plan);
+    expect(listener).toHaveBeenCalledWith(plan);
+    adapter.setEnabled(false);
+    expect(session.setFusionPlanEnabled).toHaveBeenCalledWith(false);
+    expect(adapter.plan).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    adapter.handleExecutionResult(createExecuteResult());
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("materializeVariable wiring", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("forwards string selectors and options to the native session", async () => {
+    const spy = vi.fn(() => ({
+      name: "A",
+      className: "double",
+      dtype: "double",
+      shape: [1, 1],
+      isGpu: false,
+      residency: "cpu",
+      sizeBytes: 8,
+      preview: { values: [1], truncated: false },
+      valueText: "1",
+      valueJson: 1
+    }));
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          materializeVariable: spy
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const materialized = await session.materializeVariable("token-123", { limit: 64 });
+
+    expect(spy).toHaveBeenCalledWith("token-123", { limit: 64 });
+    expect(materialized.name).toBe("A");
+    expect(materialized.preview?.values).toEqual([1]);
+  });
+
+  it("normalizes selector objects and clamps invalid limits", async () => {
+    const spy = vi.fn(() => ({
+      name: "B",
+      className: "double",
+      shape: [2, 2],
+      dtype: "double",
+      isGpu: true,
+      residency: "gpu",
+      preview: undefined,
+      sizeBytes: undefined,
+      valueText: "[]",
+      valueJson: []
+    }));
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          materializeVariable: spy
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([9]) }, enableGpu: false });
+    await session.materializeVariable({ previewToken: "abc-uuid", name: "ignored" }, { limit: 0 });
+
+    expect(spy).toHaveBeenCalledWith({ previewToken: "abc-uuid" }, {});
+  });
+});
+
+describe("setFusionPlanEnabled", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("delegates to the native session", async () => {
+    const spy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          setFusionPlanEnabled: spy
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    session.setFusionPlanEnabled(true);
+    expect(spy).toHaveBeenCalledWith(true);
   });
 });
