@@ -1,26 +1,26 @@
 ---
 title: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
-description: "TODO"
+description: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
 date: "2025-12-11"
-author: "TODO"
-readTime: "TODO"
+author: "Nabeel Allana"
+readTime: "8 min read"
 slug: "in-defense-of-matlab-whiteboard-style-code"
-tags: ["TODO"]
-keywords: "TODO"
-excerpt: "TODO"
-image: "/placeholder.jpg"
-imageAlt: "TODO"
+tags: ["matlab", "runmat", "whiteboard-code", "scientific-computing", "engineering-math", "llm-codegen"]
+keywords: "MATLAB, MATLAB syntax, whiteboard-style code, RunMat, scientific computing, engineering math, code review, LLM code generation, MATLAB alternative"
+excerpt: "People joke about MATLAB, but the syntax is not the problem. Whiteboard-style code is still one of the safest ways for engineers to write and review math-heavy logic. This article explains why readable math matters in an AI coding world and how RunMat keeps the syntax while modernizing the engine."
+image: "https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png"
+imageAlt: "Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop."
 ogType: "article"
-ogTitle: "TODO"
-ogDescription: "TODO"
+ogTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
+ogDescription: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
 twitterCard: "summary_large_image"
-twitterTitle: "TODO"
-twitterDescription: "TODO"
-canonical: "TODO"
+twitterTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
+twitterDescription: "Whiteboard-style MATLAB code is still a superpower for engineers. Here’s why readable math matters for safety, code review, and AI-assisted workflows."
+canonical: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
 ---
 
 
-*The problem was never the syntax—it was the logic. Here is why readable math still matters in an LLM-assisted code gen world.*
+*The problem was never the syntax—it was the runtime. Here is why readable math still matters in an LLM-assisted code gen world.*
 
 ## Introduction
 
@@ -35,6 +35,8 @@ But if you walk into the R&D departments of top aerospace, automotive, or medica
 We need to separate the **language syntax** (which is excellent) from the **runtime and business model** (which are dated).
 
 ## What is "Whiteboard-Style Code"?
+
+![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png)
 
 When I say "whiteboard-style code," I am referring to a specific level of abstraction.
 In engineering, the "truth" is derived on a whiteboard or a notepad. That is where the physics is worked out. You draw matrices, you transpose vectors, and you define relationships ($F = ma$, $V = IR$, $Y = Hx$).
@@ -67,7 +69,7 @@ W = [Z, Z];      % Brackets imply concatenation
 **In Python (NumPy):**
 Python is an incredible language, and NumPy is a powerhouse. But notice the cognitive load required to handle the shapes explicitly:
 
-```matlab
+```python
 import numpy as np
 
 X = np.array([1, 2, 3])
@@ -101,6 +103,8 @@ When they review code, they are holding their derivation notes in one hand and l
 
 MATLAB’s syntax allows them to verify the *math* without getting bogged down in the *implementation*. When the code looks like the math, bugs have fewer places to hide. The syntax itself reduces the cognitive load, allowing the reviewer to focus on the physics rather than the programming.
 
+![MATLAB code review](https://web.runmatstatic.com/matlab-code-review-sm.png)
+
 ## It’s Not Just for Humans (Compilers Love It Too)
 
 There is a misconception that "simple syntax" means "slow interpretation." Actually, high-level array syntax gives runtimes and compilers excellent signals for optimization.
@@ -126,6 +130,8 @@ To be fair, the backlash against MATLAB is largely justified. The frustration us
 3. **The Cloud Gap:** Modern engineering happens in CI/CD pipelines, Docker containers, and cloud clusters. Integrating a heavy, licensed desktop application into these lightweight, automated workflows is painful.
 
 This friction pushed a generation of engineers toward Python, not because they preferred writing `np.concatenate`, but because they needed tools that played nice with the modern stack.
+
+![MATLAB meme](https://web.runmatstatic.com/matlab-meme-sm.png)
 
 ## A Vision for a Modern "Whiteboard" Runtime
 
