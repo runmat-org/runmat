@@ -731,10 +731,9 @@ mod tests {
     }
 
     #[test]
-    fn scatter_rejects_flat_marker_edge_color() {
+    fn scatter_rejects_flat_marker_edge_color_without_color_data() {
         let rest = vec![
             Value::Tensor(tensor_from(&[5.0, 5.0])),
-            Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::String("Marker".into()),
             Value::String("o".into()),
             Value::String("MarkerEdgeColor".into()),

@@ -418,8 +418,7 @@ pub fn parse_line_style_args(
 
     let appearance = options.resolve();
     Ok(ParsedLineStyle {
-        requires_cpu_fallback: options.requires_cpu_fallback
-            || appearance.line_style != LineStyle::Solid,
+        requires_cpu_fallback: options.requires_cpu_fallback,
         appearance,
         line_style_explicit: options.line_style.is_some(),
         line_style_order: options.line_style_order.clone(),
@@ -1001,8 +1000,9 @@ pub fn parse_bar_style_args(
 
     let mut idx = 0usize;
     if let Some(token) = rest.get(0).and_then(value_as_string) {
-        if !looks_like_option_name(&token) && !token.trim().is_empty() {
-            style.face_color = parse_bar_color_literal(&opts, &token)?;
+        let trimmed = token.trim();
+        if !trimmed.is_empty() && !is_bar_option_name(trimmed) {
+            style.face_color = parse_bar_color_literal(&opts, trimmed)?;
             idx = 1;
         }
     }
@@ -1137,7 +1137,7 @@ fn strip_bar_layout_tokens(rest: &[Value], style: &mut BarStyle) -> Vec<Value> {
 
 fn is_bar_option_name(token: &str) -> bool {
     matches!(
-        token,
+        token.trim().to_ascii_lowercase().as_str(),
         "facecolor"
             | "color"
             | "edgecolor"

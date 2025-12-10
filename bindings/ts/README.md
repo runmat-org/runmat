@@ -38,7 +38,7 @@ Both providers implement the `RunMatFilesystemProvider` contract:
 
 Optional helpers such as `createDir`, `rename`, `setReadonly`, etc. unlock the full MATLAB IO surface.
 
-See `docs/filesystem-notes.md` in the repo for the detailed contract and backend-specific guidance.
+See `docs/FILESYSTEM.md` in the repo for the detailed contract and backend-specific guidance.
 
 ## Snapshot loading
 

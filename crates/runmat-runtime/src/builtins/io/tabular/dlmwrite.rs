@@ -1102,6 +1102,7 @@ fn format_exponential_body(
     uppercase: bool,
 ) -> String {
     let mut s = format!("{:.*e}", precision, value);
+    normalize_exponent_notation(&mut s);
     if uppercase {
         s.make_ascii_uppercase();
     }
@@ -1126,10 +1127,12 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     }
 
     let exponent = abs_val.log10().floor() as i32;
-    let use_exponent = exponent < -4 || exponent >= effective_precision as i32;
+    let force_exponent = uppercase && alternate;
+    let use_exponent = force_exponent || exponent < -4 || exponent >= effective_precision as i32;
     let mut s = if use_exponent {
         let frac = effective_precision.saturating_sub(1);
         let mut out = format!("{:.*e}", frac, abs_val);
+        normalize_exponent_notation(&mut out);
         if uppercase {
             out.make_ascii_uppercase();
         }
@@ -1179,6 +1182,7 @@ fn trim_trailing_zeros(s: &mut String) {
         s.clear();
         s.push_str(&mantissa);
         s.push_str(&exponent);
+        normalize_exponent_notation(s);
     } else {
         trim_fraction(s);
     }
@@ -1201,6 +1205,40 @@ fn trim_fraction(s: &mut String) {
 #[cfg(any(target_arch = "wasm32", test))]
 fn find_exponent_index(s: &str) -> Option<usize> {
     s.find('e').or_else(|| s.find('E'))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn normalize_exponent_notation(s: &mut String) {
+    if let Some(idx) = find_exponent_index(s) {
+        let marker = s.as_bytes()[idx] as char;
+        let suffix = &s[idx + 1..];
+        let (sign, digits) = if let Some(first) = suffix.chars().next() {
+            if first == '+' || first == '-' {
+                (first, suffix.get(1..).unwrap_or("").to_string())
+            } else {
+                ('+', suffix.to_string())
+            }
+        } else {
+            ('+', String::from("0"))
+        };
+        let mut normalized_digits = if digits.is_empty() {
+            String::from("0")
+        } else {
+            digits
+        };
+        if normalized_digits.is_empty() {
+            normalized_digits.push('0');
+        }
+        if normalized_digits.len() < 2 {
+            normalized_digits = format!("{:0>2}", normalized_digits);
+        }
+        let mut rebuilt = String::with_capacity(idx + 1 + 1 + normalized_digits.len());
+        rebuilt.push_str(&s[..idx]);
+        rebuilt.push(marker);
+        rebuilt.push(sign);
+        rebuilt.push_str(&normalized_digits);
+        *s = rebuilt;
+    }
 }
 
 #[cfg(test)]

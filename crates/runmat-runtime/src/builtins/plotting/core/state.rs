@@ -6,12 +6,12 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
-use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::sync::Once;
+use std::sync::{Arc, Mutex};
 use std::thread_local;
 
-use super::common::default_figure;
+use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 use super::engine::render_figure;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -124,6 +124,52 @@ impl FigureState {
             cycle.reset_cursor();
         }
     }
+}
+
+struct ActiveAxesContext {
+    axes_index: usize,
+    cycle_ptr: *mut LineStyleCycle,
+}
+
+struct AxesContextGuard {
+    _private: (),
+}
+
+impl AxesContextGuard {
+    fn install(state: &mut FigureState, axes_index: usize) -> Self {
+        let cycle_ptr = state.cycle_for_axes_mut(axes_index) as *mut LineStyleCycle;
+        ACTIVE_AXES_CONTEXT.with(|ctx| {
+            debug_assert!(
+                ctx.borrow().is_none(),
+                "plot axes context already installed"
+            );
+            ctx.borrow_mut().replace(ActiveAxesContext {
+                axes_index,
+                cycle_ptr,
+            });
+        });
+        Self { _private: () }
+    }
+}
+
+impl Drop for AxesContextGuard {
+    fn drop(&mut self) {
+        ACTIVE_AXES_CONTEXT.with(|ctx| {
+            ctx.borrow_mut().take();
+        });
+    }
+}
+
+fn with_active_cycle<R>(axes_index: usize, f: impl FnOnce(&mut LineStyleCycle) -> R) -> Option<R> {
+    ACTIVE_AXES_CONTEXT.with(|ctx| {
+        let guard = ctx.borrow();
+        let active = guard.as_ref()?;
+        if active.axes_index != axes_index {
+            return None;
+        }
+        let cycle = unsafe { &mut *active.cycle_ptr };
+        Some(f(cycle))
+    })
 }
 
 struct PlotRegistry {
@@ -277,6 +323,7 @@ static FIGURE_OBSERVERS: OnceCell<FigureObserverRegistry> = OnceCell::new();
 
 thread_local! {
     static RECENT_FIGURES: RefCell<HashSet<FigureHandle>> = RefCell::new(HashSet::new());
+    static ACTIVE_AXES_CONTEXT: RefCell<Option<ActiveAxesContext>> = RefCell::new(None);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -555,6 +602,7 @@ pub fn render_active_plot<F>(opts: PlotRenderOptions<'_>, mut apply: F) -> Resul
 where
     F: FnMut(&mut Figure, usize) -> Result<(), String>,
 {
+    let rendering_disabled = interactive_rendering_disabled();
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
@@ -573,27 +621,37 @@ where
         state.figure.set_grid(opts.grid);
         state.figure.set_axis_equal(opts.axis_equal);
 
+        let _axes_context = AxesContextGuard::install(state, axes_index);
         apply(&mut state.figure, axes_index)?;
 
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
+    if rendering_disabled {
+        return Err(ERR_PLOTTING_UNAVAILABLE.to_string());
+    }
+
     let rendered = render_figure(handle, figure_clone)?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+}
+
+fn interactive_rendering_disabled() -> bool {
+    std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some()
 }
 
 #[cfg(test)]
 pub(crate) fn disable_rendering_for_tests() {
     static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        unsafe {
-            std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        }
+    INIT.call_once(|| unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     });
 }
 
 pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
+    if with_active_cycle(axes_index, |cycle| cycle.set_order(order)).is_some() {
+        return;
+    }
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
@@ -601,6 +659,9 @@ pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
 }
 
 pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
+    if let Some(style) = with_active_cycle(axes_index, |cycle| cycle.next()) {
+        return style;
+    }
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
