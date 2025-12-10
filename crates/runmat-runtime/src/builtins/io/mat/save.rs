@@ -491,8 +491,12 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
             Ok(names)
         }
         other => {
+            // Gather once, then require a string-like scalar to avoid infinite recursion.
             let gathered = gather_if_needed(other)?;
-            extract_names(&gathered)
+            if let Some(text) = value_to_string_scalar(&gathered) {
+                return Ok(vec![text]);
+            }
+            Err("save: variable names must be strings, character arrays, string arrays, or cell arrays of strings".to_string())
         }
     }
 }
