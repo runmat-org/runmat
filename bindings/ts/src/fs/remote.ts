@@ -9,6 +9,7 @@ import type {
 export interface RemoteProviderOptions {
   baseUrl: string;
   authToken?: string;
+  headers?: Record<string, string>;
   chunkBytes?: number;
   timeoutMs?: number;
 }
@@ -34,7 +35,7 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
   }
   const chunkBytes = Math.max(64 * 1024, options.chunkBytes ?? DEFAULT_CHUNK_BYTES);
   const timeout = options.timeoutMs ?? 120_000;
-  const client = new RemoteHttpClient(options.baseUrl, timeout, options.authToken);
+  const client = new RemoteHttpClient(options.baseUrl, timeout, options.authToken, options.headers);
 
   return {
     readFile(path) {
@@ -138,7 +139,8 @@ class RemoteHttpClient {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs: number,
-    private readonly authToken?: string
+    private readonly authToken?: string,
+    private readonly extraHeaders: Record<string, string> = {}
   ) {}
 
   fetchMetadata(path: string): RunMatFilesystemMetadata {
@@ -195,16 +197,25 @@ class RemoteHttpClient {
     xhr.open(method, buildUrl(this.baseUrl, route, query), false);
     xhr.timeout = this.timeoutMs;
     xhr.responseType = responseType;
+    const headers: Record<string, string> = {
+      "X-RunMat-Client": "remote-fs",
+      ...this.extraHeaders
+    };
     if (this.authToken) {
-      xhr.setRequestHeader("Authorization", `Bearer ${this.authToken}`);
+      headers.Authorization = `Bearer ${this.authToken}`;
     }
     if (contentType) {
-      xhr.setRequestHeader("Content-Type", contentType);
+      headers["Content-Type"] = contentType;
     }
-    xhr.setRequestHeader("X-RunMat-Client", "remote-fs");
+    for (const [key, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(key, value);
+    }
+
+    const sendBody: Document | XMLHttpRequestBodyInit | null =
+      body === undefined ? null : (body as XMLHttpRequestBodyInit);
 
     try {
-      xhr.send(body ?? null);
+      xhr.send(sendBody);
     } catch (error) {
       throw new Error(`remote fs http error: ${String(error)}`);
     }

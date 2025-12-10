@@ -414,10 +414,16 @@ interface RunMatNativeModule {
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
-let nativeModuleOverride: RunMatNativeModule | null = null;
+let nativeModuleOverride: RunMatNativeModule | RunMatNativeSession | null = null;
 
 async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativeModule> {
   if (nativeModuleOverride) {
+    if (isNativeSession(nativeModuleOverride)) {
+      return {
+        default: async () => {},
+        initRunMat: async () => nativeModuleOverride
+      } as RunMatNativeModule;
+    }
     return nativeModuleOverride;
   }
   if (!loadPromise) {
@@ -759,10 +765,10 @@ function ensureFsProvider(provider: RunMatFilesystemProvider): void {
   }
 }
 
-function requireNativeFunction<K extends keyof RunMatNativeModule>(
-  native: RunMatNativeModule,
+function requireNativeFunction<T, K extends keyof T>(
+  native: T,
   method: K
-): asserts native is RunMatNativeModule & Required<Pick<RunMatNativeModule, K>> {
+): asserts native is T & Required<Pick<T, K>> {
   if (typeof native[method] !== "function") {
     throw new Error(`The loaded runmat-wasm module does not expose ${String(method)} yet.`);
   }
@@ -1045,11 +1051,15 @@ export const __internals = {
   fetchSnapshotFromUrl,
   coerceFigureError,
   normalizeResumeInputValue,
-  workspaceHover: workspaceHoverInternals,
-  setNativeModuleOverride(module: RunMatNativeModule | null): void {
+  workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,
+  setNativeModuleOverride(module: RunMatNativeModule | RunMatNativeSession | null): void {
     nativeModuleOverride = module;
     if (!module) {
       loadPromise = null;
     }
   }
 };
+
+function isNativeSession(value: unknown): value is RunMatNativeSession {
+  return Boolean(value && typeof (value as RunMatNativeSession).execute === "function");
+}

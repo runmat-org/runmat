@@ -157,8 +157,9 @@ function readAllEntries(db: IDBDatabase, storeName: string): Promise<VolumeSnaps
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
-    if ("getAll" in store) {
-      const request = store.getAll();
+    const getAll = (store as any).getAll?.bind(store);
+    if (typeof getAll === "function") {
+      const request = getAll();
       request.onsuccess = () => {
         const raw = (request.result ?? []) as PersistedEntry[];
         resolve(raw.map(deserializeEntry));

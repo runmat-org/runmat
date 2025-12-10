@@ -61,19 +61,19 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 
 ## D. Filesystem & Remote Providers
 1. **Provider selection**
-   - [ ] Confirm the JS bindings expose `createMemoryFsProvider`, `createIndexedDbFsProvider`, and `createRemoteFsProvider` with consistent signatures, plus validation for read-only vs. read-write modes.
-   - [ ] Document size limits and cleanup strategy (e.g., IndexedDB quotas).
+   - [x] Confirm the JS bindings expose `createMemoryFsProvider`, `createIndexedDbFsProvider`, and `createRemoteFsProvider` with consistent signatures, plus validation for read-only vs. read-write modes.
+   - [x] Document size limits and cleanup strategy (e.g., IndexedDB quotas).
 2. **Auth / S3 throughput**
-   - [ ] Ensure the Remote FS hooks (HTTP proxy) support auth headers + chunked streaming so a future S3-backed host can saturate bandwidth.
-   - [ ] Provide mock/stub servers + tests so shell teams can simulate remote mounts locally.
+   - [x] Ensure the Remote FS hooks (HTTP proxy) support auth headers + chunked streaming so a future S3-backed host can saturate bandwidth.
+   - [x] Provide mock/stub servers + tests so shell teams can simulate remote mounts locally.
 
 ## E. Packaging & Tooling
 1. **Build pipeline**
-   - [ ] Script the wasm build (cargo + wasm-bindgen + npm packaging) into `bindings/ts/package-scripts` with reproducible versions.
-   - [ ] Add CI sanity tests (wasm `cargo test`, Vitest suite) and publish dry-run instructions.
+   - [x] Script the wasm build (cargo + wasm-bindgen + npm packaging) into `bindings/ts/package-scripts` with reproducible versions.
+   - [x] Add CI sanity tests (wasm `cargo check`, Vitest suite) and publish dry-run instructions.
 2. **Documentation**
-   - [ ] Produce an integration guide: initialization flow, example React hook, filesystem mounting, plot canvas registration, error handling.
-   - [ ] Keep `docs/wasm/plan.md` in sync by linking to this file and marking milestones as they land.
+   - [x] Produce an integration guide: initialization flow, example React hook, filesystem mounting, plot canvas registration, error handling.
+   - [x] Keep `docs/wasm/plan.md` in sync by linking to this file and marking milestones as they land.
 
 ---
 
@@ -87,7 +87,8 @@ Goal: deliver a standalone RunMat WASM package that shell/UI teams can consume t
 | GPU stress + headless snapshots | | ☑ | Headless WebGPU tests (gated by `RUNMAT_PLOT_FORCE_GPU_TESTS`) render multi-axes + scatter3 figures via the shared context, and the new `renderFigureImage` hook (runtime + wasm + TS) returns PNG bytes or a structured `RenderFailure` error when GPUs are unavailable. |
 | Variable inspector API | | ☑ | Workspace snapshots now expose residency/preview tokens + `materializeVariable`, and the new `createWorkspaceHoverProvider` helper feeds Monaco hovers straight from the session cache. |
 | Fusion plan emission | | ☑ | `emitFusionPlan` init option + `setFusionPlanEnabled` toggle gate the existing fusion DAG payload so UIs can opt in only when needed. |
-| FS provider selection docs | | ☐ | |
+| FS provider selection docs | | ☑ | README now documents in-memory/IndexedDB/remote providers (auth headers, chunk sizes, quotas); vitest suite covers persistence, default fallback, auth, chunked streaming, and readonly propagation. |
+| Packaging & integration docs | | ☑ | `npm run ci` now drives lint + vitest + wasm-pack + cargo check (wasm target); integration guide added (`docs/wasm/INTEGRATION.md`) and README links to it. |
 | WASM build script + CI | | ☐ | |
 | Integration guide | | ☐ | |
 

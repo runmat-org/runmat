@@ -27,6 +27,7 @@ Browser and hybrid hosts must forward filesystem requests to the runtime through
 - `createInMemoryFsProvider(options?)` – zero-dependency, synchronous filesystem stored entirely in JS memory. Supports all RunMat file ops and is ideal for tests or ephemeral browser sessions.
 - `createIndexedDbFsHandle(options?)` – wraps the in-memory provider and persists its state to IndexedDB. The handle exposes `.provider` (pass to `initRunMat`), `.flush()` to await persistence, and `.close()` to release the database. A convenience `createIndexedDbFsProvider` is also exported if you only need the provider.
 - `createDefaultFsProvider()` – automatically tries IndexedDB → in-memory. `initRunMat` calls this for you when `fsProvider` is omitted.
+- `createRemoteFsProvider({ baseUrl, authToken?, headers?, chunkBytes?, timeoutMs? })` – proxies all file ops over HTTP(S) using chunked reads/writes. Bearer tokens and custom headers are forwarded on every request so S3/proxy-style backends can enforce auth without extra glue, and large transfers stream in configurable chunks (`chunkBytes`, default 8 MiB).
 
 Both providers implement the `RunMatFilesystemProvider` contract:
 
@@ -39,6 +40,10 @@ Both providers implement the `RunMatFilesystemProvider` contract:
 Optional helpers such as `createDir`, `rename`, `setReadonly`, etc. unlock the full MATLAB IO surface.
 
 See `docs/FILESYSTEM.md` in the repo for the detailed contract and backend-specific guidance.
+
+Notes:
+- IndexedDB quotas vary by browser (commonly 50–200 MB). For long-lived sessions consider a `dbName` per workspace and call `handle.flush()`/`handle.close()` before tab teardown; falling back to the in-memory provider avoids quota prompts but data is ephemeral.
+- Remote providers surface server-side readonly bits via `metadata().readonly` and will propagate HTTP errors (including 401s) directly so hosts can prompt for credentials or retry. Tune `chunkBytes` for high-throughput links; the helper will stream multi-GB transfers chunk-by-chunk without buffering the entire payload.
 
 ## Snapshot loading
 

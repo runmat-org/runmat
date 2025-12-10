@@ -21,10 +21,11 @@
     "README.md"
   ],
   "scripts": {
-    "clean": "rimraf dist pkg",
-    "build:wasm": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir pkg --out-name runmat_wasm --release",
+    "clean": "rimraf dist pkg ../../crates/runmat-wasm/pkg",
+    "build:wasm": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release",
     "build:types": "tsc -p tsconfig.json",
     "build": "npm run clean && npm run build:wasm && npm run build:types",
+    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "prepublishOnly": "npm run build"

@@ -118,6 +118,31 @@ describe("remote filesystem provider", () => {
     provider.removeFile("/reports/data.bin");
     expect(() => provider.metadata("/reports/data.bin")).toThrow();
   });
+
+  it("respects auth tokens when provided", async () => {
+    await server.close();
+    server = new RemoteTestServer("secret");
+    await server.start();
+
+    const authed = createRemoteFsProvider({
+      baseUrl: server.baseUrl,
+      authToken: "secret"
+    });
+    authed.writeFile("/secured/info.txt", encoder.encode("ok"));
+    expect(toText(authed.readFile("/secured/info.txt"))).toBe("ok");
+
+    const unauth = createRemoteFsProvider({ baseUrl: server.baseUrl });
+    expect(() => unauth.readDir("/")).toThrow(/unauthorized/i);
+  });
+
+  it("propagates readonly flags", () => {
+    const provider = createRemoteFsProvider({ baseUrl: server.baseUrl });
+    provider.writeFile("/reports/lock.txt", encoder.encode("locked"));
+    provider.setReadonly?.("/reports/lock.txt", true);
+    const meta = provider.metadata("/reports/lock.txt");
+    expect(meta.readonly).toBe(true);
+    expect(() => provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).toThrow();
+  });
 });
 
 function toText(data: Uint8Array | ArrayBuffer): string {
@@ -130,7 +155,7 @@ class RemoteTestServer {
   private readonly root: string;
   private worker?: Worker;
 
-  constructor() {
+  constructor(private readonly authToken?: string) {
     this.root = mkdtempSync(path.join(tmpdir(), "runmat-remote-"));
   }
 
@@ -161,7 +186,7 @@ class RemoteTestServer {
       };
       worker.on("message", handleMessage);
       worker.on("error", handleError);
-      worker.postMessage({ type: "start", root: this.root });
+      worker.postMessage({ type: "start", root: this.root, authToken: this.authToken });
     });
   }
 
@@ -196,14 +221,21 @@ const path = require("node:path");
 
 let server = null;
 let rootDir = "";
+let expectedAuth = null;
 
 parentPort.on("message", async (msg) => {
   if (msg.type === "start") {
     rootDir = msg.root;
+    expectedAuth = msg.authToken || null;
     server = createServer(async (req, res) => {
       if (!req.url) {
         res.statusCode = 400;
         res.end("missing url");
+        return;
+      }
+      if (expectedAuth && req.headers["authorization"] !== \`Bearer \${expectedAuth}\`) {
+        res.statusCode = 401;
+        res.end("unauthorized");
         return;
       }
       const url = new URL(req.url, "http://127.0.0.1");
@@ -215,7 +247,7 @@ parentPort.on("message", async (msg) => {
             fileType: stats.isDirectory() ? "dir" : stats.isFile() ? "file" : "other",
             len: stats.size,
             modified: Math.floor(stats.mtimeMs / 1000),
-            readonly: false
+            readonly: (stats.mode & 0o200) === 0
           };
           sendJson(res, 200, payload);
           return;
