@@ -467,6 +467,10 @@ impl PlotSeriesInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
@@ -476,6 +480,14 @@ mod tests {
             cols: 1,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    fn assert_plotting_unavailable(msg: &str) {
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]
@@ -496,7 +508,9 @@ mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
         );
-        assert!(result.is_ok() || result.unwrap_err().contains("Plotting is unavailable"));
+        if let Err(msg) = result {
+            assert_plotting_unavailable(&msg);
+        }
     }
 
     #[test]

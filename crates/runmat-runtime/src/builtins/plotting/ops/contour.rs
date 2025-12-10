@@ -1079,6 +1079,10 @@ fn implicit_axis(len: usize) -> Vec<f64> {
 mod tests {
     use super::*;
     use runmat_builtins::NumericDType;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         let mut shape = vec![rows];

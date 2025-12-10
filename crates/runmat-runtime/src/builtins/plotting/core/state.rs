@@ -7,6 +7,8 @@ use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::Once;
 use std::thread_local;
 
 use super::common::default_figure;
@@ -576,8 +578,19 @@ where
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+
     let rendered = render_figure(handle, figure_clone)?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+}
+
+#[cfg(test)]
+pub(crate) fn disable_rendering_for_tests() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        unsafe {
+            std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+        }
+    });
 }
 
 pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {

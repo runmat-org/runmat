@@ -308,6 +308,18 @@ pub fn render_interactive_with_handle(
 ) -> Result<String, String> {
     #[cfg(feature = "gui")]
     {
+        if std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some() {
+            return Err(
+                "Plotting is unavailable in this environment (interactive rendering disabled)."
+                    .to_string(),
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if !is_main_thread() {
+                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUSTMAT_PLOT_MODE=headless for exports.".to_string());
+            }
+        }
         if handle == 0 {
             show_plot_unified(figure, None)
         } else {

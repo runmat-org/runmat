@@ -290,6 +290,10 @@ impl StairsInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {

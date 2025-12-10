@@ -100,6 +100,10 @@ fn parse_clf_action(args: &[Value]) -> Result<(ClfAction, bool), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     #[test]
     fn defaults_to_current() {

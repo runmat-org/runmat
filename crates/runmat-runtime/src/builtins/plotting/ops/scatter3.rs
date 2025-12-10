@@ -539,6 +539,10 @@ mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
     use runmat_builtins::Value;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     fn test_style() -> Scatter3ResolvedStyle {
         Scatter3ResolvedStyle {
@@ -566,6 +570,14 @@ mod tests {
         }
     }
 
+    fn assert_plotting_unavailable(msg: &str) {
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {msg}"
+        );
+    }
+
     #[test]
     fn build_scatter3_requires_equal_lengths() {
         assert!(build_scatter3_plot(vec![1.0], vec![], vec![1.0], &mut test_style()).is_err());
@@ -580,10 +592,7 @@ mod tests {
             Vec::new(),
         );
         if let Err(msg) = out {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 

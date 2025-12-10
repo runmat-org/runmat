@@ -1335,6 +1335,10 @@ impl HistInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
@@ -1346,16 +1350,21 @@ mod tests {
         }
     }
 
+    fn assert_plotting_unavailable(msg: &str) {
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {msg}"
+        );
+    }
+
     #[test]
     fn hist_respects_bin_argument() {
         let data = Value::Tensor(tensor_from(&[1.0, 2.0, 3.0, 4.0]));
         let bins = vec![Value::from(2.0)];
         let result = hist_builtin(data, bins);
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 
@@ -1365,10 +1374,7 @@ mod tests {
         let centers = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0]));
         let result = hist_builtin(data, vec![centers]);
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 
@@ -1380,10 +1386,7 @@ mod tests {
             vec![Value::from(3.0), Value::String("probability".into())],
         );
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 
@@ -1392,10 +1395,7 @@ mod tests {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("pdf".into())]);
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 
@@ -1410,10 +1410,7 @@ mod tests {
             ],
         );
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 
@@ -1423,10 +1420,7 @@ mod tests {
         let edges = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("BinEdges".into()), edges]);
         if let Err(msg) = result {
-            assert!(
-                msg.contains("Plotting is unavailable"),
-                "unexpected error: {msg}"
-            );
+            assert_plotting_unavailable(&msg);
         }
     }
 

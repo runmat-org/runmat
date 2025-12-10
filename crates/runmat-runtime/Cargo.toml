@@ -111,6 +111,7 @@ tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 wgpu = "0.19"
+ctor = "0.2"
 
 [dependencies.serde]
 version = "1.0"

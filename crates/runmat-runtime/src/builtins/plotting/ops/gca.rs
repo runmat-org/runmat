@@ -48,6 +48,10 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[ctor::ctor]
+    fn init_plot_test_env() {
+        crate::builtins::plotting::state::disable_rendering_for_tests();
+    }
 
     #[test]
     fn default_returns_scalar_handle() {
