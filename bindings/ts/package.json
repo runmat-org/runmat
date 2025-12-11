@@ -1,5 +1,5 @@
 {
-  "name": "@runmat/wasm",
+  "name": "runmat",
   "version": "0.2.7",
   "description": "Browser-ready WebAssembly bindings for the RunMat runtime",
   "type": "module",
