@@ -23,7 +23,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "union")
+    runmat_macros::register_doc_text(
+        name = "union",
+        wasm_path = "crate::builtins::array::sorting_sets::union"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -219,7 +222,7 @@ No. RunMat only implements the modern MATLAB semantics. Passing `'legacy'` or `'
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::union")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "union",
     op_kind: GpuOpKind::Custom("union"),
@@ -235,7 +238,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a dedicated union hook; otherwise tensors are gathered and processed on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::union")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "union",
     shape: ShapeRequirements::Any,
@@ -252,7 +255,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
     keywords = "union,set,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::union"
 )]
 fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())

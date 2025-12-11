@@ -15,7 +15,10 @@ use crate::builtins::common::{
 };
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "logical")
+    runmat_macros::register_doc_text(
+        name = "logical",
+        wasm_path = "crate::builtins::logical::ops"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -186,7 +189,7 @@ See the references below and the RunMat source for implementation details.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::ops")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logical",
     op_kind: GpuOpKind::Elementwise,
@@ -205,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Preferred path issues elem_ne(X, 0) on the device; missing hooks trigger a gather → host cast → re-upload sequence flagged as logical.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::ops")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logical",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -221,7 +224,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical",
     summary = "Convert scalars, arrays, and gpuArray values to logical outputs.",
     keywords = "logical,boolean,gpuArray,mask,conversion",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::logical::ops"
 )]
 fn logical_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {

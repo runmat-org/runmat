@@ -17,7 +17,10 @@ const EPS: f64 = 1.0e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "polyint")
+    runmat_macros::register_doc_text(
+        name = "polyint",
+        wasm_path = "crate::builtins::math::poly::polyint"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,7 @@ All arithmetic uses IEEE 754 double precision (`f64`), mirroring MATLAB's defaul
 [polyder](./polyder), [polyval](./polyval), [polyfit](./polyfit), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyint",
     op_kind: GpuOpKind::Custom("polynomial-integral"),
@@ -207,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers implement the polyint hook for real coefficient vectors; complex inputs fall back to the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::poly::polyint")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyint",
     shape: ShapeRequirements::Any,
@@ -222,7 +225,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "polyint",
     category = "math/poly",
     summary = "Integrate polynomial coefficient vectors and append a constant of integration.",
-    keywords = "polyint,polynomial,integral,antiderivative"
+    keywords = "polyint,polynomial,integral,antiderivative",
+    wasm_path = "crate::builtins::math::poly::polyint"
 )]
 fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

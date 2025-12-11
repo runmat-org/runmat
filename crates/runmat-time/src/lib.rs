@@ -62,4 +62,3 @@ pub fn unix_timestamp_us() -> u128 {
 pub fn unix_timestamp_ns() -> u128 {
     duration_since_epoch().as_nanos()
 }
-

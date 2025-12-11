@@ -18,7 +18,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "sum"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sum",
+        wasm_path = "crate::builtins::math::reduction::sum"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sum"
@@ -181,7 +187,7 @@ Only when you explicitly request `'native'` or `'like'`. Otherwise integers are 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::sum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sum",
     op_kind: GpuOpKind::Reduction,
@@ -200,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_sum_dim / reduce_sum; omitnan and multi-axis reductions fall back to the CPU path when unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::sum")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -225,7 +231,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/reduction",
     summary = "Sum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sum,reduction,gpu,omitnan,all,like",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::sum"
 )]
 fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input_meta = InputMeta::from_value(&value);

@@ -14,7 +14,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "strcmp")
+    runmat_macros::register_doc_text(
+        name = "strcmp",
+        wasm_path = "crate::builtins::strings::core::strcmp"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -159,7 +162,7 @@ It returns logical results. Scalars become logical scalars (`Value::Bool`), whil
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strcmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcmp",
     op_kind: GpuOpKind::Custom("string-compare"),
@@ -175,7 +178,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs host-side text comparisons; GPU operands are gathered automatically before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strcmp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strcmp",
     shape: ShapeRequirements::Any,
@@ -191,7 +194,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/core",
     summary = "Compare text inputs for exact matches (case-sensitive).",
     keywords = "strcmp,string compare,text equality",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::core::strcmp"
 )]
 fn strcmp_builtin(a: Value, b: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("strcmp: {e}"))?;

@@ -10,7 +10,13 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "pad"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pad",
+        wasm_path = "crate::builtins::strings::transform::pad"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pad"
@@ -185,7 +191,7 @@ and the behaviour documented here will remain the reference.
 - Found an issue? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::pad")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pad",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -201,7 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered before padding to preserve MATLAB semantics.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::pad")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pad",
     shape: ShapeRequirements::Any,
@@ -266,7 +272,8 @@ impl PadOptions {
     category = "strings/transform",
     summary = "Pad strings, character arrays, and cell arrays to a target length.",
     keywords = "pad,align,strings,character array",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::transform::pad"
 )]
 fn pad_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_arguments(&rest)?;

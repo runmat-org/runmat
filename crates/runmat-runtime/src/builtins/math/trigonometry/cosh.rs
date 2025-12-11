@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cosh")
+    runmat_macros::register_doc_text(
+        name = "cosh",
+        wasm_path = "crate::builtins::math::trigonometry::cosh"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -165,7 +168,7 @@ Providers may compile elementwise pipelines during initialization. If `unary_cos
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::cosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cosh",
     op_kind: GpuOpKind::Elementwise,
@@ -182,7 +185,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute cosh directly on the device; runtimes gather to the host when unary_cosh is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::cosh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cosh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -204,7 +207,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Hyperbolic cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "cosh,hyperbolic cosine,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::cosh"
 )]
 fn cosh_builtin(value: Value) -> Result<Value, String> {
     match value {

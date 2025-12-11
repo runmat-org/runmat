@@ -19,7 +19,13 @@ use num_complex::Complex64;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "svd"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "svd",
+        wasm_path = "crate::builtins::math::linalg::factor::svd"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "svd"
@@ -170,7 +176,7 @@ device-resident once GPU kernels land.
 - Feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::factor::svd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "svd",
     op_kind: GpuOpKind::Custom("svd-factor"),
@@ -187,7 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "GPU inputs are gathered to the host until a provider implements the reserved `svd` hook.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::factor::svd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "svd",
     shape: ShapeRequirements::Any,
@@ -204,7 +210,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Singular value decomposition with MATLAB-compatible economy and vector options.",
     keywords = "svd,singular value decomposition,economy,vector",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::math::linalg::factor::svd"
 )]
 fn svd_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;

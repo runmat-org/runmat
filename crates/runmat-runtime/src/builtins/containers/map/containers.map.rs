@@ -22,7 +22,10 @@ const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present 
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "containers.Map")
+    runmat_macros::register_doc_text(
+        name = "containers.Map",
+        wasm_path = "crate::builtins::containers::map::containers_map"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -212,7 +215,7 @@ error pointing to the offending argument.
 [remove](./containers.Map.remove), [length](../../array/introspection/length)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::containers::map::containers_map")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "containers.Map",
     op_kind: GpuOpKind::Custom("map"),
@@ -228,7 +231,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Map storage is host-resident; GPU inputs are gathered only when split into multiple entries.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "containers.Map",
     shape: ShapeRequirements::Any,
@@ -531,7 +536,8 @@ struct KeyCandidate {
     summary = "Create MATLAB-style dictionary objects that map keys to values.",
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_constructor_args(args)?;
@@ -539,7 +545,10 @@ fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
     allocate_handle(store)
 }
 
-#[runtime_builtin(name = "containers.Map.keys")]
+#[runtime_builtin(
+    name = "containers.Map.keys",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_keys(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let values = store.keys();
@@ -547,7 +556,10 @@ fn containers_map_keys(map: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.values")]
+#[runtime_builtin(
+    name = "containers.Map.values",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_values(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let values = store.values();
@@ -555,7 +567,10 @@ fn containers_map_values(map: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.isKey")]
+#[runtime_builtin(
+    name = "containers.Map.isKey",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
@@ -575,7 +590,10 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.remove")]
+#[runtime_builtin(
+    name = "containers.Map.remove",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store_mut(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
@@ -588,7 +606,10 @@ fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     Ok(map)
 }
 
-#[runtime_builtin(name = "containers.Map.subsref")]
+#[runtime_builtin(
+    name = "containers.Map.subsref",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Value, String> {
     if !matches!(map, Value::HandleObject(_)) {
         return Err(format!(
@@ -646,7 +667,10 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Va
     }
 }
 
-#[runtime_builtin(name = "containers.Map.subsasgn")]
+#[runtime_builtin(
+    name = "containers.Map.subsasgn",
+    wasm_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_subsasgn(
     map: Value,
     kind: String,

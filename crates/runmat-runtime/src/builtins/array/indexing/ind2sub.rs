@@ -14,7 +14,10 @@ use crate::make_cell;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ind2sub")
+    runmat_macros::register_doc_text(
+        name = "ind2sub",
+        wasm_path = "crate::builtins::array::indexing::ind2sub"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ Definitely—`ind2sub` works for any number of dimensions represented in `siz`.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::indexing::ind2sub")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ind2sub",
     op_kind: GpuOpKind::Custom("indexing"),
@@ -200,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider executes `ind2sub` entirely on-device; other providers fall back to the host implementation and re-upload results to preserve residency.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::indexing::ind2sub")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ind2sub",
     shape: ShapeRequirements::Any,
@@ -216,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/indexing",
     summary = "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
     keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::indexing::ind2sub"
 )]
 fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;

@@ -5,8 +5,8 @@
 
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
 use runmat_builtins::Value;
-use std::collections::HashSet;
 use runmat_time::Instant;
+use std::collections::HashSet;
 
 /// Mark-and-sweep garbage collector
 pub struct MarkSweepCollector {

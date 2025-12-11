@@ -23,7 +23,10 @@ const DOMAIN_TOL: f64 = 1e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "asin")
+    runmat_macros::register_doc_text(
+        name = "asin",
+        wasm_path = "crate::builtins::math::trigonometry::asin"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -216,7 +219,7 @@ rounding differences may appear but stay within MATLAB compatibility requirement
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::asin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "asin",
     op_kind: GpuOpKind::Elementwise,
@@ -232,7 +235,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute asin in-place when inputs remain within [-1, 1]; the runtime gathers to host when complex promotion is required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::asin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "asin",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -254,7 +257,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Element-wise inverse sine with MATLAB-compatible complex promotion.",
     keywords = "asin,inverse sine,arcsin,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::asin"
 )]
 fn asin_builtin(value: Value) -> Result<Value, String> {
     match value {

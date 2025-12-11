@@ -3,12 +3,12 @@
 //! Multi-tier compression system with adaptive algorithm selection.
 //! Optimized for fast decompression during runtime startup.
 
+use runmat_time::Instant;
 use std::collections::HashMap;
 #[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
 use std::convert::TryFrom;
 #[cfg(all(feature = "compression", target_arch = "wasm32"))]
 use std::io::{Cursor, Read};
-use runmat_time::Instant;
 
 use crate::format::{CompressionAlgorithm, CompressionInfo};
 use crate::{SnapshotError, SnapshotResult};

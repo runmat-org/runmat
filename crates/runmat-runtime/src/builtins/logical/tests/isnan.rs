@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isnan")
+    runmat_macros::register_doc_text(
+        name = "isnan",
+        wasm_path = "crate::builtins::logical::tests::isnan"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -164,7 +167,7 @@ It returns an empty logical array with the same size metadata as the input, matc
 [isfinite](./isfinite), [isinf](./isinf), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isnan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isnan",
     op_kind: GpuOpKind::Elementwise,
@@ -183,7 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isnan` hook when available; otherwise the runtime gathers to host and builds the logical mask on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isnan")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isnan",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -212,7 +215,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/tests",
     summary = "Return a logical mask indicating which elements of the input are NaN.",
     keywords = "isnan,nan,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::tests::isnan"
 )]
 fn isnan_builtin(value: Value) -> Result<Value, String> {
     match value {

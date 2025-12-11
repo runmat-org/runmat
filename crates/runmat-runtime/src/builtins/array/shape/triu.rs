@@ -17,7 +17,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "triu")
+    runmat_macros::register_doc_text(
+        name = "triu",
+        wasm_path = "crate::builtins::array::shape::triu"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ the triangular mask is applied, matching MATLAB behaviour.
 - Issues & feedback: [github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::triu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "triu",
     op_kind: GpuOpKind::Custom("triu"),
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement triu directly; the runtime falls back to gather→mask→upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::triu")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "triu",
     shape: ShapeRequirements::Any,
@@ -219,7 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Upper triangular portion of a matrix or paged tensor.",
     keywords = "triu,upper triangular,matrix,diagonal,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::triu"
 )]
 fn triu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

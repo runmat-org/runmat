@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "ne"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "ne", wasm_path = "crate::builtins::logical::rel::ne")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ne"
@@ -169,7 +172,7 @@ Yes. You can use the operator form `A ~= B`, which maps directly to this builtin
 [`eq`](./eq), [`lt`](./lt), [`gt`](./gt), [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::rel::ne")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ne",
     op_kind: GpuOpKind::Elementwise,
@@ -189,7 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_ne kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::rel::ne")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ne",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -217,7 +220,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/rel",
     summary = "Element-wise inequality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "ne,not equal,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::rel::ne"
 )]
 fn ne_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {

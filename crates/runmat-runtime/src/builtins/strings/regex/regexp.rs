@@ -15,7 +15,10 @@ use crate::{gather_if_needed, make_cell};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "regexp")
+    runmat_macros::register_doc_text(
+        name = "regexp",
+        wasm_path = "crate::builtins::strings::regex::regexp"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -202,7 +205,7 @@ specified become numeric zeros.
 - Found a difference from MATLAB? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::regex::regexp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexp",
     op_kind: GpuOpKind::Custom("regex"),
@@ -218,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; when inputs live on the GPU, the runtime gathers them before matching and re-uploads numeric tensors afterwards.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::regex::regexp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "regexp",
     shape: ShapeRequirements::Any,
@@ -246,7 +249,8 @@ pub fn evaluate(
     category = "strings/regex",
     summary = "Regular expression matching with MATLAB-compatible outputs.",
     keywords = "regexp,regex,pattern,match,tokens,split",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::regex::regexp"
 )]
 fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let evaluation = evaluate(subject, pattern, &rest)?;

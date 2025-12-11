@@ -22,7 +22,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "dlmwrite")
+    runmat_macros::register_doc_text(
+        name = "dlmwrite",
+        wasm_path = "crate::builtins::io::tabular::dlmwrite"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -205,7 +208,7 @@ Prefer `writematrix` for new code. Use `dlmwrite` only when maintaining legacy s
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmwrite",
     op_kind: GpuOpKind::Custom("io-dlmwrite"),
@@ -221,7 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before formatting.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dlmwrite",
     shape: ShapeRequirements::Any,
@@ -237,7 +240,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/tabular",
     summary = "Write numeric matrices to delimiter-separated text files.",
     keywords = "dlmwrite,delimiter,precision,append,roffset,coffset",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::tabular::dlmwrite"
 )]
 fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&filename).map_err(|e| format!("dlmwrite: {e}"))?;
@@ -1244,9 +1248,9 @@ fn normalize_exponent_notation(s: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use runmat_time::unix_timestamp_ms;
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;

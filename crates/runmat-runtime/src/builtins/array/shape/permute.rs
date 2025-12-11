@@ -15,7 +15,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "permute")
+    runmat_macros::register_doc_text(
+        name = "permute",
+        wasm_path = "crate::builtins::array::shape::permute"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -167,7 +170,7 @@ ans = logical 1
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::permute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "permute",
     op_kind: GpuOpKind::Custom("permute"),
@@ -189,7 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement a custom permute hook; the runtime falls back to gather→permute→upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::permute")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "permute",
     shape: ShapeRequirements::Any,
@@ -205,7 +208,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
     keywords = "permute,dimension reorder,swap axes,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::permute"
 )]
 fn permute_builtin(value: Value, order: Value) -> Result<Value, String> {
     let order_vec = parse_order_argument(order)?;

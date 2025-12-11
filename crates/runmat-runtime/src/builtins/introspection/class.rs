@@ -9,7 +9,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "class")
+    runmat_macros::register_doc_text(
+        name = "class",
+        wasm_path = "crate::builtins::introspection::class"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -139,7 +142,7 @@ Calling `class(classref("Point"))` returns `"meta.class"`. Use the returned meta
 - Found a behavioural difference? Please open an issue with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::class")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "class",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -155,7 +158,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Introspection-only builtin; providers do not need to implement hooks. RunMat reads residency metadata and returns a host string.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::class")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "class",
     shape: ShapeRequirements::Any,
@@ -170,7 +173,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "class",
     category = "introspection",
     summary = "Return the MATLAB class name for scalars, arrays, and objects.",
-    keywords = "class,type inspection,type name,gpuArray class"
+    keywords = "class,type inspection,type name,gpuArray class",
+    wasm_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> Result<String, String> {
     Ok(class_name_for_value(&value))

@@ -14,7 +14,13 @@ use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "rng"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rng",
+        wasm_path = "crate::builtins::stats::random::rng"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rng"
@@ -207,7 +213,7 @@ consume the current stream but do not reseed it.
 - Found a bug or behavioural gap? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::stats::random::rng")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rng",
     op_kind: GpuOpKind::Custom("state-control"),
@@ -224,7 +230,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Not a numeric kernel; synchronises provider RNG state via set_rng_state when available.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::stats::random::rng")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rng",
     shape: ShapeRequirements::Any,
@@ -239,7 +245,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "rng",
     category = "stats/random",
     summary = "Seed, shuffle, and query the global random number generator.",
-    keywords = "rng,seed,twister,shuffle,state"
+    keywords = "rng,seed,twister,shuffle,state",
+    wasm_path = "crate::builtins::stats::random::rng"
 )]
 fn rng_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {

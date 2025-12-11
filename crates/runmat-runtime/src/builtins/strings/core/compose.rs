@@ -13,7 +13,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "compose")
+    runmat_macros::register_doc_text(
+        name = "compose",
+        wasm_path = "crate::builtins::strings::core::compose"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -183,7 +186,7 @@ Yes, as long as non-scalar arguments all share the same number of elements or ma
 `string`, `sprintf`, `strcat`, `join`
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::compose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "compose",
     op_kind: GpuOpKind::Custom("format"),
@@ -199,7 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting always executes on the CPU; GPU tensors are gathered before substitution.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::compose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "compose",
     shape: ShapeRequirements::Any,
@@ -215,7 +218,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/core",
     summary = "Format values into MATLAB string arrays using printf-style placeholders.",
     keywords = "compose,format,string array,gpu",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::core::compose"
 )]
 fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let format_value = gather_if_needed(&format_spec).map_err(|e| format!("compose: {e}"))?;

@@ -18,7 +18,10 @@ use std::sync::Arc;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mesh")
+    runmat_macros::register_doc_text(
+        name = "mesh",
+        wasm_path = "crate::builtins::plotting::ops::mesh"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -54,7 +57,7 @@ mode enabled and no fill, matching MATLAB's default mesh aesthetics.
 - Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather automatically.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::mesh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mesh",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -70,7 +73,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Wireframe rendering happens on the host/WebGPU path.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::mesh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mesh",
     shape: ShapeRequirements::Any,
@@ -86,7 +89,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "plotting",
     summary = "Render a MATLAB-compatible wireframe surface.",
     keywords = "mesh,wireframe,surface,plotting",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::mesh"
 )]
 pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);

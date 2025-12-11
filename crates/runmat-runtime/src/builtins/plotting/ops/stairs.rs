@@ -27,7 +27,10 @@ use std::convert::TryFrom;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "stairs")
+    runmat_macros::register_doc_text(
+        name = "stairs",
+        wasm_path = "crate::builtins::plotting::ops::stairs"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -71,7 +74,7 @@ stairs(t, cumsum(rand(size(t))));
 ```
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::stairs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "stairs",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -87,7 +90,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stairs plots terminate fusion graphs and render out-of-band.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::stairs")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "stairs",
     shape: ShapeRequirements::Any,
@@ -103,7 +106,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "plotting",
     summary = "Render MATLAB-compatible stairs plots.",
     keywords = "stairs,plotting,step",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::stairs"
 )]
 pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;

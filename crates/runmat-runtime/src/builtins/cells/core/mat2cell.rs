@@ -12,7 +12,10 @@ use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mat2cell")
+    runmat_macros::register_doc_text(
+        name = "mat2cell",
+        wasm_path = "crate::builtins::cells::core::mat2cell"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ without affecting other cells or the original array.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::mat2cell")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mat2cell",
     op_kind: GpuOpKind::Custom("container"),
@@ -201,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "mat2cell gathers gpuArray inputs to the host until providers expose block-splitting hooks.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::mat2cell")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mat2cell",
     shape: ShapeRequirements::Any,
@@ -216,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "mat2cell",
     category = "cells/core",
     summary = "Split arrays into cell-array blocks.",
-    keywords = "mat2cell,cell array,partition,block"
+    keywords = "mat2cell,cell array,partition,block",
+    wasm_path = "crate::builtins::cells::core::mat2cell"
 )]
 fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {

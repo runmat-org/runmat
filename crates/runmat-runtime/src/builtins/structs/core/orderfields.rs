@@ -13,7 +13,10 @@ use std::collections::{HashMap, HashSet};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "orderfields")
+    runmat_macros::register_doc_text(
+        name = "orderfields",
+        wasm_path = "crate::builtins::structs::core::orderfields"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,7 @@ Only the top-level struct passed to `orderfields` is reordered. Nested structs r
 - Found a behavioural mismatch? Please open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::orderfields")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "orderfields",
     op_kind: GpuOpKind::Custom("orderfields"),
@@ -207,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata manipulation; struct values that live on the GPU remain resident.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::orderfields")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "orderfields",
     shape: ShapeRequirements::Any,
@@ -222,7 +225,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "orderfields",
     category = "structs/core",
     summary = "Reorder structure field definitions alphabetically or using a supplied order.",
-    keywords = "orderfields,struct,reorder fields,alphabetical,struct array"
+    keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
+    wasm_path = "crate::builtins::structs::core::orderfields"
 )]
 fn orderfields_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_ordered_value())

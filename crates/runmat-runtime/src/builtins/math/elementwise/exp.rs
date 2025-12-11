@@ -14,7 +14,13 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "exp"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "exp",
+        wasm_path = "crate::builtins::math::elementwise::exp"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "exp"
@@ -174,7 +180,7 @@ single precision when configured, but results are converted back to double.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::exp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exp",
     op_kind: GpuOpKind::Elementwise,
@@ -191,7 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may evaluate exp directly on device buffers; runtimes gather to host when unary_exp is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::exp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exp",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -216,7 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise exponential of scalars, vectors, matrices, or N-D tensors.",
     keywords = "exp,exponential,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::exp"
 )]
 fn exp_builtin(value: Value) -> Result<Value, String> {
     match value {

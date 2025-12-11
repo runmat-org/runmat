@@ -9,31 +9,13 @@ use indexmap::IndexMap;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_registry {
     use super::{BuiltinDoc, BuiltinFunction, Constant};
-    use once_cell::sync::{Lazy, OnceCell};
+    use once_cell::sync::Lazy;
     use std::sync::Mutex;
 
     static FUNCTIONS: Lazy<Mutex<Vec<&'static BuiltinFunction>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
     static CONSTANTS: Lazy<Mutex<Vec<&'static Constant>>> = Lazy::new(|| Mutex::new(Vec::new()));
     static DOCS: Lazy<Mutex<Vec<&'static BuiltinDoc>>> = Lazy::new(|| Mutex::new(Vec::new()));
-    static INIT: OnceCell<()> = OnceCell::new();
-
-    fn ensure_initialized() {
-        INIT.get_or_init(|| {
-            generated::register_all();
-        });
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    mod generated {
-        #[allow(dead_code)]
-        pub fn register_all() {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../target/runmat_wasm_registry.rs"
-            ));
-        }
-    }
 
     fn leak<T>(value: T) -> &'static T {
         Box::leak(Box::new(value))
@@ -55,17 +37,14 @@ pub mod wasm_registry {
     }
 
     pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
-        ensure_initialized();
         FUNCTIONS.lock().unwrap().clone()
     }
 
     pub fn constants() -> Vec<&'static Constant> {
-        ensure_initialized();
         CONSTANTS.lock().unwrap().clone()
     }
 
     pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
-        ensure_initialized();
         DOCS.lock().unwrap().clone()
     }
 }

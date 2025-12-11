@@ -1177,8 +1177,8 @@ mod gpu_stress {
         plots::{scatter::MarkerStyle, Figure, LinePlot, Scatter3Plot, ScatterPlot, SurfacePlot},
         SharedWgpuContext,
     };
-    use std::sync::Arc;
     use runmat_time::Instant;
+    use std::sync::Arc;
 
     static CONTEXT_READY: OnceCell<bool> = OnceCell::new();
 

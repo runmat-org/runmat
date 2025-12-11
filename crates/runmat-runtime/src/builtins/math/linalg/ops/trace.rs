@@ -181,7 +181,7 @@ Fused kernels treat `trace` as a scalar reduction boundary. The planner emits GP
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::trace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Reduction,
@@ -203,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::trace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -219,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Sum the diagonal elements of matrices and matrix-like tensors.",
     keywords = "trace,matrix trace,diagonal sum,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::linalg::ops::trace"
 )]
 fn trace_builtin(value: Value) -> Result<Value, String> {
     match value {

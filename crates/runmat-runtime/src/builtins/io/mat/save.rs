@@ -23,7 +23,7 @@ use crate::workspace;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "save")
+    runmat_macros::register_doc_text(name = "save", wasm_path = "crate::builtins::io::mat::save")
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -161,7 +161,7 @@ No. Parent folders must already exist; otherwise the builtin raises an error fro
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::mat::save")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "save",
     op_kind: GpuOpKind::Custom("io-save"),
@@ -177,7 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host I/O; no GPU execution path is involved.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::mat::save")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "save",
     shape: ShapeRequirements::Any,
@@ -193,7 +193,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/mat",
     summary = "Persist workspace variables to a MAT-file.",
     keywords = "save,mat,workspace",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::io::mat::save"
 )]
 fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut host_args = Vec::with_capacity(args.len());

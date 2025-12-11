@@ -14,7 +14,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "imfilter")
+    runmat_macros::register_doc_text(
+        name = "imfilter",
+        wasm_path = "crate::builtins::image::filters::imfilter"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -168,7 +171,7 @@ Yes. Logical arrays are promoted to double precision (0.0/1.0) during filtering,
 - Report issues or differences at https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::image::filters::imfilter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imfilter",
     op_kind: GpuOpKind::Custom("imfilter"),
@@ -184,7 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side filtering when available; otherwise gathers to host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::image::filters::imfilter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imfilter",
     shape: ShapeRequirements::Any,
@@ -200,7 +203,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "image/filters",
     summary = "Apply linear filters with MATLAB-compatible padding semantics.",
     keywords = "imfilter,image,filter,convolution,correlation,padding",
-    accel = "custom-imfilter"
+    accel = "custom-imfilter",
+    wasm_path = "crate::builtins::image::filters::imfilter"
 )]
 fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_imfilter_options(&rest)?;

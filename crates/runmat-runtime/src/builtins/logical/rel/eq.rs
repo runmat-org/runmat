@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "eq"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "eq", wasm_path = "crate::builtins::logical::rel::eq")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eq"
@@ -178,7 +181,7 @@ Yes. String arrays support MATLAB-style implicit expansion, so you can compare a
 Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::rel::eq")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eq",
     op_kind: GpuOpKind::Elementwise,
@@ -198,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_eq kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::rel::eq")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eq",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -226,7 +229,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/rel",
     summary = "Element-wise equality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "eq,equality,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::rel::eq"
 )]
 fn eq_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {

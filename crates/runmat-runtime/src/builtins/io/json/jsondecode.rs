@@ -17,7 +17,10 @@ const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
 
 #[allow(clippy::too_many_lines)]
-#[runmat_macros::register_doc_text(name = "jsondecode")]
+#[runmat_macros::register_doc_text(
+    name = "jsondecode",
+    wasm_path = "crate::builtins::io::json::jsondecode"
+)]
 pub const DOC_MD: &str = r#"---
 title: "jsondecode"
 category: "io/json"
@@ -191,7 +194,7 @@ remains valid JSON.
 [jsonencode](./jsonencode), [struct](../../structs/constructors/struct), [cell](../../array/constructors/cell), [fileread](../filetext/fileread)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::json::jsondecode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsondecode",
     op_kind: GpuOpKind::Custom("parse"),
@@ -207,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::json::jsondecode")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsondecode",
     shape: ShapeRequirements::Any,
@@ -223,7 +226,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/json",
     summary = "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
     keywords = "jsondecode,json,parse json,struct,gpu",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::io::json::jsondecode"
 )]
 fn jsondecode_builtin(text: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&text).map_err(|e| format!("jsondecode: {e}"))?;

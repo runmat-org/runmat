@@ -193,7 +193,7 @@ LAPACK when enabled). GPU providers are free to reuse buffers or stream the comp
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::rank")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("matrix-rank"),
@@ -210,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may keep the computation on-device via the `rank` hook; the reference backend gathers to the host and re-uploads a scalar.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::rank")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -226,7 +226,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/solve",
     summary = "Compute the numerical rank of a matrix using SVD with MATLAB-compatible tolerance handling.",
     keywords = "rank,svd,tolerance,matrix,gpu",
-    accel = "rank"
+    accel = "rank",
+    wasm_path = "crate::builtins::math::linalg::solve::rank"
 )]
 fn rank_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let tol = parse_tolerance_arg(NAME, &rest)?;

@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ishermitian")
+    runmat_macros::register_doc_text(
+        name = "ishermitian",
+        wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -189,7 +192,9 @@ No. RunMat automatically keeps tensors resident on the GPU when it is profitable
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ishermitian",
     op_kind: GpuOpKind::Custom("structure_analysis"),
@@ -205,7 +210,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a Hermitian predicate hook; otherwise the runtime gathers the matrix and evaluates on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ishermitian",
     shape: ShapeRequirements::Any,
@@ -221,7 +228,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/structure",
     summary = "Determine whether a matrix is Hermitian or skew-Hermitian.",
     keywords = "ishermitian,hermitian,skew-hermitian,matrix structure,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mode, tol) = parse_optional_args(&rest)?;

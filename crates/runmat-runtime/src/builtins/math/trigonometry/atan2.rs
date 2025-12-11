@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "atan2")
+    runmat_macros::register_doc_text(
+        name = "atan2",
+        wasm_path = "crate::builtins::math::trigonometry::atan2"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -175,7 +178,7 @@ Call `rad2deg(atan2(y, x))` or multiply the result by `180/pi`.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::atan2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atan2",
     op_kind: GpuOpKind::Elementwise,
@@ -194,7 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement elem_atan2 to keep the computation on device; the runtime gathers operands to the host when the hook is unavailable or broadcasting is required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::atan2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atan2",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -217,7 +220,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
     keywords = "atan2,inverse tangent,quadrant,gpu",
-    accel = "binary"
+    accel = "binary",
+    wasm_path = "crate::builtins::math::trigonometry::atan2"
 )]
 fn atan2_builtin(y: Value, x: Value) -> Result<Value, String> {
     match (y, x) {

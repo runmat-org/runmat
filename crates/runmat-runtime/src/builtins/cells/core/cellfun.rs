@@ -14,7 +14,10 @@ use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cellfun")
+    runmat_macros::register_doc_text(
+        name = "cellfun",
+        wasm_path = "crate::builtins::cells::core::cellfun"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -219,7 +222,7 @@ Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write
 - Issue tracker: [RunMat GitHub Issues](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::cellfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellfun",
     op_kind: GpuOpKind::Custom("host-cell-map"),
@@ -235,7 +238,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host and gathers GPU-resident inputs before evaluating callbacks.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::cellfun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellfun",
     shape: ShapeRequirements::Any,
@@ -251,7 +254,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "cells/core",
     summary = "Apply a function to the contents of each cell array element.",
     keywords = "cellfun,cell,array,functional",
-    accel = "host"
+    accel = "host",
+    wasm_path = "crate::builtins::cells::core::cellfun"
 )]
 fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -1168,21 +1172,30 @@ mod tests {
         assert!((gathered.data[0] - expected).abs() < 1e-12);
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_test_handler")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_test_handler",
+        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
         let _ = rest;
         Ok(seed)
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_add")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_add",
+        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_add(lhs: Value, rhs: Value) -> Result<Value, String> {
         let a: f64 = (&lhs).try_into()?;
         let b: f64 = (&rhs).try_into()?;
         Ok(Value::Num(a + b))
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_identity")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_identity",
+        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_identity(value: Value) -> Result<Value, String> {
         Ok(value)
     }

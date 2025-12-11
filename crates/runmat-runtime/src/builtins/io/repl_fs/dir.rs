@@ -21,7 +21,13 @@ use crate::builtins::common::spec::{
 };
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "dir"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "dir",
+        wasm_path = "crate::builtins::io::repl_fs::dir"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dir"
@@ -179,7 +185,7 @@ No cache files found.
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::dir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dir",
     op_kind: GpuOpKind::Custom("io"),
@@ -195,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only filesystem builtin. Providers do not participate; GPU-resident inputs are gathered to host memory.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::dir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dir",
     shape: ShapeRequirements::Any,
@@ -211,7 +217,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Return file and folder information in a MATLAB-compatible struct array.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::dir"
 )]
 fn dir_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;

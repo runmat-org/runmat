@@ -15,7 +15,10 @@ const LN_10: f64 = std::f64::consts::LN_10;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "logspace")
+    runmat_macros::register_doc_text(
+        name = "logspace",
+        wasm_path = "crate::builtins::array::creation::logspace"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -183,7 +186,7 @@ Yes. `logspace(3, 1, 4)` returns `[1000 464.1589 215.4435 100]`, decreasing loga
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::logspace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logspace",
     op_kind: GpuOpKind::Custom("generator"),
@@ -205,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a dedicated logspace path or compose it from linspace + scalar multiply + unary_exp. The runtime uploads host-generated data when hooks are unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::logspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logspace",
     shape: ShapeRequirements::Any,
@@ -222,7 +225,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Logarithmically spaced vector.",
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::logspace"
 )]
 fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

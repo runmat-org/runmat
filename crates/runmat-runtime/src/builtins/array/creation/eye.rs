@@ -9,7 +9,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "eye"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "eye",
+        wasm_path = "crate::builtins::array::creation::eye"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eye"
@@ -182,7 +188,7 @@ hook fall back to a single host upload, which is still efficient for typical siz
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::eye")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eye",
     op_kind: GpuOpKind::Custom("generator"),
@@ -201,7 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates identity tensors on the device when providers expose dedicated hooks; otherwise falls back to uploading a host-constructed identity tensor.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::eye")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eye",
     shape: ShapeRequirements::Any,
@@ -217,7 +223,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::eye"
 )]
 fn eye_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedEye::parse(rest)?;

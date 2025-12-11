@@ -205,7 +205,7 @@ Yes. `strings(0)` returns the same 0-by-0 empty string array as `string.empty`.
 `string`, `char`, `zeros`, `string.empty`
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strings")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: FN_NAME,
     op_kind: GpuOpKind::Custom("array_creation"),
@@ -221,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; size arguments pulled from the GPU are gathered before allocation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strings")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: FN_NAME,
     shape: ShapeRequirements::Any,
@@ -248,7 +248,8 @@ enum FillKind {
     category = "strings/core",
     summary = "Preallocate string arrays filled with empty string scalars.",
     keywords = "strings,string array,empty,preallocate",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::strings::core::strings"
 )]
 fn strings_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let ParsedStrings { shape, fill } = parse_arguments(rest)?;

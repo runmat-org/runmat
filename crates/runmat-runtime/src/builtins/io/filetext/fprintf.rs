@@ -24,7 +24,10 @@ const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fprintf")
+    runmat_macros::register_doc_text(
+        name = "fprintf",
+        wasm_path = "crate::builtins::io::filetext::fprintf"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -215,7 +218,7 @@ Ignore it, just as in MATLAB. Omitting the output argument does not change the w
   with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fprintf",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -231,7 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fprintf",
     shape: ShapeRequirements::Any,
@@ -404,7 +407,8 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     summary = "Write formatted text to files or standard streams.",
     keywords = "fprintf,format,printf,io",
     accel = "cpu",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::io::filetext::fprintf"
 )]
 fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut args = Vec::with_capacity(rest.len() + 1);

@@ -19,7 +19,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "filter2")
+    runmat_macros::register_doc_text(
+        name = "filter2",
+        wasm_path = "crate::builtins::image::filters::filter2"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ and dimensionality.
 - Report issues or differences at https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::image::filters::filter2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter2",
     op_kind: GpuOpKind::Custom("filter2"),
@@ -200,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the provider `imfilter` hook with zero padding and correlation/convolution options.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::image::filters::filter2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filter2",
     shape: ShapeRequirements::Any,
@@ -216,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "image/filters",
     summary = "Apply a 2-D correlation or convolution with MATLAB-compatible sizing.",
     keywords = "filter2,correlation,convolution,image filtering,gpu",
-    accel = "custom-imfilter"
+    accel = "custom-imfilter",
+    wasm_path = "crate::builtins::image::filters::filter2"
 )]
 fn filter2_builtin(kernel: Value, image: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_filter2_options(&rest)?;

@@ -23,7 +23,7 @@ members = [
     "crates/runmat-core",
     "crates/runmat-time",
     "crates/runmat-wasm",
-    "crates/runmat-filesystem",
+    "crates/runmat-filesystem", "tools/wasm-paths",
 ]
 resolver = "2"
 

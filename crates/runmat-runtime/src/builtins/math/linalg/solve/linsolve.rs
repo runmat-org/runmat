@@ -22,7 +22,10 @@ const NAME: &str = "linsolve";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "linsolve")
+    runmat_macros::register_doc_text(
+        name = "linsolve",
+        wasm_path = "crate::builtins::math::linalg::solve::linsolve"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ arrays should be reshaped before calling `linsolve`, just like in MATLAB.
 [mldivide](../../ops/mldivide), [mrdivide](../../ops/mrdivide), [lu](../../factor/lu), [chol](../../factor/chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::linsolve")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "linsolve",
     op_kind: GpuOpKind::Custom("solve"),
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider linsolve hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::linsolve")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linsolve",
     shape: ShapeRequirements::Any,
@@ -219,7 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/solve",
     summary = "Solve A * X = B with structural hints such as LT, UT, POSDEF, or TRANSA.",
     keywords = "linsolve,linear system,triangular,gpu",
-    accel = "linsolve"
+    accel = "linsolve",
+    wasm_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
 fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate_args(lhs, rhs, &rest)?;

@@ -11,7 +11,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "size")
+    runmat_macros::register_doc_text(
+        name = "size",
+        wasm_path = "crate::builtins::array::introspection::size"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -161,7 +164,7 @@ No. The dimension argument must be positive integers; fractions or negatives rai
 [length (MathWorks)](https://www.mathworks.com/help/matlab/ref/length.html), [ndims (MathWorks)](https://www.mathworks.com/help/matlab/ref/ndims.html), [numel (MathWorks)](https://www.mathworks.com/help/matlab/ref/numel.html), [MathWorks size reference](https://www.mathworks.com/help/matlab/ref/size.html)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::size")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "size",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -178,7 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Reads dimension metadata from tensor handles; no kernels or provider hooks are required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::size")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "size",
     shape: ShapeRequirements::Any,
@@ -193,7 +196,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "size",
     category = "array/introspection",
     summary = "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
-    keywords = "size,dimensions,shape,gpu,introspection"
+    keywords = "size,dimensions,shape,gpu,introspection",
+    wasm_path = "crate::builtins::array::introspection::size"
 )]
 fn size_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let dims = value_dimensions(&value);

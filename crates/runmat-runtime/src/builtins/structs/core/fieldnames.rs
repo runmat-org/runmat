@@ -12,7 +12,10 @@ use std::collections::BTreeSet;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fieldnames")
+    runmat_macros::register_doc_text(
+        name = "fieldnames",
+        wasm_path = "crate::builtins::structs::core::fieldnames"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -193,7 +196,7 @@ No. Passing anything other than a struct, struct array, or object raises
 - Found a bug or behaviour mismatch? Open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::fieldnames")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fieldnames",
     op_kind: GpuOpKind::Custom("fieldnames"),
@@ -209,7 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only introspection; providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::fieldnames")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fieldnames",
     shape: ShapeRequirements::Any,
@@ -224,7 +227,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "fieldnames",
     category = "structs/core",
     summary = "List the field names of scalar structs or struct arrays.",
-    keywords = "fieldnames,struct,introspection,fields"
+    keywords = "fieldnames,struct,introspection,fields",
+    wasm_path = "crate::builtins::structs::core::fieldnames"
 )]
 fn fieldnames_builtin(value: Value) -> Result<Value, String> {
     let names = match &value {

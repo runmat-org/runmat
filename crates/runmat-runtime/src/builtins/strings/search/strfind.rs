@@ -16,7 +16,10 @@ use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "strfind")
+    runmat_macros::register_doc_text(
+        name = "strfind",
+        wasm_path = "crate::builtins::strings::search::strfind"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -176,7 +179,7 @@ expression functions when you need case-insensitive searches.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::search::strfind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strfind",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -193,7 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes entirely on the host; GPU-resident inputs are gathered before substring matching.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::search::strfind")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strfind",
     shape: ShapeRequirements::Any,
@@ -209,7 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/search",
     summary = "Return the starting indices of pattern matches in text inputs.",
     keywords = "strfind,substring,index,positions,string search",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::search::strfind"
 )]
 fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("strfind: {e}"))?;

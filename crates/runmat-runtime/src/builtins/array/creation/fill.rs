@@ -15,7 +15,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fill")
+    runmat_macros::register_doc_text(
+        name = "fill",
+        wasm_path = "crate::builtins::array::creation::fill"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -239,7 +242,7 @@ host tensor, ensuring identical results.
 - Issues or questions: [RunMat GitHub issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::fill")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fill",
     op_kind: GpuOpKind::Custom("generator"),
@@ -258,7 +261,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs dedicated constant-fill kernels; falls back to host upload when the provider reports an error.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::fill")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fill",
     shape: ShapeRequirements::Any,
@@ -283,7 +286,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Create arrays filled with a constant value.",
     keywords = "fill,constant,array,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::fill"
 )]
 fn fill_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_value =

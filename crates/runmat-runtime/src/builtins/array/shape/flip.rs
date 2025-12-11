@@ -18,7 +18,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "flip")
+    runmat_macros::register_doc_text(
+        name = "flip",
+        wasm_path = "crate::builtins::array::shape::flip"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -198,7 +201,7 @@ complex scalars after the operation.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::flip")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "flip",
     op_kind: GpuOpKind::Custom("flip"),
@@ -219,7 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement flip directly; the runtime falls back to gather→flip→upload when the hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::flip")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "flip",
     shape: ShapeRequirements::Any,
@@ -235,7 +238,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Reverse the order of elements along specific dimensions.",
     keywords = "flip,reverse,dimension,gpu,horizontal,vertical",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::flip"
 )]
 fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

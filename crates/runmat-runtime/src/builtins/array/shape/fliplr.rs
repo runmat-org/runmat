@@ -16,7 +16,10 @@ const LR_DIM: [usize; 1] = [2];
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fliplr")
+    runmat_macros::register_doc_text(
+        name = "fliplr",
+        wasm_path = "crate::builtins::array::shape::fliplr"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -197,7 +200,7 @@ Yes. The function only reorders elements; values are never modified, so it is nu
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::fliplr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fliplr",
     op_kind: GpuOpKind::Custom("flip"),
@@ -218,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the generic flip hook with axis=1; falls back to host mirror when the hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::fliplr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fliplr",
     shape: ShapeRequirements::Any,
@@ -234,7 +237,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Flip an array left-to-right along the second dimension.",
     keywords = "fliplr,flip,horizontal,matrix,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::fliplr"
 )]
 fn fliplr_builtin(value: Value) -> Result<Value, String> {
     match value {

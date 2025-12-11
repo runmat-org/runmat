@@ -20,7 +20,10 @@ const IMAG_EPS: f64 = 1e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "log1p")
+    runmat_macros::register_doc_text(
+        name = "log1p",
+        wasm_path = "crate::builtins::math::elementwise::log1p"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ kernels can materialize `log(1 + x)` directly in generated WGSL.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::log1p")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "log1p",
     op_kind: GpuOpKind::Elementwise,
@@ -201,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should supply unary_log1p and reduce_min; runtimes gather to host when complex outputs are required or either hook is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::log1p")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log1p",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -231,7 +234,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Accurate element-wise computation of log(1 + x).",
     keywords = "log1p,log(1+x),natural logarithm,elementwise,gpu,precision",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::log1p"
 )]
 fn log1p_builtin(value: Value) -> Result<Value, String> {
     match value {

@@ -16,7 +16,10 @@ const EPS: f64 = 1.0e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "polyval")
+    runmat_macros::register_doc_text(
+        name = "polyval",
+        wasm_path = "crate::builtins::math::poly::polyval"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -214,7 +217,7 @@ once RunMat's sparse infrastructure stabilises.
 - Found an issue or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyval",
     op_kind: GpuOpKind::Custom("polyval"),
@@ -231,7 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider-level Horner kernels for real coefficients/inputs; falls back to host evaluation (with upload) for complex or prediction-interval paths.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::poly::polyval")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyval",
     shape: ShapeRequirements::Any,
@@ -248,7 +251,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Evaluate a polynomial at given points with MATLAB-compatible options.",
     keywords = "polyval,polynomial,polyfit,delta,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::math::poly::polyval"
 )]
 fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(p, x, &rest, false)?;

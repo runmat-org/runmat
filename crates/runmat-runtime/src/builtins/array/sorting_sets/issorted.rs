@@ -13,7 +13,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "issorted")
+    runmat_macros::register_doc_text(
+        name = "issorted",
+        wasm_path = "crate::builtins::array::sorting_sets::issorted"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -200,7 +203,7 @@ Empty slices are considered sorted. Passing a dimension larger than `ndims(A)` a
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::issorted")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issorted",
     op_kind: GpuOpKind::Custom("predicate"),
@@ -216,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU inputs gather to the host until providers implement dedicated predicate kernels.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::issorted")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issorted",
     shape: ShapeRequirements::Any,
@@ -233,7 +236,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Determine whether an array is already sorted.",
     keywords = "issorted,sorted,monotonic,rows",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 fn issorted_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input = normalize_input(value)?;

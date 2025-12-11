@@ -15,7 +15,10 @@ const EPS: f64 = 1.0e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "deconv")
+    runmat_macros::register_doc_text(
+        name = "deconv",
+        wasm_path = "crate::builtins::math::signal::deconv"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -201,7 +204,7 @@ the quotient.
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::signal::deconv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "deconv",
     op_kind: GpuOpKind::Custom("deconv1d"),
@@ -217,7 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "When providers lack native deconvolution kernels, RunMat gathers inputs to the host and re-uploads real-valued outputs to maintain GPU residency.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::signal::deconv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "deconv",
     shape: ShapeRequirements::Any,
@@ -233,7 +236,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/signal",
     summary = "Polynomial (1-D sequence) deconvolution returning quotient and remainder.",
     keywords = "deconv,deconvolution,polynomial division,signal,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::math::signal::deconv"
 )]
 fn deconv_builtin(numerator: Value, denominator: Value) -> Result<Value, String> {
     let eval = evaluate(numerator, denominator)?;

@@ -2,13 +2,13 @@ use crate::config::TelemetryConfig as RuntimeTelemetryConfig;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{provider, ApiDeviceInfo, ProviderTelemetry};
+use runmat_time::{system_time_now, Instant};
 use serde::Serialize;
 use std::fs;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use runmat_time::{system_time_now, Instant};
 use std::time::{Duration, UNIX_EPOCH};
 use uuid::Uuid;
 

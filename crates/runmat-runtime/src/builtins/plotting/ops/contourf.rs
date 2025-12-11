@@ -14,7 +14,10 @@ use super::state::{render_active_plot, PlotRenderOptions};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "contourf")
+    runmat_macros::register_doc_text(
+        name = "contourf",
+        wasm_path = "crate::builtins::plotting::ops::contourf"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -57,7 +60,8 @@ behaviour (10).
     category = "plotting",
     summary = "Render MATLAB-compatible filled contour plots.",
     keywords = "contourf,plotting,filled,contour",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::contourf"
 )]
 pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
     let mut args = Some(parse_contour_args("contourf", first, rest)?);

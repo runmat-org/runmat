@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "find")
+    runmat_macros::register_doc_text(
+        name = "find",
+        wasm_path = "crate::builtins::array::indexing::find"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ Use `find` to get linear indices and then call `ind2sub(size(X), ...)` if you ne
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::indexing::find")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "find",
     op_kind: GpuOpKind::Custom("find"),
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider executes find directly on device; other providers fall back to host and re-upload results to preserve residency.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::indexing::find")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "find",
     shape: ShapeRequirements::Any,
@@ -219,7 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/indexing",
     summary = "Locate indices and values of nonzero elements.",
     keywords = "find,nonzero,indices,row,column,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::indexing::find"
 )]
 fn find_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;

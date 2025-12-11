@@ -10,7 +10,10 @@ use std::collections::HashSet;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isfield")
+    runmat_macros::register_doc_text(
+        name = "isfield",
+        wasm_path = "crate::builtins::structs::core::isfield"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -159,7 +162,7 @@ No. The builtin only inspects field metadata and leaves GPU-resident tensors unt
 [fieldnames](./fieldnames), [struct](./struct), [isprop](../../introspection/isprop), [getfield](./getfield), [setfield](./setfield)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::isfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfield",
     op_kind: GpuOpKind::Custom("isfield"),
@@ -175,7 +178,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata check; acceleration providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::isfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isfield",
     shape: ShapeRequirements::Any,
@@ -190,7 +193,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "isfield",
     category = "structs/core",
     summary = "Test whether a struct or struct array defines specific field names.",
-    keywords = "isfield,struct,field existence"
+    keywords = "isfield,struct,field existence",
+    wasm_path = "crate::builtins::structs::core::isfield"
 )]
 fn isfield_builtin(target: Value, names: Value) -> Result<Value, String> {
     let context = classify_struct(&target)?;

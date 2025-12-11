@@ -11,7 +11,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ischar")
+    runmat_macros::register_doc_text(
+        name = "ischar",
+        wasm_path = "crate::builtins::introspection::ischar"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -163,7 +166,7 @@ elements, so the cost is constant regardless of array size.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::ischar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ischar",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -179,7 +182,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host and inspects value metadata; gpuArray inputs return logical false.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::ischar")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ischar",
     shape: ShapeRequirements::Any,
@@ -195,7 +198,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "introspection",
     summary = "Return true when a value is a MATLAB character array.",
     keywords = "ischar,char array,type checking,introspection",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(matches!(value, Value::CharArray(_))))

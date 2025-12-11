@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 };
 use crate::gather_if_needed;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "cd"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "cd", wasm_path = "crate::builtins::io::repl_fs::cd")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cd"
@@ -139,7 +142,7 @@ Expected output:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::cd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cd",
     op_kind: GpuOpKind::Custom("io"),
@@ -156,7 +159,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that updates the process working folder; GPU inputs are gathered before path resolution.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::cd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cd",
     shape: ShapeRequirements::Any,
@@ -172,7 +175,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Change the current working folder or query the folder that RunMat is executing in.",
     keywords = "cd,change directory,current folder,working directory,pwd",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::cd"
 )]
 fn cd_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;

@@ -2,15 +2,18 @@
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
-use std::convert::TryFrom;
 use runmat_time::Instant;
+use std::convert::TryFrom;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "toc"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "toc", wasm_path = "crate::builtins::timing::toc")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "toc"
@@ -146,7 +149,7 @@ resolution depends on your operating system.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::timing::toc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "toc",
     op_kind: GpuOpKind::Custom("timer"),
@@ -162,7 +165,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for toc.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::timing::toc")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "toc",
     shape: ShapeRequirements::Any,
@@ -182,7 +185,8 @@ const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
     name = "toc",
     category = "timing",
     summary = "Read the elapsed time since the most recent tic or an explicit handle.",
-    keywords = "toc,timing,profiling,benchmark"
+    keywords = "toc,timing,profiling,benchmark",
+    wasm_path = "crate::builtins::timing::toc"
 )]
 pub fn toc_builtin(args: Vec<Value>) -> Result<f64, String> {
     match args.len() {

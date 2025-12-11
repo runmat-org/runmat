@@ -18,7 +18,10 @@ use std::sync::Arc;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "meshc")
+    runmat_macros::register_doc_text(
+        name = "meshc",
+        wasm_path = "crate::builtins::plotting::ops::meshc"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -57,7 +60,8 @@ tested:
     category = "plotting",
     summary = "Render a MATLAB-compatible mesh with contour overlay.",
     keywords = "meshc,plotting,mesh,contour",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::meshc"
 )]
 pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);

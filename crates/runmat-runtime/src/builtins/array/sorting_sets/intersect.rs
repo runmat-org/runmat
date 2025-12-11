@@ -21,7 +21,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "intersect")
+    runmat_macros::register_doc_text(
+        name = "intersect",
+        wasm_path = "crate::builtins::array::sorting_sets::intersect"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -190,7 +193,7 @@ gathers automatically, so explicit residency management is rarely needed. Explic
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::intersect")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "intersect",
     op_kind: GpuOpKind::Custom("intersect"),
@@ -207,7 +210,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose a dedicated intersect hook; otherwise tensors are gathered and processed on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::array::sorting_sets::intersect"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "intersect",
     shape: ShapeRequirements::Any,
@@ -224,7 +229,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return common elements or rows across arrays with MATLAB-compatible ordering and index outputs.",
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())

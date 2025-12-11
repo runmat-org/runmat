@@ -11,7 +11,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "numel")
+    runmat_macros::register_doc_text(
+        name = "numel",
+        wasm_path = "crate::builtins::array::introspection::numel"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -162,7 +165,7 @@ an error that mirrors MATLAB.
 [size](./size), [length](./length), [MathWorks numel reference](https://www.mathworks.com/help/matlab/ref/numel.html), [MathWorks size reference](https://www.mathworks.com/help/matlab/ref/size.html)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::numel")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "numel",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -179,7 +182,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Counts elements using tensor metadata; gathers once only if provider metadata is missing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::numel")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "numel",
     shape: ShapeRequirements::Any,
@@ -195,7 +198,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/introspection",
     summary = "Count the number of elements in scalars, vectors, matrices, and N-D arrays.",
     keywords = "numel,number of elements,array length,gpu metadata,dimensions",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::array::introspection::numel"
 )]
 fn numel_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {

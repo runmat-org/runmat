@@ -18,7 +18,10 @@ const ERR_UNABLE_TO_DETERMINE: &str =
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "tempdir")
+    runmat_macros::register_doc_text(
+        name = "tempdir",
+        wasm_path = "crate::builtins::io::repl_fs::tempdir"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -175,7 +178,7 @@ RunMat raises `tempdir: too many input arguments`, matching MATLAB’s diagnosti
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::tempdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tempdir",
     op_kind: GpuOpKind::Custom("io"),
@@ -191,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only operation that queries the environment for the temporary folder. No provider hooks are required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::tempdir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tempdir",
     shape: ShapeRequirements::Any,
@@ -207,7 +210,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Return the absolute path to the system temporary folder.",
     keywords = "tempdir,temporary folder,temp directory,system temp",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::tempdir"
 )]
 fn tempdir_builtin(args: Vec<Value>) -> Result<Value, String> {
     if !args.is_empty() {

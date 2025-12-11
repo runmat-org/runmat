@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isfinite")
+    runmat_macros::register_doc_text(
+        name = "isfinite",
+        wasm_path = "crate::builtins::logical::tests::isfinite"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -157,7 +160,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 [isinf](./isinf), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isfinite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfinite",
     op_kind: GpuOpKind::Elementwise,
@@ -176,7 +179,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isfinite` hook when available; otherwise the runtime gathers to host and computes the mask on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isfinite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isfinite",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -203,7 +206,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/tests",
     summary = "Return a logical mask indicating which elements of the input are finite.",
     keywords = "isfinite,finite,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::tests::isfinite"
 )]
 fn isfinite_builtin(value: Value) -> Result<Value, String> {
     match value {

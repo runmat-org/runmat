@@ -15,7 +15,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cummax")
+    runmat_macros::register_doc_text(
+        name = "cummax",
+        wasm_path = "crate::builtins::math::reduction::cummax"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -151,7 +154,7 @@ The input is returned unchanged. Every index is `1`, matching MATLAB's treatment
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::cummax")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cummax",
     op_kind: GpuOpKind::Custom("scan"),
@@ -168,7 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose prefix-max kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::cummax")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cummax",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -220,7 +223,8 @@ impl CummaxEvaluation {
     category = "math/reduction",
     summary = "Cumulative maximum and index tracking for scalars, vectors, matrices, or N-D tensors.",
     keywords = "cummax,cumulative maximum,running maximum,reverse,omitnan,indices,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::cummax"
 )]
 fn cummax_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_value())

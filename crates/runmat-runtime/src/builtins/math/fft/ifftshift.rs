@@ -15,7 +15,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ifftshift")
+    runmat_macros::register_doc_text(
+        name = "ifftshift",
+        wasm_path = "crate::builtins::math::fft::ifftshift"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -178,7 +181,7 @@ single gather/upload cycle otherwise.
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::ifftshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ifftshift",
     op_kind: GpuOpKind::Custom("ifftshift"),
@@ -195,7 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Delegates to provider circshift kernels; falls back to host when the hook is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::ifftshift")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ifftshift",
     shape: ShapeRequirements::Any,
@@ -211,7 +214,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/fft",
     summary = "Undo fftshift by moving the zero-frequency component back to the origin.",
     keywords = "ifftshift,inverse fft shift,frequency alignment,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::math::fft::ifftshift"
 )]
 fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

@@ -19,7 +19,13 @@ use crate::gather_if_needed;
 
 const DOT_NAME: &str = "dot";
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "dot"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "dot",
+        wasm_path = "crate::builtins::math::linalg::ops::dot"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dot"
@@ -172,7 +178,7 @@ No. MATLAB's `dot` is fixed to conjugate the first argument. Use `sum(A .* conj(
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::dot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dot",
     op_kind: GpuOpKind::Reduction,
@@ -188,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Dispatches to a provider-side dot implementation when available; otherwise gathers operands and re-uploads real outputs.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::dot")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dot",
     shape: ShapeRequirements::Any,
@@ -204,7 +210,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Dot product (inner product) of matching tensors along a specified dimension.",
     keywords = "dot,inner product,gpu,linear algebra",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::linalg::ops::dot"
 )]
 fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

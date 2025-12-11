@@ -17,7 +17,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ismember")
+    runmat_macros::register_doc_text(
+        name = "ismember",
+        wasm_path = "crate::builtins::array::sorting_sets::ismember"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -201,7 +204,7 @@ Otherwise the data is gathered to the host with no behavioural differences.
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::ismember")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismember",
     op_kind: GpuOpKind::Custom("ismember"),
@@ -217,7 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply dedicated membership kernels; until then RunMat gathers GPU tensors to host memory.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::ismember")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismember",
     shape: ShapeRequirements::Any,
@@ -234,7 +237,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Identify array elements or rows that appear in another array while returning first-match indices.",
     keywords = "ismember,membership,set,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::ismember"
 )]
 fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_mask_value())

@@ -19,7 +19,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "rot90")
+    runmat_macros::register_doc_text(
+        name = "rot90",
+        wasm_path = "crate::builtins::array::shape::rot90"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -198,7 +201,7 @@ to the host implementation.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::rot90")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rot90",
     op_kind: GpuOpKind::Custom("rot90"),
@@ -218,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Preferred implementation composes provider permute + flip hooks; providers may offer a dedicated rot90 fast path.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::rot90")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rot90",
     shape: ShapeRequirements::Any,
@@ -235,7 +238,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Rotate matrices and N-D arrays by multiples of 90 degrees.",
     keywords = "rot90,rotate,90 degrees,matrix,gpu,clockwise,counterclockwise",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::rot90"
 )]
 fn rot90_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

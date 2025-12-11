@@ -22,7 +22,10 @@ const DOMAIN_TOL: f64 = 1e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "acos")
+    runmat_macros::register_doc_text(
+        name = "acos",
+        wasm_path = "crate::builtins::math::trigonometry::acos"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -202,7 +205,7 @@ generated path, allowing fused GPU execution without intermediate buffers.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::acos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "acos",
     op_kind: GpuOpKind::Elementwise,
@@ -218,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acos in-place when inputs stay within [-1, 1]; otherwise the runtime gathers to host to honour MATLAB-compatible complex promotion.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::acos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acos",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -240,7 +243,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Element-wise inverse cosine with MATLAB-compatible complex promotion.",
     keywords = "acos,inverse cosine,arccos,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::acos"
 )]
 fn acos_builtin(value: Value) -> Result<Value, String> {
     match value {

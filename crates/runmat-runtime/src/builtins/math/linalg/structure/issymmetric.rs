@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "issymmetric")
+    runmat_macros::register_doc_text(
+        name = "issymmetric",
+        wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -202,7 +205,9 @@ Only the execution strategy changes (device-side predicate vs. host fallback).
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issymmetric",
     op_kind: GpuOpKind::Custom("structure_analysis"),
@@ -218,7 +223,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a symmetry predicate hook; otherwise the runtime gathers the tensor and evaluates on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issymmetric",
     shape: ShapeRequirements::Any,
@@ -234,7 +241,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/structure",
     summary = "Test whether a matrix is symmetric or skew-symmetric.",
     keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mode, tol) = parse_optional_args(&rest)?;

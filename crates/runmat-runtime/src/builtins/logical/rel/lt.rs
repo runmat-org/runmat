@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "lt"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "lt", wasm_path = "crate::builtins::logical::rel::lt")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "lt"
@@ -183,7 +186,7 @@ Yes. The builtin registers element-wise fusion metadata so the planner can fuse 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::rel::lt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "lt",
     op_kind: GpuOpKind::Elementwise,
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_lt kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::rel::lt")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "lt",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,7 +235,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/rel",
     summary = "Element-wise less-than comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "lt,less than,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::rel::lt"
 )]
 fn lt_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {

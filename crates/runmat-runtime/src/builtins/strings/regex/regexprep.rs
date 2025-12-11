@@ -14,7 +14,10 @@ use crate::{gather_if_needed, make_cell};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "regexprep")
+    runmat_macros::register_doc_text(
+        name = "regexprep",
+        wasm_path = "crate::builtins::strings::regex::regexprep"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -167,7 +170,7 @@ results remain in host memory.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::regex::regexprep")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexprep",
     op_kind: GpuOpKind::Custom("regex"),
@@ -184,7 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Runs on the CPU; GPU inputs are gathered before processing and results remain on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::regex::regexprep")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "regexprep",
     shape: ShapeRequirements::Any,
@@ -200,7 +203,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/regex",
     summary = "Regular expression replacement with MATLAB-compatible semantics.",
     keywords = "regexprep,regex,replace,substitute",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::regex::regexprep"
 )]
 fn regexprep_builtin(
     subject: Value,

@@ -17,7 +17,10 @@ const MAX_PRECISION: usize = 52;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "num2str")
+    runmat_macros::register_doc_text(
+        name = "num2str",
+        wasm_path = "crate::builtins::strings::core::num2str"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -172,7 +175,7 @@ numeric form first or use `string` for rich text conversions.
 `sprintf`, `string`, `mat2str`, `str2double`
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::num2str")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "num2str",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -188,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always gathers GPU data to host memory before formatting numeric text.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::num2str")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "num2str",
     shape: ShapeRequirements::Any,
@@ -207,7 +210,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         category = "strings/core",
         summary = "Format numeric scalars, vectors, and matrices as character arrays.",
         keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink"
+        accel = "sink",
+        wasm_path = "crate::builtins::strings::core::num2str"
     )
 )]
 #[cfg_attr(
@@ -217,7 +221,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         category = "strings/core",
         summary = "Format numeric scalars, vectors, and matrices as character arrays.",
         keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink"
+        accel = "sink",
+        wasm_path = "crate::builtins::strings::core::num2str"
     )
 )]
 fn num2str_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {

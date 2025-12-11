@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "tanh")
+    runmat_macros::register_doc_text(
+        name = "tanh",
+        wasm_path = "crate::builtins::math::trigonometry::tanh"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -186,7 +189,7 @@ Yes. The autograd infrastructure recognises `tanh` as a primitive and records it
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::tanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tanh",
     op_kind: GpuOpKind::Elementwise,
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute tanh directly on the device; runtimes gather to the host when unary_tanh is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::tanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tanh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -226,7 +229,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Hyperbolic tangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "tanh,hyperbolic tangent,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::tanh"
 )]
 fn tanh_builtin(value: Value) -> Result<Value, String> {
     match value {

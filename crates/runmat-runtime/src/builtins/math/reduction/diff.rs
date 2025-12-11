@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "diff")
+    runmat_macros::register_doc_text(
+        name = "diff",
+        wasm_path = "crate::builtins::math::reduction::diff"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -169,7 +172,7 @@ to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces ident
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::diff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diff",
     op_kind: GpuOpKind::Custom("finite-difference"),
@@ -185,7 +188,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers surface finite-difference kernels through `diff_dim`; the WGPU backend keeps tensors on the device.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::diff")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diff",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -201,7 +204,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/reduction",
     summary = "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
     keywords = "diff,difference,finite difference,nth difference,gpu",
-    accel = "diff"
+    accel = "diff",
+    wasm_path = "crate::builtins::math::reduction::diff"
 )]
 fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (order, dim) = parse_arguments(&rest)?;

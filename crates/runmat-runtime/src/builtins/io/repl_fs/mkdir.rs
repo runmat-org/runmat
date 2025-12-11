@@ -24,7 +24,10 @@ const ERR_PARENT_ARG: &str = "mkdir: parent folder must be a character vector or
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mkdir")
+    runmat_macros::register_doc_text(
+        name = "mkdir",
+        wasm_path = "crate::builtins::io::repl_fs::mkdir"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -176,7 +179,7 @@ status =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::mkdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mkdir",
     op_kind: GpuOpKind::Custom("io"),
@@ -193,7 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. GPU-resident path arguments are gathered automatically before directory creation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::mkdir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mkdir",
     shape: ShapeRequirements::Any,
@@ -209,7 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Create folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "mkdir,create directory,folder,filesystem,status,message,messageid",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::mkdir"
 )]
 fn mkdir_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;

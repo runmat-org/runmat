@@ -14,7 +14,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "str2double")
+    runmat_macros::register_doc_text(
+        name = "str2double",
+        wasm_path = "crate::builtins::strings::core::str2double"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ Wrap the result with `gpuArray(...)` if you need to move it back to the device.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::str2double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "str2double",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -200,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Parses text on the CPU; GPU-resident inputs are gathered before conversion.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::str2double")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "str2double",
     shape: ShapeRequirements::Any,
@@ -221,7 +224,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/core",
     summary = "Convert strings, character arrays, or cell arrays of text into doubles.",
     keywords = "str2double,string to double,text conversion,gpu",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::core::str2double"
 )]
 fn str2double_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("str2double: {e}"))?;

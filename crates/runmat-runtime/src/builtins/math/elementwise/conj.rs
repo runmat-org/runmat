@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "conj")
+    runmat_macros::register_doc_text(
+        name = "conj",
+        wasm_path = "crate::builtins::math::elementwise::conj"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -173,7 +176,7 @@ Yes. The fusion planner can fold `conj` into neighbouring elementwise kernels, l
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::conj")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conj",
     op_kind: GpuOpKind::Elementwise,
@@ -190,7 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute conj in-place for real tensors via unary_conj; complex tensors currently gather to the host for conjugation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::conj")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conj",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -216,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Compute the complex conjugate of scalars, vectors, matrices, or N-D tensors.",
     keywords = "conj,complex conjugate,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::conj"
 )]
 fn conj_builtin(value: Value) -> Result<Value, String> {
     match value {

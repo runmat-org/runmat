@@ -14,7 +14,10 @@ type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "kron")
+    runmat_macros::register_doc_text(
+        name = "kron",
+        wasm_path = "crate::builtins::array::shape::kron"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -179,7 +182,7 @@ host, computes the product, and re-uploads the result when a provider is availab
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/kron.rs`
 - Found an issue? Please open an issue with a minimal reproduction."#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::kron")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "kron",
     op_kind: GpuOpKind::Custom("kronecker"),
@@ -195,7 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on-device when the provider implements `kron`; otherwise the runtime gathers inputs, computes on the host, and re-uploads the result when possible.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::kron")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "kron",
     shape: ShapeRequirements::Any,
@@ -223,7 +226,8 @@ enum KronInput {
     category = "array/shape",
     summary = "Compute the Kronecker (tensor) product of two arrays.",
     keywords = "kron,kronecker product,tensor product,block matrix,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::kron"
 )]
 fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {

@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sinh")
+    runmat_macros::register_doc_text(
+        name = "sinh",
+        wasm_path = "crate::builtins::math::trigonometry::sinh"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -158,7 +161,7 @@ Providers may warm up pipelines during initialization. If `unary_sinh` is unavai
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::sinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sinh",
     op_kind: GpuOpKind::Elementwise,
@@ -175,7 +178,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sinh directly on the device; runtimes gather to the host when unary_sinh is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::sinh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sinh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -197,7 +200,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "sinh,hyperbolic,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::sinh"
 )]
 fn sinh_builtin(value: Value) -> Result<Value, String> {
     match value {

@@ -14,7 +14,10 @@ use crate::builtins::common::spec::{
 };
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isreal")
+    runmat_macros::register_doc_text(
+        name = "isreal",
+        wasm_path = "crate::builtins::logical::tests::isreal"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -181,7 +184,7 @@ Use elementwise predicates such as `imag`/`real` combined with comparison (`imag
 [isfinite](./isfinite), [isinf](./isinf), [isnan](./isnan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isreal")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isreal",
     op_kind: GpuOpKind::Custom("storage-check"),
@@ -197,7 +200,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Queries provider metadata when `logical_isreal` is available; otherwise gathers once and inspects host storage.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isreal")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isreal",
     shape: ShapeRequirements::Any,
@@ -213,7 +216,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/tests",
     summary = "Return true when a value uses real storage without an imaginary component.",
     keywords = "isreal,real,complex,gpu,logical",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::logical::tests::isreal"
 )]
 fn isreal_builtin(value: Value) -> Result<Value, String> {
     match value {

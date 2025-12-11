@@ -18,7 +18,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "prod")
+    runmat_macros::register_doc_text(
+        name = "prod",
+        wasm_path = "crate::builtins::math::reduction::prod"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -177,7 +180,7 @@ Only when you explicitly request `'native'` or `'like'`. Otherwise, integers are
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::prod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "prod",
     op_kind: GpuOpKind::Reduction,
@@ -201,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_prod_dim / reduce_prod. Requests using 'omitnan', multi-axis reductions, or class coercions fall back to the host implementation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::prod")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "prod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -226,7 +229,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/reduction",
     summary = "Multiply elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "prod,product,reduction,gpu,omitnan",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::prod"
 )]
 fn prod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input_meta = InputMeta::from_value(&value);

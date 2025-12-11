@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cumsum")
+    runmat_macros::register_doc_text(
+        name = "cumsum",
+        wasm_path = "crate::builtins::math::reduction::cumsum"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -149,7 +152,7 @@ If the active provider does not natively handle `"omitnan"`, RunMat gathers back
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::cumsum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cumsum",
     op_kind: GpuOpKind::Custom("scan"),
@@ -165,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose device prefix-sum kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::cumsum")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cumsum",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -193,7 +196,8 @@ enum CumsumNanMode {
     category = "math/reduction",
     summary = "Cumulative sum of scalars, vectors, matrices, or N-D tensors.",
     keywords = "cumsum,cumulative sum,running total,reverse,omitnan,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::cumsum"
 )]
 fn cumsum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;

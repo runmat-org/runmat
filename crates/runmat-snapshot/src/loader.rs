@@ -3,13 +3,13 @@
 //! Optimized for fast startup times with parallel loading, compression,
 //! and integration with the RunMat runtime.
 
+use runmat_time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
-use runmat_time::Instant;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -186,11 +186,11 @@ impl SnapshotLoader {
         };
         let compressed_size =
             u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
-        let data_end = data_start
-            .checked_add(compressed_size)
-            .ok_or_else(|| SnapshotError::Configuration {
+        let data_end = data_start.checked_add(compressed_size).ok_or_else(|| {
+            SnapshotError::Configuration {
                 message: "Snapshot data section overflowed buffer length".to_string(),
-            })?;
+            }
+        })?;
 
         if data_end > bytes.len() {
             return Err(SnapshotError::Io(std::io::Error::new(
@@ -689,8 +689,10 @@ impl FormatLoader {
             // Account for 4-byte header size prefix + actual header size
             let header_size = bincode::serialized_size(&self.header)? as usize;
             let data_start = 4 + header_size; // 4 bytes for size + header
-            let compressed_size =
-                u64_to_usize(self.header.data_info.compressed_size, "snapshot compressed size")?;
+            let compressed_size = u64_to_usize(
+                self.header.data_info.compressed_size,
+                "snapshot compressed size",
+            )?;
             let data_end = data_start + compressed_size;
 
             if data_end > mmap.len() {
@@ -710,8 +712,10 @@ impl FormatLoader {
 
             reader.seek(SeekFrom::Start(data_start))?;
 
-            let compressed_size =
-                u64_to_usize(self.header.data_info.compressed_size, "snapshot compressed size")?;
+            let compressed_size = u64_to_usize(
+                self.header.data_info.compressed_size,
+                "snapshot compressed size",
+            )?;
             let mut data = vec![0u8; compressed_size];
             reader.read_exact(&mut data)?;
 

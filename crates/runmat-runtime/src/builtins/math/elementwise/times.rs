@@ -15,7 +15,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "times")
+    runmat_macros::register_doc_text(
+        name = "times",
+        wasm_path = "crate::builtins::math::elementwise::times"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -221,7 +224,7 @@ String arrays are not numeric and therefore raise an error when passed to `times
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::times")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "times",
     op_kind: GpuOpKind::Elementwise,
@@ -244,7 +247,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses elem_mul for shape-compatible gpuArrays and scalar_mul when one operand is a scalar; falls back to host execution for implicit expansion or unsupported operand kinds.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::times")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "times",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -270,7 +273,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise multiplication with MATLAB-compatible implicit expansion.",
     keywords = "times,element-wise multiply,gpu,.*",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::math::elementwise::times"
 )]
 fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;

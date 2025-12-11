@@ -45,7 +45,8 @@ fn parse_mode_str(text: &str) -> Result<HoldMode, String> {
     name = "hold",
     category = "plotting",
     summary = "Toggle whether plots replace or append to the current axes.",
-    keywords = "hold,plotting"
+    keywords = "hold,plotting",
+    wasm_path = "crate::builtins::plotting::ops::hold"
 )]
 pub fn hold_builtin(rest: Vec<Value>) -> Result<String, String> {
     let mode = if rest.is_empty() {

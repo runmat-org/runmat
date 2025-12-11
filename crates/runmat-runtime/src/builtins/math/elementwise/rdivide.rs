@@ -16,7 +16,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "rdivide")
+    runmat_macros::register_doc_text(
+        name = "rdivide",
+        wasm_path = "crate::builtins::math::elementwise::rdivide"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -225,7 +228,7 @@ String arrays are not numeric and therefore raise an error when passed to `rdivi
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::rdivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rdivide",
     op_kind: GpuOpKind::Elementwise,
@@ -248,7 +251,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses elem_div when shapes match, scalar_div for tensor ./ scalar, and scalar_rdiv for scalar ./ tensor; implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::rdivide")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rdivide",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -274,7 +277,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise division with MATLAB-compatible implicit expansion.",
     keywords = "rdivide,element-wise division,gpu,./",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::math::elementwise::rdivide"
 )]
 fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;

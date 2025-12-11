@@ -35,7 +35,10 @@ use super::style::{LineStyleParseOptions, MarkerColor};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "scatter")
+    runmat_macros::register_doc_text(
+        name = "scatter",
+        wasm_path = "crate::builtins::plotting::ops::scatter"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -87,7 +90,7 @@ device is active, their buffers are consumed zero-copy by the renderer. Otherwis
 gathered before plotting, matching MATLAB semantics.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -103,7 +106,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "2-D scatter rendering happens outside fusion; tensors are gathered first.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::scatter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "scatter",
     shape: ShapeRequirements::Any,
@@ -119,7 +122,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "plotting",
     summary = "Create MATLAB-compatible 2-D scatter plots.",
     keywords = "scatter,plotting,2d,markers",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::scatter"
 )]
 pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;

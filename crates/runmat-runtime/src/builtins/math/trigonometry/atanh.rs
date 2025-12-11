@@ -20,7 +20,10 @@ const DOMAIN_EPS: f64 = 1.0e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "atanh")
+    runmat_macros::register_doc_text(
+        name = "atanh",
+        wasm_path = "crate::builtins::math::trigonometry::atanh"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -211,7 +214,7 @@ the operation on the GPU.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::atanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atanh",
     op_kind: GpuOpKind::Elementwise,
@@ -227,7 +230,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Keeps tensors on the device when the provider exposes unary_atanh and every element satisfies |x| ≤ 1; otherwise gathers to the host for complex promotion.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::atanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atanh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -249,7 +252,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Inverse hyperbolic tangent with MATLAB-compatible complex promotion.",
     keywords = "atanh,inverse hyperbolic tangent,artanh,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::atanh"
 )]
 fn atanh_builtin(value: Value) -> Result<Value, String> {
     match value {

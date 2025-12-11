@@ -12,21 +12,21 @@ pub(crate) mod wasm_registry {
     static FUSION_SPECS: Lazy<Mutex<Vec<&'static BuiltinFusionSpec>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
 
-    pub(super) fn submit_gpu_spec(spec: &'static BuiltinGpuSpec) {
+    pub(crate) fn submit_gpu_spec(spec: &'static BuiltinGpuSpec) {
         GPU_SPECS
             .lock()
             .expect("gpu spec registry poisoned")
             .push(spec);
     }
 
-    pub(super) fn submit_fusion_spec(spec: &'static BuiltinFusionSpec) {
+    pub(crate) fn submit_fusion_spec(spec: &'static BuiltinFusionSpec) {
         FUSION_SPECS
             .lock()
             .expect("fusion spec registry poisoned")
             .push(spec);
     }
 
-    pub(super) fn gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
+    pub(crate) fn gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
         GPU_SPECS
             .lock()
             .expect("gpu spec registry poisoned")
@@ -34,7 +34,7 @@ pub(crate) mod wasm_registry {
             .into_iter()
     }
 
-    pub(super) fn fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
+    pub(crate) fn fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
         FUSION_SPECS
             .lock()
             .expect("fusion spec registry poisoned")
@@ -46,14 +46,14 @@ pub(crate) mod wasm_registry {
     static DOC_TEXTS: Lazy<Mutex<Vec<&'static DocTextInventory>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
 
-    pub(super) fn submit_doc_text(entry: &'static DocTextInventory) {
+    pub(crate) fn submit_doc_text(entry: &'static DocTextInventory) {
         DOC_TEXTS
             .lock()
             .expect("doc text registry poisoned")
             .push(entry);
     }
 
-    pub(super) fn doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
+    pub(crate) fn doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
         DOC_TEXTS
             .lock()
             .expect("doc text registry poisoned")

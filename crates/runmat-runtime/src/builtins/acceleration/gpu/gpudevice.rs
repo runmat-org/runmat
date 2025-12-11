@@ -18,7 +18,10 @@ const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive inte
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "gpuDevice")
+    runmat_macros::register_doc_text(
+        name = "gpuDevice",
+        wasm_path = "crate::builtins::acceleration::gpu::gpudevice"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -167,7 +170,7 @@ string that is convenient for logging or display.
 [gpuArray](./gpuArray), [gather](./gather), [gpuInfo](./gpuInfo)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::gpudevice")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuDevice",
     op_kind: GpuOpKind::Custom("device-info"),
@@ -183,7 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Pure metadata query; does not enqueue GPU kernels. Returns an error when no provider is registered.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::gpudevice")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuDevice",
     shape: ShapeRequirements::Any,
@@ -201,7 +204,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         name = "gpuDevice",
         category = "acceleration/gpu",
         summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate"
+        keywords = "gpu,device,info,accelerate",
+        wasm_path = "crate::builtins::acceleration::gpu::gpudevice"
     )
 )]
 #[cfg_attr(
@@ -210,7 +214,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         name = "gpuDevice",
         category = "acceleration/gpu",
         summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate"
+        keywords = "gpu,device,info,accelerate",
+        wasm_path = "crate::builtins::acceleration::gpu::gpudevice"
     )
 )]
 fn gpu_device_builtin(args: Vec<Value>) -> Result<Value, String> {

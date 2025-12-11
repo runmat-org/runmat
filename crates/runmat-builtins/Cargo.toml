@@ -7,7 +7,6 @@ license-file = "../LICENSE.md"
 description = "RunMat built-in functions and standard library components"
 homepage = "https://runmat.org"
 repository = "https://github.com/runmat-org/runmat"
-build = "build.rs"
 
 [dependencies]
 inventory = { workspace = true }

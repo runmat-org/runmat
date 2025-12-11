@@ -32,7 +32,10 @@ const ERR_FLAG_ARG: &str =
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "copyfile")
+    runmat_macros::register_doc_text(
+        name = "copyfile",
+        wasm_path = "crate::builtins::io::repl_fs::copyfile"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -175,7 +178,7 @@ MATLAB:COPYFILE:FileDoesNotExist
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "copyfile",
     op_kind: GpuOpKind::Custom("io"),
@@ -192,7 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path and flag arguments are gathered automatically before performing the copy.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "copyfile",
     shape: ShapeRequirements::Any,
@@ -209,7 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 fn copyfile_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;

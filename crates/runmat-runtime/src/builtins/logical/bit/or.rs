@@ -10,7 +10,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "or"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "or", wasm_path = "crate::builtins::logical::bit::or")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "or"
@@ -161,7 +164,7 @@ RunMat promotes the other input to the GPU before dispatch when the auto-offload
 [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::bit::or")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "or",
     op_kind: GpuOpKind::Elementwise,
@@ -180,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to host execution when the provider does not implement logical_or; non-zero (including NaN) inputs map to true.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::bit::or")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "or",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -215,7 +218,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/bit",
     summary = "Element-wise logical OR for scalars, arrays, and gpuArray values.",
     keywords = "logical,or,elementwise,boolean,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::bit::or"
 )]
 fn or_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {

@@ -11,7 +11,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "length")
+    runmat_macros::register_doc_text(
+        name = "length",
+        wasm_path = "crate::builtins::array::introspection::length"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -164,7 +167,7 @@ won't break fusion plans.
 [size](./size), [numel (MathWorks)](https://www.mathworks.com/help/matlab/ref/numel.html), [strlength (MathWorks)](https://www.mathworks.com/help/matlab/ref/strlength.html)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::length")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "length",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -180,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads tensor metadata from handles; falls back to gathering only when provider metadata is absent.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::length")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "length",
     shape: ShapeRequirements::Any,
@@ -196,7 +199,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/introspection",
     summary = "Return the length of the largest dimension of scalars, vectors, matrices, and N-D arrays.",
     keywords = "length,largest dimension,vector length,gpu metadata,array size",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::array::introspection::length"
 )]
 fn length_builtin(value: Value) -> Result<Value, String> {
     if let Some(count) = map_length(&value) {

@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "hypot")
+    runmat_macros::register_doc_text(
+        name = "hypot",
+        wasm_path = "crate::builtins::math::elementwise::hypot"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -181,7 +184,7 @@ Use `hypot` repeatedly: `hypot(x, hypot(y, z))` computes the Euclidean norm of `
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::hypot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "hypot",
     op_kind: GpuOpKind::Elementwise,
@@ -200,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can execute hypot in a single binary kernel; the runtime gathers to host when the hook is unavailable or shapes require implicit expansion.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::hypot")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "hypot",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -223,7 +226,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise Euclidean norm sqrt(x.^2 + y.^2) with MATLAB-compatible broadcasting.",
     keywords = "hypot,euclidean norm,distance,gpu",
-    accel = "binary"
+    accel = "binary",
+    wasm_path = "crate::builtins::math::elementwise::hypot"
 )]
 fn hypot_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     match (lhs, rhs) {

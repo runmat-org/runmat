@@ -46,6 +46,7 @@ use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matri
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_time::Instant;
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -58,7 +59,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
-use runmat_time::Instant;
 use std::time::Duration;
 use wgpu::util::DeviceExt;
 

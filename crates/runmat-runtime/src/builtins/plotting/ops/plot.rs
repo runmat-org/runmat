@@ -27,7 +27,10 @@ use std::convert::TryFrom;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "plot")
+    runmat_macros::register_doc_text(
+        name = "plot",
+        wasm_path = "crate::builtins::plotting::ops::plot"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -78,7 +81,7 @@ device is active, their buffers are consumed zero-copy by the renderer. Otherwis
 gathered before plotting, matching MATLAB semantics.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::plot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "plot",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -94,7 +97,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Plots are rendered on the host; gpuArray inputs are gathered before rendering.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::plot")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "plot",
     shape: ShapeRequirements::Any,
@@ -110,7 +113,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "plotting",
     summary = "Create MATLAB-compatible 2-D line plots.",
     keywords = "plot,line,2d,visualization",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::plot"
 )]
 pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
     let mut args = Vec::with_capacity(2 + rest.len());

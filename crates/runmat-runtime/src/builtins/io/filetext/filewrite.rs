@@ -15,7 +15,10 @@ use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "filewrite")
+    runmat_macros::register_doc_text(
+        name = "filewrite",
+        wasm_path = "crate::builtins::io::filetext::filewrite"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -149,7 +152,7 @@ No. The parent directory must already exist. Use `mkdir` before calling `filewri
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::filewrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filewrite",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -165,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; GPU providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::filewrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filewrite",
     shape: ShapeRequirements::Any,
@@ -236,7 +239,8 @@ impl Default for FilewriteOptions {
     category = "io/filetext",
     summary = "Write text or raw bytes to a file.",
     keywords = "filewrite,io,write file,text file,append,encoding",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::filetext::filewrite"
 )]
 fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let path = gather_if_needed(&path).map_err(|e| format!("filewrite: {e}"))?;

@@ -16,7 +16,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "min"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "min",
+        wasm_path = "crate::builtins::math::reduction::min"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "min"
@@ -160,7 +166,7 @@ Yes. Logical arrays are promoted to double precision, and integer inputs are con
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::min")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "min",
     op_kind: GpuOpKind::Reduction,
@@ -184,7 +190,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_min_dim / reduce_min. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::min")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "min",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -235,7 +241,8 @@ impl MinEvaluation {
     category = "math/reduction",
     summary = "Return the minimum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::min"
 )]
 fn min_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_value())

@@ -3,9 +3,9 @@
 //! Provides detailed statistics about GC performance, memory usage,
 //! and collection behavior for monitoring and tuning.
 
+use runmat_time::Instant;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use runmat_time::Instant;
 use std::time::Duration;
 
 /// Comprehensive GC statistics

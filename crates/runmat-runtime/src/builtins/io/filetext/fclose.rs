@@ -19,7 +19,10 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fclose")
+    runmat_macros::register_doc_text(
+        name = "fclose",
+        wasm_path = "crate::builtins::io::filetext::fclose"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,7 @@ No. It only closes identifiers that the current RunMat process opened via
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fclose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fclose",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -208,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fclose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fclose",
     shape: ShapeRequirements::Any,
@@ -224,7 +227,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/filetext",
     summary = "Close one file, multiple files, or all files opened with fopen.",
     keywords = "fclose,file,close,io,identifier",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::filetext::fclose"
 )]
 fn fclose_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;

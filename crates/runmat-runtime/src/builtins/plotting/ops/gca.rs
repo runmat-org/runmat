@@ -10,7 +10,8 @@ use super::style::value_as_string;
     name = "gca",
     category = "plotting",
     summary = "Return the handle for the current axes.",
-    keywords = "gca,axes,plotting"
+    keywords = "gca,axes,plotting",
+    wasm_path = "crate::builtins::plotting::ops::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let state = current_axes_state();

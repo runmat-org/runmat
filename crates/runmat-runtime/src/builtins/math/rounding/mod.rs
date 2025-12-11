@@ -17,7 +17,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "mod"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "mod", wasm_path = "crate::builtins::math::rounding")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mod"
@@ -175,7 +178,7 @@ Explicit `gpuArray` / `gather` calls remain available for scripts that mirror Ma
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mod",
     op_kind: GpuOpKind::Elementwise,
@@ -206,7 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers can keep mod on-device by composing elem_div → unary_floor → elem_mul → elem_sub for matching shapes. Future backends may expose a dedicated elem_mod hook.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,7 +235,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/rounding",
     summary = "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
     keywords = "mod,modulus,remainder,gpu",
-    accel = "binary"
+    accel = "binary",
+    wasm_path = "crate::builtins::math::rounding"
 )]
 fn mod_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     match (lhs, rhs) {

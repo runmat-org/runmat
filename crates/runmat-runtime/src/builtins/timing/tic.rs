@@ -10,7 +10,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "tic"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tic", wasm_path = "crate::builtins::timing::tic")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tic"
@@ -142,7 +145,7 @@ any GPU-resident tensors are gathered automatically by surrounding code when nec
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::timing::tic")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tic",
     op_kind: GpuOpKind::Custom("timer"),
@@ -158,7 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for tic/toc.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::timing::tic")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tic",
     shape: ShapeRequirements::Any,
@@ -198,7 +201,8 @@ const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
     category = "timing",
     summary = "Start a stopwatch timer and optionally return a handle for toc.",
     keywords = "tic,timing,profiling,benchmark",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::timing::tic"
 )]
 pub fn tic_builtin() -> Result<f64, String> {
     record_tic()

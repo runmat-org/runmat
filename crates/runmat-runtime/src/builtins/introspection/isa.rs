@@ -9,7 +9,13 @@ use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{get_class, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "isa"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isa",
+        wasm_path = "crate::builtins::introspection::isa"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isa"
@@ -200,7 +206,7 @@ Yes. Meta-class references created with `classref` return `true` for `"meta.clas
 [`class`](./class), [`isnumeric`](../logical/tests/isnumeric), [`islogical`](../logical/tests/islogical), `isaUnderlying`, [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::isa")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isa",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -216,7 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata predicate that returns host logical scalars; no GPU kernels or gathers are required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::isa")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isa",
     shape: ShapeRequirements::Any,
@@ -233,7 +239,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "introspection",
     summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> Result<Value, String> {
     let type_name = parse_type_name(&class_designator)?;

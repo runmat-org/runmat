@@ -1,6 +1,6 @@
-# @runmat/wasm
+# runmat
 
-TypeScript/ESM bindings for the `runmat-wasm` crate. The package exposes an async `initRunMat` helper that boots the WASM runtime, streams optional snapshot bytes, and returns a browser-friendly session wrapper.
+TypeScript/ESM bindings for the `runmat` crate. The package exposes an async `initRunMat` helper that boots the WASM runtime, streams optional snapshot bytes, and returns a browser-friendly session wrapper.
 
 ## Developing
 

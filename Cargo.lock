@@ -7929,6 +7929,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-paths"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "walkdir",
+]
+
+[[package]]
 name = "wasm-streams"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

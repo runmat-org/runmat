@@ -10,7 +10,10 @@ use std::collections::HashSet;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "rmfield")
+    runmat_macros::register_doc_text(
+        name = "rmfield",
+        wasm_path = "crate::builtins::structs::core::rmfield"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -168,7 +171,7 @@ the device until another operation decides otherwise.
 [fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [orderfields](./orderfields)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::rmfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmfield",
     op_kind: GpuOpKind::Custom("rmfield"),
@@ -184,7 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only struct metadata update; acceleration providers are not consulted.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::rmfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmfield",
     shape: ShapeRequirements::Any,
@@ -199,7 +202,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "rmfield",
     category = "structs/core",
     summary = "Remove one or more fields from scalar structs or struct arrays.",
-    keywords = "rmfield,struct,remove field,struct array"
+    keywords = "rmfield,struct,remove field,struct array",
+    wasm_path = "crate::builtins::structs::core::rmfield"
 )]
 fn rmfield_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let names = parse_field_names(&rest)?;

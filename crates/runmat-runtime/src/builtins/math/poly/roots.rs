@@ -21,7 +21,10 @@ const RESULT_ZERO_TOL: f64 = 1.0e-10;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "roots")
+    runmat_macros::register_doc_text(
+        name = "roots",
+        wasm_path = "crate::builtins::math::poly::roots"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -173,7 +176,7 @@ Small imaginary components (|imag| ≤ 1e-10·(1 + |real|)) are rounded to zero 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "roots",
     op_kind: GpuOpKind::Custom("polynomial-roots"),
@@ -189,7 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Companion matrix eigenvalue solve executes on the host; providers currently fall back to the CPU implementation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::poly::roots")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "roots",
     shape: ShapeRequirements::Any,
@@ -205,7 +208,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/poly",
     summary = "Compute the roots of a polynomial specified by its coefficients.",
     keywords = "roots,polynomial,eigenvalues,companion",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::math::poly::roots"
 )]
 fn roots_builtin(coefficients: Value) -> Result<Value, String> {
     let coeffs = coefficients_to_complex(coefficients)?;

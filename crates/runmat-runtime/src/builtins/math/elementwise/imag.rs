@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "imag")
+    runmat_macros::register_doc_text(
+        name = "imag",
+        wasm_path = "crate::builtins::math::elementwise::imag"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -157,7 +160,7 @@ Yes. The fusion planner can fold `imag` into neighbouring elementwise kernels, l
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::imag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imag",
     op_kind: GpuOpKind::Elementwise,
@@ -173,7 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_imag to materialise zero tensors in-place; the runtime gathers to the host whenever complex storage or string conversions are required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::imag")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imag",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -199,7 +202,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Extract the imaginary component of scalars, vectors, matrices, or N-D tensors.",
     keywords = "imag,imaginary,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::imag"
 )]
 fn imag_builtin(value: Value) -> Result<Value, String> {
     match value {

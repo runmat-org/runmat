@@ -15,7 +15,10 @@ const LN_2: f64 = std::f64::consts::LN_2;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "pow2")
+    runmat_macros::register_doc_text(
+        name = "pow2",
+        wasm_path = "crate::builtins::math::elementwise::pow2"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ reproduce MATLAB's bit-shift style scaling in floating point.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::pow2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pow2",
     op_kind: GpuOpKind::Elementwise,
@@ -209,7 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_pow2 and pow2_scale to keep tensors on-device; the runtime gathers to host when hooks are unavailable or shapes require implicit expansion.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::pow2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pow2",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -234,7 +237,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Compute 2.^X or scale mantissas by binary exponents.",
     keywords = "pow2,ldexp,binary scaling,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::pow2"
 )]
 fn pow2_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {

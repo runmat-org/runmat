@@ -3,10 +3,10 @@
 //! High-performance builder that preloads, analyzes, and optimizes all standard
 //! library components into a single snapshot file.
 
+use runmat_time::Instant;
 use std::collections::{hash_map::Entry, HashMap};
 use std::path::Path;
 use std::sync::Arc;
-use runmat_time::Instant;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -1114,9 +1114,7 @@ impl SnapshotBuilder {
         Ok(())
     }
 
-    fn encode_header_with_offset(
-        header: &mut SnapshotHeader,
-    ) -> SnapshotResult<(Vec<u8>, u32)> {
+    fn encode_header_with_offset(header: &mut SnapshotHeader) -> SnapshotResult<(Vec<u8>, u32)> {
         const MAX_ITER: usize = 4;
         let mut last_size = None;
 

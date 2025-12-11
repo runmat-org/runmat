@@ -19,7 +19,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "atan")
+    runmat_macros::register_doc_text(
+        name = "atan",
+        wasm_path = "crate::builtins::math::trigonometry::atan"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -189,7 +192,7 @@ matching MATLAB's IEEE behavior.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::atan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atan",
     op_kind: GpuOpKind::Elementwise,
@@ -205,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers execute atan on-device via unary_atan; runtimes gather to host when the hook is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::atan")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atan",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -227,7 +230,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Arctangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "atan,arctangent,inverse tangent,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::atan"
 )]
 fn atan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;

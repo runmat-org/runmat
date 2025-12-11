@@ -3,8 +3,8 @@
 //! Command-line interface for creating, validating, and managing
 //! RunMat snapshot files.
 
-use std::path::PathBuf;
 use runmat_time::Instant;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};

@@ -15,7 +15,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher;
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "std"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "std",
+        wasm_path = "crate::builtins::math::reduction::std"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "std"
@@ -182,7 +188,7 @@ Not yet. RunMat currently requires real inputs for `std`. Convert complex data t
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::std")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "std",
     op_kind: GpuOpKind::Reduction,
@@ -205,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer reduce_std_dim/reduce_std implementations; host fallback ensures correctness when they are unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::std")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "std",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -369,7 +375,8 @@ enum NormParse {
     category = "math/reduction",
     summary = "Standard deviation of scalars, vectors, matrices, or N-D tensors.",
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::std"
 )]
 fn std_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input_meta = InputMeta::from_value(&value);

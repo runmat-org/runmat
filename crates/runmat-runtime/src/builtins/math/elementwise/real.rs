@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "real")
+    runmat_macros::register_doc_text(
+        name = "real",
+        wasm_path = "crate::builtins::math::elementwise::real"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -169,7 +172,7 @@ Yes. The fusion planner can fold `real` into neighbouring elementwise kernels, k
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "real",
     op_kind: GpuOpKind::Elementwise,
@@ -186,7 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute real in-place via unary_real; the runtime gathers to the host when the hook is absent or when host-only conversions (e.g. complex tensors) are required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::real")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "real",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -211,7 +214,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Extract the real part of scalars, vectors, matrices, or N-D tensors.",
     keywords = "real,real part,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::real"
 )]
 fn real_builtin(value: Value) -> Result<Value, String> {
     match value {

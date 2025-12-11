@@ -20,7 +20,13 @@ use runmat_macros::runtime_builtin;
 
 const REAL_EPS: f64 = 1e-12;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "eig"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "eig",
+        wasm_path = "crate::builtins::math::linalg::factor::eig"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eig"
@@ -217,7 +223,7 @@ behaviour.
 - Feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::factor::eig")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eig",
     op_kind: GpuOpKind::Custom("eig-factor"),
@@ -233,7 +239,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::factor::eig")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eig",
     shape: ShapeRequirements::Any,
@@ -250,7 +256,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
     keywords = "eig,eigenvalues,eigenvectors,linalg",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::math::linalg::factor::eig"
 )]
 fn eig_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest, false)?;

@@ -17,7 +17,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sortrows")
+    runmat_macros::register_doc_text(
+        name = "sortrows",
+        wasm_path = "crate::builtins::array::sorting_sets::sortrows"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -201,7 +204,7 @@ String arrays are not yet supported. Convert them to character matrices or use t
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::sortrows")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sortrows",
     op_kind: GpuOpKind::Custom("sortrows"),
@@ -218,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement a row-sort kernel; explicit MissingPlacement overrides fall back to host memory until native support exists.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::sortrows")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sortrows",
     shape: ShapeRequirements::Any,
@@ -235,7 +238,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sort matrix rows lexicographically with optional column and direction control.",
     keywords = "sortrows,row sort,lexicographic,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
 fn sortrows_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_sorted_value())

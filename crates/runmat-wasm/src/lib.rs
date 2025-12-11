@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Array, Error as JsError, Reflect, Uint8Array};
-use std::backtrace::Backtrace;
 use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
@@ -29,6 +28,7 @@ use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_
 use runmat_runtime::warning_store::RuntimeWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
+use std::backtrace::Backtrace;
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;

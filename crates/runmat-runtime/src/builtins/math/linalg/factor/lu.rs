@@ -11,7 +11,13 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "lu"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "lu",
+        wasm_path = "crate::builtins::math::linalg::factor::lu"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "lu"
@@ -201,7 +207,7 @@ Yes. The combined matrix returned by `lu(A)` stores `L` in the strictly lower-tr
 - Found an issue or missing behaviour? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::factor::lu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "lu",
     op_kind: GpuOpKind::Custom("lu-factor"),
@@ -217,7 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `lu` hook; automatically gathers and falls back to the CPU implementation when no provider support is registered.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::factor::lu")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "lu",
     shape: ShapeRequirements::Any,
@@ -234,7 +240,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "LU decomposition with partial pivoting.",
     keywords = "lu,factorization,decomposition,permutation",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::math::linalg::factor::lu"
 )]
 fn lu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;

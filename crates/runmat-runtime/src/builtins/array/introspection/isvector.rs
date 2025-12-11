@@ -10,7 +10,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isvector")
+    runmat_macros::register_doc_text(
+        name = "isvector",
+        wasm_path = "crate::builtins::array::introspection::isvector"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -205,7 +208,7 @@ Sparse inputs will follow the same dimension check once sparse tensors are intro
 [isscalar](./isscalar), [isempty](./isempty), [length](./length), [numel](./numel), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::isvector")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isvector",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -221,7 +224,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads tensor metadata; falls back to gathering when providers omit shape information.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::array::introspection::isvector"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isvector",
     shape: ShapeRequirements::Any,
@@ -237,7 +242,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/introspection",
     summary = "Return true when an array is 1-by-N or N-by-1 (including scalars).",
     keywords = "isvector,vector detection,metadata query,gpu,logical",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::array::introspection::isvector"
 )]
 fn isvector_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_vector(&value)))

@@ -162,7 +162,7 @@ downloads the matrix, computes the estimate on the host, and re-uploads the scal
   with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::rcond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("rcond"),
@@ -178,7 +178,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may reuse dense solver factorizations to expose rcond; current backends gather to the host and re-upload a scalar value when possible.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::rcond")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -194,7 +194,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/solve",
     summary = "Estimate the reciprocal condition number of a square matrix.",
     keywords = "rcond,condition number,reciprocal,gpu",
-    accel = "rcond"
+    accel = "rcond",
+    wasm_path = "crate::builtins::math::linalg::solve::rcond"
 )]
 fn rcond_builtin(value: Value) -> Result<Value, String> {
     let estimate = match value {

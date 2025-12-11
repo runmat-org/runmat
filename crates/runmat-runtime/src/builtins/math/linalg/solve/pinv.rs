@@ -20,7 +20,10 @@ const NAME: &str = "pinv";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "pinv")
+    runmat_macros::register_doc_text(
+        name = "pinv",
+        wasm_path = "crate::builtins::math::linalg::solve::pinv"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -176,7 +179,7 @@ remains useful for ill-conditioned or rank-deficient problems where the pseudoin
   with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pinv",
     op_kind: GpuOpKind::Custom("pinv"),
@@ -192,7 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pinv",
     shape: ShapeRequirements::Any,
@@ -208,7 +211,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/solve",
     summary = "Compute the Moore–Penrose pseudoinverse of a matrix using SVD.",
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
-    accel = "pinv"
+    accel = "pinv",
+    wasm_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 fn pinv_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let tol = parse_tolerance_arg(NAME, &rest)?;

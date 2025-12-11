@@ -18,7 +18,10 @@ const RANGE_EPS: f64 = 1.0e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "histcounts")
+    runmat_macros::register_doc_text(
+        name = "histcounts",
+        wasm_path = "crate::builtins::stats::hist::histcounts"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -183,7 +186,7 @@ already in host memory.
 - Found a discrepancy? Please open an issue with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::stats::hist::histcounts")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histcounts",
     op_kind: GpuOpKind::Custom("histcounts"),
@@ -199,7 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement device-side histogramming via the custom hook; current builds gather to host memory.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::stats::hist::histcounts")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "histcounts",
     shape: ShapeRequirements::Any,
@@ -216,7 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Count observations in numeric arrays using configurable histogram bins.",
     keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
     accel = "reduction",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::stats::hist::histcounts"
 )]
 fn histcounts_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(data, &rest).map(|eval| eval.into_counts_value())

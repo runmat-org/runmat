@@ -10,7 +10,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ndims")
+    runmat_macros::register_doc_text(
+        name = "ndims",
+        wasm_path = "crate::builtins::array::introspection::ndims"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -170,7 +173,7 @@ use inside expressions that also run on the GPU because it does not allocate dev
 [size](./size), [length](./length), [numel](./numel), [MathWorks ndims reference](https://www.mathworks.com/help/matlab/ref/ndims.html)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::ndims")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ndims",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -186,7 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata-only query; relies on tensor handle shapes and gathers only when provider metadata is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::ndims")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ndims",
     shape: ShapeRequirements::Any,
@@ -202,7 +205,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/introspection",
     summary = "Return the number of dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::array::introspection::ndims"
 )]
 fn ndims_builtin(value: Value) -> Result<Value, String> {
     let rank = value_ndims(&value) as f64;

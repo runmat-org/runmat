@@ -16,7 +16,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "expm1")
+    runmat_macros::register_doc_text(
+        name = "expm1",
+        wasm_path = "crate::builtins::math::elementwise::expm1"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -171,7 +174,7 @@ can materialise `expm1` directly in generated WGSL.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::expm1")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "expm1",
     op_kind: GpuOpKind::Elementwise,
@@ -188,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement expm1 directly; runtimes gather to host when unary_expm1 is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::expm1")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "expm1",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -218,7 +221,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Accurate element-wise computation of exp(x) - 1.",
     keywords = "expm1,exp(x)-1,exponential,elementwise,gpu,precision",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::expm1"
 )]
 fn expm1_builtin(value: Value) -> Result<Value, String> {
     match value {

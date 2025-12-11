@@ -23,7 +23,7 @@ const MESSAGE_ID_INTERNAL: &str = "MATLAB:read:InternalError";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "read")
+    runmat_macros::register_doc_text(name = "read", wasm_path = "crate::builtins::io::net::read")
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -175,7 +175,7 @@ assuming UTF-8 (non-UTF-8 sequences fall back to byte-wise decoding).
 - Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with repro steps if you observe a behavioural difference from MATLAB.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::read")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "read",
     op_kind: GpuOpKind::Custom("network"),
@@ -191,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::read")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "read",
     shape: ShapeRequirements::Any,
@@ -206,7 +206,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "read",
     category = "io/net",
     summary = "Read numeric or text data from a TCP/IP client.",
-    keywords = "read,tcpclient,networking"
+    keywords = "read,tcpclient,networking",
+    wasm_path = "crate::builtins::io::net::read"
 )]
 fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     let client = gather_if_needed(&client)?;

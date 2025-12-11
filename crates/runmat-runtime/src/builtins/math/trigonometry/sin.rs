@@ -11,7 +11,13 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "sin"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sin",
+        wasm_path = "crate::builtins::math::trigonometry::sin"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sin"
@@ -160,7 +166,7 @@ Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; compl
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sin",
     op_kind: GpuOpKind::Elementwise,
@@ -177,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sin in-place on the device; runtimes gather to host when unary_sin is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::sin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sin",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -199,7 +205,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/trigonometry",
     summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "sin,sine,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::trigonometry::sin"
 )]
 fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let output = parse_output_template(&rest)?;

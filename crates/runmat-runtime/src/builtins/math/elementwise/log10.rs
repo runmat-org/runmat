@@ -22,7 +22,10 @@ const LOG10_E: f64 = std::f64::consts::LOG10_E;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "log10")
+    runmat_macros::register_doc_text(
+        name = "log10",
+        wasm_path = "crate::builtins::math::elementwise::log10"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -172,7 +175,7 @@ zero, mirroring MATLAB's behavior for well-conditioned inputs.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::log10")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "log10",
     op_kind: GpuOpKind::Elementwise,
@@ -188,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute log10 directly on device buffers; runtimes fall back to the host when complex outputs are required or the hook is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::log10")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log10",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -223,7 +226,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Base-10 logarithm of scalars, vectors, matrices, or N-D tensors.",
     keywords = "log10,base-10 logarithm,elementwise,magnitude,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::log10"
 )]
 fn log10_builtin(value: Value) -> Result<Value, String> {
     match value {

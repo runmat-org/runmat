@@ -20,7 +20,10 @@ const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector 
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "genpath")
+    runmat_macros::register_doc_text(
+        name = "genpath",
+        wasm_path = "crate::builtins::io::repl_fs::genpath"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -164,7 +167,7 @@ savepath();
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::genpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "genpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -180,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem traversal is a host-only operation; inputs are gathered before processing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::genpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "genpath",
     shape: ShapeRequirements::Any,
@@ -197,7 +200,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Generate a MATLAB-style search path string for a folder tree.",
     keywords = "genpath,recursive path,search path,addpath",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::genpath"
 )]
 fn genpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(args)?;

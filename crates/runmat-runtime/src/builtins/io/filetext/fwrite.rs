@@ -14,7 +14,10 @@ use runmat_filesystem::File;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fwrite")
+    runmat_macros::register_doc_text(
+        name = "fwrite",
+        wasm_path = "crate::builtins::io::filetext::fwrite"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -206,7 +209,7 @@ saturate to the min/max integer representable by the target precision.
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fwrite",
     op_kind: GpuOpKind::Custom("file-io-write"),
@@ -222,7 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only binary file I/O; GPU arguments are gathered to the CPU prior to writing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fwrite",
     shape: ShapeRequirements::Any,
@@ -238,7 +241,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/filetext",
     summary = "Write binary data to a file identifier.",
     keywords = "fwrite,file,io,binary,precision",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::filetext::fwrite"
 )]
 fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &data, &rest)?;
@@ -835,10 +839,10 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
     use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
-    use runmat_time::system_time_now;
 
     #[test]
     fn fwrite_default_uint8_bytes() {

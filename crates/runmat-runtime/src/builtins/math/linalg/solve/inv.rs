@@ -170,7 +170,7 @@ gathers, computes on the host, and re-uploads so the caller still receives a GPU
 [pinv](./pinv), [linsolve](./linsolve), [mldivide](../ops/mldivide), [det](../ops/det), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::inv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("inv"),
@@ -186,7 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native inverse; the reference WGPU backend gathers to the host implementation and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::inv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -202,7 +202,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/solve",
     summary = "Compute the inverse of a square matrix.",
     keywords = "inv,matrix inverse,linear solve,gpu",
-    accel = "inv"
+    accel = "inv",
+    wasm_path = "crate::builtins::math::linalg::solve::inv"
 )]
 fn inv_builtin(value: Value) -> Result<Value, String> {
     match value {

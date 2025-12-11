@@ -12,7 +12,10 @@ use crate::{gather_if_needed, make_cell};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "replace")
+    runmat_macros::register_doc_text(
+        name = "replace",
+        wasm_path = "crate::builtins::strings::transform::replace"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -199,7 +202,7 @@ returned on the host. Providers do not need to implement a GPU kernel for this b
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::replace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "replace",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -216,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory prior to replacement.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::replace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "replace",
     shape: ShapeRequirements::Any,
@@ -248,7 +251,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/transform",
     summary = "Replace substring occurrences in strings, character arrays, and cell arrays.",
     keywords = "replace,strrep,strings,character array,text",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::transform::replace"
 )]
 fn replace_builtin(text: Value, old: Value, new: Value) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("replace: {e}"))?;

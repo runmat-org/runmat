@@ -181,7 +181,7 @@ performs a gather/transpose/upload round-trip automatically.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::ctranspose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Transpose,
@@ -202,7 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider transpose/permute hooks followed by unary_conj; falls back to host conjugate transpose when either hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::ctranspose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -218,7 +218,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Swap the first two dimensions of arrays and conjugate complex values.",
     keywords = "ctranspose,conjugate transpose,hermitian,gpu",
-    accel = "transpose"
+    accel = "transpose",
+    wasm_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
 fn ctranspose_builtin(value: Value) -> Result<Value, String> {
     match value {

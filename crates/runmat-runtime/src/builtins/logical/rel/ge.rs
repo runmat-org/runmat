@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "ge"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "ge", wasm_path = "crate::builtins::logical::rel::ge")
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ge"
@@ -183,7 +186,7 @@ Yes. The builtin registers element-wise fusion metadata so the planner can fuse 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::rel::ge")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ge",
     op_kind: GpuOpKind::Elementwise,
@@ -203,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_ge kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::rel::ge")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ge",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -231,7 +234,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/rel",
     summary = "Element-wise greater-than-or-equal comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "ge,greater equal,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::rel::ge"
 )]
 fn ge_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     // Prefer device paths when any operand is a GPU tensor

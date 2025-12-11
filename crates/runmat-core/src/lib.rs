@@ -9,9 +9,10 @@ use runmat_lexer::{tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
+use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
+use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
@@ -21,7 +22,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use runmat_time::Instant;
 use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -13,7 +13,8 @@ use super::state::{clear_figure, figure_handles, FigureHandle};
     category = "plotting",
     summary = "Clear figure contents, optionally targeting specific handles.",
     keywords = "clf,clear figure,plotting",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> Result<String, String> {
     let (action, _reset) = parse_clf_action(&rest)?;

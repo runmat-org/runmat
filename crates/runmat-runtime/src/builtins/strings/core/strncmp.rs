@@ -16,7 +16,10 @@ const FN_NAME: &str = "strncmp";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "strncmp")
+    runmat_macros::register_doc_text(
+        name = "strncmp",
+        wasm_path = "crate::builtins::strings::core::strncmp"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -154,7 +157,7 @@ Yes. Scalar comparisons yield logical scalars; array inputs produce logical arra
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
     op_kind: GpuOpKind::Custom("string-prefix-compare"),
@@ -170,7 +173,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs host-side prefix comparisons; GPU inputs are gathered before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strncmp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strncmp",
     shape: ShapeRequirements::Any,
@@ -186,7 +189,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/core",
     summary = "Compare text inputs for equality up to N leading characters (case-sensitive).",
     keywords = "strncmp,string compare,prefix,text equality",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::core::strncmp"
 )]
 fn strncmp_builtin(a: Value, b: Value, n: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("{FN_NAME}: {e}"))?;

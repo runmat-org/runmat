@@ -23,7 +23,10 @@ const ERR_CHAR_MATRIX_CELL: &str =
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "getenv")
+    runmat_macros::register_doc_text(
+        name = "getenv",
+        wasm_path = "crate::builtins::io::repl_fs::getenv"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -205,7 +208,7 @@ Yes. The builtin reports every variable visible to the RunMat process, including
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::getenv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "getenv",
     op_kind: GpuOpKind::Custom("io"),
@@ -221,7 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host environment query with no GPU participation; providers do not implement hooks.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::getenv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "getenv",
     shape: ShapeRequirements::Any,
@@ -237,7 +240,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Query environment variables as character vectors, strings, or structures.",
     keywords = "getenv,environment variable,env,system variable,process environment",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::getenv"
 )]
 fn getenv_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {

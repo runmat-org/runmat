@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{linalg, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mtimes")
+    runmat_macros::register_doc_text(
+        name = "mtimes",
+        wasm_path = "crate::builtins::math::linalg::ops::mtimes"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -210,7 +213,7 @@ Providers may fuse GEMM with adjacent operations; otherwise fusion falls back to
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mtimes",
     op_kind: GpuOpKind::MatMul,
@@ -229,7 +232,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Calls the provider `matmul` hook when available; otherwise gathers inputs and executes the CPU fallback.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mtimes",
     shape: ShapeRequirements::Any,
@@ -245,7 +248,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Matrix multiplication with MATLAB-compatible semantics.",
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
-    accel = "matmul"
+    accel = "matmul",
+    wasm_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 fn mtimes_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     mtimes_eval(&lhs, &rhs)

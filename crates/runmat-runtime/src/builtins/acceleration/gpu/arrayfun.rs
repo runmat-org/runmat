@@ -17,7 +17,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "arrayfun")
+    runmat_macros::register_doc_text(
+        name = "arrayfun",
+        wasm_path = "crate::builtins::acceleration::gpu::arrayfun"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -184,7 +187,7 @@ back into a logical array automatically.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::arrayfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "arrayfun",
     op_kind: GpuOpKind::Elementwise,
@@ -223,7 +226,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement the listed kernels can run supported callbacks entirely on the GPU; unsupported callbacks fall back to the host path with re-upload.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::arrayfun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "arrayfun",
     shape: ShapeRequirements::Any,
@@ -239,7 +242,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "acceleration/gpu",
     summary = "Apply a function element-wise to array inputs.",
     keywords = "arrayfun,gpu,array,map,functional",
-    accel = "host"
+    accel = "host",
+    wasm_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -1401,7 +1405,10 @@ mod tests {
         let _ = provider.free(&out_handle);
     }
 
-    #[runmat_macros::runtime_builtin(name = "__arrayfun_test_handler")]
+    #[runmat_macros::runtime_builtin(
+        name = "__arrayfun_test_handler",
+        wasm_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
+    )]
     fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         let _ = rest;
         Ok(seed)

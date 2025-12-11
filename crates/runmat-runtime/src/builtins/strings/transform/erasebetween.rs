@@ -15,7 +15,10 @@ use crate::builtins::common::spec::{
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "eraseBetween")
+    runmat_macros::register_doc_text(
+        name = "eraseBetween",
+        wasm_path = "crate::builtins::strings::transform::erasebetween"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -194,7 +197,7 @@ the string length, and start positions that lie beyond the text leave the elemen
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::erasebetween")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eraseBetween",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -210,7 +213,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; GPU-resident inputs are gathered before deletion and outputs remain on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::strings::transform::erasebetween"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eraseBetween",
     shape: ShapeRequirements::Any,
@@ -246,7 +251,8 @@ enum BoundariesMode {
     category = "strings/transform",
     summary = "Delete text between boundary markers with MATLAB-compatible semantics.",
     keywords = "eraseBetween,delete,boundaries,strings",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::transform::erasebetween"
 )]
 fn erase_between_builtin(
     text: Value,

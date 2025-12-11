@@ -16,7 +16,10 @@ use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextE
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "endsWith")
+    runmat_macros::register_doc_text(
+        name = "endsWith",
+        wasm_path = "crate::builtins::strings::search::endswith"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -192,7 +195,7 @@ contains exactly one element, the builtin returns a logical scalar.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::search::endswith")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "endsWith",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -208,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on the host; inputs are gathered from the GPU before evaluating suffix checks.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::search::endswith")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "endsWith",
     shape: ShapeRequirements::Any,
@@ -224,7 +227,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/search",
     summary = "Return logical values indicating whether text inputs end with specific patterns.",
     keywords = "endswith,suffix,text,ignorecase,search",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::search::endswith"
 )]
 fn endswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("endsWith: {e}"))?;

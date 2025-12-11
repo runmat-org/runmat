@@ -14,7 +14,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "strcmpi")
+    runmat_macros::register_doc_text(
+        name = "strcmpi",
+        wasm_path = "crate::builtins::strings::core::strcmpi"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -158,7 +161,7 @@ A logical scalar is returned (`true` or `false`). For non-scalar shapes, a logic
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strcmpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcmpi",
     op_kind: GpuOpKind::Custom("string-compare"),
@@ -174,7 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the CPU; GPU operands are gathered before comparison.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strcmpi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strcmpi",
     shape: ShapeRequirements::Any,
@@ -190,7 +193,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/core",
     summary = "Compare text inputs for equality without considering case.",
     keywords = "strcmpi,string compare,text equality",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::core::strcmpi"
 )]
 fn strcmpi_builtin(a: Value, b: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("strcmpi: {e}"))?;

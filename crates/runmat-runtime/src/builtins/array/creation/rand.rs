@@ -16,7 +16,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "rand")
+    runmat_macros::register_doc_text(
+        name = "rand",
+        wasm_path = "crate::builtins::array::creation::rand"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ Yes. `rand` always produces a dense array. For sparse matrices of random numbers
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::rand")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rand",
     op_kind: GpuOpKind::Custom("generator"),
@@ -206,7 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to provider random_uniform hooks; falls back to host sampling + upload when hooks are unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::rand")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rand",
     shape: ShapeRequirements::Any,
@@ -222,7 +225,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Uniform random numbers on (0, 1).",
     keywords = "rand,random,uniform,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::rand"
 )]
 fn rand_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRand::parse(rest)?;

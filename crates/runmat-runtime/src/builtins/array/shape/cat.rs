@@ -13,7 +13,13 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "cat"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "cat",
+        wasm_path = "crate::builtins::array::shape::cat"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cat"
@@ -227,7 +233,7 @@ dimension.
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::cat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -243,7 +249,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to gather + upload when providers lack a native concatenation kernel.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::cat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cat",
     shape: ShapeRequirements::Any,
@@ -349,7 +355,8 @@ fn extract_like(mut inputs: Vec<Value>) -> Result<(Vec<Value>, LikeSpec), String
     category = "array/shape",
     summary = "Concatenate arrays along a specified dimension while preserving MATLAB semantics.",
     keywords = "cat,concatenate,array,dimension,gpu",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::shape::cat"
 )]
 fn cat_builtin(dim: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() < 2 {

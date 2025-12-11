@@ -19,7 +19,10 @@ const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:close:InvalidHandle";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "close")
+    runmat_macros::register_doc_text(
+        name = "close",
+        wasm_path = "crate::builtins::io::net::close"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -177,7 +180,7 @@ Yes. The second call simply returns `0`, indicating that nothing needed to be cl
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::close")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "close",
     op_kind: GpuOpKind::Custom("network"),
@@ -194,7 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Networking resources are host-only; the builtin gathers GPU values before closing handles.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::close")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "close",
     shape: ShapeRequirements::Any,
@@ -209,7 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "close",
     category = "io/net",
     summary = "Close TCP clients or servers created by tcpclient, tcpserver, or accept.",
-    keywords = "close,tcpclient,tcpserver,networking"
+    keywords = "close,tcpclient,tcpserver,networking",
+    wasm_path = "crate::builtins::io::net::close"
 )]
 fn close_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {

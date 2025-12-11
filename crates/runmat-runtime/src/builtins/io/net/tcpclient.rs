@@ -28,7 +28,10 @@ const DEFAULT_BUFFER_SIZE: usize = 8192;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "tcpclient")
+    runmat_macros::register_doc_text(
+        name = "tcpclient",
+        wasm_path = "crate::builtins::io::net::tcpclient"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -156,7 +159,7 @@ No. RunMat automatically gathers GPU scalars before opening sockets. The returne
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::tcpclient")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpclient",
     op_kind: GpuOpKind::Custom("network"),
@@ -172,7 +175,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. Inputs backed by GPU memory are gathered before connecting.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::tcpclient")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tcpclient",
     shape: ShapeRequirements::Any,
@@ -187,7 +190,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "tcpclient",
     category = "io/net",
     summary = "Open a TCP client socket that connects to MATLAB-compatible servers.",
-    keywords = "tcpclient,tcp,network,client"
+    keywords = "tcpclient,tcp,network,client",
+    wasm_path = "crate::builtins::io::net::tcpclient"
 )]
 pub(crate) fn tcpclient_builtin(
     host: Value,

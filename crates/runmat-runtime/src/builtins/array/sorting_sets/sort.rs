@@ -16,7 +16,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sort")
+    runmat_macros::register_doc_text(
+        name = "sort",
+        wasm_path = "crate::builtins::array::sorting_sets::sort"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -186,7 +189,7 @@ Yes. Logical inputs are promoted to double precision automatically. Scalars are 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::sort")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sort",
     op_kind: GpuOpKind::Custom("sort"),
@@ -202,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may add a dedicated sort kernel in the future; today tensors are gathered to host memory before sorting.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::sort")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sort",
     shape: ShapeRequirements::Any,
@@ -219,7 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sort scalars, vectors, matrices, or N-D tensors along a dimension, with optional index outputs.",
     keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::sort"
 )]
 fn sort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_sorted_value())

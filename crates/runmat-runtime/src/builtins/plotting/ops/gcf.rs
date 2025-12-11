@@ -8,7 +8,8 @@ use super::state::current_figure_handle;
     name = "gcf",
     category = "plotting",
     summary = "Return the handle of the current figure.",
-    keywords = "gcf,figure,plotting"
+    keywords = "gcf,figure,plotting",
+    wasm_path = "crate::builtins::plotting::ops::gcf"
 )]
 pub fn gcf_builtin() -> Result<f64, String> {
     Ok(current_figure_handle().as_u32() as f64)

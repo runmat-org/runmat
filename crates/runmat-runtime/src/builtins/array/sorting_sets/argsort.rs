@@ -10,7 +10,10 @@ use crate::builtins::common::spec::{
 };
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "argsort")
+    runmat_macros::register_doc_text(
+        name = "argsort",
+        wasm_path = "crate::builtins::array::sorting_sets::argsort"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -166,7 +169,7 @@ No. It only returns indices. Combine the result with indexing (`A(idx)`) to obta
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::argsort")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "argsort",
     op_kind: GpuOpKind::Custom("sort"),
@@ -182,7 +185,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Shares provider hooks with `sort`; when unavailable tensors are gathered to host memory before computing indices.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::argsort")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "argsort",
     shape: ShapeRequirements::Any,
@@ -199,7 +202,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return the permutation indices that would sort tensors along a dimension.",
     keywords = "argsort,sort,indices,permutation,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::argsort"
 )]
 fn argsort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let evaluation = sort::evaluate(value, &rest)?;

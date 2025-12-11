@@ -23,7 +23,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "unique")
+    runmat_macros::register_doc_text(
+        name = "unique",
+        wasm_path = "crate::builtins::array::sorting_sets::unique"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -281,7 +284,7 @@ Sorting is stable where applicable; ties preserve their relative order. You can 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::unique")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "unique",
     op_kind: GpuOpKind::Custom("unique"),
@@ -297,7 +300,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement the `unique` hook; default providers download tensors and reuse the CPU implementation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::unique")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "unique",
     shape: ShapeRequirements::Any,
@@ -314,7 +317,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return the unique elements or rows of arrays with optional index outputs.",
     keywords = "unique,set,distinct,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::array::sorting_sets::unique"
 )]
 fn unique_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_values_value())

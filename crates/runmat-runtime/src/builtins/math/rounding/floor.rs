@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "floor")
+    runmat_macros::register_doc_text(
+        name = "floor",
+        wasm_path = "crate::builtins::math::rounding::floor"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -195,7 +198,7 @@ You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding::floor")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "floor",
     op_kind: GpuOpKind::Elementwise,
@@ -212,7 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute floor directly on the device; the runtime gathers to the host when unary_floor is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding::floor")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "floor",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -237,7 +240,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/rounding",
     summary = "Round values toward negative infinity.",
     keywords = "floor,rounding,integers,gpu",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::rounding::floor"
 )]
 fn floor_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = parse_arguments(&rest)?;

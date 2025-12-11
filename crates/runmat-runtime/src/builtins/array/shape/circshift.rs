@@ -19,7 +19,10 @@ use std::collections::HashSet;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "circshift")
+    runmat_macros::register_doc_text(
+        name = "circshift",
+        wasm_path = "crate::builtins::array::shape::circshift"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -207,7 +210,7 @@ Providers may reuse buffers internally, but from the user’s perspective the re
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::circshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "circshift",
     op_kind: GpuOpKind::Custom("circshift"),
@@ -229,7 +232,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement a dedicated circshift hook; otherwise the runtime gathers, rotates, and re-uploads once.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::circshift")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "circshift",
     shape: ShapeRequirements::Any,
@@ -246,7 +249,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Rotate arrays circularly along one or more dimensions.",
     keywords = "circshift,circular shift,rotate array,gpu,cyclic shift",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::shape::circshift"
 )]
 fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

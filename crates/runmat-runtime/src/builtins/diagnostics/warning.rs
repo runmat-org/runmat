@@ -19,7 +19,10 @@ const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "warning")
+    runmat_macros::register_doc_text(
+        name = "warning",
+        wasm_path = "crate::builtins::diagnostics::warning"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -149,7 +152,7 @@ warning("default", "verbose");   % restore the default verbosity
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::diagnostics::warning")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "warning",
     op_kind: GpuOpKind::Custom("control"),
@@ -165,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU backends are never invoked.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::diagnostics::warning")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "warning",
     shape: ShapeRequirements::Any,
@@ -196,7 +199,8 @@ where
     summary = "Display formatted warnings, control warning state, and query per-identifier settings.",
     keywords = "warning,diagnostics,state,query,backtrace",
     accel = "metadata",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {

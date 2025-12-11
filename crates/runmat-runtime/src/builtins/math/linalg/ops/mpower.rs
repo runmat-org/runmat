@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mpower")
+    runmat_macros::register_doc_text(
+        name = "mpower",
+        wasm_path = "crate::builtins::math::linalg::ops::mpower"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -158,7 +161,7 @@ Integers up to ±(2³¹−1) are supported. Exponents outside this range trigger
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::mpower")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mpower",
     op_kind: GpuOpKind::MatMul,
@@ -180,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses repeated provider matmul calls via binary exponentiation; falls back to the host implementation when matmul or identity creation is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::mpower")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mpower",
     shape: ShapeRequirements::Any,
@@ -196,7 +199,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Matrix power with MATLAB-compatible semantics.",
     keywords = "mpower,matrix power,linear algebra,gpu",
-    accel = "matmul"
+    accel = "matmul",
+    wasm_path = "crate::builtins::math::linalg::ops::mpower"
 )]
 fn mpower_builtin(base: Value, exponent: Value) -> Result<Value, String> {
     mpower_eval(&base, &exponent)

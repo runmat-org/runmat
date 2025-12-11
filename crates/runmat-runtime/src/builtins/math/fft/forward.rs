@@ -17,7 +17,13 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "fft"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fft",
+        wasm_path = "crate::builtins::math::fft::forward"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fft"
@@ -154,7 +160,7 @@ Call `fft` repeatedly along each dimension (`fft(fft(X, [], 1), [], 2)` for a 2-
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::forward")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fft",
     op_kind: GpuOpKind::Custom("fft"),
@@ -170,7 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers should implement `fft_dim` to transform along an arbitrary dimension; the runtime gathers to host when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::forward")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fft",
     shape: ShapeRequirements::Any,
@@ -186,7 +192,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "fft",
     category = "math/fft",
     summary = "Compute the discrete Fourier transform (DFT) of numeric or complex data.",
-    keywords = "fft,fourier transform,complex,gpu"
+    keywords = "fft,fourier transform,complex,gpu",
+    wasm_path = "crate::builtins::math::fft::forward"
 )]
 fn fft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (length, dimension) = parse_arguments(&rest)?;

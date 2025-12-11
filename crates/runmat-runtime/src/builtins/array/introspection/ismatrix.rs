@@ -10,7 +10,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ismatrix")
+    runmat_macros::register_doc_text(
+        name = "ismatrix",
+        wasm_path = "crate::builtins::array::introspection::ismatrix"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -200,7 +203,7 @@ Future sparse tensors will report their dimensions through the same metadata, so
 [isscalar](./isscalar), [isvector](./isvector), [ndims](./ndims), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::ismatrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismatrix",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -216,7 +219,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Consumes tensor shape metadata; falls back to gathering only when providers omit shape information.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::array::introspection::ismatrix"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismatrix",
     shape: ShapeRequirements::Any,
@@ -232,7 +237,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/introspection",
     summary = "Return true when an array has at most two dimensions (m-by-n, including vectors and scalars).",
     keywords = "ismatrix,matrix detection,metadata query,logical,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::array::introspection::ismatrix"
 )]
 fn ismatrix_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_matrix(&value)))

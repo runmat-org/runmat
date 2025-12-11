@@ -15,7 +15,10 @@ use crate::builtins::common::spec::{
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "extractBetween")
+    runmat_macros::register_doc_text(
+        name = "extractBetween",
+        wasm_path = "crate::builtins::strings::transform::extractbetween"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,9 @@ host-side results, and fusion planning treats the builtin as a residency sink.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(
+    wasm_path = "crate::builtins::strings::transform::extractbetween"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "extractBetween",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -207,7 +212,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; GPU-resident inputs are gathered before extraction and outputs are returned on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::strings::transform::extractbetween"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "extractBetween",
     shape: ShapeRequirements::Any,
@@ -243,7 +250,8 @@ enum BoundariesMode {
     category = "strings/transform",
     summary = "Extract substrings between boundary markers using MATLAB-compatible semantics.",
     keywords = "extractBetween,substring,boundaries,strings",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::strings::transform::extractbetween"
 )]
 fn extract_between_builtin(
     text: Value,

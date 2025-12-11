@@ -17,7 +17,10 @@ use std::sync::Arc;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "surfc")
+    runmat_macros::register_doc_text(
+        name = "surfc",
+        wasm_path = "crate::builtins::plotting::ops::surfc"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -57,7 +60,8 @@ RunMat reuses the same surface renderer as `surf` and complements it with GPU-ge
     category = "plotting",
     summary = "Render a MATLAB-compatible surface with contour overlay.",
     keywords = "surfc,plotting,surface,contour",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::surfc"
 )]
 pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);

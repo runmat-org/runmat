@@ -13,7 +13,13 @@ use crate::builtins::common::spec::{
 use crate::builtins::io::mat::load::read_mat_file;
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "who"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "who",
+        wasm_path = "crate::builtins::introspection::who"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "who"
@@ -149,7 +155,7 @@ Yes. The builtin reads just enough metadata to enumerate variable names; it does
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::who")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "who",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -165,7 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; no kernels are launched.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::who")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "who",
     shape: ShapeRequirements::Any,
@@ -181,7 +187,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "introspection",
     summary = "List the names of variables in the workspace or MAT-files (MATLAB-compatible).",
     keywords = "who,workspace,variables,introspection",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::introspection::who"
 )]
 fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
     #[cfg(all(test, feature = "wgpu"))]

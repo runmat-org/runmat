@@ -15,7 +15,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mean")
+    runmat_macros::register_doc_text(
+        name = "mean",
+        wasm_path = "crate::builtins::math::reduction::mean"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -205,7 +208,7 @@ Yes. When you pass `'like', prototype`, RunMat mirrors both the class and reside
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::mean")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mean",
     op_kind: GpuOpKind::Reduction,
@@ -228,7 +231,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::mean")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mean",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -379,7 +382,8 @@ enum MeanAxes {
     category = "math/reduction",
     summary = "Average elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "mean,average,reduction,gpu,omitnan",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::math::reduction::mean"
 )]
 fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     // Normalise argument order defensively:

@@ -14,7 +14,10 @@ use runmat_builtins::NumericDType;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ones")
+    runmat_macros::register_doc_text(
+        name = "ones",
+        wasm_path = "crate::builtins::array::creation::ones"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -183,7 +186,7 @@ Absolutely. Preallocating with `ones` (or `zeros`) and then filling in values is
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::ones")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ones",
     op_kind: GpuOpKind::Custom("generator"),
@@ -202,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device ones when providers expose dedicated hooks; otherwise falls back to scalar fill or host upload.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::ones")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ones",
     shape: ShapeRequirements::Any,
@@ -229,7 +232,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Create arrays filled with ones.",
     keywords = "ones,array,logical,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::ones"
 )]
 fn ones_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedOnes::parse(rest)?;

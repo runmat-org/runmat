@@ -13,7 +13,8 @@ use super::state::{close_figure, figure_handles, FigureHandle};
     category = "plotting",
     summary = "Close figures by handle or the active figure.",
     keywords = "close,figure,plotting",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::close"
 )]
 pub fn close_builtin(rest: Vec<Value>) -> Result<String, String> {
     match parse_close_action(&rest)? {

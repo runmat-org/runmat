@@ -18,7 +18,10 @@ const NAME: &str = "mrdivide";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "mrdivide")
+    runmat_macros::register_doc_text(
+        name = "mrdivide",
+        wasm_path = "crate::builtins::math::linalg::ops::mrdivide"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -169,7 +172,7 @@ NaNs in the output wherever they influence the solution.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::mrdivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mrdivide",
     op_kind: GpuOpKind::Custom("solve"),
@@ -185,7 +188,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `mrdivide` hook; the WGPU provider currently performs the solve on the host and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::mrdivide")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mrdivide",
     shape: ShapeRequirements::Any,
@@ -201,7 +204,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/linalg/ops",
     summary = "Solve X * B = A using MATLAB-compatible right division.",
     keywords = "mrdivide,matrix division,linear algebra,least squares,gpu",
-    accel = "mrdivide"
+    accel = "mrdivide",
+    wasm_path = "crate::builtins::math::linalg::ops::mrdivide"
 )]
 fn mrdivide_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     mrdivide_eval(&lhs, &rhs)

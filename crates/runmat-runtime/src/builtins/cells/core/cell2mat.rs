@@ -12,7 +12,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cell2mat")
+    runmat_macros::register_doc_text(
+        name = "cell2mat",
+        wasm_path = "crate::builtins::cells::core::cell2mat"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -221,7 +224,7 @@ introduce GPU-resident cell storage, at which point providers can supply dedicat
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::cell2mat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cell2mat",
     op_kind: GpuOpKind::Custom("cell-flatten"),
@@ -237,7 +240,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "cell2mat gathers GPU-resident tensors before concatenating; providers do not supply custom kernels.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::cell2mat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cell2mat",
     shape: ShapeRequirements::Any,
@@ -260,7 +263,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "cells/core",
     summary = "Convert a cell array of numeric, logical, complex, or character blocks into a dense MATLAB array.",
     keywords = "cell2mat,cell,matrix,concatenation",
-    accel = "gather"
+    accel = "gather",
+    wasm_path = "crate::builtins::cells::core::cell2mat"
 )]
 fn cell2mat_builtin(value: Value) -> Result<Value, String> {
     match value {

@@ -27,7 +27,10 @@ const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var'
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "exist")
+    runmat_macros::register_doc_text(
+        name = "exist",
+        wasm_path = "crate::builtins::io::repl_fs::exist"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -170,7 +173,7 @@ No. `exist` gathers any GPU-resident string inputs transparently. The lookup, fi
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exist",
     op_kind: GpuOpKind::Custom("io"),
@@ -186,7 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem and workspace lookup run on the host; arguments are gathered from the GPU when necessary.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::exist")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exist",
     shape: ShapeRequirements::Any,
@@ -202,7 +205,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Determine whether a variable, file, folder, built-in, or class exists.",
     keywords = "exist,file,dir,var,builtin,class",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::exist"
 )]
 fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

@@ -11,7 +11,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "squeeze")
+    runmat_macros::register_doc_text(
+        name = "squeeze",
+        wasm_path = "crate::builtins::array::shape::squeeze"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -167,7 +170,7 @@ Use `reshape` with the original size vector (for example, captured via `size(A)`
 - [`gather`](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::squeeze")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "squeeze",
     op_kind: GpuOpKind::Custom("squeeze"),
@@ -188,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider reshape hook to drop singleton metadata without moving device buffers.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::squeeze")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "squeeze",
     shape: ShapeRequirements::Any,
@@ -205,7 +208,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/shape",
     summary = "Remove singleton dimensions while preserving MATLAB row/column semantics.",
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
-    accel = "shape"
+    accel = "shape",
+    wasm_path = "crate::builtins::array::shape::squeeze"
 )]
 fn squeeze_builtin(value: Value) -> Result<Value, String> {
     squeeze_value(value)

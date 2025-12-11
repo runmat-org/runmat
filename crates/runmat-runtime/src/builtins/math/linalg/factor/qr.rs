@@ -12,7 +12,13 @@ use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "qr"))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "qr",
+        wasm_path = "crate::builtins::math::linalg::factor::qr"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "qr"
@@ -133,7 +139,7 @@ Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `
 - Issues & feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::factor::qr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "qr",
     op_kind: GpuOpKind::Custom("qr-factor"),
@@ -149,7 +155,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::factor::qr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "qr",
     shape: ShapeRequirements::Any,
@@ -166,7 +172,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "QR factorization with optional column pivoting and economy-size outputs.",
     keywords = "qr,factorization,decomposition,householder",
     accel = "sink",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::math::linalg::factor::qr"
 )]
 fn qr_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;

@@ -16,7 +16,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "ifft2")
+    runmat_macros::register_doc_text(
+        name = "ifft2",
+        wasm_path = "crate::builtins::math::fft::ifft2"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -156,7 +159,7 @@ transform on the CPU with `rustfft`, and returns a MATLAB-compatible result auto
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::ifft2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ifft2",
     op_kind: GpuOpKind::Custom("ifft2"),
@@ -173,7 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Performs two sequential `ifft_dim` passes (dimensions 0 and 1); falls back to host execution when the hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::ifft2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ifft2",
     shape: ShapeRequirements::Any,
@@ -189,7 +192,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "ifft2",
     category = "math/fft",
     summary = "Compute the two-dimensional inverse discrete Fourier transform (IDFT) of numeric or complex data.",
-    keywords = "ifft2,inverse fft,image reconstruction,gpu"
+    keywords = "ifft2,inverse fft,image reconstruction,gpu",
+    wasm_path = "crate::builtins::math::fft::ifft2"
 )]
 fn ifft2_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;

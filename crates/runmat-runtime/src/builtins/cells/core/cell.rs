@@ -14,7 +14,10 @@ use crate::{gather_if_needed, make_cell_with_shape};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "cell")
+    runmat_macros::register_doc_text(
+        name = "cell",
+        wasm_path = "crate::builtins::cells::core::cell"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -220,7 +223,7 @@ No. The builtin only allocates empty cells. Populate the elements afterwards wit
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::cell")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cell",
     op_kind: GpuOpKind::Custom("container"),
@@ -236,7 +239,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Cell arrays are allocated on the host heap; providers currently gather any GPU inputs and rely on host execution.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::cell")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cell",
     shape: ShapeRequirements::Any,
@@ -253,7 +256,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create empty MATLAB cell arrays.",
     keywords = "cell,cell array,container,empty",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::cells::core::cell"
 )]
 fn cell_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedCell::parse(args)?;

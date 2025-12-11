@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sub2ind")
+    runmat_macros::register_doc_text(
+        name = "sub2ind",
+        wasm_path = "crate::builtins::array::indexing::sub2ind"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,7 @@ No. The output preserves the orientation (shape) of the subscript arrays, so row
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::indexing::sub2ind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sub2ind",
     op_kind: GpuOpKind::Custom("indexing"),
@@ -207,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement the custom `sub2ind` hook to execute on device; runtimes fall back to host computation otherwise.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::indexing::sub2ind")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sub2ind",
     shape: ShapeRequirements::Any,
@@ -223,7 +226,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/indexing",
     summary = "Convert N-D subscripts into MATLAB-style column-major linear indices.",
     keywords = "sub2ind,linear index,column major,gpu indexing",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::array::indexing::sub2ind"
 )]
 fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;

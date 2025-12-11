@@ -11,7 +11,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "char")
+    runmat_macros::register_doc_text(
+        name = "char",
+        wasm_path = "crate::builtins::strings::core::char"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -176,7 +179,7 @@ need to move the result back to the device.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::char")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "char",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -193,7 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Conversion always runs on the CPU; GPU tensors are gathered before building the result.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::char")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "char",
     shape: ShapeRequirements::Any,
@@ -209,7 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "strings/core",
     summary = "Convert numeric codes, strings, and cell contents into a character array.",
     keywords = "char,character,string,gpu",
-    accel = "conversion"
+    accel = "conversion",
+    wasm_path = "crate::builtins::strings::core::char"
 )]
 fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {

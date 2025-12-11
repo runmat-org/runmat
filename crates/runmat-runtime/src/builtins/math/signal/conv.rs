@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "conv")
+    runmat_macros::register_doc_text(
+        name = "conv",
+        wasm_path = "crate::builtins::math::signal::conv"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -213,7 +216,7 @@ Not yet. Current providers choose kernel launch parameters automatically; user-f
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::signal::conv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv",
     op_kind: GpuOpKind::Custom("conv1d"),
@@ -230,7 +233,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement `conv1d` to keep results on the device; when unavailable the runtime gathers inputs and runs on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::signal::conv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conv",
     shape: ShapeRequirements::Any,
@@ -246,7 +249,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/signal",
     summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
     keywords = "conv,convolution,signal processing,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::math::signal::conv"
 )]
 fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mode = parse_mode(&rest)?;

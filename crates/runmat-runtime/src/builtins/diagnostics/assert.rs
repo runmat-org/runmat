@@ -19,7 +19,10 @@ const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "assert")
+    runmat_macros::register_doc_text(
+        name = "assert",
+        wasm_path = "crate::builtins::diagnostics::assert"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -142,7 +145,7 @@ If the dimensions disagree, the assertion stops execution before any costly matr
 - Report issues: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::diagnostics::assert")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "assert",
     op_kind: GpuOpKind::Custom("control"),
@@ -158,7 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::diagnostics::assert")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "assert",
     shape: ShapeRequirements::Any,
@@ -174,7 +177,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "diagnostics",
     summary = "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
     keywords = "assert,diagnostics,validation,error",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::diagnostics::assert"
 )]
 fn assert_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {

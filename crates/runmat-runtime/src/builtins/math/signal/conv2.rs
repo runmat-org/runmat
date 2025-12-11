@@ -15,7 +15,10 @@ const EPS: f64 = 1e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "conv2")
+    runmat_macros::register_doc_text(
+        name = "conv2",
+        wasm_path = "crate::builtins::math::signal::conv2"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -200,7 +203,7 @@ add native kernels without breaking compatibility.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a small reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::signal::conv2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv2",
     op_kind: GpuOpKind::Custom("conv2d"),
@@ -216,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can keep results on-device by implementing a conv2d custom hook; absent that, the builtin gathers to the host for CPU execution.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::signal::conv2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conv2",
     shape: ShapeRequirements::Any,
@@ -232,7 +235,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/signal",
     summary = "Two-dimensional convolution with MATLAB-compatible padding modes.",
     keywords = "conv2,2d convolution,image filtering,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::math::signal::conv2"
 )]
 fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut extras = rest;

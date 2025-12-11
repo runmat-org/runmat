@@ -55,7 +55,8 @@ fn parse_string_handle(text: &str) -> Result<Option<FigureHandle>, String> {
     name = "figure",
     category = "plotting",
     summary = "Create or select a plotting figure.",
-    keywords = "figure,plotting"
+    keywords = "figure,plotting",
+    wasm_path = "crate::builtins::plotting::ops::figure"
 )]
 pub fn figure_builtin(rest: Vec<Value>) -> Result<f64, String> {
     let handle = if rest.is_empty() {

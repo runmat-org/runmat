@@ -14,7 +14,10 @@ use runmat_macros::runtime_builtin;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fftshift")
+    runmat_macros::register_doc_text(
+        name = "fftshift",
+        wasm_path = "crate::builtins::math::fft::fftshift"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -179,7 +182,7 @@ Yes. Logical arrays are shifted without changing their logical element type.
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::fftshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fftshift",
     op_kind: GpuOpKind::Custom("fftshift"),
@@ -195,7 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to provider circshift kernels when available; otherwise gathers once and shifts on the host.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::fftshift")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fftshift",
     shape: ShapeRequirements::Any,
@@ -211,7 +214,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/fft",
     summary = "Shift zero-frequency components to the center of a spectrum.",
     keywords = "fftshift,fourier transform,frequency centering,spectrum,gpu",
-    accel = "custom"
+    accel = "custom",
+    wasm_path = "crate::builtins::math::fft::fftshift"
 )]
 fn fftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {

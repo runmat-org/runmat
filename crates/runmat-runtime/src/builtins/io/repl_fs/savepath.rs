@@ -24,7 +24,10 @@ const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "savepath")
+    runmat_macros::register_doc_text(
+        name = "savepath",
+        wasm_path = "crate::builtins::io::repl_fs::savepath"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -199,7 +202,7 @@ Expected behavior:
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "savepath",
     op_kind: GpuOpKind::Custom("io"),
@@ -216,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Filesystem persistence executes on the host; GPU-resident filenames are gathered before writing pathdef.m.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::savepath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "savepath",
     shape: ShapeRequirements::Any,
@@ -233,7 +236,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::savepath"
 )]
 fn savepath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;

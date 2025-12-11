@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{random, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "randi")
+    runmat_macros::register_doc_text(
+        name = "randi",
+        wasm_path = "crate::builtins::array::creation::randi"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -203,7 +206,7 @@ Not yet. The `randi` builtin currently supports doubles only. Supplying `'single
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::randi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "randi",
     op_kind: GpuOpKind::Custom("generator"),
@@ -222,7 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; the runtime falls back to host sampling and upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
     shape: ShapeRequirements::Any,
@@ -238,7 +241,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Uniform random integers with inclusive bounds.",
     keywords = "randi,random,integer,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::randi"
 )]
 fn randi_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRandi::parse(args)?;

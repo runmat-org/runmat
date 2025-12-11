@@ -29,7 +29,10 @@ const ERROR_OPTION_ARG: &str = "which: option must be a character vector or stri
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "which")
+    runmat_macros::register_doc_text(
+        name = "which",
+        wasm_path = "crate::builtins::introspection::which"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -160,7 +163,7 @@ Expected output (example):
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::which")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "which",
     op_kind: GpuOpKind::Custom("io"),
@@ -177,7 +180,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::which")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "which",
     shape: ShapeRequirements::Any,
@@ -193,7 +196,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "introspection",
     summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::introspection::which"
 )]
 fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {

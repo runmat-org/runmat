@@ -3,8 +3,8 @@
 //! Provides comprehensive validation for snapshot files including
 //! format validation, integrity checks, and compatibility verification.
 
-use std::collections::HashMap;
 use runmat_time::Instant;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::format::*;

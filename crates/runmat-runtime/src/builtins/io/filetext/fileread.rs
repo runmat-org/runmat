@@ -14,7 +14,10 @@ use runmat_filesystem as fs;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "fileread")
+    runmat_macros::register_doc_text(
+        name = "fileread",
+        wasm_path = "crate::builtins::io::filetext::fileread"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -147,7 +150,7 @@ Relative paths are evaluated against the current working directory of the RunMat
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fileread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fileread",
     op_kind: GpuOpKind::Custom("io-file-read"),
@@ -163,7 +166,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; acceleration providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fileread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fileread",
     shape: ShapeRequirements::Any,
@@ -207,7 +210,8 @@ impl FileEncoding {
     category = "io/filetext",
     summary = "Read the entire contents of a text file into a 1-by-N character vector.",
     keywords = "fileread,io,read file,text file,character vector",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::filetext::fileread"
 )]
 fn fileread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("fileread: {e}"))?;

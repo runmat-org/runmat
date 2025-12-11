@@ -20,7 +20,10 @@ const ZERO_EPS: f64 = 1e-12;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sqrt")
+    runmat_macros::register_doc_text(
+        name = "sqrt",
+        wasm_path = "crate::builtins::math::elementwise::sqrt"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -191,7 +194,7 @@ providers may expose complex buffers, and the builtin will automatically benefit
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::sqrt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sqrt",
     op_kind: GpuOpKind::Elementwise,
@@ -208,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers execute sqrt directly on device buffers when inputs are non-negative; runtime gathers to host when complex promotion is required.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::sqrt")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sqrt",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -233,7 +236,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sqrt,square root,elementwise,gpu,complex",
-    accel = "unary"
+    accel = "unary",
+    wasm_path = "crate::builtins::math::elementwise::sqrt"
 )]
 fn sqrt_builtin(value: Value) -> Result<Value, String> {
     match value {

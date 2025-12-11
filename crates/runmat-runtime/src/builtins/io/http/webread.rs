@@ -23,7 +23,10 @@ const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
 
 #[allow(clippy::too_many_lines)]
-#[runmat_macros::register_doc_text(name = "webread")]
+#[runmat_macros::register_doc_text(
+    name = "webread",
+    wasm_path = "crate::builtins::io::http::webread"
+)]
 pub const DOC_MD: &str = r#"---
 title: "webread"
 category: "io/http"
@@ -178,7 +181,7 @@ results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks ope
 [webwrite](./webwrite), [weboptions](./weboptions), [jsondecode](../json/jsondecode), [websave](../filetext/filewrite)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::http::webread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "webread",
     op_kind: GpuOpKind::Custom("http-get"),
@@ -194,7 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP requests always execute on the CPU; gpuArray inputs are gathered eagerly.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::http::webread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "webread",
     shape: ShapeRequirements::Any,
@@ -210,7 +213,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/http",
     summary = "Download web content (JSON, text, or binary) over HTTP/HTTPS.",
     keywords = "webread,http get,rest client,json,api",
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::io::http::webread"
 )]
 fn webread_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_url = gather_if_needed(&url).map_err(|e| format!("webread: {e}"))?;

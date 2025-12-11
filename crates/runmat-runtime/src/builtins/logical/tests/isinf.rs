@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isinf")
+    runmat_macros::register_doc_text(
+        name = "isinf",
+        wasm_path = "crate::builtins::logical::tests::isinf"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -159,7 +162,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 [isfinite](./isfinite), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isinf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isinf",
     op_kind: GpuOpKind::Elementwise,
@@ -178,7 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isinf` hook when available; otherwise the runtime gathers to host and builds the logical mask on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isinf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isinf",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -205,7 +208,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/tests",
     summary = "Return a logical mask indicating which elements of the input are ±Inf.",
     keywords = "isinf,infinity,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::logical::tests::isinf"
 )]
 fn isinf_builtin(value: Value) -> Result<Value, String> {
     match value {

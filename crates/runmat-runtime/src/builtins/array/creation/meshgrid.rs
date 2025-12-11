@@ -17,7 +17,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "meshgrid")
+    runmat_macros::register_doc_text(
+        name = "meshgrid",
+        wasm_path = "crate::builtins::array::creation::meshgrid"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -227,7 +230,7 @@ RunMat raises the MATLAB-compatible error `meshgrid: at least one input vector i
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::meshgrid")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "meshgrid",
     op_kind: GpuOpKind::Custom("array_construct"),
@@ -243,7 +246,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a dedicated meshgrid hook; until then the runtime builds grids on the host and uploads them when GPU residency is requested.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::meshgrid")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "meshgrid",
     shape: ShapeRequirements::Any,
@@ -260,7 +263,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Generate coordinate matrices for 2-D and 3-D grids.",
     keywords = "meshgrid,grid,gpu,like,3d",
-    accel = "array_construct"
+    accel = "array_construct",
+    wasm_path = "crate::builtins::array::creation::meshgrid"
 )]
 fn meshgrid_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&rest)?;

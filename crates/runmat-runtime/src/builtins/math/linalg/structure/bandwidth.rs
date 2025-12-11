@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "bandwidth")
+    runmat_macros::register_doc_text(
+        name = "bandwidth",
+        wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -198,7 +201,9 @@ and contribute to the bandwidth calculation.
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bandwidth",
     op_kind: GpuOpKind::Custom("structure_analysis"),
@@ -215,7 +220,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "WGPU providers compute bandwidth on-device when available; runtimes gather to the host as a fallback when providers lack the hook.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(
+    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "bandwidth",
     shape: ShapeRequirements::Any,
@@ -238,7 +245,8 @@ enum BandSelector {
     category = "math/linalg/structure",
     summary = "Compute the lower and upper bandwidth of a matrix.",
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
-    accel = "structure"
+    accel = "structure",
+    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> Result<Value, String> {
     let selector = parse_selector(&rest)?;

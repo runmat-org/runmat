@@ -27,7 +27,10 @@ use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "hist")
+    runmat_macros::register_doc_text(
+        name = "hist",
+        wasm_path = "crate::builtins::plotting::ops::hist"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -78,7 +81,7 @@ hist(data, 20);
 ```
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::hist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "hist",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -94,7 +97,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Single-precision gpuArray vectors render zero-copy when the shared renderer is active; other contexts gather first.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::hist")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "hist",
     shape: ShapeRequirements::Any,
@@ -346,7 +349,8 @@ impl HistWeightsInput {
     category = "plotting",
     summary = "Plot a histogram with MATLAB-compatible defaults.",
     keywords = "hist,histogram,frequency",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::hist"
 )]
 pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let evaluation = evaluate(data, &rest)?;

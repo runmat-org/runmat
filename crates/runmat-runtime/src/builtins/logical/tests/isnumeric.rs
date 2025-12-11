@@ -11,7 +11,10 @@ use crate::builtins::common::spec::{
 };
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "isnumeric")
+    runmat_macros::register_doc_text(
+        name = "isnumeric",
+        wasm_path = "crate::builtins::logical::tests::isnumeric"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -197,7 +200,7 @@ No. Both host and device numeric arrays return `true`; only logical GPU handles 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isnumeric")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isnumeric",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -214,7 +217,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider metadata to distinguish logical gpuArrays from numeric ones; otherwise falls back to runtime residency tracking.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isnumeric")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isnumeric",
     shape: ShapeRequirements::Any,
@@ -230,7 +233,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "logical/tests",
     summary = "Return true when a value is stored as numeric data.",
     keywords = "isnumeric,numeric,type,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    wasm_path = "crate::builtins::logical::tests::isnumeric"
 )]
 fn isnumeric_builtin(value: Value) -> Result<Value, String> {
     match value {

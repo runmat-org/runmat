@@ -23,7 +23,10 @@ use std::sync::Arc;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "surf")
+    runmat_macros::register_doc_text(
+        name = "surf",
+        wasm_path = "crate::builtins::plotting::ops::surf"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -71,7 +74,7 @@ surf(x, y, sin(x)' * cos(y));
 ```
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::surf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "surf",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -87,7 +90,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Surface rendering runs on the host/WebGPU pipeline; single-precision gpuArray inputs stay on device.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::surf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "surf",
     shape: ShapeRequirements::Any,
@@ -103,7 +106,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "plotting",
     summary = "Render a MATLAB-compatible surface plot.",
     keywords = "surf,plotting,3d,surface",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::plotting::ops::surf"
 )]
 pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_tensor = Tensor::try_from(&x).map_err(|e| format!("surf: {e}"))?;

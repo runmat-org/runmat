@@ -13,7 +13,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "range")
+    runmat_macros::register_doc_text(
+        name = "range",
+        wasm_path = "crate::builtins::array::creation::range"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -187,7 +190,7 @@ Use `range(X, 'all')` to flatten all dimensions into a single scalar spread.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::range")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "range",
     op_kind: GpuOpKind::Reduction,
@@ -220,7 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Requires provider min/max reductions plus elem_sub; omitnan and multi-axis reductions gather to host when hooks are absent.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -236,7 +239,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "array/creation",
     summary = "Compute the difference between the maximum and minimum values.",
     keywords = "range,max,min,spread,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    wasm_path = "crate::builtins::array::creation::range"
 )]
 fn range_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;

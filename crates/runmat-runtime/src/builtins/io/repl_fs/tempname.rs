@@ -1,8 +1,8 @@
 //! MATLAB-compatible `tempname` builtin for RunMat.
 
+use runmat_time::system_time_now;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use runmat_time::system_time_now;
 use std::time::UNIX_EPOCH;
 
 use runmat_builtins::{CharArray, Value};
@@ -27,7 +27,10 @@ static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "tempname")
+    runmat_macros::register_doc_text(
+        name = "tempname",
+        wasm_path = "crate::builtins::io::repl_fs::tempname"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -175,7 +178,7 @@ No. The builtin is host-only and ignores GPU providers entirely.
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::tempname")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tempname",
     op_kind: GpuOpKind::Custom("io"),
@@ -191,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only path generation. Providers are not expected to supply kernels for temporary name creation.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::tempname")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tempname",
     shape: ShapeRequirements::Any,
@@ -207,7 +210,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/repl_fs",
     summary = "Return a unique temporary file path.",
     keywords = "tempname,temporary file,unique name,temp directory",
-    accel = "cpu"
+    accel = "cpu",
+    wasm_path = "crate::builtins::io::repl_fs::tempname"
 )]
 fn tempname_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {

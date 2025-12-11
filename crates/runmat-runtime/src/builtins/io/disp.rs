@@ -19,7 +19,7 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "disp")
+    runmat_macros::register_doc_text(name = "disp", wasm_path = "crate::builtins::io::disp")
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -179,7 +179,7 @@ Use `fprintf` instead. `disp` always terminates the output with a newline.
 [fprintf](../filetext/fprintf), [sprintf](../../strings/core/sprintf), [string](../../strings/core/string), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::disp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "disp",
     op_kind: GpuOpKind::Custom("sink"),
@@ -195,7 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always formats on the CPU; GPU tensors are gathered via the active provider before display.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::disp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "disp",
     shape: ShapeRequirements::Any,
@@ -233,7 +233,8 @@ enum Align {
     summary = "Display value in the Command Window without returning output.",
     keywords = "disp,display,print,gpu",
     sink = true,
-    accel = "sink"
+    accel = "sink",
+    wasm_path = "crate::builtins::io::disp"
 )]
 fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {

@@ -15,7 +15,10 @@ use crate::gather_if_needed;
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "sprintf")
+    runmat_macros::register_doc_text(
+        name = "sprintf",
+        wasm_path = "crate::builtins::strings::core::sprintf"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -206,7 +209,7 @@ arrays raise `sprintf: formatSpec must be a character row vector or string scala
 [compose](./compose), [string](./string), [num2str](./num2str), [strlength](./strlength)
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::sprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sprintf",
     op_kind: GpuOpKind::Custom("format"),
@@ -222,7 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting runs on the CPU; GPU tensors are gathered before substitution.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::sprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sprintf",
     shape: ShapeRequirements::Any,
@@ -239,7 +242,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Format data into a character vector using printf-style placeholders.",
     keywords = "sprintf,format,printf,text",
     accel = "format",
-    sink = true
+    sink = true,
+    wasm_path = "crate::builtins::strings::core::sprintf"
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;

@@ -16,7 +16,10 @@ use crate::builtins::common::{
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "power")
+    runmat_macros::register_doc_text(
+        name = "power",
+        wasm_path = "crate::builtins::math::elementwise::power"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -204,7 +207,7 @@ uploads the result when necessary.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec]
+#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::power")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "power",
     op_kind: GpuOpKind::Elementwise,
@@ -224,7 +227,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers execute element-wise pow when both operands reside on the device; host fallbacks cover implicit expansion and complex inputs.",
 };
 
-#[runmat_macros::register_fusion_spec]
+#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::power")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "power",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -250,7 +253,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/elementwise",
     summary = "Element-wise power with MATLAB-compatible broadcasting and complex support.",
     keywords = "power,element-wise,.^,gpu,broadcast",
-    accel = "elementwise"
+    accel = "elementwise",
+    wasm_path = "crate::builtins::math::elementwise::power"
 )]
 fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
