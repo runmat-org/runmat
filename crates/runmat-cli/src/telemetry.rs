@@ -8,7 +8,8 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use runmat_time::{system_time_now, Instant};
+use std::time::{Duration, UNIX_EPOCH};
 use uuid::Uuid;
 
 const DEFAULT_HTTP_ENDPOINT: &str = "https://telemetry.runmat.org/ingest";
@@ -458,7 +459,7 @@ fn resolve_drain_timeout() -> Duration {
 }
 
 fn now_timestamp_ms() -> u64 {
-    SystemTime::now()
+    system_time_now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis() as u64

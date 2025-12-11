@@ -4,7 +4,8 @@ use runmat_hir::lower;
 use runmat_ignition::compile;
 use runmat_parser::parse;
 use runmat_turbine::TurbineEngine;
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 #[test]
 fn test_compilation_performance() {

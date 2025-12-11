@@ -449,7 +449,7 @@ fn test_edge_case_data() {
 
 #[test]
 fn test_performance_large_datasets() {
-    use std::time::Instant;
+    use runmat_time::Instant;
 
     let mut manager = JupyterPlottingManager::new();
 

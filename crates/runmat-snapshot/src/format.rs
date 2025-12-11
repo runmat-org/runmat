@@ -3,6 +3,7 @@
 //! High-performance binary format optimized for fast loading and validation.
 //! Uses a structured layout with versioning and integrity checks.
 
+use runmat_time::system_time_now;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
@@ -277,7 +278,7 @@ impl SnapshotMetadata {
     /// Create metadata for current environment
     pub fn current() -> Self {
         Self {
-            created_at: SystemTime::now(),
+            created_at: system_time_now(),
             runmat_version: env!("CARGO_PKG_VERSION").to_string(),
             tool_version: env!("CARGO_PKG_VERSION").to_string(),
             build_config: BuildConfig::current(),
@@ -316,7 +317,7 @@ impl SnapshotMetadata {
 
     /// Get human-readable age of snapshot
     pub fn age(&self) -> Duration {
-        SystemTime::now()
+        system_time_now()
             .duration_since(self.created_at)
             .unwrap_or(Duration::ZERO)
     }

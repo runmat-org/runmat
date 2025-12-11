@@ -21,6 +21,7 @@ members = [
     "crates/runmat-cli",
     "tools/runmatfunc",
     "crates/runmat-core",
+    "crates/runmat-time",
     "crates/runmat-wasm",
     "crates/runmat-filesystem",
 ]
@@ -72,3 +73,4 @@ runmat-accelerate-api = { version = "=0.2.7", path = "crates/runmat-accelerate-a
 runmat-gc-api = { version = "=0.2.7", path = "crates/runmat-gc-api" }
 runmat-core = { version = "=0.2.7", path = "crates/runmat-core" }
 runmat-filesystem = { version = "=0.2.7", path = "crates/runmat-filesystem" }
+runmat-time = { version = "=0.2.7", path = "crates/runmat-time" }

@@ -1246,7 +1246,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use runmat_time::unix_timestamp_ms;
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
@@ -1259,10 +1259,7 @@ mod tests {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(ext: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(

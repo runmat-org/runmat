@@ -6,6 +6,7 @@
 
 use crate::gui::lifecycle::CloseSignal;
 use crate::plots::Figure;
+use runmat_time::Instant;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread::{self, ThreadId};
 
@@ -178,7 +179,7 @@ pub struct GuiThreadManager {
 /// GUI thread health monitoring
 #[derive(Debug, Clone)]
 struct GuiHealthState {
-    last_response: std::time::Instant,
+    last_response: Instant,
     response_count: u64,
     error_count: u64,
     is_healthy: bool,
@@ -201,7 +202,7 @@ impl GuiThreadManager {
 
         let (sender, receiver) = mpsc::channel();
         let health_state = Arc::new(Mutex::new(GuiHealthState {
-            last_response: std::time::Instant::now(),
+            last_response: Instant::now(),
             response_count: 0,
             error_count: 0,
             is_healthy: true,
@@ -244,7 +245,7 @@ impl GuiThreadManager {
 
                     // Update health state
                     if let Ok(mut health) = health_state.lock() {
-                        health.last_response = std::time::Instant::now();
+                        health.last_response = Instant::now();
                         health.response_count += 1;
 
                         if let Some(GuiOperationResult::Error { .. }) = &result {

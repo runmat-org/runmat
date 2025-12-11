@@ -366,7 +366,7 @@ fn test_edge_cases() {
 
 #[test]
 fn test_performance_benchmarks() {
-    use std::time::Instant;
+    use runmat_time::Instant;
 
     let mut backend = JupyterBackend::with_format(OutputFormat::HTML);
 

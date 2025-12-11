@@ -19,6 +19,7 @@ use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use runmat_repl::ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
+use runmat_time::Instant;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -924,7 +925,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         jit_enabled: config.jit.enabled,
         accelerate_enabled: config.accelerate.enabled,
     });
-    let session_start = std::time::Instant::now();
+    let session_start = Instant::now();
 
     let enable_jit = config.jit.enabled;
     info!(
@@ -1224,7 +1225,7 @@ async fn execute_script_with_args(
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
-    let start_time = std::time::Instant::now();
+    let start_time = Instant::now();
     let result = engine
         .execute(&content)
         .context("Failed to execute script")?;
@@ -1339,7 +1340,7 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             println!("{}", stats.summary_report());
         }
         GcCommand::Minor => {
-            let start = std::time::Instant::now();
+            let start = Instant::now();
             match gc_collect_minor() {
                 Ok(collected) => {
                     let duration = start.elapsed();
@@ -1352,7 +1353,7 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             }
         }
         GcCommand::Major => {
-            let start = std::time::Instant::now();
+            let start = Instant::now();
             match gc_collect_major() {
                 Ok(collected) => {
                     let duration = start.elapsed();
@@ -1400,7 +1401,7 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
         GcCommand::Stress { allocations } => {
             info!("Starting GC stress test with {allocations} allocations");
 
-            let start_time = std::time::Instant::now();
+            let start_time = Instant::now();
             let initial_stats = gc_stats();
 
             println!("Running GC stress test with {allocations} allocations...");

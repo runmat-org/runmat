@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 const MESSAGE_ID_INVALID_SERVER: &str = "MATLAB:accept:InvalidTcpServer";
 const MESSAGE_ID_TIMEOUT: &str = "MATLAB:accept:Timeout";

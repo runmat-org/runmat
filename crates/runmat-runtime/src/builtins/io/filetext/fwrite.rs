@@ -837,7 +837,8 @@ mod tests {
     use runmat_filesystem::{self as fs, File};
     use std::io::Read;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
+    use runmat_time::system_time_now;
 
     #[test]
     fn fwrite_default_uint8_bytes() {
@@ -1088,7 +1089,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!(

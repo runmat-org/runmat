@@ -708,9 +708,10 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
     use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn fprintf_matrix_column_major() {
@@ -850,7 +851,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
+        let nanos = system_time_now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();

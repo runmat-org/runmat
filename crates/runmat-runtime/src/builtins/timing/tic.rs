@@ -2,8 +2,9 @@
 
 use once_cell::sync::Lazy;
 use runmat_macros::runtime_builtin;
+use runmat_time::Instant;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -126,7 +127,7 @@ Yes. Each thread shares the same stopwatch stack. Nested `tic`/`toc` pairs remai
 serialise access at the script level to avoid interleaving unrelated timings.
 
 ### How accurate is the measurement?
-`tic` relies on `std::time::Instant`, typically providing microsecond or better precision. The actual resolution
+`tic` relies on a monotonic clock (via `runmat_time::Instant`), typically providing microsecond or better precision. The actual resolution
 depends on your operating system. There is no artificial jitter or throttling introduced by RunMat.
 
 ### Does `tic` participate in GPU fusion?

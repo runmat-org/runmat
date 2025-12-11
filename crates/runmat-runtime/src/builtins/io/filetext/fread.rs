@@ -1275,9 +1275,10 @@ mod tests {
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
     use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn fread_reads_default_double() {
@@ -1649,7 +1650,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!(

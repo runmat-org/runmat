@@ -480,9 +480,9 @@ fn normalize_exponent(exponent: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray};
@@ -493,10 +493,7 @@ mod tests {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(ext: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(

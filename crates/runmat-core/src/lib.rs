@@ -19,7 +19,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Instant;
+use runmat_time::Instant;
 use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]

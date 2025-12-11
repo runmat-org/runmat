@@ -202,7 +202,7 @@ fn test_jupyter_integration() {
 
 #[test]
 fn test_performance_characteristics() {
-    use std::time::Instant;
+    use runmat_time::Instant;
 
     // Test large dataset handling
     let large_size = 10_000;

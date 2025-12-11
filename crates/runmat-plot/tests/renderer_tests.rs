@@ -9,6 +9,7 @@
 
 use glam::{Mat4, Vec3, Vec4};
 use runmat_plot::core::{vertex_utils, PipelineType, Uniforms};
+use runmat_time::Instant;
 
 #[cfg(test)]
 mod export_subplot_tests {
@@ -621,7 +622,7 @@ fn test_vertex_large_dataset() {
     let y_data: Vec<f64> = x_data.iter().map(|x| x.sin()).collect();
     let color = Vec4::new(0.0, 0.5, 1.0, 1.0);
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let vertices = vertex_utils::create_line_plot(&x_data, &y_data, color);
     let duration = start.elapsed();
 
@@ -1177,7 +1178,7 @@ mod gpu_stress {
         SharedWgpuContext,
     };
     use std::sync::Arc;
-    use std::time::Instant;
+    use runmat_time::Instant;
 
     static CONTEXT_READY: OnceCell<bool> = OnceCell::new();
 

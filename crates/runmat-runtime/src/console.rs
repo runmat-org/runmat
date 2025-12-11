@@ -1,8 +1,8 @@
 use once_cell::sync::OnceCell;
 use std::cell::RefCell;
+use runmat_time::unix_timestamp_ms;
 use std::sync::{Arc, RwLock};
 use std::thread_local;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Identifies the console stream that received the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,10 +28,7 @@ thread_local! {
 static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new();
 
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|dur| dur.as_millis() as u64)
-        .unwrap_or(0)
+    unix_timestamp_ms().min(u64::MAX as u128) as u64
 }
 
 /// Record console output for the current thread while also forwarding it to any

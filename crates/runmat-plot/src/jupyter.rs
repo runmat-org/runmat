@@ -3,6 +3,7 @@
 //! Provides seamless integration with Jupyter notebooks, enabling interactive
 //! plotting output directly in notebook cells with full GPU acceleration.
 
+use runmat_time::unix_timestamp_us;
 use std::collections::HashMap;
 // use std::path::Path; // Not currently used
 use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot};
@@ -295,11 +296,7 @@ impl JupyterBackend {
 
     /// Generate unique plot ID
     fn generate_plot_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
+        let timestamp = unix_timestamp_us();
         format!("{timestamp}")
     }
 

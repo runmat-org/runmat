@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
 runmat-accelerate = { workspace = true }
 runmat-gc = { workspace = true }
+runmat-time = { workspace = true }
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"

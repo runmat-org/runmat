@@ -11,6 +11,8 @@ use egui_winit::State as EguiState;
 #[cfg(feature = "gui")]
 use glam::{Mat4, Vec2, Vec3, Vec4};
 #[cfg(feature = "gui")]
+use runmat_time::Instant;
+#[cfg(feature = "gui")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "gui")]
 use std::sync::Arc;
@@ -242,7 +244,7 @@ impl<'window> PlotWindow<'window> {
             .take()
             .ok_or("Event loop already consumed")?;
         let window = self.window.clone();
-        let mut last_render_time = std::time::Instant::now();
+        let mut last_render_time = Instant::now();
         let close_signal = self.close_signal.clone();
 
         event_loop.run(move |event, target| {
@@ -297,7 +299,7 @@ impl<'window> PlotWindow<'window> {
                     window_id,
                     event: winit::event::WindowEvent::RedrawRequested,
                 } if window_id == window.id() => {
-                    let now = std::time::Instant::now();
+                    let now = Instant::now();
                     let dt = now - last_render_time;
                     last_render_time = now;
 

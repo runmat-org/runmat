@@ -425,10 +425,11 @@ mod tests {
     use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_filesystem as fs;
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     static REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -437,7 +438,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());

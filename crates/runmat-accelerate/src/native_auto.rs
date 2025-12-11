@@ -3,7 +3,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use runmat_time::{system_time_now, Instant};
+use std::time::{Duration, UNIX_EPOCH};
 
 use crate::{
     auto_offload_options,
@@ -278,7 +279,7 @@ fn clear_decisions() {
 }
 
 fn now_millis() -> u128 {
-    SystemTime::now()
+    system_time_now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis()
@@ -1399,7 +1400,7 @@ fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<Pat
     }
     let record = CalibrationRecord {
         version: CALIBRATION_VERSION,
-        recorded_at: SystemTime::now()
+        recorded_at: system_time_now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
             .as_secs(),

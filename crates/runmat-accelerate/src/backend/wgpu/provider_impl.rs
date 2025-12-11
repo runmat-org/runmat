@@ -58,7 +58,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 use wgpu::util::DeviceExt;
 
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -7378,7 +7379,7 @@ impl WgpuProvider {
             );
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         if enable_chunk {
             self.prepare_matmul_pipeline();
@@ -7717,7 +7718,7 @@ impl WgpuProvider {
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let mut multi_index = vec![0usize; rank];
         for page_idx in 0..page_volume {
@@ -9873,7 +9874,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = product_checked(&state.shape)
             .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let state_entry = self.get_entry(state)?;
         let out_buffer =
             self.create_storage_buffer_checked(total_len, "runmat-stochastic-evolution-out")?;
@@ -11244,7 +11245,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -11441,7 +11442,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -11906,7 +11907,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -12006,7 +12007,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -14518,7 +14519,7 @@ impl AccelProvider for WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let m_u32 =
             u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
@@ -15807,7 +15808,7 @@ impl AccelProvider for WgpuProvider {
         output_shape: &[usize],
         len: usize,
     ) -> Result<GpuTensorHandle> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = self.fused_elementwise_exec(shader, inputs, output_shape, len);
         if result.is_ok() {
             let elapsed = start.elapsed();
@@ -15861,7 +15862,7 @@ impl AccelProvider for WgpuProvider {
         workgroup_size: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = self.fused_reduction_exec(
             shader,
             inputs,
@@ -15921,7 +15922,7 @@ impl AccelProvider for WgpuProvider {
             return;
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         self.warmup_from_disk();
         // Proactively warm common pipelines used by normalization and reduction chains
         let pl = &self.pipelines;

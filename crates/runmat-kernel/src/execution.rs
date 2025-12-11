@@ -7,7 +7,8 @@ use crate::Result;
 use runmat_builtins::Value;
 use runmat_repl::ReplEngine;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 /// Execution engine managing RunMat code execution state for the Jupyter kernel
 pub struct ExecutionEngine {

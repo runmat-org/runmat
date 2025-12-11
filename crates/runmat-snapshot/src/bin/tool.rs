@@ -4,7 +4,7 @@
 //! RunMat snapshot files.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use runmat_time::Instant;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};

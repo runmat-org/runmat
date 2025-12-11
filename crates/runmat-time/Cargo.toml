@@ -1,0 +1,16 @@
+[package]
+name = "runmat-time"
+version = "0.2.7"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Cross-platform time utilities for RunMat (monotonic + wall-clock helpers)"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+instant = { version = "0.1", default-features = false, features = ["wasm-bindgen"] }
+js-sys = "0.3"
+

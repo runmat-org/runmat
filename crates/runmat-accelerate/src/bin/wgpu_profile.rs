@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use log::info;

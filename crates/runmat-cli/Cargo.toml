@@ -49,6 +49,7 @@ runmat-snapshot = { version = "=0.2.7", path = "../runmat-snapshot", default-fea
 runmat-plot = { version = "=0.2.7", path = "../runmat-plot" }
 runmat-accelerate = { version = "=0.2.7", path = "../runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.7", path = "../runmat-accelerate-api" }
+runmat-time = { version = "=0.2.7", path = "../runmat-time" }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)

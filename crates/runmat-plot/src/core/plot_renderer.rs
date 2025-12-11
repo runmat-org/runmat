@@ -10,6 +10,7 @@ use crate::plots::figure::LegendEntry;
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
 use glam::{Mat4, Vec3, Vec4};
+use runmat_time::Instant;
 use std::sync::Arc;
 
 /// Unified plot renderer that handles both interactive and static rendering
@@ -356,7 +357,7 @@ impl PlotRenderer {
         clear_background: bool,
         background_color: Option<glam::Vec4>,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
 
         // Collect render data and create buffers first
         let mut render_items = Vec::new();
@@ -491,7 +492,7 @@ impl PlotRenderer {
         clear_background: bool,
         background_color: Option<glam::Vec4>,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
 
         // Ensure direct pipelines exist
         self.wgpu_renderer.ensure_direct_line_pipeline();
@@ -770,7 +771,7 @@ impl PlotRenderer {
         target_view: &wgpu::TextureView,
         config: &PlotRenderConfig,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
 
         // Update camera aspect ratio
         let aspect_ratio = config.width as f32 / config.height as f32;
@@ -951,7 +952,7 @@ impl PlotRenderer {
         viewport_scissor: (u32, u32, u32, u32),
         config: &PlotRenderConfig,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
 
         // Apply MSAA preference into pipelines
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);

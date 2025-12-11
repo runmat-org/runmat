@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Array, Error as JsError, Reflect, Uint8Array};
+use std::backtrace::Backtrace;
 use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
@@ -1482,7 +1483,16 @@ fn init_logging_once() {
     INIT.get_or_init(|| {
         #[cfg(target_arch = "wasm32")]
         {
-            console_error_panic_hook::set_once();
+            std::panic::set_hook(Box::new(|info| {
+                let _ = web_sys::console::error_1(&JsValue::from_str(
+                    "RunMat panic hook invoked; forwarding to console_error_panic_hook",
+                ));
+                console_error_panic_hook::hook(info);
+                let bt = Backtrace::force_capture();
+                let _ = web_sys::console::error_1(&JsValue::from_str(&format!(
+                    "RunMat panic backtrace:\n{bt:?}"
+                )));
+            }));
             let _ = wasm_logger::init(wasm_logger::Config::default());
         }
     });

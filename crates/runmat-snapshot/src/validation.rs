@@ -4,7 +4,8 @@
 //! format validation, integrity checks, and compatibility verification.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 use crate::format::*;
 use crate::{Snapshot, SnapshotResult};

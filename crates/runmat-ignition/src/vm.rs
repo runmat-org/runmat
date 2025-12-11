@@ -24,6 +24,7 @@ use runmat_runtime::{
     call_builtin, gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
+use runmat_time::Instant;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -60,7 +61,7 @@ impl Drop for FusionPlanGuard {
 
 struct InterpreterTiming {
     enabled: bool,
-    host_span_start: Option<(std::time::Instant, usize)>,
+    host_span_start: Option<(Instant, usize)>,
     host_span_last_pc: Option<usize>,
     host_span_instrs: u64,
     seq: u64,
@@ -85,7 +86,7 @@ impl InterpreterTiming {
             return;
         }
         if self.host_span_start.is_none() {
-            self.host_span_start = Some((std::time::Instant::now(), pc));
+            self.host_span_start = Some((Instant::now(), pc));
             self.host_span_instrs = 0;
         }
         self.host_span_instrs += 1;
@@ -1376,11 +1377,11 @@ fn run_interpreter(
             None
         };
     #[inline]
-    fn bench_start() -> Option<std::time::Instant> {
+    fn bench_start() -> Option<Instant> {
         None
     }
     #[inline]
-    fn bench_end(_label: &str, _start: Option<std::time::Instant>) {}
+    fn bench_end(_label: &str, _start: Option<Instant>) {}
     let debug_stack = std::env::var("RUNMAT_DEBUG_STACK")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);

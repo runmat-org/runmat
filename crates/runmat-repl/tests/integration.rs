@@ -1,5 +1,6 @@
 use runmat_gc::{gc_test_context, GcConfig};
 use runmat_repl::ReplEngine;
+use runmat_time::Instant;
 use std::thread;
 
 #[test]
@@ -189,7 +190,7 @@ fn test_execution_timing_accuracy() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = engine.execute("x = 1 + 1");
         let elapsed = start.elapsed();
 

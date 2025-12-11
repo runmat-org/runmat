@@ -4,7 +4,7 @@
 //! repeatedly and returning the median per-invocation runtime in seconds.
 
 use std::cmp::Ordering;
-use std::time::Instant;
+use runmat_time::Instant;
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;

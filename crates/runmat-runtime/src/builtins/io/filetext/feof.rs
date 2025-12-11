@@ -286,9 +286,10 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
     use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn feof_returns_false_before_reading() {
@@ -492,7 +493,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();

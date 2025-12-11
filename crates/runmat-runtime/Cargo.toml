@@ -19,6 +19,7 @@ runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-filesystem = { workspace = true }
+runmat-time = { workspace = true }
 glam = "0.24"
 once_cell = "1.19"
 encoding_rs = "0.8.35"

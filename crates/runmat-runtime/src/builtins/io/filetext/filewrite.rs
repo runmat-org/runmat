@@ -616,16 +616,13 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> Result<usize, St
 mod tests {
     use super::*;
     use runmat_filesystem as fs;
+    use runmat_time::unix_timestamp_ms;
     use std::io::Read;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path

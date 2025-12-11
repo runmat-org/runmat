@@ -770,12 +770,13 @@ mod tests {
     use super::*;
     use crate::builtins::io::filetext::registry;
     use runmat_filesystem as fs;
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());

@@ -936,9 +936,9 @@ fn rows_to_tensor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ns;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
@@ -947,10 +947,7 @@ mod tests {
     static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nanos = unix_timestamp_ns();
         let seq = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(

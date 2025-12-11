@@ -11,7 +11,7 @@ use runmat_builtins::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use runmat_time::Instant;
 use thiserror::Error;
 
 pub mod allocator;

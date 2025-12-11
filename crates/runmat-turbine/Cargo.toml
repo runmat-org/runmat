@@ -24,6 +24,7 @@ runmat-runtime = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-accelerate = { workspace = true, optional = true }
+runmat-time = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

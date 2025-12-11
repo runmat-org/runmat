@@ -2,6 +2,7 @@
 //!
 //! Production-ready interactive plot widgets using WebAssembly and WebGL.
 
+use runmat_time::unix_timestamp_us;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -154,14 +155,10 @@ impl WebExporter {
     /// Generate unique widget ID
     fn generate_widget_id(&self) -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{SystemTime, UNIX_EPOCH};
 
         static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros();
+        let timestamp = unix_timestamp_us();
         let inc = COUNTER.fetch_add(1, Ordering::Relaxed);
 
         // Combine time with a monotonic counter for cross-platform uniqueness

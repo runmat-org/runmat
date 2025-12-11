@@ -21,6 +21,7 @@ runmat-builtins = { workspace = true }
 anyhow = "1.0"
 log = "0.4"
 uuid = { version = "1", features = ["v4"], default-features = false }
+runmat-time = { workspace = true }
 
 [features]
 default = ["jit"]

@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use runmat_time::system_time_now;
+use std::time::UNIX_EPOCH;
 
 use runmat_builtins::{CharArray, Value};
 use runmat_filesystem as vfs;
@@ -291,7 +292,7 @@ fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
 }
 
 fn unique_token() -> String {
-    let now = SystemTime::now()
+    let now = system_time_now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let secs = now.as_secs();

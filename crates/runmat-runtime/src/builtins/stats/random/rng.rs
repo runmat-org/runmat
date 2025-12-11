@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 use log::debug;
 use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use std::time::{SystemTime, UNIX_EPOCH};
+use runmat_time::unix_timestamp_ns;
 
 #[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = "rng"))]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -486,10 +486,7 @@ fn shuffle_seed() -> u64 {
             return parsed;
         }
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let now = unix_timestamp_ns();
     let mut seed = now as u64 ^ (now >> 32) as u64;
     let addr = (&seed as *const u64 as u64).rotate_left(21);
     seed ^= addr ^ (seed << 7);
@@ -682,9 +679,9 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345");
+        unsafe { std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345") };
         rng_builtin(vec![Value::from("shuffle")]).expect("rng shuffle");
-        std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED");
+        unsafe { std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED") };
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.seed, Some(12345));
     }

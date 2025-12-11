@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 #[cfg(all(feature = "compression", target_arch = "wasm32"))]
 use std::io::{Cursor, Read};
-use std::time::Instant;
+use runmat_time::Instant;
 
 use crate::format::{CompressionAlgorithm, CompressionInfo};
 use crate::{SnapshotError, SnapshotResult};

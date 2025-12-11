@@ -21,6 +21,7 @@ use {
     std::sync::Arc,
     std::{env, fs},
     tempfile::TempDir,
+    runmat_time::Instant,
 };
 
 #[cfg(not(feature = "embedded-codex"))]
@@ -201,7 +202,7 @@ fn run_via_cli(
     });
 
     // Keep-alive and timeout mechanics
-    let start_time = std::time::Instant::now();
+    let start_time = Instant::now();
     let mut last_activity = start_time;
     let mut last_notice = start_time;
     let keepalive_every = std::time::Duration::from_secs(10);
@@ -222,11 +223,11 @@ fn run_via_cli(
                     } else {
                         println!("codex: thread started");
                     }
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
                 Some("turn.started") => {
                     println!("codex: turn started");
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
                 Some("item.completed") => {
                     if let Some(item) = parsed.get("item") {
@@ -244,7 +245,7 @@ fn run_via_cli(
                                             append_with_gap(&mut aggregated, text);
                                             last_agent_message = Some(text.to_string());
                                         }
-                                        last_activity = std::time::Instant::now();
+                                        last_activity = Instant::now();
                                     }
                                 }
                                 "command_execution" => {
@@ -257,7 +258,7 @@ fn run_via_cli(
                                     {
                                         println!("codex exec: `{command}` → {code}");
                                     }
-                                    last_activity = std::time::Instant::now();
+                                    last_activity = Instant::now();
                                 }
                                 "file_change" => {
                                     if let Some(status) =
@@ -265,7 +266,7 @@ fn run_via_cli(
                                     {
                                         println!("apply_patch: {status}");
                                     }
-                                    last_activity = std::time::Instant::now();
+                                    last_activity = Instant::now();
                                 }
                                 _ => {}
                             }
@@ -282,15 +283,15 @@ fn run_via_cli(
                 }
                 Some("turn.completed") => {
                     println!("codex: turn completed");
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
                 Some("response.created") => {
                     println!("codex: response created");
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
                 Some("response.completed") => {
                     println!("codex: response completed");
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
                 Some("error") => {
                     let message = parsed
@@ -307,12 +308,12 @@ fn run_via_cli(
                 if !line.trim().is_empty() {
                     println!("codex: {}", line.trim_end());
                     append_with_gap(&mut aggregated, &line);
-                    last_activity = std::time::Instant::now();
+                    last_activity = Instant::now();
                 }
             }
         }
         // keepalive + timeout
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         if now.duration_since(last_notice) >= keepalive_every {
             let idle = now.duration_since(last_activity).as_secs();
             let elapsed = now.duration_since(start_time).as_secs();

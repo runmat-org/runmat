@@ -6,7 +6,8 @@
 use crate::{GcConfig, GcError, Result};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 /// Represents a single generation in the generational heap
 #[derive(Debug)]

@@ -5,7 +5,8 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use runmat_time::Instant;
+use std::time::Duration;
 
 /// Comprehensive GC statistics
 #[derive(Debug)]

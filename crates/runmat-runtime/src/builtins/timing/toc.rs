@@ -3,7 +3,7 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use std::convert::TryFrom;
-use std::time::Instant;
+use runmat_time::Instant;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -135,7 +135,7 @@ No. The stopwatch uses the host's monotonic clock. GPU acceleration, fusion, and
 change the measured interval.
 
 ### How accurate is the reported time?
-`toc` relies on `std::time::Instant`, typically offering microsecond precision on modern platforms. The actual
+`toc` relies on the same monotonic clock (`runmat_time::Instant`), typically offering microsecond precision on modern platforms. The actual
 resolution depends on your operating system.
 
 ## See Also

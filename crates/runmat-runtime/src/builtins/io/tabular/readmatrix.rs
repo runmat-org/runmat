@@ -1183,8 +1183,8 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
@@ -1192,10 +1192,7 @@ mod tests {
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path

@@ -126,7 +126,7 @@ fn test_collection_frequency() {
 #[test]
 fn test_collection_timing() {
     gc_test_context(|| {
-        use std::time::Instant;
+        use runmat_time::Instant;
 
         // Reset to default configuration
         let config = GcConfig::default();
@@ -289,7 +289,7 @@ fn test_force_collection() {
 #[test]
 fn test_collection_performance() {
     gc_test_context(|| {
-        use std::time::Instant;
+        use runmat_time::Instant;
 
         // Reset to default configuration
         let config = GcConfig::default();
