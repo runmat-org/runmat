@@ -20,9 +20,9 @@ canonical: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
 ---
 
 
-*The problem was never the syntax—it was the runtime. Here is why readable math still matters in an LLM-assisted code gen world.*
+*The issue was never the syntax—it was the runtime. Why readable math still matters in a world aided by LLM-assisted code generation*
 
-## Introduction
+## The enduring relevance of MATLAB in modern engineering
 
 If you look at the most preferred language list on any Stack Overflow developer survey, you will usually find MATLAB hovering near the bottom. It sits there alongside VBA and COBOL, often dismissed by modern software engineers as a dinosaur. You have probably seen the memes: complaints about license manager errors, the massive install size, or the feeling that it is a language strictly for "old-school academics.”
 
@@ -34,7 +34,7 @@ But if you walk into the R&D departments of top aerospace, automotive, or medica
 
 We need to separate the **language syntax** (which is excellent) from the **runtime and business model** (which are dated).
 
-## What is "Whiteboard-Style Code"?
+## What is "whiteboard-style code"?
 
 ![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png)
 
@@ -47,11 +47,10 @@ The goal of engineering software is to translate that whiteboard truth into exec
 3. **Low Boilerplate:** No memory allocation logic, no type declarations, and minimal imports.
 For vectors, matrices, and arrays, MATLAB’s syntax is often the shortest distance between the board and the running code
 
-## The Translation Test: Board vs. Code
+## The translation test: board vs. code
 
 Let’s look at a concrete example. Imagine you are sketching a simple linear algebra operation during a lecture or a design review.
 
-![Whiteboard translation placeholder](/placeholder-image.png)
 
 **In MATLAB:**
 The code is almost a direct transcription of the board:
@@ -87,7 +86,7 @@ W = np.concatenate([Z, Z], axis=1)
 
 The math is identical. But in the Python version, the engineer is thinking about computer science concepts: `imports`, `methods`, `tuples`, and `axes`. In the MATLAB version, the engineer is thinking about linear algebra: *rows, columns, and multiplication.*
 
-## Why Readable Math is a Safety Feature
+## Why readable math is a safety feature
 
 Why does this subtle difference matter?
 
@@ -105,7 +104,7 @@ MATLAB’s syntax allows them to verify the *math* without getting bogged down i
 
 ![MATLAB code review](https://web.runmatstatic.com/matlab-code-review-sm.png)
 
-## It’s Not Just for Humans (Compilers Love It Too)
+## It's not just for humans (compilers love it too)
 
 There is a misconception that "simple syntax" means "slow interpretation." Actually, high-level array syntax gives runtimes and compilers excellent signals for optimization.
 
@@ -119,7 +118,7 @@ Because the language constraints are strict (matrices have defined shapes, types
 
 The structure that makes it readable for humans also makes it predictable for machines.
 
-## The Honest Truth: Why the Hate Exists
+## The honest truth: why the hate exists
 
 If the syntax is so good, why is the sentiment so mixed?
 
@@ -133,7 +132,7 @@ This friction pushed a generation of engineers toward Python, not because they p
 
 ![MATLAB meme](https://web.runmatstatic.com/matlab-meme-sm.png)
 
-## A Vision for a Modern "Whiteboard" Runtime
+## A vision for a modern "whiteboard" runtime
 
 The solution isn't to abandon the syntax that engineers love. The solution is to build a new, modern engine to run it.
 
@@ -145,7 +144,7 @@ We need a runtime that preserves the dense, array-oriented notation but operates
 
 We should keep the language surface that mimics the whiteboard, but swap out the engine for something designed for the era of cloud computing and massive datasets.  
 
-## Keeping the Math, Changing the Engine
+## Keeping the math, changing the engine
 
 This is exactly why we are building **RunMat**.
 
