@@ -84,7 +84,7 @@ Same code, everywhere: static binaries with consistent performance on macOS/Wind
 **Content:** Architecture diagram SVG
 
 **Want more detail?**
-- [How accelerate works](/docs/accelerate/how-it-works)
+- [How accelerate works](/docs/accelerate/gpu-residency)
 - [How fusion works](/docs/accelerate/fusion)
 - [How GPU data residency works](/docs/accelerate/gpu-residency)
 
