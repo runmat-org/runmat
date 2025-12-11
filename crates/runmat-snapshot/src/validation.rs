@@ -295,7 +295,7 @@ impl SnapshotValidator {
         warnings: &mut Vec<ValidationWarning>,
     ) -> SnapshotResult<()> {
         // Check data size consistency
-        if format.data.len() != format.header.data_info.compressed_size {
+        if (format.data.len() as u64) != format.header.data_info.compressed_size {
             errors.push(ValidationError {
                 error_type: ValidationErrorType::FormatError,
                 message: "Data size mismatch between header and actual data".to_string(),
@@ -357,14 +357,33 @@ impl SnapshotValidator {
         errors: &mut Vec<ValidationError>,
         warnings: &mut Vec<ValidationWarning>,
     ) -> SnapshotResult<()> {
-        // Check registry consistency
-        if registry.name_index.len() != registry.functions.len() {
-            errors.push(ValidationError {
-                error_type: ValidationErrorType::FormatError,
-                message: "Builtin registry size mismatch".to_string(),
-                location: Some("builtins".to_string()),
-                severity: ErrorSeverity::Medium,
-            });
+        // Validate that the name_index map points to matching entries within the functions list.
+        for (name, &mapped_index) in &registry.name_index {
+            match registry.functions.get(mapped_index) {
+                Some(function) if function.name == *name => {}
+                Some(_) => {
+                    errors.push(ValidationError {
+                        error_type: ValidationErrorType::FormatError,
+                        message: format!(
+                            "Builtin registry index mismatch: expected '{}' at position {}, found '{}'",
+                            name, mapped_index, registry.functions[mapped_index].name
+                        ),
+                        location: Some(format!("builtins.functions[{mapped_index}]")),
+                        severity: ErrorSeverity::Medium,
+                    });
+                }
+                None => {
+                    errors.push(ValidationError {
+                        error_type: ValidationErrorType::FormatError,
+                        message: format!(
+                            "Builtin registry name_index points outside function list: '{}' -> {}",
+                            name, mapped_index
+                        ),
+                        location: Some("builtins.name_index".to_string()),
+                        severity: ErrorSeverity::Medium,
+                    });
+                }
+            }
         }
 
         // Check for essential builtins
@@ -378,20 +397,6 @@ impl SnapshotValidator {
                         "Ensure all standard library components are included".to_string(),
                     ),
                 });
-            }
-        }
-
-        // Validate function metadata
-        for (index, function) in registry.functions.iter().enumerate() {
-            if let Some(&expected_index) = registry.name_index.get(&function.name) {
-                if expected_index != index {
-                    errors.push(ValidationError {
-                        error_type: ValidationErrorType::FormatError,
-                        message: format!("Index mismatch for builtin '{}'", function.name),
-                        location: Some(format!("builtins.functions[{index}]")),
-                        severity: ErrorSeverity::Medium,
-                    });
-                }
             }
         }
 

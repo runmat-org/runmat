@@ -26,6 +26,12 @@ use crate::format::*;
 use crate::validation::{SnapshotValidator, ValidationConfig};
 use crate::{LoadingStats, Snapshot, SnapshotConfig, SnapshotError, SnapshotResult};
 
+fn u64_to_usize(value: u64, context: &str) -> SnapshotResult<usize> {
+    usize::try_from(value).map_err(|_| SnapshotError::Configuration {
+        message: format!("{context} ({value}) exceeds platform limits"),
+    })
+}
+
 /// High-performance snapshot loader
 pub struct SnapshotLoader {
     /// Configuration
@@ -147,22 +153,41 @@ impl SnapshotLoader {
     /// Load snapshot from an in-memory byte slice (supports wasm streaming scenarios)
     pub fn load_from_bytes(&mut self, bytes: &[u8]) -> SnapshotResult<(Snapshot, LoadingStats)> {
         let start_time = Instant::now();
-        self.stats.total_size = bytes.len();
+        self.stats.total_size = bytes.len() as u64;
 
-        if bytes.len() < std::mem::size_of::<SnapshotHeader>() {
+        if bytes.len() < 4 {
+            return Err(SnapshotError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Byte buffer too small to contain snapshot header size",
+            )));
+        }
+
+        let header_size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        if bytes.len() < 4 + header_size {
             return Err(SnapshotError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Byte buffer too small to contain snapshot header",
             )));
         }
 
-        let header = parse_snapshot_header(bytes)?;
+        let header_data = &bytes[4..4 + header_size];
+        let header: SnapshotHeader = bincode::deserialize(header_data)
+            .context("Failed to deserialize snapshot header")
+            .map_err(|e| SnapshotError::Configuration {
+                message: e.to_string(),
+            })?;
 
         header.validate()?;
 
-        let data_start = header.data_info.data_offset as usize;
+        let data_start = if header.data_info.data_offset != 0 {
+            u64_to_usize(header.data_info.data_offset, "snapshot data offset")?
+        } else {
+            4 + header_size
+        };
+        let compressed_size =
+            u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
         let data_end = data_start
-            .checked_add(header.data_info.compressed_size)
+            .checked_add(compressed_size)
             .ok_or_else(|| SnapshotError::Configuration {
                 message: "Snapshot data section overflowed buffer length".to_string(),
             })?;
@@ -175,7 +200,7 @@ impl SnapshotLoader {
         }
 
         let compressed_data = &bytes[data_start..data_end];
-        self.stats.compressed_size = compressed_data.len();
+        self.stats.compressed_size = compressed_data.len() as u64;
 
         let decompression_start = Instant::now();
         let decompressed = if matches!(
@@ -222,7 +247,7 @@ impl SnapshotLoader {
         // Get file metadata asynchronously
         let metadata = file.metadata().await.map_err(SnapshotError::Io)?;
         let file_size = metadata.len() as usize;
-        self.stats.total_size = file_size;
+        self.stats.total_size = file_size as u64;
 
         // Read entire file asynchronously
         let mut file_contents = Vec::with_capacity(file_size);
@@ -248,8 +273,10 @@ impl SnapshotLoader {
         header.validate()?;
 
         // Extract and decompress data
-        let data_start = header.data_info.data_offset as usize;
-        let data_end = data_start + header.data_info.compressed_size;
+        let data_start = u64_to_usize(header.data_info.data_offset, "snapshot data offset")?;
+        let compressed_size =
+            u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
+        let data_end = data_start + compressed_size;
 
         if data_end > file_contents.len() {
             return Err(SnapshotError::Io(std::io::Error::new(
@@ -259,7 +286,7 @@ impl SnapshotLoader {
         }
 
         let compressed_data = &file_contents[data_start..data_end];
-        self.stats.compressed_size = compressed_data.len();
+        self.stats.compressed_size = compressed_data.len() as u64;
 
         // Decompress data if needed
         let decompression_start = Instant::now();
@@ -286,7 +313,7 @@ impl SnapshotLoader {
         // Update stats
         let load_time = start_time.elapsed();
         self.stats.load_time = load_time;
-        self.stats.builtin_count = snapshot.builtins.functions.len();
+        self.stats.builtin_count = snapshot.builtins.functions.len() as u64;
 
         Ok((snapshot, self.stats.clone()))
     }
@@ -317,7 +344,7 @@ impl SnapshotLoader {
         // Get file metadata
         let metadata = file.metadata()?;
         let file_size = metadata.len() as usize;
-        self.stats.total_size = file_size;
+        self.stats.total_size = file_size as u64;
 
         // Create memory mapping if enabled and file is large enough
         let mmap = if self.config.memory_mapping_enabled && file_size > 4096 {
@@ -401,10 +428,16 @@ impl SnapshotLoader {
             })?;
 
         // Update stats
-        self.stats.builtin_count = snapshot.builtins.functions.len();
+        self.stats.builtin_count = snapshot.builtins.functions.len() as u64;
+        self.stats.builtin_count = snapshot.builtins.functions.len() as u64;
 
         let deserialize_time = start.elapsed();
         log::debug!("Snapshot deserialized in {deserialize_time:?}");
+        log::debug!(
+            "Builtin registry counts: names={}, functions={}",
+            snapshot.builtins.name_index.len(),
+            snapshot.builtins.functions.len()
+        );
 
         Ok(snapshot)
     }
@@ -417,6 +450,16 @@ impl SnapshotLoader {
         // Validate content
         let content_result = self.validator.validate_content(snapshot)?;
         if !content_result.is_ok() {
+            for error in &content_result.errors {
+                log::error!(
+                    "Snapshot content validation error ({:?}): {}",
+                    error.severity,
+                    error.message
+                );
+            }
+            for warning in &content_result.warnings {
+                log::warn!("Snapshot content validation warning: {}", warning.message);
+            }
             if self.config.validation_enabled {
                 return Err(SnapshotError::Validation {
                     message: "Snapshot content validation failed".to_string(),
@@ -646,7 +689,9 @@ impl FormatLoader {
             // Account for 4-byte header size prefix + actual header size
             let header_size = bincode::serialized_size(&self.header)? as usize;
             let data_start = 4 + header_size; // 4 bytes for size + header
-            let data_end = data_start + self.header.data_info.compressed_size;
+            let compressed_size =
+                u64_to_usize(self.header.data_info.compressed_size, "snapshot compressed size")?;
+            let data_end = data_start + compressed_size;
 
             if data_end > mmap.len() {
                 return Err(SnapshotError::Corrupted {
@@ -665,7 +710,9 @@ impl FormatLoader {
 
             reader.seek(SeekFrom::Start(data_start))?;
 
-            let mut data = vec![0u8; self.header.data_info.compressed_size];
+            let compressed_size =
+                u64_to_usize(self.header.data_info.compressed_size, "snapshot compressed size")?;
+            let mut data = vec![0u8; compressed_size];
             reader.read_exact(&mut data)?;
 
             Ok(data)
@@ -743,12 +790,21 @@ impl SnapshotLoader {
 }
 
 fn parse_snapshot_header(bytes: &[u8]) -> SnapshotResult<SnapshotHeader> {
-    let header_size = bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
-        .map_err(SnapshotError::Serialization)? as usize;
-    bincode::deserialize(&bytes[..header_size.min(bytes.len())]).map_err(|e| {
-        SnapshotError::Configuration {
-            message: format!("Failed to deserialize snapshot header: {e}"),
-        }
+    if bytes.len() < 4 {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Snapshot bytes too small to contain header size",
+        )));
+    }
+    let header_size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    if bytes.len() < 4 + header_size {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Snapshot bytes too small to contain full header",
+        )));
+    }
+    bincode::deserialize(&bytes[4..4 + header_size]).map_err(|e| SnapshotError::Configuration {
+        message: format!("Failed to deserialize snapshot header: {e}"),
     })
 }
 

@@ -18,6 +18,7 @@
   "files": [
     "dist",
     "pkg",
+    "artifacts",
     "README.md"
   ],
   "scripts": {

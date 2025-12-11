@@ -302,10 +302,10 @@ pub struct LoadingStats {
     pub decompression_time: Duration,
     pub validation_time: Duration,
     pub initialization_time: Duration,
-    pub total_size: usize,
-    pub compressed_size: usize,
+    pub total_size: u64,
+    pub compressed_size: u64,
     pub compression_ratio: f64,
-    pub builtin_count: usize,
+    pub builtin_count: u64,
     pub cache_hit_rate: f64,
 }
 

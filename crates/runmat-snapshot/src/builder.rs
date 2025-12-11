@@ -3,7 +3,7 @@
 //! High-performance builder that preloads, analyzes, and optimizes all standard
 //! library components into a single snapshot file.
 
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use runmat_time::Instant;
@@ -386,7 +386,19 @@ impl SnapshotBuilder {
         let mut dispatch_table = Vec::new();
 
         for (index, builtin) in builtins.iter().enumerate() {
-            name_index.insert(builtin.name.to_string(), index);
+            match name_index.entry(builtin.name.to_string()) {
+                Entry::Vacant(slot) => {
+                    slot.insert(index);
+                }
+                Entry::Occupied(existing) => {
+                    log::warn!(
+                        "Duplicate builtin '{}' detected while building snapshot (first index {}, duplicate index {})",
+                        builtin.name,
+                        existing.get(),
+                        index
+                    );
+                }
+            }
 
             // Analyze function characteristics
             let metadata = self.analyze_builtin_function(builtin)?;
@@ -998,12 +1010,12 @@ impl SnapshotBuilder {
             creation_time: stats
                 .start_time
                 .map_or(Duration::ZERO, |start| start.elapsed()),
-            builtin_count: snapshot.builtins.functions.len(),
-            hir_cache_entries: snapshot.hir_cache.functions.len(),
-            bytecode_cache_entries: snapshot.bytecode_cache.stdlib_bytecode.len(),
-            uncompressed_size: bincode::serialized_size(snapshot).unwrap_or(0) as usize,
+            builtin_count: snapshot.builtins.functions.len() as u64,
+            hir_cache_entries: snapshot.hir_cache.functions.len() as u64,
+            bytecode_cache_entries: snapshot.bytecode_cache.stdlib_bytecode.len() as u64,
+            uncompressed_size: bincode::serialized_size(snapshot).unwrap_or(0) as u64,
             compression_ratio: 1.0, // Will be updated after compression
-            peak_memory_usage: self.estimate_peak_memory_usage(),
+            peak_memory_usage: self.estimate_peak_memory_usage() as u64,
         };
 
         Ok(())
@@ -1021,7 +1033,7 @@ impl SnapshotBuilder {
         let serialized = bincode::serialize(snapshot).map_err(SnapshotError::Serialization)?;
 
         // Store original serialized size before compression
-        let uncompressed_size = serialized.len();
+        let uncompressed_size = serialized.len() as u64;
 
         // Compress if enabled
         let (data, _compression_info) = if self.config.compression_enabled {
@@ -1040,7 +1052,7 @@ impl SnapshotBuilder {
         let mut header = SnapshotHeader::new(snapshot.metadata.clone());
 
         // Update data info with actual sizes
-        header.data_info.compressed_size = data.len();
+        header.data_info.compressed_size = data.len() as u64;
         header.data_info.uncompressed_size = uncompressed_size;
         if self.config.compression_enabled {
             header.data_info.compression = _compression_info.unwrap_or_else(|| CompressionInfo {
@@ -1065,7 +1077,7 @@ impl SnapshotBuilder {
         }
 
         // Write to file
-        self.write_snapshot_file(&format, output_path)?;
+        self.write_snapshot_file(&mut format, output_path)?;
 
         log::info!("Snapshot saved successfully");
         Ok(())
@@ -1074,18 +1086,17 @@ impl SnapshotBuilder {
     /// Write snapshot format to file
     fn write_snapshot_file<P: AsRef<Path>>(
         &self,
-        format: &SnapshotFormat,
+        format: &mut SnapshotFormat,
         output_path: P,
     ) -> SnapshotResult<()> {
         use std::io::Write;
 
         let mut file = std::fs::File::create(output_path)?;
 
-        // Serialize header
-        let header_data = bincode::serialize(&format.header)?;
+        // Serialize header and ensure the data offset reflects the final layout
+        let (header_data, header_size) = Self::encode_header_with_offset(&mut format.header)?;
 
         // Write header size first (4 bytes, little-endian)
-        let header_size = header_data.len() as u32;
         file.write_all(&header_size.to_le_bytes())?;
 
         // Write header
@@ -1101,6 +1112,33 @@ impl SnapshotBuilder {
 
         file.sync_all()?;
         Ok(())
+    }
+
+    fn encode_header_with_offset(
+        header: &mut SnapshotHeader,
+    ) -> SnapshotResult<(Vec<u8>, u32)> {
+        const MAX_ITER: usize = 4;
+        let mut last_size = None;
+
+        for _ in 0..MAX_ITER {
+            let header_data = bincode::serialize(header)?;
+            let header_size = header_data.len() as u32;
+            let desired_offset = 4 + header_size as u64;
+
+            if header.data_info.data_offset == desired_offset {
+                return Ok((header_data, header_size));
+            }
+
+            header.data_info.data_offset = desired_offset;
+            last_size = Some(header_size);
+        }
+
+        Err(SnapshotError::Configuration {
+            message: format!(
+                "Snapshot header failed to stabilize data_offset after {MAX_ITER} attempts (last observed size: {:?})",
+                last_size
+            ),
+        })
     }
 
     /// Start build process

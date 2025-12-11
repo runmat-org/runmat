@@ -10,6 +10,8 @@ use runmat_parser::parse;
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
+#[cfg(target_arch = "wasm32")]
+use runmat_snapshot::SnapshotBuilder;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
@@ -440,6 +442,14 @@ impl RunMatSession {
         verbose: bool,
         snapshot: Option<Arc<Snapshot>>,
     ) -> Result<Self> {
+        #[cfg(target_arch = "wasm32")]
+        let snapshot = {
+            match snapshot {
+                some @ Some(_) => some,
+                None => Self::build_wasm_snapshot(),
+            }
+        };
+
         #[cfg(feature = "jit")]
         let jit_engine = if enable_jit {
             match TurbineEngine::new() {
@@ -497,6 +507,30 @@ impl RunMatSession {
         }
 
         Ok(session)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn build_wasm_snapshot() -> Option<Arc<Snapshot>> {
+        use log::{info, warn};
+
+        info!("No snapshot provided; building stdlib snapshot inside wasm runtime");
+        let mut config = SnapshotConfig::default();
+        config.compression_enabled = false;
+        config.validation_enabled = false;
+        config.memory_mapping_enabled = false;
+        config.parallel_loading = false;
+        config.progress_reporting = false;
+
+        match SnapshotBuilder::new(config).build() {
+            Ok(snapshot) => {
+                info!("WASM snapshot build completed successfully");
+                Some(Arc::new(snapshot))
+            }
+            Err(err) => {
+                warn!("Failed to build stdlib snapshot in wasm runtime: {err}");
+                None
+            }
+        }
     }
 
     /// Load a snapshot from disk
