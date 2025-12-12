@@ -23,6 +23,7 @@ Environment variables:
 | Variable | Description |
 | --- | --- |
 | `RUNMAT_CHROME_BIN` | Override the Chrome binary (defaults to the system Chrome/Chromium). |
+| `CHROMEDRIVER_ARGS` | Extra args for the WebDriver binary (default `--log-level=SEVERE` to suppress early stderr warnings that confuse `wasm-bindgen-test`). |
 | `RUNMAT_WASM_INCLUDE_RUNTIME=1` | Attempt to run the `runmat-runtime` tests as well (see below). |
 | `WASM_BINDGEN_TEST_TIMEOUT` | Per-test timeout passed to `wasm-bindgen-test` (default `120`). |
 

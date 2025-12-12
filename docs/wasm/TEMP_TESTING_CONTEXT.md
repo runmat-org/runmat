@@ -28,7 +28,8 @@ triaged, fixed, or deferred.
 2. Plotting ops used `#[ctor]`, which `wasm-bindgen-test` rejects. ✅ tests now call `ensure_plot_test_env()` (per-ops helper) backed by a shared `Once` in `plotting::tests`.
 3. Doc example helpers (`test_support`) import host-only code.
 4. Tests that depend on tokio/mio networking or file descriptors.
-5. Current runtime blocker: `wasm-bindgen-test-runner` fails with `Error: driver failed to bind port during startup` once the runtime suite is invoked (ChromeDriver can't claim a port while wasm tests stream ~5k cases). Need to investigate stabilizing Chrome-for-Testing invocation or serializing the wasm runner.
+5. `wasm-bindgen-test-runner` killed ChromeDriver before it bound a port because ChromeDriver logged a warning on stderr (`FromSockAddr failed on netmask`). ✅ default `CHROMEDRIVER_ARGS=--log-level=SEVERE` so the warning never emits and the runner stops recycling the driver.
+6. New runtime blocker after the driver fix: plotting tests panic with `one-time initialization may not be performed recursively` because `plotting::tests::ensure_plot_test_env()` wraps another `Once`. Need to replace it with `OnceLock<()>` or refactor the helper to avoid nested initialization.
 
 ## Work Log
 
@@ -36,4 +37,5 @@ triaged, fixed, or deferred.
 | ---- | ------ | ----- |
 | 2025-12-12 | BLAS/LAPACK tests host-only | Entire file now `cfg(all(feature="blas-lapack", not(target_arch="wasm32")))` so wasm builds skip Accelerate/OpenBLAS while native coverage remains intact. |
 | 2025-12-12 | Replaced plotting `#[ctor]` hooks | Added `plotting::tests::ensure_plot_test_env()` (Once + `disable_rendering_for_tests`) and invoked it at the start of each plotting test; removes `ctor` dependency and keeps both native + wasm test behavior identical. |
+| 2025-12-12 | Stabilized ChromeDriver startup | `CHROMEDRIVER_ARGS` now defaults to `--log-level=SEVERE`, suppressing macOS `FromSockAddr` warnings that `wasm-bindgen-test-runner` misinterpreted as driver failure. Runtime wasm tests progress past driver startup; current failure is the plotting `Once` recursion panic. |
 
