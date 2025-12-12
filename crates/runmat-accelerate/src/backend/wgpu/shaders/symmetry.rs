@@ -28,9 +28,20 @@ fn is_nan_f64(value: f64) -> bool {
     return value != value;
 }
 
+fn pos_inf_f64() -> f64 {
+    var bits: u64 = 0x7ff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn neg_inf_f64() -> f64 {
+    var bits: u64 = 0xfff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
 fn is_inf_f64(value: f64) -> bool {
-    let inf = bitcast<f64>(0x7ff0000000000000u);
-    return value == inf || value == -inf;
+    let inf = pos_inf_f64();
+    let ninf = neg_inf_f64();
+    return value == inf || value == ninf;
 }
 
 fn finite_f64(value: f64) -> bool {
@@ -125,9 +136,20 @@ fn is_nan_f32(value: f32) -> bool {
     return value != value;
 }
 
+fn pos_inf_f32() -> f32 {
+    var bits: u32 = 0x7f800000u;
+    return bitcast<f32>(bits);
+}
+
+fn neg_inf_f32() -> f32 {
+    var bits: u32 = 0xff800000u;
+    return bitcast<f32>(bits);
+}
+
 fn is_inf_f32(value: f32) -> bool {
-    let inf = bitcast<f32>(0x7f800000u);
-    return value == inf || value == -inf;
+    let inf = pos_inf_f32();
+    let ninf = neg_inf_f32();
+    return value == inf || value == ninf;
 }
 
 fn finite_f32(value: f32) -> bool {

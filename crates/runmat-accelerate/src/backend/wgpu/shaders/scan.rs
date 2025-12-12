@@ -23,7 +23,8 @@ fn is_nan_f64(value: f64) -> bool {
 }
 
 fn nan_f64() -> f64 {
-    return bitcast<f64>(0x7ff8000000000000u);
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -134,7 +135,8 @@ fn is_nan_f32(value: f32) -> bool {
 }
 
 fn nan_f32() -> f32 {
-    return bitcast<f32>(0x7fc00000u);
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -245,7 +247,8 @@ fn is_nan_f64(value: f64) -> bool {
 }
 
 fn nan_f64() -> f64 {
-    return bitcast<f64>(0x7ff8000000000000u);
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -356,7 +359,8 @@ fn is_nan_f32(value: f32) -> bool {
 }
 
 fn nan_f32() -> f32 {
-    return bitcast<f32>(0x7fc00000u);
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -472,7 +476,8 @@ fn is_nan_f64(value: f64) -> bool {
 }
 
 fn nan_f64() -> f64 {
-    return bitcast<f64>(0x7ff8000000000000u);
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -638,7 +643,8 @@ fn is_nan_f64(value: f64) -> bool {
 }
 
 fn nan_f64() -> f64 {
-    return bitcast<f64>(0x7ff8000000000000u);
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -804,7 +810,8 @@ fn is_nan_f32(value: f32) -> bool {
 }
 
 fn nan_f32() -> f32 {
-    return bitcast<f32>(0x7fc00000u);
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
 }
 
 @compute @workgroup_size(@WG@)
@@ -970,7 +977,8 @@ fn is_nan_f32(value: f32) -> bool {
 }
 
 fn nan_f32() -> f32 {
-    return bitcast<f32>(0x7fc00000u);
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
 }
 
 @compute @workgroup_size(@WG@)

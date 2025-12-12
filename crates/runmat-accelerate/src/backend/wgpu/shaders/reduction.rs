@@ -43,6 +43,21 @@ struct Params {
 
 var<workgroup> tile: array<f64, @WG@>;
 
+fn pos_inf_f64() -> f64 {
+    var bits: u64 = 0x7ff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn neg_inf_f64() -> f64 {
+    var bits: u64 = 0xfff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn nan_f64() -> f64 {
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
+}
+
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
         case 0u: { return a + b; }
@@ -58,8 +73,8 @@ fn identity(op: u32) -> f64 {
     switch op {
         case 0u: { return 0.0; }
         case 1u: { return 1.0; }
-        case 2u: { return f64(1.0) / f64(0.0); }
-        case 3u: { return -f64(1.0) / f64(0.0); }
+        case 2u: { return pos_inf_f64(); }
+        case 3u: { return neg_inf_f64(); }
         case 4u: { return 0.0; }
         default: { return 0.0; }
     }
@@ -122,6 +137,21 @@ struct Params {
 
 var<workgroup> tile: array<f32, @WG@>;
 
+fn pos_inf_f32() -> f32 {
+    var bits: u32 = 0x7f800000u;
+    return bitcast<f32>(bits);
+}
+
+fn neg_inf_f32() -> f32 {
+    var bits: u32 = 0xff800000u;
+    return bitcast<f32>(bits);
+}
+
+fn nan_f32() -> f32 {
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
+}
+
 fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
         case 0u: { return a + b; }
@@ -137,8 +167,8 @@ fn identity(op: u32) -> f32 {
     switch op {
         case 0u: { return 0.0f; }
         case 1u: { return 1.0f; }
-        case 2u: { return 1.0f / 0.0f; }
-        case 3u: { return -1.0f / 0.0f; }
+        case 2u: { return pos_inf_f32(); }
+        case 3u: { return neg_inf_f32(); }
         case 4u: { return 0.0f; }
         default: { return 0.0f; }
     }
@@ -200,6 +230,11 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn isNan(x: f64) -> bool { return x != x; }
+
+fn nan_f64() -> f64 {
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
+}
 
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -286,7 +321,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
         if saw_nan {
-            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+            OutBuf.data[idx] = nan_f64();
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f64(params.rows);
         } else if params.op == 2u {
@@ -370,7 +405,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
         if saw_nan {
-            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+            OutBuf.data[idx] = nan_f64();
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f64(params.cols);
         } else if params.op == 2u {
@@ -400,6 +435,11 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn isNan(x: f32) -> bool { return x != x; }
+
+fn nan_f32() -> f32 {
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
+}
 
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -486,7 +526,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
         if saw_nan {
-            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+            OutBuf.data[idx] = nan_f32();
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f32(params.rows);
         } else if params.op == 2u {
@@ -570,7 +610,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
         if saw_nan {
-            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+            OutBuf.data[idx] = nan_f32();
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f32(params.cols);
         } else if params.op == 2u {
@@ -605,13 +645,23 @@ fn better(current: f64, candidate: f64, op: u32) -> bool {
     return candidate > current;
 }
 
+fn pos_inf_f64() -> f64 {
+    var bits: u64 = 0x7ff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn neg_inf_f64() -> f64 {
+    var bits: u64 = 0xfff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
         if idx >= params.cols { return; }
         var best: f64;
-        if params.op == 0u { best = f64(1.0) / f64(0.0); } else { best = -f64(1.0) / f64(0.0); }
+        if params.op == 0u { best = pos_inf_f64(); } else { best = neg_inf_f64(); }
         var best_idx: u32 = 1u;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
@@ -623,7 +673,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else {
         if idx >= params.rows { return; }
         var best: f64;
-        if params.op == 0u { best = f64(1.0) / f64(0.0); } else { best = -f64(1.0) / f64(0.0); }
+        if params.op == 0u { best = pos_inf_f64(); } else { best = neg_inf_f64(); }
         var best_idx: u32 = 1u;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
@@ -658,13 +708,23 @@ fn better(current: f32, candidate: f32, op: u32) -> bool {
     return candidate > current;
 }
 
+fn pos_inf_f32() -> f32 {
+    var bits: u32 = 0x7f800000u;
+    return bitcast<f32>(bits);
+}
+
+fn neg_inf_f32() -> f32 {
+    var bits: u32 = 0xff800000u;
+    return bitcast<f32>(bits);
+}
+
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
         if idx >= params.cols { return; }
         var best: f32;
-        if params.op == 0u { best = 1.0f / 0.0f; } else { best = -1.0f / 0.0f; }
+        if params.op == 0u { best = pos_inf_f32(); } else { best = neg_inf_f32(); }
         var best_idx: u32 = 1u;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
@@ -676,7 +736,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else {
         if idx >= params.rows { return; }
         var best: f32;
-        if params.op == 0u { best = 1.0f / 0.0f; } else { best = -1.0f / 0.0f; }
+        if params.op == 0u { best = pos_inf_f32(); } else { best = neg_inf_f32(); }
         var best_idx: u32 = 1u;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
