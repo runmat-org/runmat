@@ -14,7 +14,13 @@ use crate::builtins::common::{gpu_helpers, tensor};
 
 const NAME: &str = "norm";
 
-#[cfg_attr(feature = "doc_export", runmat_macros::register_doc_text(name = NAME))]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::solve::norm"
+    )
+)]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "norm"
