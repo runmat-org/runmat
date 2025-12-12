@@ -109,11 +109,17 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
     notFound();
   }
 
+  // Format date as MM/DD/YYYY without timezone conversion
+  const formatDate = (dateString: string): string => {
+    const [year, month, day] = dateString.split('-');
+    return `${month}/${day}/${year}`;
+  };
+
   return (
     <BlogLayout
       title={post.frontmatter.title}
-      description={post.frontmatter.excerpt}
-      date={new Date(post.frontmatter.date).toLocaleDateString()}
+      description=""
+      date={formatDate(post.frontmatter.date)}
       readTime={post.frontmatter.readTime}
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
