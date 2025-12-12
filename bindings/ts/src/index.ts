@@ -3,6 +3,7 @@ import type {
 } from "./fs/provider-types.js";
 import { createDefaultFsProvider } from "./fs/default.js";
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
+import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
   createInMemoryFsProvider,
   createIndexedDbFsHandle,
@@ -417,6 +418,7 @@ let loadPromise: Promise<RunMatNativeModule> | null = null;
 let nativeModuleOverride: RunMatNativeModule | RunMatNativeSession | null = null;
 
 async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativeModule> {
+  installWebGpuCompatibilityShims();
   if (nativeModuleOverride) {
     if (isNativeSession(nativeModuleOverride)) {
       return {
