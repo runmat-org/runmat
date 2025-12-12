@@ -573,18 +573,21 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::HandleRef;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_scalar_true() {
         let result = ne_builtin(Value::Num(5.0), Value::Num(4.0)).expect("ne");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_scalar_false() {
         let result = ne_builtin(Value::Num(5.0), Value::Num(5.0)).expect("ne");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 2.0], vec![1, 4]).unwrap();
@@ -598,6 +601,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_char_array_against_numeric() {
         let char_array = CharArray::new(vec!['A', 'B', 'A'], 1, 3).unwrap();
@@ -612,6 +616,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_string_array_broadcast() {
         let sa = StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap();
@@ -625,6 +630,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_identity() {
         unsafe {
@@ -642,6 +648,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_difference() {
         unsafe {
@@ -663,12 +670,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_mixed_numeric_string_error() {
         let err = ne_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.contains("ne: mixing numeric and string inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -691,6 +700,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_gpu_falls_back_to_host_when_only_one_tensor() {
         test_support::with_test_provider(|provider| {
@@ -710,12 +720,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ne_wgpu_matches_host() {

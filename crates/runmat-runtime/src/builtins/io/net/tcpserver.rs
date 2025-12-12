@@ -623,6 +623,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_loopback_connection() {
         let _lock = TCP_TEST_LOCK
@@ -649,6 +650,7 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_applies_timeout_option() {
         let _lock = TCP_TEST_LOCK
@@ -672,6 +674,7 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_supports_custom_name() {
         let _lock = TCP_TEST_LOCK
@@ -695,6 +698,7 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_byte_order_option() {
         let _lock = TCP_TEST_LOCK
@@ -718,6 +722,7 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_byte_order() {
         let err = tcpserver_builtin(
@@ -729,6 +734,7 @@ pub(crate) mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_NAME_VALUE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_scalar_tensor_port() {
         let _lock = TCP_TEST_LOCK
@@ -753,6 +759,7 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_port() {
         let err = tcpserver_builtin(
@@ -764,6 +771,7 @@ pub(crate) mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_PORT));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_requires_name_value_pairs() {
         let err = tcpserver_builtin(
@@ -775,6 +783,7 @@ pub(crate) mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_NAME_VALUE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_stores_userdata() {
         let _lock = TCP_TEST_LOCK
@@ -801,12 +810,14 @@ pub(crate) mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_times_out_connect_attempt() {
         let _lock = TCP_TEST_LOCK

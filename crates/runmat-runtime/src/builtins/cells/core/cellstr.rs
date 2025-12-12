@@ -409,6 +409,7 @@ pub(crate) mod tests {
             .collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_char_matrix_and_trims() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', 'd', 'o', 'g', ' ', 'f', 'o', 'x', ' '];
@@ -428,6 +429,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_string_array_with_shape() {
         let data = vec![
@@ -457,6 +459,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_string_scalar() {
         let result = cellstr_builtin(Value::String("RunMat".to_string())).expect("cellstr");
@@ -471,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn normalises_cell_elements() {
         let alpha = Value::CharArray(CharArray::new_row("alpha"));
@@ -488,6 +492,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_text_cell_element() {
         let cell = crate::make_cell(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -495,6 +500,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_multirow_char_element() {
         let ca = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
@@ -503,12 +509,14 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_text_input() {
         let err = cellstr_builtin(Value::Num(std::f64::consts::PI)).expect_err("expected error");
         assert!(err.contains("input must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_empty_char_array() {
         let ca = CharArray::new(Vec::new(), 0, 5).expect("empty char");
@@ -523,6 +531,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_row_of_spaces_becomes_empty_vector() {
         let ca = CharArray::new(vec![' '; 3], 1, 3).expect("char array");
@@ -544,6 +553,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_elements_preserve_trailing_spaces() {
         let ca = CharArray::new(vec!['a', ' ', ' '], 1, 3).expect("char array");
@@ -566,6 +576,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_missing_value_converts() {
         let sa = StringArray::new(vec!["<missing>".to_string()], vec![1, 1]).expect("string array");
@@ -579,6 +590,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_string_array_produces_empty_cell_shape() {
         let sa = StringArray::new(Vec::new(), vec![0, 2]).expect("string array");
@@ -593,6 +605,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -891,6 +891,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_scalar_struct() {
         let mut st = StructValue::new();
@@ -900,6 +901,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(42.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_nested_structs() {
         let mut inner = StructValue::new();
@@ -916,6 +918,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_struct_array_element() {
         let mut first = StructValue::new();
@@ -939,6 +942,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::from("Grace"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_object_property() {
         let mut obj = ObjectInstance::new("TestClass".to_string());
@@ -948,6 +952,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_missing_field_errors() {
         let st = StructValue::new();
@@ -955,6 +960,7 @@ pub(crate) mod tests {
         assert!(err.contains("Reference to non-existent field 'missing'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_fields() {
         let ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
@@ -966,6 +972,7 @@ pub(crate) mod tests {
         assert_eq!(ident, Value::String("MATLAB:Test".to_string()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_stack_cell() {
         let mut ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
@@ -982,12 +989,14 @@ pub(crate) mod tests {
         assert_eq!(first, Value::String("demo.m:5".to_string()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn indexing_missing_field_name_fails() {
         let mut outer = StructValue::new();
@@ -998,6 +1007,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected field name"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_supports_end_index() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1014,6 +1024,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_struct_array_defaults_to_first() {
         let mut first = StructValue::new();
@@ -1032,6 +1043,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::from("Ada"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_char_array_single_element() {
         let chars = CharArray::new_row("Ada");
@@ -1055,6 +1067,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_complex_tensor_index() {
         let tensor =
@@ -1072,6 +1085,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Complex(3.0, 4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_dependent_property_invokes_getter() {
         let class_name = "runmat.unittest.GetfieldDependent";
@@ -1103,6 +1117,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(42.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_invalid_handle_errors() {
         let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(1.0)))) };
@@ -1116,6 +1131,7 @@ pub(crate) mod tests {
         assert!(err.contains("Invalid or deleted handle object 'Demo'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_listener_fields_resolved() {
         let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(7.0)))) };
@@ -1149,6 +1165,7 @@ pub(crate) mod tests {
         assert!(matches!(callback, Value::FunctionHandle(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn getfield_gpu_tensor_indexing() {

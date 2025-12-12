@@ -221,6 +221,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = horzcat_builtin(Vec::new()).expect("horzcat");
@@ -233,12 +234,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_argument_round_trips() {
         let result = horzcat_builtin(vec![Value::Num(3.5)]).expect("horzcat");
         assert_eq!(result, Value::Num(3.5));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_horizontal_concat() {
         let left = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -254,6 +257,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_by_columns() {
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -271,6 +275,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_arrays_concatenate() {
         let left = StringArray::new(vec!["left".into(), "right".into()], vec![1, 2]).unwrap();
@@ -286,6 +291,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mismatched_rows_error_mentions_horzcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -295,6 +301,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension 1 mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -318,6 +325,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_concatenate() {
         let top = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -333,6 +341,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_arrays_concatenate() {
         let left = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
@@ -354,6 +363,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_arrays_concatenate_columns() {
         let lhs = CellArray::new(
@@ -389,6 +399,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
@@ -418,6 +429,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn horzcat_wgpu_matches_cpu() {
@@ -452,6 +464,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

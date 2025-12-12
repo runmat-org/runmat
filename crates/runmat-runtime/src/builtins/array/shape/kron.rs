@@ -551,6 +551,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_matrix_product() {
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -571,6 +572,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_scalar_scaling() {
         let a = Value::Num(3.0);
@@ -585,6 +587,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_complex_inputs() {
         let a = Value::Complex(1.0, 2.0);
@@ -601,6 +604,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_logical_promotes_to_double() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -620,6 +624,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_char_arrays_convert_to_double() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -639,6 +644,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_rejects_extra_arguments() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -655,6 +661,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -692,6 +699,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_mixed_gpu_host_reuploads() {
         test_support::with_test_provider(|provider| {
@@ -711,6 +719,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_empty_inputs() {
         let a = Tensor::new(Vec::new(), vec![0, 2]).unwrap();
@@ -725,6 +734,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn kron_wgpu_matches_cpu() {
@@ -780,6 +790,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());

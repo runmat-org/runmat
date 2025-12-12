@@ -268,6 +268,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_scalar_numeric() {
         let result = compose_builtin(Value::from("Count %d"), vec![Value::Int(IntValue::I32(7))])
@@ -281,6 +282,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_broadcasts_scalar_spec() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -295,6 +297,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_zero_arguments_returns_spec() {
         let spec = Value::StringArray(
@@ -310,6 +313,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_mismatched_lengths_errors() {
         let spec = Value::StringArray(
@@ -327,6 +331,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_gpu_argument() {
         test_support::with_test_provider(|provider| {
@@ -356,12 +361,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn compose_wgpu_numeric_tensor_matches_cpu() {

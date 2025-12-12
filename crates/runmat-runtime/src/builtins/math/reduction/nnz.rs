@@ -541,24 +541,28 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_zero() {
         let result = nnz_host_value(Value::Num(0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_negative_zero_is_zero() {
         let result = nnz_host_value(Value::Num(-0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_nonzero() {
         let result = nnz_host_value(Value::Int(IntValue::I32(-5)), None).expect("nnz");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_tensor_counts_entries() {
         let tensor = Tensor::new(vec![1.0, 0.0, -3.0, f64::NAN], vec![2, 2]).unwrap();
@@ -566,6 +570,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_matrix_dimension_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -579,6 +584,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -592,6 +598,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_empty_matrix_dimension_returns_zero_counts() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -605,6 +612,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_with_dimension_returns_scalar() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -612,6 +620,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_three_dimensional_reduction_counts_per_slice() {
         let data = vec![1.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 4.0];
@@ -626,6 +635,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_dimension_greater_than_ndims_returns_mask() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -639,6 +649,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_empty_tensor_is_zero() {
         let tensor = Tensor::new(vec![], vec![0, 3]).unwrap();
@@ -646,6 +657,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_complex_tensor_counts() {
         let data = vec![(0.0, 0.0), (2.0, 0.0), (0.0, -4.0), (0.0, 0.0)];
@@ -654,6 +666,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_logical_array_counts_true() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![4]).unwrap();
@@ -661,6 +674,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_char_array_counts_nonzero_codepoints() {
         let chars = CharArray::new(vec!['a', '\0', 'c'], 1, 3).unwrap();
@@ -668,12 +682,14 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_complex_scalar_nan_counts() {
         let result = nnz_host_value(Value::Complex(f64::NAN, 0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -688,6 +704,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn nnz_wgpu_dim_matches_cpu() {
@@ -712,6 +729,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
@@ -722,6 +740,7 @@ pub(crate) mod tests {
         assert!(err.contains("string scalar"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

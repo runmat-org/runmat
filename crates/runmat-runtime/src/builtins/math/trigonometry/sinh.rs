@@ -274,6 +274,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_scalar() {
         let value = Value::Num(1.0);
@@ -284,6 +285,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
@@ -300,6 +302,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_int_value_promotes() {
         let value = Value::Int(IntValue::I32(1));
@@ -310,6 +313,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_complex_scalar() {
         let result = sinh_builtin(Value::Complex(1.0, 2.0)).expect("sinh");
@@ -322,6 +326,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_char_array_roundtrip() {
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
@@ -338,6 +343,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -355,12 +361,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sinh_wgpu_matches_cpu_elementwise() {

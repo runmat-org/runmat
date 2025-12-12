@@ -295,6 +295,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_scalar_negative() {
         let result = abs_builtin(Value::Num(-3.5)).expect("abs");
@@ -304,6 +305,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_int_promotes() {
         let result = abs_builtin(Value::Int(IntValue::I32(-8))).expect("abs");
@@ -313,6 +315,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, -2.0, 3.0, -4.0], vec![2, 2]).unwrap();
@@ -326,6 +329,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_complex_scalar() {
         let result = abs_builtin(Value::Complex(3.0, 4.0)).expect("abs");
@@ -335,6 +339,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_complex_tensor_to_real_tensor() {
         let complex = ComplexTensor::new(vec![(3.0, 4.0), (1.0, -1.0)], vec![2, 1]).unwrap();
@@ -349,6 +354,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_char_array_codes() {
         let char_array = CharArray::new("Az".chars().collect(), 1, 2).unwrap();
@@ -362,12 +368,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_string_rejected() {
         let err = abs_builtin(Value::from("hello")).expect_err("should error");
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -384,12 +392,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn abs_wgpu_matches_cpu_elementwise() {

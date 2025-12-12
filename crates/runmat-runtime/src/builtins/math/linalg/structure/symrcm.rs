@@ -457,6 +457,7 @@ pub(crate) mod tests {
         Tensor::new(data, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_identity_matrix() {
         let tensor = tensor_from_entries(3, 3, &[(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0)]);
@@ -470,6 +471,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_scalar_input() {
         let result = symrcm_builtin(Value::Num(42.0)).expect("symrcm");
@@ -482,6 +484,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_path_graph() {
         let entries = vec![
@@ -505,6 +508,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_logical_matrix() {
         let data = vec![
@@ -524,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_disconnected_components() {
         let entries = vec![(0, 1, 1.0), (1, 0, 1.0), (2, 3, 1.0), (3, 2, 1.0)];
@@ -538,6 +543,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_unsymmetric_treated_structurally() {
         let entries = vec![(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0), (3, 4, 1.0)];
@@ -552,6 +558,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_complex_matrix() {
         let data = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 2.0), (0.0, 0.0)];
@@ -566,6 +573,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -586,6 +594,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_empty_matrix() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -599,6 +608,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_requires_square_matrix() {
         let tensor = tensor_from_entries(2, 3, &[(0, 1, 1.0)]);
@@ -606,6 +616,7 @@ pub(crate) mod tests {
         assert!(err.contains("square"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_vector_is_not_square() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
@@ -616,6 +627,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_higher_dimensional_input() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -626,6 +638,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_unsupported_type() {
         let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
@@ -635,6 +648,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn symrcm_wgpu_matches_cpu() {
@@ -678,6 +692,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

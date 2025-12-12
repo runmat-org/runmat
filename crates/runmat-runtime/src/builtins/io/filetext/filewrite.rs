@@ -632,6 +632,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_text_content() {
         let path = unique_path("filewrite_text");
@@ -655,6 +656,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_appends_when_requested() {
         let path = unique_path("filewrite_append");
@@ -673,6 +675,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_invalid_ascii() {
         let path = unique_path("filewrite_ascii_error");
@@ -689,6 +692,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_raw_bytes_from_tensor() {
         let path = unique_path("filewrite_raw_bytes");
@@ -710,6 +714,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_numeric_scalar_writes_byte() {
         let path = unique_path("filewrite_numeric_scalar");
@@ -726,6 +731,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_bool_scalar_writes_byte() {
         let path = unique_path("filewrite_bool_scalar");
@@ -742,6 +748,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_logical_array_bytes() {
         let path = unique_path("filewrite_logical_array");
@@ -759,6 +766,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_numeric_out_of_range() {
         let path = unique_path("filewrite_out_of_range");
@@ -775,6 +783,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_non_integer_numeric() {
         let path = unique_path("filewrite_non_integer");
@@ -791,6 +800,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_ascii_numeric_bytes_above_range() {
         let path = unique_path("filewrite_ascii_bytes");
@@ -808,6 +818,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_positional_encoding_argument() {
         let path = unique_path("filewrite_positional_encoding");
@@ -824,6 +835,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_utf8_encoding_allows_arbitrary_bytes() {
         let path = unique_path("filewrite_utf8_numeric");
@@ -841,6 +853,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_unknown_option() {
         let path = unique_path("filewrite_unknown_option");
@@ -857,6 +870,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_duplicate_encoding() {
         let path = unique_path("filewrite_duplicate_encoding");
@@ -877,6 +891,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_duplicate_writemode() {
         let path = unique_path("filewrite_duplicate_writemode");
@@ -898,6 +913,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_invalid_writemode_value() {
         let path = unique_path("filewrite_invalid_writemode");
@@ -914,6 +930,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_invalid_encoding_value() {
         let path = unique_path("filewrite_invalid_encoding");
@@ -930,6 +947,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_accepts_char_array_filename() {
         let path = unique_path("filewrite_char_path");
@@ -950,6 +968,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_string_array_stores_newlines() {
         let path = unique_path("filewrite_string_array");
@@ -968,6 +987,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

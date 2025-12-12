@@ -223,12 +223,14 @@ pub(crate) mod tests {
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_scalar_returns_two() {
         let result = ndims_builtin(Value::Num(std::f64::consts::PI)).expect("ndims");
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_row_vector_returns_two() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -236,6 +238,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_three_dimensional_tensor_returns_three() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -243,6 +246,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_trailing_singletons_preserved() {
         let tensor = Tensor::new(vec![0.0; 40], vec![5, 1, 1, 8]).unwrap();
@@ -250,6 +254,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_cell_array_returns_two() {
         let cells = CellArray::new(
@@ -267,6 +272,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_string_array_returns_two() {
         let sa = StringArray::new(vec!["a".into(), "bb".into(), "ccc".into()], vec![3, 1]).unwrap();
@@ -274,6 +280,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_char_array_returns_two() {
         let chars = CharArray::new_row("RunMat");
@@ -281,6 +288,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_complex_tensor_uses_shape() {
         let complex = ComplexTensor::new(vec![(0.0, 0.0); 18], vec![3, 3, 2]).unwrap();
@@ -288,6 +296,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_logical_array_returns_two() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -295,6 +304,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_gpu_tensor_reads_shape() {
         test_support::with_test_provider(|provider| {
@@ -309,6 +319,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_gpu_tensor_without_metadata_defaults_correctly() {
         // Simulate a provider that does not populate shape metadata.
@@ -321,12 +332,14 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ndims_wgpu_tensor_reads_shape() {

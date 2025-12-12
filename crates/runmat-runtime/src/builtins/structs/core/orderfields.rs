@@ -576,6 +576,7 @@ pub(crate) mod tests {
         struct_value.field_names().cloned().collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_sorts_alphabetically() {
         let mut st = StructValue::new();
@@ -593,6 +594,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_cell_name_list() {
         let mut st = StructValue::new();
@@ -617,6 +619,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_string_array_names() {
         let mut st = StructValue::new();
@@ -641,6 +644,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_char_array_names() {
         let mut st = StructValue::new();
@@ -662,6 +666,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_reference_struct() {
         let mut source = StructValue::new();
@@ -686,6 +691,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_index_vector() {
         let mut st = StructValue::new();
@@ -709,6 +715,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn index_vector_must_be_integers() {
         let mut st = StructValue::new();
@@ -724,6 +731,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permutation_vector_matches_original_positions() {
         let mut st = StructValue::new();
@@ -746,6 +754,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_struct_array() {
         let mut first = StructValue::new();
@@ -775,6 +784,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_array_permutation_reuses_order() {
         let mut first = StructValue::new();
@@ -801,6 +811,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_field() {
         let mut st = StructValue::new();
@@ -820,6 +831,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_field_names_rejected() {
         let mut st = StructValue::new();
@@ -835,6 +847,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reference_struct_mismatch_errors() {
         let mut source = StructValue::new();
@@ -852,6 +865,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_order_argument_type_errors() {
         let mut st = StructValue::new();
@@ -864,6 +878,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_struct_array_nonempty_reference_errors() {
         let empty = CellArray::new(Vec::new(), 0, 0).expect("empty struct array");
@@ -880,6 +895,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);

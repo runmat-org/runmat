@@ -1447,12 +1447,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_scalar_num() {
         let result = mean_builtin(Value::Num(6.0), Vec::new()).expect("mean");
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1466,6 +1468,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1480,6 +1483,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_with_omit_nan_default_dimension() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
@@ -1491,6 +1495,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_with_omit_nan_all_nan_returns_nan() {
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN], vec![2, 1]).unwrap();
@@ -1502,6 +1507,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_with_include_nan_propagates_nan() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
@@ -1513,6 +1519,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_dimension_greater_than_ndims_returns_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1525,6 +1532,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_native_integer_scalar() {
         let value = Value::Int(IntValue::I16(42));
@@ -1532,6 +1540,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Int(IntValue::I16(42)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_like_complex_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1550,6 +1559,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_like_without_prototype_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1558,6 +1568,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_dimension_with_omit_nan() {
         let tensor =
@@ -1576,6 +1587,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_all_dimension_reduces_to_scalar() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -1590,6 +1602,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_all_keyword_first_arg_swapped_ok() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -1608,6 +1621,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_all_with_omit_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, 4.0, f64::NAN], vec![2, 2]).expect("tensor");
@@ -1622,6 +1636,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_all_matches_sequential_for_nd_tensor() {
         let data: Vec<f64> = (1..=24).map(|v| v as f64).collect();
@@ -1645,6 +1660,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_vector_dimensions_match_sequential() {
         let tensor =
@@ -1660,6 +1676,7 @@ pub(crate) mod tests {
         assert_eq!(combined, sequential);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_complex_scalar_passthrough() {
         let result = mean_builtin(Value::Complex(2.0, -3.0), Vec::new()).expect("mean");
@@ -1672,6 +1689,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_complex_matrix_along_rows() {
         let tensor = ComplexTensor::new(
@@ -1697,6 +1715,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_complex_omit_nan_returns_nan() {
         let tensor =
@@ -1720,6 +1739,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1736,6 +1756,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -1753,6 +1774,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_gpu_all_dimension_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1770,6 +1792,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_gpu_vector_dimensions_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1803,6 +1826,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_nested_dim2_then_dim3_host_matches_vecdim() {
         let t = Tensor::new((0..(2 * 3 * 4)).map(|i| i as f64).collect(), vec![2, 3, 4]).unwrap();
@@ -1813,6 +1837,7 @@ pub(crate) mod tests {
         assert_eq!(a, b2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_like_gpu_prototype_residency() {
         test_support::with_test_provider(|provider| {
@@ -1844,12 +1869,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn mean_wgpu_dim1_matches_cpu() {

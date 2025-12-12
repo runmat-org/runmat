@@ -479,6 +479,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_scalar_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -487,6 +488,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcasts_scalars_over_vectors() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -505,6 +507,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_three_dimensions() {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -525,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_out_of_range_subscripts() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -536,6 +540,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_shape_mismatch() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -552,6 +557,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_integer_subscripts() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -563,6 +569,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_integer_value_variants() {
         let dims = Value::Tensor(Tensor::new(vec![3.0], vec![1, 1]).unwrap());
@@ -570,6 +577,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sub2ind_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -613,6 +621,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sub2ind_wgpu_matches_cpu() {
@@ -662,6 +671,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -309,6 +309,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn stairs_requires_matching_lengths() {
         let res = stairs_builtin(
@@ -319,6 +320,7 @@ pub(crate) mod tests {
         assert!(res.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn stairs_requires_minimum_length() {
         let res = stairs_builtin(

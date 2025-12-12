@@ -787,6 +787,7 @@ pub(crate) mod tests {
     use std::fs::{self, File};
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_file_to_new_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -808,6 +809,7 @@ pub(crate) mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_into_existing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -830,6 +832,7 @@ pub(crate) mod tests {
         assert!(dest_dir.join("report.txt").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_overwrites_existing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -853,6 +856,7 @@ pub(crate) mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_without_force_fails_when_destination_exists() {
         let _lock = REPL_FS_TEST_LOCK
@@ -880,6 +884,7 @@ pub(crate) mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_folder_tree() {
         let _lock = REPL_FS_TEST_LOCK
@@ -907,6 +912,7 @@ pub(crate) mod tests {
         assert!(file_path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_requires_existing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -928,6 +934,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_DEST_MISSING);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_copies_multiple_files() {
         let _lock = REPL_FS_TEST_LOCK
@@ -953,6 +960,7 @@ pub(crate) mod tests {
         assert!(dest_dir.join("beta.log").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_copies_all_matches() {
         let _lock = REPL_FS_TEST_LOCK
@@ -978,6 +986,7 @@ pub(crate) mod tests {
         assert!(dest_dir.join("b.log").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_missing_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -997,6 +1006,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_SOURCE_NOT_FOUND);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_outputs_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1020,6 +1030,7 @@ pub(crate) mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_rejects_invalid_flag() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1031,6 +1042,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_FLAG_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_flag_accepts_uppercase_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1052,6 +1064,7 @@ pub(crate) mod tests {
         assert_eq!(eval.status(), 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_flag_accepts_uppercase_string() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1073,6 +1086,7 @@ pub(crate) mod tests {
         assert_eq!(eval.status(), 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_same_path_fails() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1092,6 +1106,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_SAME_PATH);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_empty_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1103,6 +1118,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_SOURCE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_empty_destination() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1114,6 +1130,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_DEST);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_invalid_pattern() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1125,6 +1142,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_PATTERN_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

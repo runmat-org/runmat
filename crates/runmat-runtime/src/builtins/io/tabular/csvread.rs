@@ -799,6 +799,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_basic_csv_roundtrip() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -814,6 +815,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_offsets() {
         let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
@@ -830,6 +832,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_numeric_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -850,6 +853,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_string_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -870,6 +874,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_empty_fields_become_zero() {
         let path = write_temp_file(&["1,,3", ",5,", "7,8,"]);
@@ -885,6 +890,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_errors_on_text() {
         let path = write_temp_file(&["1,2,3", "4,error,6"]);
@@ -897,6 +903,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_accepts_char_array_filename() {
         let path = write_temp_file(&["1,2"]);
@@ -915,6 +922,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

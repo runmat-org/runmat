@@ -225,12 +225,14 @@ pub(crate) mod tests {
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_scalar_is_one() {
         let result = length_builtin(Value::Num(5.0)).expect("length");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_column_vector_uses_rows() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -238,6 +240,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_matrix_returns_larger_dimension() {
         let tensor = Tensor::new(vec![0.0; 10], vec![2, 5]).unwrap();
@@ -245,6 +248,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_high_rank_tensor_reports_global_max() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -252,6 +256,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_partial_empty_tensor_returns_max_dimension() {
         let tensor = Tensor::new(vec![], vec![0, 0, 5]).unwrap();
@@ -259,6 +264,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_empty_matrix_with_nonzero_dimension() {
         let tensor = Tensor::new(vec![], vec![0, 7]).unwrap();
@@ -266,6 +272,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_fully_empty_matrix_returns_zero() {
         let tensor = Tensor::new(vec![], vec![0, 0]).unwrap();
@@ -273,6 +280,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_character_array_uses_shape() {
         let chars = CharArray::new_row("RunMat");
@@ -280,6 +288,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_complex_tensor_uses_shape() {
         let complex = ComplexTensor::new(vec![(0.0, 0.0); 12], vec![3, 4]).unwrap();
@@ -287,6 +296,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_cell_array_respects_dimensions() {
         let cells = CellArray::new(
@@ -304,6 +314,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_string_array_defaults_to_shape() {
         let sa = StringArray::new(vec!["a".into(), "bb".into()], vec![2, 1]).unwrap();
@@ -311,6 +322,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_logical_array_uses_shape() {
         let la = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -318,6 +330,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_gpu_tensor_reads_shape() {
         test_support::with_test_provider(|provider| {
@@ -332,11 +345,13 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn length_wgpu_tensor_uses_handle_shape() {

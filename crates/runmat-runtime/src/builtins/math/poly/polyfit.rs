@@ -941,6 +941,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fits_linear_data() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
@@ -966,6 +967,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn returns_struct_and_mu() {
         let x = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
@@ -995,6 +997,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weighted_fit_matches_unweighted_when_weights_equal() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1017,6 +1020,7 @@ pub(crate) mod tests {
         assert_eq!(eval_unweighted.coefficients(), eval_weighted.coefficients());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_logical_degree_scalar() {
         let x = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -1032,6 +1036,7 @@ pub(crate) mod tests {
         assert!(matches!(eval.coefficients(), Value::Tensor(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_integer_degree() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1041,6 +1046,7 @@ pub(crate) mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_infinite_weights() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1056,6 +1062,7 @@ pub(crate) mod tests {
         assert!(err.contains("weight at position 2"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_inputs_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -1082,6 +1089,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_weights_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -1132,6 +1140,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyfit_wgpu_matches_cpu() {
         let options = runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default();
@@ -1243,6 +1252,7 @@ pub(crate) mod tests {
         assert!((cpu_normr - gpu_normr).abs() < 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_mismatched_lengths() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1257,6 +1267,7 @@ pub(crate) mod tests {
         assert!(err.contains("same length"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_vector_inputs() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -1271,6 +1282,7 @@ pub(crate) mod tests {
         assert!(err.contains("vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_weight_length_mismatch() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1286,6 +1298,7 @@ pub(crate) mod tests {
         assert!(err.contains("weight vector must match"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_weights() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1301,6 +1314,7 @@ pub(crate) mod tests {
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fits_complex_data() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1321,6 +1335,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         {

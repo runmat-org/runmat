@@ -351,12 +351,14 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_of_booleans() {
         assert_eq!(not_builtin(Value::Bool(true)).unwrap(), Value::Bool(false));
         assert_eq!(not_builtin(Value::Bool(false)).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_numeric_array() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -370,6 +372,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_complex_scalar() {
         let result =
@@ -381,12 +384,14 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_nan_yields_false() {
         let result = not_builtin(Value::Num(f64::NAN)).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_char_array() {
         let chars = CharArray::new_row("A\0C");
@@ -400,6 +405,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -416,12 +422,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_accepts_int_inputs() {
         let value = Value::Int(IntValue::I32(0));
         assert_eq!(not_builtin(value).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_tensor_scalar_returns_bool() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -437,6 +445,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -450,6 +459,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_complex_tensor() {
         let tensor =
@@ -464,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_logical_array_flips_bits() {
         let array = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -477,6 +488,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_rejects_string_input() {
         let err = not_builtin(Value::String("abc".into())).unwrap_err();
@@ -486,6 +498,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn not_wgpu_matches_host_path() {
@@ -515,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

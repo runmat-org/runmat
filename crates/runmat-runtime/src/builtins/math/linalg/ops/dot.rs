@@ -508,6 +508,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_row_vectors() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -519,6 +520,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_column_vectors() {
         let lhs = Tensor::new(vec![1.0, 3.0, 5.0], vec![3, 1]).unwrap();
@@ -530,6 +532,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_with_dimension_argument() {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -562,6 +565,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_with_dimension() {
         let lhs = ComplexTensor::new(
@@ -603,6 +607,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_uses_conjugate_first_argument() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
@@ -622,6 +627,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_and_real_inputs() {
         let lhs = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
@@ -637,6 +643,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_empty_reduction_returns_zero() {
         let lhs = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -651,6 +658,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_mismatched_shapes_error() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -659,6 +667,7 @@ pub(crate) mod tests {
         assert!(err.contains("A and B must be the same size"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_zero_errors() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -672,6 +681,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_non_integer_errors() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -685,6 +695,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension must be an integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_promotes_logical_inputs() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -704,6 +715,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -736,6 +748,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_mixed_gpu_and_host_returns_gpu() {
         test_support::with_test_provider(|provider| {
@@ -764,6 +777,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_exceeds_rank_returns_product() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -783,6 +797,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn dot_wgpu_matches_cpu() {
@@ -814,6 +829,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, cpu.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

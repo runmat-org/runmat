@@ -568,6 +568,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_scalar_positive_and_negative() {
         let value = Value::Num(-2.7);
@@ -578,6 +579,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_integer_tensor() {
         let tensor = Tensor::new(vec![1.2, 4.7, -3.4, 5.0], vec![2, 2]).unwrap();
@@ -591,6 +593,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_complex_value() {
         let result = ceil_builtin(Value::Complex(1.7, -2.3), Vec::new()).expect("ceil");
@@ -603,6 +606,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_char_array_to_tensor() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -616,6 +620,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_logical_array_remains_same() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -629,6 +634,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_int_value_passthrough() {
         let result = ceil_builtin(Value::Int(IntValue::I32(-4)), Vec::new()).expect("ceil");
@@ -638,6 +644,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -654,6 +661,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_decimal_digits() {
         let value = Value::Num(21.456);
@@ -665,6 +673,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_negative_digits() {
         let tensor = Tensor::new(vec![123.4, -987.6], vec![2, 1]).unwrap();
@@ -676,6 +685,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_digits_accepts_tensor_scalar() {
         let value = Value::Tensor(Tensor::new(vec![1.234], vec![1, 1]).unwrap());
@@ -687,6 +697,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_digits_accepts_gpu_scalar() {
         test_support::with_test_provider(|provider| {
@@ -705,6 +716,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_significant_digits() {
         let value = Value::Num(98765.4321);
@@ -716,6 +728,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_significant_negative_numbers() {
         let value = Value::Num(-0.01234);
@@ -727,6 +740,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_significant_requires_positive_digits() {
         let args = vec![Value::Int(IntValue::I32(0)), Value::from("significant")];
@@ -734,6 +748,7 @@ pub(crate) mod tests {
         assert!(err.contains("positive integer"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_decimal_mode_alias_digits_keyword() {
         let args = vec![Value::Int(IntValue::I32(1)), Value::from("digits")];
@@ -744,6 +759,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_nan_and_inf_preserved() {
         let tensor =
@@ -759,12 +775,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_string_input_errors() {
         let err = ceil_builtin(Value::from("hello"), Vec::new()).unwrap_err();
         assert!(err.contains("numeric"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_like_invalid_prototype_errors() {
         let args = vec![Value::from("like"), Value::from("prototype")];
@@ -772,6 +790,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported prototype"), "unexpected: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_like_missing_prototype_errors() {
         let err = ceil_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
@@ -781,6 +800,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_like_host_output_keeps_host_residency() {
         let args = vec![Value::from("like"), Value::Num(0.0)];
@@ -791,6 +811,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_like_gpu_output() {
         test_support::with_test_provider(|provider| {
@@ -816,6 +837,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_decimal_digits_with_gpu_like_prototype_reuploads() {
         test_support::with_test_provider(|provider| {
@@ -850,6 +872,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_bool_value() {
         let result = ceil_builtin(Value::Bool(true), Vec::new()).expect("ceil");
@@ -859,12 +882,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ceil_wgpu_matches_cpu() {

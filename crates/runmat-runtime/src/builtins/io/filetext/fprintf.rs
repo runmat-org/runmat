@@ -717,6 +717,7 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_matrix_column_major() {
         registry::reset_for_tests();
@@ -744,6 +745,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_ascii_encoding_errors() {
         registry::reset_for_tests();
@@ -769,6 +771,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_gpu_gathers_values() {
         registry::reset_for_tests();
@@ -807,12 +810,14 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_missing_format_errors() {
         let err = evaluate(&[Value::Num(1.0)]).expect_err("fprintf should require format");
         assert!(err.contains("missing format string"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_literal_with_extra_args_errors() {
         let err = evaluate(&[
@@ -823,6 +828,7 @@ pub(crate) mod tests {
         assert!(err.contains("contains no conversion specifiers"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_invalid_identifier_errors() {
         let err = evaluate(&[Value::Num(99.0), Value::String("value".to_string())])
@@ -830,6 +836,7 @@ pub(crate) mod tests {
         assert!(err.contains("Invalid file identifier"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_read_only_error() {
         registry::reset_for_tests();
@@ -848,6 +855,7 @@ pub(crate) mod tests {
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);

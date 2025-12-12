@@ -759,6 +759,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_default_two() {
         let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
@@ -769,6 +770,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_fractional_p() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -782,6 +784,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_infinity_and_negative_infinity() {
         let tensor = Tensor::new(vec![2.0, -7.0, 4.0], vec![3, 1]).unwrap();
@@ -808,6 +811,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_zero_norm_counts_nonzeros() {
         let tensor = Tensor::new(vec![0.0, 0.0, 5.0, 0.0], vec![4, 1]).unwrap();
@@ -818,6 +822,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_p_less_than_one_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -825,6 +830,7 @@ pub(crate) mod tests {
         assert!(err.contains("p >= 1"), "expected p >= 1 error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_nuclear_norm_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -835,6 +841,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_matrix_fro_and_nuclear() {
         let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -858,6 +865,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_matrix_two_matches_spectral_radius() {
         let tensor = Tensor::new(vec![3.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -868,6 +876,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_matrix_invalid_order_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -878,6 +887,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_accepts_boolean_scalar() {
         let tensor = Tensor::new(vec![2.0, -3.0], vec![2, 1]).unwrap();
@@ -888,6 +898,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_logical_scalar_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -900,6 +911,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_char_array_inf() {
         let tensor = Tensor::new(vec![2.0, -7.0, 4.0], vec![3, 1]).unwrap();
@@ -912,6 +924,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_tensor_non_scalar_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -920,6 +933,7 @@ pub(crate) mod tests {
         assert!(err.contains("scalar"), "expected scalar error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_higher_dimensional_tensor_errors() {
         let data: Vec<f64> = (1..=8).map(|v| v as f64).collect();
@@ -931,6 +945,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_complex_vector() {
         let tensor = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
@@ -941,6 +956,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_complex_matrix_nuclear() {
         let tensor = ComplexTensor::new(
@@ -956,6 +972,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_empty_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -966,6 +983,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -981,6 +999,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn norm_wgpu_matches_cpu() {
@@ -1002,6 +1021,7 @@ pub(crate) mod tests {
         assert_close(gathered.data[0], cpu);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

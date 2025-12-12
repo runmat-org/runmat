@@ -298,6 +298,7 @@ pub(crate) mod tests {
 
     const EPS: f64 = 1e-12;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_scalar_pair() {
         let result = atan2_builtin(Value::Num(1.0), Value::Num(1.0)).expect("atan2");
@@ -307,6 +308,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_quadrant_detection() {
         let result = atan2_builtin(Value::Num(-1.0), Value::Num(-1.0)).expect("atan2");
@@ -316,6 +318,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_matrix_vs_scalar_broadcast() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -337,6 +340,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_row_vector_broadcast() {
         let y = Tensor::new(vec![1.0, -1.0, 2.0, -2.0], vec![2, 2]).unwrap();
@@ -359,6 +363,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_char_input() {
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
@@ -369,6 +374,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_logical_input() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -391,6 +397,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_zero_zero_is_zero() {
         let result = atan2_builtin(Value::Num(0.0), Value::Num(0.0)).expect("atan2");
@@ -400,6 +407,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_signed_zero_behaviour() {
         let neg_zero = f64::from_bits(0x8000_0000_0000_0000);
@@ -429,6 +437,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_empty_tensor_result() {
         let y = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -443,12 +452,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_complex_input_errors() {
         let err = atan2_builtin(Value::Complex(1.0, 1.0), Value::Num(1.0)).unwrap_err();
         assert!(err.to_ascii_lowercase().contains("complex"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_dimension_mismatch_errors() {
         let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
@@ -460,6 +471,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -493,6 +505,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_gpu_host_mix_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -513,12 +526,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn atan2_wgpu_matches_cpu_elementwise() {

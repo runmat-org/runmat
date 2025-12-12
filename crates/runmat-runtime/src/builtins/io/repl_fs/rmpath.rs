@@ -467,6 +467,7 @@ pub(crate) mod tests {
         path_to_string(&normalized)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_removes_single_entry() {
         let _lock = REPL_FS_TEST_LOCK
@@ -494,6 +495,7 @@ pub(crate) mod tests {
         assert_eq!(segments, vec![keep_str]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_splits_path_list_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -525,6 +527,7 @@ pub(crate) mod tests {
         assert_eq!(segments, vec![str3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_accepts_string_containers() {
         let _lock = REPL_FS_TEST_LOCK
@@ -548,6 +551,7 @@ pub(crate) mod tests {
         assert!(segments.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_supports_cell_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -565,6 +569,7 @@ pub(crate) mod tests {
         assert!(segments.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_errors_on_missing_folder() {
         let _lock = REPL_FS_TEST_LOCK
@@ -578,6 +583,7 @@ pub(crate) mod tests {
         assert!(err.contains("not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_errors_when_folder_not_on_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -593,6 +599,7 @@ pub(crate) mod tests {
         assert!(err.contains("not on search path"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_returns_previous_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -609,6 +616,7 @@ pub(crate) mod tests {
         assert_eq!(returned_str, str);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

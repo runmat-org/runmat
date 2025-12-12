@@ -487,6 +487,7 @@ pub(crate) mod tests {
         random::reset_rng();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
@@ -502,6 +503,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
@@ -521,6 +523,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
@@ -540,6 +543,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_single_matrix_has_f32_dtype() {
         let _guard = random::test_lock().lock().unwrap();
@@ -565,6 +569,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
@@ -589,6 +594,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rand_gpu_like_uniform() {
         let _guard = random::test_lock().lock().unwrap();
@@ -622,12 +628,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rand_wgpu_like_uniform_and_gather() {
@@ -655,6 +663,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rand_wgpu_fusion_then_sin_then_sum() {
@@ -668,6 +677,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, vec![1, 2]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rand_wgpu_single_allocates_gpu_without_like() {

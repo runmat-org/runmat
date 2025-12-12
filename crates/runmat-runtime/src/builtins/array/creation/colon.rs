@@ -597,6 +597,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_basic_increasing() {
         let result = colon_builtin(Value::Num(1.0), Value::Num(5.0), Vec::new()).expect("colon");
@@ -609,6 +610,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_basic_descending() {
         let result = colon_builtin(Value::Num(5.0), Value::Num(1.0), Vec::new()).expect("colon");
@@ -621,6 +623,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_custom_step_reaches_stop() {
         let result =
@@ -634,6 +637,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_custom_step_stops_before_bound() {
         let result =
@@ -647,6 +651,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_sign_mismatch_returns_empty() {
         let result =
@@ -660,6 +665,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_zero_increment_errors() {
         let err = colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)])
@@ -667,6 +673,7 @@ pub(crate) mod tests {
         assert!(err.contains("increment must be nonzero"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_accepts_scalar_tensors() {
         let start = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -681,6 +688,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -709,12 +717,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn colon_wgpu_matches_cpu() {
@@ -758,6 +768,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_bool_inputs_promote() {
         let result =
@@ -770,6 +781,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_increasing() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -786,6 +798,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_with_step() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -803,6 +816,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_equal_endpoints_singleton() {
         let result = colon_builtin(Value::Num(3.0), Value::Num(3.0), Vec::new()).expect("colon");
@@ -815,6 +829,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_complex_imaginary_errors() {
         let err = colon_builtin(Value::Complex(1.0, 1e-2), Value::Num(2.0), Vec::new())
@@ -825,6 +840,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_string_input_errors() {
         let err = colon_builtin(Value::from("hello"), Value::Num(2.0), Vec::new())
@@ -835,6 +851,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_descending() {
         let start = Value::CharArray(CharArray::new_row("f"));
@@ -851,6 +868,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_fractional_step_errors() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -863,6 +881,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_gpu_step_scalar_residency() {
         test_support::with_test_provider(|provider| {

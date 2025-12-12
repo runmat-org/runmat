@@ -280,6 +280,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_default_is_case_insensitive() {
         let eval = evaluate(
@@ -298,6 +299,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_match_output_ignores_case() {
         let eval = evaluate(
@@ -318,6 +320,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_matchcase_overrides_default() {
         let eval = evaluate(
@@ -335,6 +338,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_builtin_match_output() {
         let result = regexpi_builtin(
@@ -353,6 +357,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_tokens_once_returns_structured_cells() {
         let eval = evaluate(
@@ -388,6 +393,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_force_cell_output_for_scalar_subject() {
         let eval = evaluate(
@@ -421,6 +427,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_token_extents_provide_indices() {
         let eval = evaluate(
@@ -447,6 +454,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_split_returns_segments() {
         let eval = evaluate(
@@ -474,6 +482,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_emptymatch_allow_keeps_zero_length_matches() {
         let eval = evaluate(
@@ -493,6 +502,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_string_array_preserves_shape() {
         let array =
@@ -515,6 +525,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_cell_array_inputs_require_all_strings() {
         let handles = vec![
@@ -533,6 +544,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

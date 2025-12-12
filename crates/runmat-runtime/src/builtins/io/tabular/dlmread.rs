@@ -976,6 +976,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_default_delimiter() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -991,6 +992,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_semicolon_roundtrip() {
         let path = write_temp_file(&["1;2;3", "4;5;6"]);
@@ -1007,6 +1009,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_ascii_code_delimiter() {
         let path = write_temp_file(&["5|6|7", "8|9|10"]);
@@ -1023,6 +1026,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_char_array_filename() {
         let path = write_temp_file(&["1,2", "3,4"]);
@@ -1040,6 +1044,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_handles_utf8_bom() {
         let bytes = b"\xEF\xBB\xBF1,2\n3,4\n";
@@ -1056,6 +1061,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_empty_file_returns_empty_tensor() {
         let path = write_temp_file(&[]);
@@ -1071,6 +1077,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_with_offsets() {
         let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
@@ -1087,6 +1094,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_with_numeric_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1104,6 +1112,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_numeric_range_two_elements() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1121,6 +1130,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_excel_style_range_string() {
         let path = write_temp_file(&["1,2,3,4", "5,6,7,8", "9,10,11,12"]);
@@ -1137,6 +1147,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_range_without_delimiter() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1154,6 +1165,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_nonnumeric_token_error() {
         let path = write_temp_file(&["1,foo"]);
@@ -1166,6 +1178,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_invalid_range_error() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -1180,6 +1193,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_space_delimiter() {
         let path = write_temp_file(&["1  3", " 4 5 ", "6 7  "]);
@@ -1204,6 +1218,7 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

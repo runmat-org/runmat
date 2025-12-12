@@ -640,12 +640,14 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_scalar_defaults() {
         let result = fill_builtin(Value::Num(5.0), Vec::new()).expect("fill");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
@@ -659,6 +661,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rectangular_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -672,6 +675,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_size_vector() {
         let sz = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -685,6 +689,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_logical_option() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
@@ -698,6 +703,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_tensor_infers_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -715,6 +721,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_complex() {
         let result = fill_builtin(
@@ -734,6 +741,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rejects_non_scalar_value() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -741,6 +749,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_real_for_double_output() {
         let result = fill_builtin(
@@ -750,6 +759,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_double_option_generates_real_array() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::from("double")];
@@ -763,6 +773,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_infers_shape_without_dims() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -777,6 +788,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_logical_prototype() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
@@ -791,6 +803,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rejects_single_precision_option() {
         let result = fill_builtin(
@@ -800,6 +813,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_logical_conflict_errors() {
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -813,6 +827,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
@@ -840,6 +855,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fill_wgpu_like_matches_cpu() {
@@ -891,6 +907,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

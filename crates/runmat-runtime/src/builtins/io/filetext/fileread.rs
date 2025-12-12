@@ -392,6 +392,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_reads_text_file() {
         let path = unique_path("fileread_text");
@@ -414,6 +415,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_char_array_input() {
         let path = unique_path("fileread_char_input");
@@ -437,6 +439,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_string_array_scalar() {
         let path = unique_path("fileread_string_scalar");
@@ -459,6 +462,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_returns_empty_for_empty_file() {
         let path = unique_path("fileread_empty");
@@ -478,6 +482,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_errors_when_file_missing() {
         let path = unique_path("fileread_missing");
@@ -489,6 +494,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_preserves_non_utf8_bytes() {
         let path = unique_path("fileread_raw_bytes");
@@ -509,6 +515,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_supports_encoding_keyword() {
         let path = unique_path("fileread_utf8_keyword");
@@ -531,6 +538,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_supports_single_encoding_argument() {
         let path = unique_path("fileread_latin1");
@@ -553,6 +561,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_raw_encoding_returns_bytes() {
         let path = unique_path("fileread_raw_encoding");
@@ -575,6 +584,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_ascii_encoding_errors_on_invalid_bytes() {
         let path = unique_path("fileread_ascii_error");
@@ -593,6 +603,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_encoding_keyword_missing_value_errors() {
         let path = unique_path("fileread_encoding_missing");
@@ -611,6 +622,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_too_many_arguments_errors() {
         let path = unique_path("fileread_too_many");
@@ -633,6 +645,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

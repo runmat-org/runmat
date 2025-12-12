@@ -1,5 +1,8 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::Value;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn zeros_ones_variants() {
     let z = runmat_runtime::call_builtin("zeros", &[Value::Num(3.0)]).unwrap();
@@ -12,6 +15,7 @@ fn zeros_ones_variants() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn sum_prod_mean_any_all_variants() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -23,6 +27,7 @@ fn sum_prod_mean_any_all_variants() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn max_min_variants() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -35,6 +40,7 @@ fn max_min_variants() {
     let _ = runmat_runtime::call_builtin("min", &[v.clone(), Value::Num(2.0)]).unwrap();
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn find_variants() {
     let a = runmat_builtins::Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();

@@ -405,6 +405,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_defaults() {
         let result = round_builtin(Value::Num(1.7), Vec::new()).expect("round");
@@ -414,6 +415,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_negative_half() {
         let result = round_builtin(Value::Num(-2.5), Vec::new()).expect("round");
@@ -423,6 +425,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_tensor_decimals() {
         let tensor = Tensor::new(vec![1.2345, 2.499, 3.5001], vec![3, 1]).unwrap();
@@ -440,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_tensor_negative_decimals() {
         let tensor = Tensor::new(vec![123.0, 149.9, 150.0], vec![3, 1]).unwrap();
@@ -453,6 +457,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_significant() {
         let result = round_builtin(
@@ -466,6 +471,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_complex_value() {
         let result = round_builtin(Value::Complex(1.2, -3.6), Vec::new()).expect("round");
@@ -478,6 +484,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_invalid_mode_errors() {
         let err = round_builtin(
@@ -488,6 +495,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown rounding mode"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -504,6 +512,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

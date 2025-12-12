@@ -362,12 +362,14 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_scalar_num() {
         let result = trace_builtin(Value::Num(7.0)).expect("trace");
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_rectangular_matrix() {
         let tensor = Tensor::new(vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0], vec![3, 2]).unwrap();
@@ -375,6 +377,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(10.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_vector_returns_first_element() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -382,6 +385,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![0, 5]).unwrap();
@@ -389,6 +393,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_complex_matrix() {
         let data = vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0), (7.0, 8.0)];
@@ -403,6 +408,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_promotes_to_double() {
         let chars = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
@@ -413,6 +419,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_square_matrix_uses_diagonal() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -426,6 +433,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -449,6 +457,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_gpu_fallback_uploads_scalar() {
         // Force gather path by using a zero-length diagonal
@@ -471,6 +480,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_integer_promotes_to_double() {
         let value = Value::Int(IntValue::I32(5));
@@ -478,12 +488,14 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_bool_promotes_to_double() {
         let result = trace_builtin(Value::Bool(true)).expect("trace");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_logical_array_matches_numeric() {
         let data = vec![1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -492,6 +504,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_complex_empty_matrix_returns_zero() {
         let complex = ComplexTensor::new(Vec::new(), vec![0, 5]).expect("complex");
@@ -505,6 +518,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_rejects_higher_dimensional_inputs() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -512,12 +526,14 @@ pub(crate) mod tests {
         assert_eq!(err, "trace: input must be 2-D");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn trace_wgpu_matches_cpu() {

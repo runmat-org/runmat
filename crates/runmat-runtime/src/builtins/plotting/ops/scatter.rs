@@ -673,11 +673,13 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_requires_equal_lengths() {
         assert!(build_scatter_plot(vec![1.0], vec![], &mut test_style()).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_builtin_returns_or_reports_backend_status() {
         let out = scatter_builtin(
@@ -690,6 +692,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_resolves_marker_style_from_arguments() {
         let rest = vec![
@@ -706,6 +709,7 @@ pub(crate) mod tests {
         assert_eq!(style.marker_size as i32, 12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_supports_flat_marker_face_color() {
         let rest = vec![
@@ -722,6 +726,7 @@ pub(crate) mod tests {
         assert!(style.per_point_colors.is_some() || style.gpu_colors.is_some());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_applies_display_name() {
         let rest = vec![
@@ -734,6 +739,7 @@ pub(crate) mod tests {
         assert_eq!(plot.label.as_deref(), Some("Series A"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_rejects_flat_marker_edge_color_without_color_data() {
         let rest = vec![
@@ -748,6 +754,7 @@ pub(crate) mod tests {
         assert!(err.contains("requires per-point color data"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_accepts_flat_marker_edge_color_when_colors_supplied() {
         let mut appearance = LineAppearance::default();

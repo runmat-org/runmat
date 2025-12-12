@@ -304,24 +304,28 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_nan() {
         let result = isnan_builtin(Value::Num(f64::NAN)).expect("isnan");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_finite() {
         let result = isnan_builtin(Value::Num(5.0)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_scalar_bool_false() {
         let result = isnan_builtin(Value::Bool(true)).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_tensor_mask() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 3.0, f64::NAN], vec![2, 2]).unwrap();
@@ -335,6 +339,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -348,6 +353,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
@@ -365,12 +371,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_string_scalar_false() {
         let result = isnan_builtin(Value::String("NaN".to_string())).expect("isnan");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -384,6 +392,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -397,6 +406,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_rejects_unsupported_types() {
         let err = isnan_builtin(Value::FunctionHandle("foo".to_string()))
@@ -407,6 +417,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_char_array_returns_zeros() {
         let array = CharArray::new("NaN".chars().collect(), 1, 3).unwrap();
@@ -420,6 +431,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isnan_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -436,12 +448,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isnan_wgpu_matches_host_path() {

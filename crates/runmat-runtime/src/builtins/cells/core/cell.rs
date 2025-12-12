@@ -580,18 +580,21 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_no_arguments_returns_empty() {
         let result = cell_builtin(Vec::new()).expect("cell()");
         expect_cell(result, &[0, 0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_scalar_creates_square() {
         let result = cell_builtin(vec![Value::Num(3.0)]).expect("cell(3)");
         expect_cell(result, &[3, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_two_sizes() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -599,6 +602,7 @@ pub(crate) mod tests {
         expect_cell(result, &[2, 4]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_size_vector() {
         let tensor = Tensor::new(vec![2.0, 5.0], vec![1, 2]).unwrap();
@@ -606,6 +610,7 @@ pub(crate) mod tests {
         expect_cell(result, &[2, 5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_column_size_vector() {
         let tensor = Tensor::new(vec![4.0, 1.0], vec![2, 1]).unwrap();
@@ -613,6 +618,7 @@ pub(crate) mod tests {
         expect_cell(result, &[4, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_accepts_gpu_size_vector() {
         test_support::with_test_provider(|provider| {
@@ -627,6 +633,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cell_wgpu_size_vector_and_like() {
@@ -654,6 +661,7 @@ pub(crate) mod tests {
         expect_cell(like_result, &[2, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_multi_dimensional_vector() {
         let tensor = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -661,6 +669,7 @@ pub(crate) mod tests {
         expect_cell(result, &[2, 3, 4]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_variadic_dimensions() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::Num(5.0)];
@@ -668,6 +677,7 @@ pub(crate) mod tests {
         expect_cell(result, &[2, 3, 5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_with_single_element_vector_is_column() {
         let tensor = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
@@ -675,18 +685,21 @@ pub(crate) mod tests {
         expect_cell(result, &[4, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_rejects_negative() {
         let err = cell_builtin(vec![Value::Num(-1.0)]).unwrap_err();
         assert!(err.contains("non-negative"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_rejects_fractional() {
         let err = cell_builtin(vec![Value::Num(2.5)]).unwrap_err();
         assert!(err.contains("integers"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_infers_shape_from_prototype() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -695,6 +708,7 @@ pub(crate) mod tests {
         expect_cell(result, &[2, 2]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_logical_uses_logical_empty() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
@@ -713,6 +727,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_cell_prototype_produces_empty_cell_elements() {
         let proto = crate::make_cell_with_shape(Vec::new(), vec![0, 0]).unwrap();
@@ -727,6 +742,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_is_case_insensitive() {
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -735,6 +751,7 @@ pub(crate) mod tests {
         expect_cell(result, &[1, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_requires_prototype() {
         let err = cell_builtin(vec![Value::from("like")]).unwrap_err();
@@ -744,6 +761,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_rejects_multiple_keywords() {
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -758,6 +776,7 @@ pub(crate) mod tests {
         assert!(err.contains("multiple 'like'"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_gpu_prototype_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -773,6 +792,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

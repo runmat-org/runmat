@@ -592,6 +592,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_full_row_vectors() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -606,6 +607,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_same_matches_length() {
         let a = Tensor::new(vec![3.0, 4.0, 5.0, 6.0, 7.0], vec![1, 5]).unwrap();
@@ -639,6 +641,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_valid_empty_when_kernel_longer() {
         let a = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -658,6 +661,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_complex_inputs() {
         let a = Value::Complex(1.0, 2.0);
@@ -672,6 +676,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_scalar_times_vector_follows_other_orientation() {
         let scalar = Value::Num(2.0);
@@ -686,6 +691,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_handles_empty_inputs_with_row_orientation() {
         let empty_row = Tensor::new(Vec::<f64>::new(), vec![1, 0]).unwrap();
@@ -701,6 +707,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_handles_empty_inputs_with_column_orientation() {
         let empty_col = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
@@ -716,6 +723,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_promotes_logical_inputs_to_double() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -747,6 +755,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_rejects_invalid_shape_keyword() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -760,12 +769,14 @@ pub(crate) mod tests {
         assert!(err.contains("third argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_rejects_non_numeric_input() {
         let err = conv_builtin(Value::from("hi"), Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -802,6 +813,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn conv_wgpu_matches_cpu_same_mode() {
@@ -841,6 +853,7 @@ pub(crate) mod tests {
         assert_eq!(gathered_gpu.data, gathered_host.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_same_with_integer_dimension_argument() {
         let signal = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -853,6 +866,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

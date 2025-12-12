@@ -598,11 +598,13 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_requires_non_empty_input() {
         assert!(build_bar_chart(vec![]).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_builtin_matches_backend_contract() {
         let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
@@ -616,6 +618,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_parser_handles_stacked_flag() {
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
@@ -624,6 +627,7 @@ pub(crate) mod tests {
         assert_eq!(style.layout, BarLayout::Stacked);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_series_from_matrix_grouped() {
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
@@ -633,6 +637,7 @@ pub(crate) mod tests {
         assert_eq!(charts.len(), 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_series_from_matrix_stacked() {
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);

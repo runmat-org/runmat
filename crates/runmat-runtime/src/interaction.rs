@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::io::IsTerminal;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, Read, Write};
-#[cfg(feature = "interaction-test-hooks")]
+#[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 

@@ -574,6 +574,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_exact_division() {
         let numerator = Tensor::new(vec![1.0, 3.0, 3.0, 1.0], vec![1, 4]).unwrap();
@@ -589,6 +590,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_with_remainder() {
         let numerator = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
@@ -601,6 +603,7 @@ pub(crate) mod tests {
         assert_eq!(remainder, vec![3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_denominator_longer() {
         let numerator = Tensor::new(vec![3.0, 5.0], vec![1, 2]).unwrap();
@@ -613,6 +616,7 @@ pub(crate) mod tests {
         assert_eq!(remainder, vec![3.0, 5.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_leading_zeros() {
         let numerator = Tensor::new(vec![0.0, 0.0, 1.0, 2.0], vec![1, 4]).unwrap();
@@ -625,6 +629,7 @@ pub(crate) mod tests {
         assert_eq!(remainder, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_complex_coefficients() {
         let numerator = Value::ComplexTensor(
@@ -652,6 +657,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_reconstructs_original() {
         let numerator = vec![1.0, -3.0, 3.0, -1.0];
@@ -681,6 +687,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_denominator_zero_error() {
         let numerator = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -689,6 +696,7 @@ pub(crate) mod tests {
         assert!(err.contains("denominator"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_rejects_matrix_inputs() {
         let numerator = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -697,6 +705,7 @@ pub(crate) mod tests {
         assert!(err.contains("vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -727,6 +736,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn deconv_wgpu_matches_cpu() {
@@ -772,6 +782,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

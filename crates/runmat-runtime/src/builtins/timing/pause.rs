@@ -378,6 +378,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_returns_on_by_default() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -386,6 +387,7 @@ pub(crate) mod tests {
         assert_eq!(char_array_to_string(result), "on");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_off_returns_previous_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -395,6 +397,7 @@ pub(crate) mod tests {
         assert!(!pause_enabled().unwrap());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_on_restores_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -404,6 +407,7 @@ pub(crate) mod tests {
         assert!(pause_enabled().unwrap());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_default_returns_empty_tensor() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -415,6 +419,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_zero_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -426,6 +431,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -437,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_negative_zero_is_treated_as_zero() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -448,6 +455,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn negative_duration_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -456,6 +464,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_scalar_tensor_is_rejected() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -465,6 +474,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_tensor_behaves_like_default_pause() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -477,6 +487,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -489,6 +500,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn infinite_duration_behaves_like_default() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -500,6 +512,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_gpu_duration_gathered() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -519,6 +532,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pause_wgpu_duration_gathered() {
@@ -543,6 +557,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_command_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -551,6 +566,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();

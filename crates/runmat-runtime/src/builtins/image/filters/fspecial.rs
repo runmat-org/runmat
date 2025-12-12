@@ -1064,6 +1064,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_default() {
         let result = fspecial_builtin(Value::from("average"), Vec::new()).unwrap();
@@ -1078,6 +1079,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_scalar_size() {
         let args = vec![Value::from(5)];
@@ -1092,6 +1094,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_rectangular_size() {
         let args = vec![Value::from(
@@ -1110,6 +1113,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_rejects_zero_size() {
         let args = vec![Value::from(0)];
@@ -1117,6 +1121,7 @@ pub(crate) mod tests {
         assert!(err.contains("positive"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_default_matches_reference() {
         let result = fspecial_builtin(Value::from("gaussian"), Vec::new()).unwrap();
@@ -1142,6 +1147,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_size_sigma() {
         let args = vec![Value::from(7), Value::from(2.0)];
@@ -1162,6 +1168,7 @@ pub(crate) mod tests {
         assert_close(sum, 1.0, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_laplacian_alpha() {
         let args = vec![Value::from(0.2)];
@@ -1188,6 +1195,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_unsharp_default() {
         let result = fspecial_builtin(Value::from("unsharp"), Vec::new()).unwrap();
@@ -1201,6 +1209,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_log_basic_properties() {
         let result =
@@ -1218,6 +1227,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_sum_is_one() {
         let result = fspecial_builtin(Value::from("disk"), vec![Value::from(5)]).unwrap();
@@ -1233,12 +1243,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_negative_radius_errors() {
         let err = fspecial_builtin(Value::from("disk"), vec![Value::from(-1.0)]).unwrap_err();
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_motion_sum_is_one() {
         let result = fspecial_builtin(
@@ -1256,18 +1268,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_invalid_filter_name() {
         let err = fspecial_builtin(Value::from("notafilter"), Vec::new()).unwrap_err();
         assert!(err.contains("not supported"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples() {
         let blocks = test_support::doc_examples(super::DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fspecial_gaussian_gpu_matches_cpu() {

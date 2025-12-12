@@ -430,6 +430,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_diagonal_matrix() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -444,6 +445,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_lower_selector() {
         let tensor = Tensor::new(
@@ -459,6 +461,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_upper_selector() {
         let tensor = Tensor::new(
@@ -474,6 +477,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_complex_matrix() {
         let data = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 2.0), (0.0, 0.0)];
@@ -488,6 +492,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_rectangular_matrix() {
         let tensor = Tensor::new(
@@ -502,6 +507,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -512,6 +518,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_nan_counts_as_nonzero() {
         let tensor =
@@ -523,6 +530,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_logical_input_supported() {
         let logical = LogicalArray::new(vec![1, 1, 1, 0], vec![2, 2]).expect("logical array");
@@ -534,6 +542,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_selector_validation() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -545,6 +554,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_rejects_higher_dimensions() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
@@ -552,6 +562,7 @@ pub(crate) mod tests {
         assert!(err.contains("2-D"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -569,12 +580,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn bandwidth_wgpu_matches_cpu() {

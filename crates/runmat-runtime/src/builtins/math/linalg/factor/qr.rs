@@ -891,6 +891,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_single_output_returns_upper_triangular() {
         let data = vec![1.0, 4.0, 2.0, 5.0];
@@ -902,6 +903,7 @@ pub(crate) mod tests {
         tensor_close(&r_eval, &r_builtin, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_three_outputs_reconstructs_input() {
         let data = vec![1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
@@ -933,6 +935,7 @@ pub(crate) mod tests {
         tensor_close(&qr, &ae, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_vector_option_returns_pivot_vector() {
         let data = vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
@@ -944,6 +947,7 @@ pub(crate) mod tests {
         assert!(vector.data.iter().all(|v| *v == 1.0 || *v == 2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_economy_shapes_for_tall_matrix() {
         let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
@@ -956,6 +960,7 @@ pub(crate) mod tests {
         assert_eq!(r.shape, vec![3, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_economy_wide_matrix_matches_full() {
         let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
@@ -970,6 +975,7 @@ pub(crate) mod tests {
         tensor_close(&r_full, &r_econ, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_gpu_provider_returns_gpu_results() {
         test_support::with_test_provider(|provider| {
@@ -1006,6 +1012,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_matches_cpu() {
@@ -1049,6 +1056,7 @@ pub(crate) mod tests {
         tensor_close(&gpu_vec, &host_vec, tol);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_economy_device_path() {
@@ -1122,6 +1130,7 @@ pub(crate) mod tests {
         tensor_close(&qr_product, &a_matrix, 1e-3);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -599,12 +599,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_default_scalar() {
         let result = zeros_builtin(Vec::new()).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
@@ -614,6 +616,7 @@ pub(crate) mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -623,6 +626,7 @@ pub(crate) mod tests {
         assert_eq!(tensor.data.len(), 8);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_from_size_vector() {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -632,6 +636,7 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![2, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_logical_output() {
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
@@ -645,6 +650,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_tensor_infers_shape() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -655,6 +661,7 @@ pub(crate) mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_complex_scalar() {
         let args = vec![
@@ -672,6 +679,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -687,6 +695,7 @@ pub(crate) mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_without_explicit_shape_uses_prototype_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -697,6 +706,7 @@ pub(crate) mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_empty_input_returns_empty_matrix() {
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -710,6 +720,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_conflicting_like_and_logical_is_error() {
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -722,6 +733,7 @@ pub(crate) mod tests {
         assert!(zeros_builtin(args).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
@@ -749,12 +761,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn zeros_wgpu_single_allocates_gpu_without_like() {

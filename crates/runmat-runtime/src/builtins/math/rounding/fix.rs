@@ -287,6 +287,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_scalar_positive_and_negative() {
         let input = Value::Tensor(
@@ -301,6 +302,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_tensor_matrix() {
         let tensor = Tensor::new(vec![1.9, 4.1, -2.8, 0.5], vec![2, 2]).unwrap();
@@ -314,6 +316,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_complex_number() {
         let result = fix_builtin(Value::Complex(1.9, -2.2)).expect("fix");
@@ -326,6 +329,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_char_array_returns_numeric_tensor() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -339,6 +343,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_logical_array() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -349,6 +354,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_bool_promotes_to_numeric() {
         let result = fix_builtin(Value::Bool(true)).expect("fix");
@@ -358,6 +364,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_int_value_promotes() {
         let value = Value::Int(IntValue::I32(-42));
@@ -368,6 +375,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_string_errors() {
         let err = fix_builtin(Value::from("abc")).unwrap_err();
@@ -377,6 +385,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_preserves_special_values_and_canonicalizes_negative_zero() {
         let tensor = Tensor::new(
@@ -398,6 +407,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_complex_tensor_rounds_components() {
         let tensor = ComplexTensor::new(vec![(1.9, -2.6), (-3.4, 0.2)], vec![2, 1]).unwrap();
@@ -409,6 +419,7 @@ pub(crate) mod tests {
         assert_eq!(out.data, vec![(1.0, -2.0), (-3.0, 0.0)]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -424,12 +435,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fix_wgpu_matches_cpu() {

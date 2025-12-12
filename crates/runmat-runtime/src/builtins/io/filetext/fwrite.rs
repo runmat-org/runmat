@@ -844,6 +844,7 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_default_uint8_bytes() {
         registry::reset_for_tests();
@@ -867,6 +868,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_double_precision_writes_native_endian() {
         registry::reset_for_tests();
@@ -896,6 +898,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_big_endian_uint16() {
         registry::reset_for_tests();
@@ -921,6 +924,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_skip_inserts_padding() {
         registry::reset_for_tests();
@@ -945,6 +949,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_gpu_tensor_gathers_before_write() {
         registry::reset_for_tests();
@@ -990,6 +995,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_precision_errors() {
         registry::reset_for_tests();
@@ -1009,6 +1015,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_negative_skip_errors() {
         registry::reset_for_tests();
@@ -1028,6 +1035,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fwrite_wgpu_tensor_roundtrip() {
@@ -1079,6 +1087,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_identifier_errors() {
         registry::reset_for_tests();
@@ -1086,6 +1095,7 @@ pub(crate) mod tests {
         assert!(err.contains("file identifier must be non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

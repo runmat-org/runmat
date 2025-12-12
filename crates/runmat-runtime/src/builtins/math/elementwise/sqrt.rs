@@ -411,6 +411,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_scalar_positive() {
         let result = sqrt_builtin(Value::Num(9.0)).expect("sqrt");
@@ -420,6 +421,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_scalar_negative() {
         let result = sqrt_builtin(Value::Num(-4.0)).expect("sqrt");
@@ -432,6 +434,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_bool_true() {
         let result = sqrt_builtin(Value::Bool(true)).expect("sqrt");
@@ -441,6 +444,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_logical_array_inputs() {
         let logical = LogicalArray::new(vec![1u8, 0, 1, 0], vec![2, 2]).expect("logical");
@@ -457,6 +461,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_tensor_with_negatives() {
         let tensor = Tensor::new(vec![-1.0, 4.0], vec![1, 2]).unwrap();
@@ -473,6 +478,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_char_array_inputs() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
@@ -487,6 +493,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_string_input_errors() {
         let err = sqrt_builtin(Value::from("hello")).unwrap_err();
@@ -496,6 +503,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_complex_scalar() {
         let result = sqrt_builtin(Value::Complex(3.0, 4.0)).expect("sqrt");
@@ -508,6 +516,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_integer_argument() {
         let result = sqrt_builtin(Value::Int(IntValue::I32(9))).expect("sqrt");
@@ -517,6 +526,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -536,6 +546,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_gpu_negative_falls_back_to_complex() {
         test_support::with_test_provider(|provider| {
@@ -557,12 +568,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sqrt_wgpu_matches_cpu_elementwise() {

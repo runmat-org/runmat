@@ -325,6 +325,7 @@ pub(crate) mod tests {
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_generates_unique_names() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -340,6 +341,7 @@ pub(crate) mod tests {
         assert!(!path_exists(Path::new(&second_str)), "second path exists");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_returns_char_row_vector() {
         let value = tempname_builtin(Vec::new()).expect("tempname");
@@ -352,6 +354,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_uses_system_temp_directory_by_default() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -364,6 +367,7 @@ pub(crate) mod tests {
         assert_eq!(parent, std::env::temp_dir().as_path());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_custom_folder_char_array() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -382,6 +386,7 @@ pub(crate) mod tests {
         assert!(!path_exists(&path), "generated path should not exist yet");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_custom_folder_string_scalar() {
         let dir = tempdir().expect("tempdir");
@@ -394,6 +399,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_allows_nonexistent_targets() {
         let dir = tempdir().expect("tempdir");
@@ -406,6 +412,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_string_array_scalar() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -420,6 +427,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_expands_tilde_prefix() {
         let home = home_directory().expect("home directory");
@@ -432,6 +440,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_preserves_relative_folder() {
         let base = "relative_temp";
@@ -448,18 +457,21 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_too_many_arguments() {
         let err = tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("error");
         assert_eq!(err, ERR_TOO_MANY_INPUTS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_invalid_type() {
         let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");
         assert_eq!(err, ERR_FOLDER_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_empty_folder() {
         let empty = Value::CharArray(CharArray::new_row(""));
@@ -467,6 +479,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_FOLDER_EMPTY);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

@@ -582,11 +582,13 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_scatter3_requires_equal_lengths() {
         assert!(build_scatter3_plot(vec![1.0], vec![], vec![1.0], &mut test_style()).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_builtin_emits_result_or_backend_error() {
         let out = scatter3_builtin(
@@ -600,6 +602,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_accepts_per_point_sizes() {
         let rest = vec![Value::Tensor(Tensor {
@@ -614,6 +617,7 @@ pub(crate) mod tests {
         assert!(style.per_point_sizes.is_some());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_applies_display_name() {
         let rest = vec![

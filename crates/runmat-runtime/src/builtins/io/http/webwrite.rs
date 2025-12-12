@@ -1064,6 +1064,7 @@ pub(crate) mod tests {
         let _ = stream.write_all(body);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_posts_form_data_by_default() {
         let payload = {
@@ -1115,6 +1116,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_sends_json_when_media_type_json() {
         let payload = {
@@ -1162,6 +1164,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_applies_basic_auth_and_custom_headers() {
         let payload = Value::from("");
@@ -1214,6 +1217,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_supports_query_parameters() {
         let payload = Value::Struct(StructValue::new());
@@ -1247,6 +1251,7 @@ pub(crate) mod tests {
         assert!(first_line.contains("verbose=true"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_binary_payload_respected() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 255.0], vec![4, 1]).unwrap();
@@ -1276,6 +1281,7 @@ pub(crate) mod tests {
         assert_eq!(body, vec![1, 2, 3, 255]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

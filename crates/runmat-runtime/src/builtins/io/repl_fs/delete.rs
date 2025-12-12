@@ -536,6 +536,7 @@ pub(crate) mod tests {
     use std::fs::File;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_removes_single_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -552,6 +553,7 @@ pub(crate) mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_removes_files_with_wildcard() {
         let _lock = REPL_FS_TEST_LOCK
@@ -570,6 +572,7 @@ pub(crate) mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -596,6 +599,7 @@ pub(crate) mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -631,6 +635,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_cell_array_of_paths() {
         let _lock = REPL_FS_TEST_LOCK
@@ -658,6 +663,7 @@ pub(crate) mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_empty_string_array_is_noop() {
         let array = StringArray::new(Vec::<String>::new(), vec![0]).expect("empty array");
@@ -665,6 +671,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_empty_string_argument() {
         let err = delete_builtin(vec![Value::from(String::new())]).expect_err("empty string");
@@ -674,6 +681,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_string_array_empty_element() {
         let array =
@@ -685,6 +693,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_char_array_blank_row() {
         let data = vec![' '; 4];
@@ -696,6 +705,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
@@ -706,6 +716,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_missing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -722,6 +733,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -739,6 +751,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_handle_returns_invalid_handle() {
         let handle =
@@ -758,6 +771,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_rejects_mixed_handle_and_filename() {
         let handle =
@@ -773,6 +787,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_cell_of_handles() {
         let handle_a =
@@ -785,6 +800,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_runs_with_wgpu_provider_registered() {
         let _lock = REPL_FS_TEST_LOCK
@@ -803,6 +819,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_parse() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

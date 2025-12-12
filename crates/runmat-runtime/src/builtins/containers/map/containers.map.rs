@@ -1418,6 +1418,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn construct_empty_map_defaults() {
         let map = containers_map_builtin(Vec::new()).expect("map");
@@ -1452,6 +1453,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_with_cells_lookup() {
         let keys = crate::make_cell(vec![Value::from("apple"), Value::from("pear")], 1, 2).unwrap();
@@ -1466,6 +1468,7 @@ pub(crate) mod tests {
         assert_eq!(apple, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_rejects_duplicate_keys() {
         let keys = crate::make_cell(vec![Value::from("dup"), Value::from("dup")], 1, 2).unwrap();
@@ -1474,6 +1477,7 @@ pub(crate) mod tests {
         assert!(err.contains("Duplicate key name"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_errors_when_value_count_mismatch() {
         let keys = crate::make_cell(vec![Value::from("a"), Value::from("b")], 1, 2).unwrap();
@@ -1482,6 +1486,7 @@ pub(crate) mod tests {
         assert!(err.contains("number of keys"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn comparison_method_rejects_unknown_values() {
         let keys = crate::make_cell(vec![Value::from("a")], 1, 1).unwrap();
@@ -1496,6 +1501,7 @@ pub(crate) mod tests {
         assert!(err.contains("ComparisonMethod"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn key_type_single_roundtrip() {
         let map = containers_map_builtin(vec![Value::from("KeyType"), Value::from("single")])
@@ -1514,6 +1520,7 @@ pub(crate) mod tests {
         assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_type_double_converts_integers() {
         let keys = crate::make_cell(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -1532,6 +1539,7 @@ pub(crate) mod tests {
         assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_type_logical_converts_numeric_arrays() {
         let keys = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
@@ -1555,6 +1563,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn uniform_values_enforced_on_assignment() {
         let map = containers_map_builtin(vec![Value::from("UniformValues"), Value::from(true)])
@@ -1567,6 +1576,7 @@ pub(crate) mod tests {
         assert!(err.contains("UniformValues"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assignment_updates_and_inserts() {
         let map = containers_map_builtin(Vec::new()).expect("map");
@@ -1597,6 +1607,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsref_multiple_keys_preserves_shape() {
         let keys = crate::make_cell(
@@ -1627,6 +1638,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsref_empty_key_collection_returns_empty_cell() {
         let keys = crate::make_cell(vec![Value::from("z")], 1, 1).unwrap();
@@ -1645,6 +1657,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsasgn_with_cell_keys_updates_all_targets() {
         let keys = crate::make_cell(vec![Value::from("a"), Value::from("b")], 1, 2).unwrap();
@@ -1665,6 +1678,7 @@ pub(crate) mod tests {
         assert_eq!(b_value, Value::Num(20.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assignment_value_count_mismatch_errors() {
         let keys = crate::make_cell(vec![Value::from("x"), Value::from("y")], 1, 2).unwrap();
@@ -1678,6 +1692,7 @@ pub(crate) mod tests {
         assert!(err.contains("requires 2 values"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsasgn_empty_key_collection_is_noop() {
         let keys = crate::make_cell(vec![Value::from("root")], 1, 1).unwrap();
@@ -1694,6 +1709,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn keys_values_iskey_remove() {
         let keys = crate::make_cell(
@@ -1738,6 +1754,7 @@ pub(crate) mod tests {
         assert_eq!(mask, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_missing_key_returns_error() {
         let keys = crate::make_cell(vec![Value::from("key")], 1, 1).unwrap();
@@ -1751,6 +1768,7 @@ pub(crate) mod tests {
         assert_eq!(err, MISSING_KEY_ERR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_delegates_to_map_count() {
         let keys = crate::make_cell(
@@ -1769,6 +1787,7 @@ pub(crate) mod tests {
         assert_eq!(map_length(&map), Some(3));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn map_constructor_gathers_gpu_values() {
         test_support::with_test_provider(|provider| {
@@ -1794,6 +1813,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);

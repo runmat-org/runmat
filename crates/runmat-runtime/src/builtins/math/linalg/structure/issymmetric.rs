@@ -566,6 +566,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symmetric_matrix_returns_true() {
         let tensor = Tensor::new(
@@ -577,6 +578,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nonsymmetric_matrix_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -584,6 +586,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn skew_symmetric_flag_requires_zero_diagonal() {
         let tensor = Tensor::new(vec![0.0, 2.0, -2.0, 0.0], vec![2, 2]).unwrap();
@@ -597,6 +600,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_allows_small_deviations() {
         let tensor = Tensor::new(vec![1.0, 1.0 + 1e-12, 1.0 - 1e-12, 1.0], vec![2, 2]).unwrap();
@@ -605,6 +609,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_matrix_symmetry() {
         let tensor = ComplexTensor::new(
@@ -617,6 +622,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_matrix_promoted() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -625,6 +631,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_square_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -632,6 +639,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn higher_dimensional_inputs_error() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -642,6 +650,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_and_flag_in_any_order() {
         let tensor = Tensor::new(vec![0.0, 1.0, -1.0000000001, 0.0], vec![2, 2]).unwrap();
@@ -660,6 +669,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -671,6 +681,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -685,6 +696,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -695,6 +707,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_inputs_follow_rules() {
         let result = issymmetric_builtin(Value::Num(5.0), Vec::new()).expect("issymmetric scalar");
@@ -705,6 +718,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issymmetric_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -720,12 +734,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn issymmetric_wgpu_matches_cpu() {

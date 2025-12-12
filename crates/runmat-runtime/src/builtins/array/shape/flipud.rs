@@ -315,6 +315,7 @@ pub(crate) mod tests {
         CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_matrix_reverses_rows() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("tensor");
@@ -329,6 +330,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_column_vector_reverses_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -340,6 +342,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_row_vector_noop() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -351,6 +354,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_nd_tensor_flips_first_dim_only() {
         let tensor = Tensor::new((1..=24).map(|v| v as f64).collect(), vec![3, 4, 2]).unwrap();
@@ -365,6 +369,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_char_array() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -378,6 +383,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_string_array() {
         let strings =
@@ -389,6 +395,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_cell_array_reverses_rows() {
         let cell = CellArray::new(
@@ -416,6 +423,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_logical_array_preserves_bits() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -427,6 +435,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_scalar_numeric_noop() {
         let result = flipud_builtin(Value::Num(42.0)).expect("flipud");
@@ -436,6 +445,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_complex_tensor_defaults_to_first_dim() {
         let tensor = ComplexTensor::new(
@@ -451,6 +461,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_rejects_struct_inputs() {
         let mut st = StructValue::new();
@@ -459,6 +470,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -476,6 +488,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_preserves_row_vector() {
         test_support::with_test_provider(|provider| {
@@ -492,6 +505,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_falls_back_when_axis_missing() {
         // The simple provider does not expose flip, so this exercises gather→flip→upload.
@@ -503,6 +517,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_with_registered_provider_preserves_gpu_type() {
         test_support::with_test_provider(|provider| {
@@ -517,12 +532,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn flipud_wgpu_matches_cpu() {

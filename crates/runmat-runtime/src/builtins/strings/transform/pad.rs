@@ -644,12 +644,14 @@ pub(crate) mod tests {
     #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_length_right() {
         let result = pad_builtin(Value::String("GPU".into()), vec![Value::Num(5.0)]).expect("pad");
         assert_eq!(result, Value::String("GPU  ".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_left_with_custom_char() {
         let result = pad_builtin(
@@ -664,6 +666,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("0042".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_both_with_odd_count() {
         let result = pad_builtin(
@@ -678,6 +681,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("**core***".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_auto_uses_longest_element() {
         let strings =
@@ -692,6 +696,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_pad_character_only() {
         let strings = StringArray::new(vec!["A".into(), "Run".into()], vec![2, 1]).unwrap();
@@ -706,6 +711,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_length_with_pad_character() {
         let strings = StringArray::new(vec!["7".into(), "512".into()], vec![2, 1]).unwrap();
@@ -723,6 +729,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_direction_only() {
         let strings =
@@ -741,6 +748,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_single_string_pad_character_only_leaves_length() {
         let result =
@@ -748,6 +756,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("GPU".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_char_array_resizes_columns() {
         let chars: Vec<char> = "GPUrun".chars().collect();
@@ -764,6 +773,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -796,6 +806,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_preserves_missing_string() {
         let result =
@@ -803,18 +814,21 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_input_type() {
         let err = pad_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_negative_length() {
         let err = pad_builtin(Value::String("data".into()), vec![Value::Num(-1.0)]).unwrap_err();
         assert_eq!(err, LENGTH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_direction() {
         let err = pad_builtin(
@@ -825,6 +839,7 @@ pub(crate) mod tests {
         assert_eq!(err, DIRECTION_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_pad_character() {
         let err = pad_builtin(
@@ -835,6 +850,7 @@ pub(crate) mod tests {
         assert_eq!(err, PAD_CHAR_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pad_works_with_wgpu_provider_active() {
@@ -845,6 +861,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

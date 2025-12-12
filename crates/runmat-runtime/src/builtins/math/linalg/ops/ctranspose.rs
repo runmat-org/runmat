@@ -544,6 +544,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_real_matrix_matches_transpose() {
         let input = tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &[2, 3]);
@@ -557,6 +558,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_complex_matrix_conjugates() {
         let data = vec![(1.0, 2.0), (3.0, -4.0), (5.0, 0.0), (6.0, -7.0)];
@@ -574,6 +576,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_complex_tensor_realises_real_when_imag_zero() {
         let data = vec![(1.0, 0.0), (2.0, -0.0)];
@@ -588,6 +591,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_complex_scalar() {
         let result = ctranspose_builtin(Value::Complex(2.0, 3.0)).expect("ctranspose");
@@ -600,6 +604,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_logical_mask() {
         let la = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -613,6 +618,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_char_matrix() {
         let ca = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -627,6 +633,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_string_array_transposes() {
         let data = vec![
@@ -654,6 +661,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_cell_array() {
         let cells = vec![
@@ -681,6 +689,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_scalar_types_identity() {
         assert_eq!(
@@ -697,6 +706,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_tensor_swaps_first_two_dims_for_nd() {
         let data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
@@ -712,6 +722,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_struct_unsupported() {
         let mut st = StructValue::new();
@@ -720,6 +731,7 @@ pub(crate) mod tests {
         assert!(matches!(result, Err(msg) if msg.contains("unsupported input type")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -736,6 +748,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ctranspose_wgpu_matches_cpu() {
@@ -760,6 +773,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

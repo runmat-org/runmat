@@ -297,6 +297,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
     use std::f64::consts::PI;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_real_positive_negative() {
         let pos = angle_builtin(Value::Num(5.0)).expect("angle");
@@ -313,6 +314,7 @@ pub(crate) mod tests {
         assert_eq!(zero, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_complex_scalar_matches_atan2() {
         let value = Value::Complex(3.0, -4.0);
@@ -324,6 +326,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_tensor_values() {
         let tensor = Tensor::new(vec![1.0, -1.0, 0.0, 2.0], vec![2, 2]).unwrap();
@@ -340,6 +343,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_logical_and_char_inputs() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -358,6 +362,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_complex_tensor() {
         let data = vec![(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)];
@@ -379,6 +384,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -398,6 +404,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_dimensionless_int_input() {
         let result = angle_builtin(Value::Int(IntValue::I32(-10))).expect("angle");
@@ -408,6 +415,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_nan_propagates() {
         let result = angle_builtin(Value::Num(f64::NAN)).expect("angle");
@@ -417,6 +425,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_rejects_strings() {
         let err = angle_builtin(Value::from("hello")).unwrap_err();
@@ -426,6 +435,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_rejects_string_arrays() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2]).unwrap();
@@ -436,12 +446,14 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn angle_wgpu_matches_cpu() {

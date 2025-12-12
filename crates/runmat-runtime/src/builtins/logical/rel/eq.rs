@@ -581,18 +581,21 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::HandleRef;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_scalar_true() {
         let result = eq_builtin(Value::Num(5.0), Value::Num(5.0)).expect("eq");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_scalar_false() {
         let result = eq_builtin(Value::Num(5.0), Value::Num(4.0)).expect("eq");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 2.0], vec![1, 4]).unwrap();
@@ -606,6 +609,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_char_array_against_numeric() {
         let char_array = CharArray::new(vec!['A', 'B', 'A'], 1, 3).unwrap();
@@ -620,6 +624,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_string_array_broadcast() {
         let sa = StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap();
@@ -633,6 +638,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_handle_identity() {
         unsafe {
@@ -659,6 +665,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -677,12 +684,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_numeric_and_string_error() {
         let err = eq_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.contains("mixing numeric and string inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_complex_and_numeric() {
         let complex = Value::Complex(2.0, 0.0);
@@ -690,12 +699,14 @@ pub(crate) mod tests {
         assert_eq!(eq_builtin(complex, numeric).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn eq_wgpu_matches_host() {

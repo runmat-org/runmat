@@ -469,6 +469,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_basic() {
         let result = linspace_builtin(
@@ -489,6 +490,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_default_count() {
         let result =
@@ -503,6 +505,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_zero_count() {
         let result = linspace_builtin(
@@ -520,6 +523,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_single_point() {
         let result = linspace_builtin(
@@ -537,6 +541,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_non_integer_count_errors() {
         let err = linspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(3.5)])
@@ -544,6 +549,7 @@ pub(crate) mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_negative_count_errors() {
         let err = linspace_builtin(
@@ -555,6 +561,7 @@ pub(crate) mod tests {
         assert!(err.contains(">= 0"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_infinite_count_errors() {
         let err = linspace_builtin(
@@ -566,6 +573,7 @@ pub(crate) mod tests {
         assert!(err.contains("finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_nan_count_errors() {
         let err = linspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(f64::NAN)])
@@ -573,6 +581,7 @@ pub(crate) mod tests {
         assert!(err.contains("finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_non_scalar_count_errors() {
         let sz = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -581,6 +590,7 @@ pub(crate) mod tests {
         assert!(err.contains("scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_complex_sequence() {
         let result = linspace_builtin(
@@ -608,6 +618,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_boolean_arguments_are_promoted() {
         let result = linspace_builtin(
@@ -628,6 +639,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_boolean_count_supported() {
         let result = linspace_builtin(Value::Num(3.0), Value::Num(7.0), vec![Value::Bool(true)])
@@ -641,6 +653,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_tensor_scalar_arguments() {
         let start = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -663,6 +676,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_equal_endpoints_fill_with_endpoint() {
         let result = linspace_builtin(
@@ -680,6 +694,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -715,6 +730,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linspace_gpu_zero_count_produces_gpu_empty_vector() {
         test_support::with_test_provider(|provider| {
@@ -747,12 +763,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn linspace_wgpu_matches_cpu() {

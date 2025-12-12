@@ -719,6 +719,7 @@ pub(crate) mod tests {
             .collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
@@ -734,6 +735,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_range_with_dims() {
         let _guard = random::test_lock().lock().unwrap();
@@ -753,6 +755,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_tensor() {
         let _guard = random::test_lock().lock().unwrap();
@@ -771,6 +774,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_output() {
         let _guard = random::test_lock().lock().unwrap();
@@ -796,12 +800,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_requires_binary_bounds() {
         let err = randi_builtin(vec![Value::Num(3.0), Value::from("logical")]).unwrap_err();
         assert!(err.contains("logical output requires"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_logical_prototype() {
         let _guard = random::test_lock().lock().unwrap();
@@ -823,12 +829,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_requires_prototype() {
         let err = randi_builtin(vec![Value::Num(5.0), Value::from("like")]).unwrap_err();
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_duplicate_like_is_error() {
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
@@ -843,6 +851,7 @@ pub(crate) mod tests {
         assert!(err.contains("multiple 'like' specifications"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_logical_conflict_is_error() {
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
@@ -856,6 +865,7 @@ pub(crate) mod tests {
         assert!(err.contains("cannot combine 'like' with 'logical'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -887,6 +897,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_shape_override() {
         let _guard = random::test_lock().lock().unwrap();
@@ -921,12 +932,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_invalid_upper_errors() {
         let err = randi_builtin(vec![Value::Num(0.0)]).unwrap_err();
         assert!(err.contains("upper bound"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randi_wgpu_like_produces_in_range_values() {
@@ -972,6 +985,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

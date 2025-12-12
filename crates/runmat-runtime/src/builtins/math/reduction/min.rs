@@ -1667,12 +1667,14 @@ pub(crate) mod tests {
         Value::Tensor(tensor)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_scalar_returns_input() {
         let result = min_builtin(Value::Num(5.0), Vec::new()).expect("min");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_vector_with_indices() {
         let tensor = Tensor::new(vec![3.0, 1.0, 5.0], vec![3, 1]).unwrap();
@@ -1682,6 +1684,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_matrix_default_dimension() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -1702,6 +1705,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_all_linear_index() {
         let tensor =
@@ -1723,6 +1727,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_with_omitnan() {
         let tensor = Tensor::new(vec![f64::NAN, 4.0, 2.0], vec![3, 1]).unwrap();
@@ -1733,6 +1738,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_omitnan_all_nan_slice() {
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN], vec![2, 1]).unwrap();
@@ -1749,6 +1755,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_reduction_abs_comparison() {
         let tensor = Tensor::new(vec![1.0, -3.0, -2.0, 4.0], vec![2, 2]).unwrap();
@@ -1774,6 +1781,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_reduction_complex_real_comparison() {
         let tensor = ComplexTensor::new(vec![(1.0, 2.0), (0.5, 5.0)], vec![2, 1]).expect("tensor");
@@ -1794,6 +1802,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_broadcast() {
         let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
@@ -1820,6 +1829,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_abs_comparison() {
         let lhs = Tensor::new(vec![-2.0, 1.0], vec![2, 1]).unwrap();
@@ -1845,6 +1855,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_rejects_reduction_only_keywords() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1857,6 +1868,7 @@ pub(crate) mod tests {
         assert!(err.contains("only supported for reduction"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_complex_real_comparison() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
@@ -1872,6 +1884,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_argument_parsing() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1883,6 +1896,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_vecdim_duplicate_entries() {
         let tensor = Tensor::new(vec![5.0, 2.0, 7.0, 1.0], vec![2, 2]).unwrap();
@@ -1894,6 +1908,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_gpu_argument_errors() {
         let tensor = Tensor::new(vec![3.0, 1.0], vec![2, 1]).unwrap();
@@ -1907,6 +1922,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension arguments must reside on the host"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_invalid_comparison_method_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1919,12 +1935,14 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported ComparisonMethod"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_doc_examples_present() {
         let blocks = test_support::doc_examples(super::DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn min_gpu_dim1_matches_cpu() {
@@ -1961,6 +1979,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_numeric_argument() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1982,6 +2001,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_complex_auto_comparison() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
@@ -1993,6 +2013,7 @@ pub(crate) mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_scalar_pair_arguments() {
         let args = vec![Value::Num(2.0)];
@@ -2000,6 +2021,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_rejects_invalid_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();

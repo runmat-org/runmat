@@ -1406,6 +1406,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_sorted() {
         let a = Tensor::new(vec![5.0, 7.0, 5.0, 1.0], vec![4, 1]).unwrap();
@@ -1427,6 +1428,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_stable() {
         let a = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 3.0], vec![5, 1]).unwrap();
@@ -1448,6 +1450,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![2.0, 4.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_handles_nan() {
         let a = Tensor::new(vec![f64::NAN, 1.0, f64::NAN], vec![3, 1]).unwrap();
@@ -1470,6 +1473,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_complex_with_real_inputs() {
         let complex =
@@ -1497,6 +1501,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![3.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_rows_default() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1519,6 +1524,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_char_elements_basic() {
         let a = CharArray::new("cab".chars().collect(), 1, 3).unwrap();
@@ -1549,6 +1555,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![1.0, 2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_string_elements_stable() {
         let a = StringArray::new(
@@ -1583,6 +1590,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![3.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1595,6 +1603,7 @@ pub(crate) mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1611,6 +1620,7 @@ pub(crate) mod tests {
         assert!(err.contains("same number of columns"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_mixed_types_error() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1627,6 +1637,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1653,6 +1664,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_two_outputs_from_evaluate() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1676,6 +1688,7 @@ pub(crate) mod tests {
         assert_eq!(ib_tensor2.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn intersect_wgpu_matches_cpu() {
@@ -1722,6 +1735,7 @@ pub(crate) mod tests {
         assert_eq!(gpu_ib.data, cpu_ib.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

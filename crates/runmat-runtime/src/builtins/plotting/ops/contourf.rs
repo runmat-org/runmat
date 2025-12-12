@@ -160,6 +160,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
         let res = contourf_builtin(

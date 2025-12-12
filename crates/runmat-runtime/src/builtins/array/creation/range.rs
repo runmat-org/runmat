@@ -757,6 +757,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_scalar_zero() {
         let result = range_builtin(Value::Num(42.0), Vec::new()).expect("range");
@@ -766,6 +767,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_vector_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0], vec![1, 3]).unwrap();
@@ -776,6 +778,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_matrix_columnwise() {
         let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).unwrap();
@@ -789,6 +792,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_matrix_rowwise() {
         let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).unwrap();
@@ -803,6 +807,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_all_collapse() {
         let tensor =
@@ -815,6 +820,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_omit_nan() {
         let tensor = Tensor::new(vec![2.0, 4.0, f64::NAN, 6.0, 5.0, f64::NAN], vec![2, 3]).unwrap();
@@ -829,6 +835,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_includenan_returns_nan() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
@@ -840,6 +847,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_all_omitnan() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 10.0, 4.0], vec![2, 2]).unwrap();
@@ -851,6 +859,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_dim_beyond_ndims_returns_zeros_or_nan() {
         let tensor = Tensor::new(vec![1.0, 4.0, f64::NAN, 7.0], vec![2, 2]).unwrap();
@@ -868,6 +877,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_multiple_dimensions() {
         let tensor = Tensor::new(
@@ -887,6 +897,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_vecdim_column_vector() {
         let tensor = Tensor::new(
@@ -907,6 +918,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_invalid_dimension_non_integer() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -915,6 +927,7 @@ pub(crate) mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -931,6 +944,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_row_vector_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -949,6 +963,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_all_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -967,6 +982,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -988,6 +1004,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn range_wgpu_dim2_matches_cpu() {
@@ -1024,6 +1041,7 @@ pub(crate) mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

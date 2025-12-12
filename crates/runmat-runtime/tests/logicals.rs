@@ -1,5 +1,8 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{LogicalArray, Tensor, Value};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_array_construction_and_display() {
     let la = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
@@ -8,6 +11,7 @@ fn logical_array_construction_and_display() {
     assert!(s.contains("["));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_mask_index_read_write() {
     // Create 2x2 tensor and mask
@@ -21,6 +25,7 @@ fn logical_mask_index_read_write() {
     let _ = runmat_runtime::call_builtin("string", &[arr]).unwrap();
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_size_numel_ndims() {
     let la = LogicalArray::new(vec![1, 0, 1, 1, 0, 0], vec![3, 2]).unwrap();
@@ -48,6 +53,7 @@ fn logical_size_numel_ndims() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_from_numeric_and_stringarray() {
     let t = Tensor::new_2d(vec![0.0, 1.0, -2.0], 3, 1).unwrap();

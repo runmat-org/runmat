@@ -310,6 +310,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_scalar_pair() {
         let result = hypot_builtin(Value::Num(3.0), Value::Num(4.0)).expect("hypot");
@@ -319,6 +320,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_matrix_elements() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -337,6 +339,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_scalar_broadcast() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -353,6 +356,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_row_vector_broadcasts_over_matrix() {
         let matrix = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -378,6 +382,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_complex_scalars() {
         let left = (3.0, 4.0);
@@ -394,6 +399,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_complex_tensor_with_real() {
         let complex = ComplexTensor::new(vec![(3.0, 4.0), (5.0, 12.0)], vec![2, 1]).unwrap();
@@ -415,6 +421,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_char_array_inputs() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -435,6 +442,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_logical_inputs() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical array");
@@ -458,6 +466,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_dimension_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -466,6 +475,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_nan_propagates() {
         let result = hypot_builtin(Value::Num(f64::NAN), Value::Num(1.0)).expect("nan propagation");
@@ -475,6 +485,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -503,6 +514,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_gpu_and_host_mix_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -524,6 +536,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_empty_tensor_result() {
         let lhs = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -539,6 +552,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn hypot_wgpu_matches_cpu_elementwise() {
@@ -582,6 +596,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

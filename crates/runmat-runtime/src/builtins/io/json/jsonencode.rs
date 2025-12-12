@@ -917,12 +917,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_scalar_double() {
         let encoded = jsonencode_builtin(Value::Num(5.0), Vec::new()).expect("jsonencode");
         assert_eq!(as_string(encoded), "5");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_matrix_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).expect("tensor");
@@ -932,6 +934,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_struct_round_trip() {
         let mut fields = StructValue::new();
@@ -945,6 +948,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "{\"name\":\"RunMat\",\"year\":2025}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_struct_options_enable_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
@@ -957,6 +961,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_accept_scalar_tensor_bool() {
         let tensor_value = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
@@ -965,6 +970,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "42");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_reject_non_scalar_tensor_bool() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
@@ -976,6 +982,7 @@ pub(crate) mod tests {
         assert_eq!(err, OPTION_VALUE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_accept_scalar_logical_array() {
         let logical = LogicalArray::new(vec![1], vec![1]).expect("logical");
@@ -984,6 +991,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "7");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_convert_inf_and_nan_controls_null_output() {
         let tensor = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).expect("tensor");
@@ -999,6 +1007,7 @@ pub(crate) mod tests {
         assert_eq!(err, INF_NAN_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_cell_array() {
         let elements = vec![Value::from(1.0), Value::from("two")];
@@ -1007,6 +1016,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "[1,\"two\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_char_array_zero_rows_is_empty_array() {
         let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
@@ -1014,6 +1024,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "[]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_char_array_empty_strings_per_row() {
         let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
@@ -1022,6 +1033,7 @@ pub(crate) mod tests {
         assert_eq!(encoded_str, "[\"\",\"\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_string_array_matrix() {
         let sa = StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![2, 1])
@@ -1030,6 +1042,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "[\"alpha\",\"beta\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_complex_tensor_outputs_objects() {
         let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
@@ -1040,6 +1053,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_gpu_tensor_gathers_host_data() {
         test_support::with_test_provider(|provider| {
@@ -1055,6 +1069,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn jsonencode_gpu_tensor_wgpu_gathers_host_data() {
@@ -1074,6 +1089,7 @@ pub(crate) mod tests {
         assert_eq!(as_string(encoded), "[1,2,3]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);

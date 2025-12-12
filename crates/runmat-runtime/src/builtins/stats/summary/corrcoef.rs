@@ -776,6 +776,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_matrix_basic() {
         let tensor = Tensor::new(
@@ -807,6 +808,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_two_inputs_matches_concatenation() {
         let left = Tensor::new(
@@ -847,6 +849,7 @@ pub(crate) mod tests {
         assert_tensor_close(&actual_tensor, &expected_tensor.data, 1.0e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_rows_complete_ignores_missing() {
         let tensor = Tensor::new(
@@ -880,6 +883,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_rows_pairwise_staggered_missing() {
         let tensor = Tensor::new(
@@ -918,6 +922,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_flag_one_accepted() {
         let tensor = Tensor::new(
@@ -944,6 +949,7 @@ pub(crate) mod tests {
         assert_tensor_close(&a, &b.data, 1.0e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -978,6 +984,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_mismatched_rows_errors() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -990,6 +997,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1001,6 +1009,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -1010,6 +1019,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn corrcoef_wgpu_matches_cpu() {

@@ -494,6 +494,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_plot_requires_equal_lengths() {
         assert!(build_line_plot(
@@ -505,6 +506,7 @@ pub(crate) mod tests {
         .is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
         let result = plot_builtin(
@@ -517,6 +519,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_handles_interleaved_styles() {
         let args = vec![
@@ -533,6 +536,7 @@ pub(crate) mod tests {
         assert_eq!(plans[1].appearance.line_style, LineStyle::Dashed);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_errors_on_incomplete_pair() {
         let args = vec![
@@ -543,6 +547,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric Y argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_rejects_style_before_data() {
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
@@ -550,6 +555,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric X data"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_extracts_line_style_order() {
         let args = vec![

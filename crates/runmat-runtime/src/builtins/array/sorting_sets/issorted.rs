@@ -1223,6 +1223,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_numeric_vector_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1230,6 +1231,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_numeric_vector_false() {
         let tensor = Tensor::new(vec![3.0, 2.0, 1.0], vec![3, 1]).unwrap();
@@ -1237,6 +1239,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_logical_vector() {
         let logical = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
@@ -1245,6 +1248,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -1253,6 +1257,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictascend_rejects_duplicates() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1261,6 +1266,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictmonotonic_true_with_descend() {
         let tensor = Tensor::new(vec![9.0, 4.0, 1.0], vec![3, 1]).unwrap();
@@ -1269,6 +1275,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictmonotonic_rejects_plateaus() {
         let tensor = Tensor::new(vec![4.0, 4.0, 2.0, 1.0], vec![4, 1]).unwrap();
@@ -1277,6 +1284,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_monotonic_accepts_descending() {
         let tensor = Tensor::new(vec![5.0, 4.0, 4.0, 1.0], vec![4, 1]).unwrap();
@@ -1285,6 +1293,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_monotonic_rejects_unsorted_data() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0], vec![3, 1]).unwrap();
@@ -1293,6 +1302,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_first() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1301,6 +1311,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_first_violation() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
@@ -1309,6 +1320,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_auto_descend_prefers_front() {
         let tensor = Tensor::new(vec![f64::NAN, 5.0, 3.0], vec![3, 1]).unwrap();
@@ -1317,6 +1329,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_comparison_abs() {
         let tensor = Tensor::new(vec![-1.0, 1.5, -2.0], vec![3, 1]).unwrap();
@@ -1325,6 +1338,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_complex_abs_method() {
         let tensor =
@@ -1334,6 +1348,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_complex_real_method() {
         let tensor =
@@ -1347,6 +1362,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
@@ -1355,6 +1371,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_dimension_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).unwrap();
@@ -1362,6 +1379,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_descend_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 4.0, 0.0], vec![2, 2]).unwrap();
@@ -1370,6 +1388,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_dimension() {
         let array = StringArray::new(
@@ -1388,6 +1407,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last() {
         let array = StringArray::new(
@@ -1401,6 +1421,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last_violation() {
         let array = StringArray::new(vec!["<missing>".into(), "apple".into()], vec![2, 1]).unwrap();
@@ -1410,6 +1431,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_comparison_method_error() {
         let array = StringArray::new(vec!["apple".into(), "berry".into()], vec![2, 1]).unwrap();
@@ -1418,6 +1440,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_char_array_input() {
         let chars = CharArray::new(vec!['a', 'c', 'e'], 1, 3).unwrap();
@@ -1425,6 +1448,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_duplicate_direction_error() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1433,6 +1457,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1447,6 +1472,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn issorted_wgpu_matches_cpu() {
@@ -1467,6 +1493,7 @@ pub(crate) mod tests {
         assert_eq!(gpu, cpu);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_doc_examples() {
         let blocks = test_support::doc_examples(DOC_MD);

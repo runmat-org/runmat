@@ -319,6 +319,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_inverts_permute() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
@@ -337,6 +338,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_rejects_invalid_order() {
         let order = make_tensor(&[1.0, 1.0], &[1, 2]);
@@ -348,6 +350,7 @@ pub(crate) mod tests {
         assert!(err.contains("duplicate"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_requires_vector_order() {
         let order = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -362,6 +365,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_char_array_roundtrip() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -380,6 +384,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -400,6 +405,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_numeric_scalar() {
         let value = Value::Num(42.0);
@@ -408,6 +414,7 @@ pub(crate) mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_logical_array_roundtrip() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -425,6 +432,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -432,6 +440,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_wgpu_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -465,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_string_array_roundtrip() {
         let data = vec![
@@ -489,6 +499,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_extends_missing_dimensions() {
         let row = make_tensor(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1, 5]);
@@ -509,6 +520,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_errors_when_order_too_short() {
         let matrix = make_tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);

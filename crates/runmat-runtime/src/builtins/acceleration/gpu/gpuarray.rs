@@ -758,6 +758,7 @@ pub(crate) mod tests {
         gpu_array_builtin(value, rest)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_transfers_numeric_tensor() {
         test_support::with_test_provider(|_| {
@@ -774,6 +775,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_marks_logical_inputs() {
         test_support::with_test_provider(|_| {
@@ -792,6 +794,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_handles_scalar_bool() {
         test_support::with_test_provider(|_| {
@@ -807,6 +810,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_supports_char_arrays() {
         test_support::with_test_provider(|_| {
@@ -834,6 +838,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_converts_strings() {
         test_support::with_test_provider(|_| {
@@ -849,6 +854,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_passthrough_existing_handle() {
         test_support::with_test_provider(|provider| {
@@ -869,6 +875,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_casts_to_int32() {
         test_support::with_test_provider(|_| {
@@ -884,6 +891,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_casts_to_uint8() {
         test_support::with_test_provider(|_| {
@@ -899,6 +907,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_single_precision_rounds() {
         test_support::with_test_provider(|_| {
@@ -917,6 +926,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_like_infers_logical() {
         test_support::with_test_provider(|_| {
@@ -937,6 +947,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_like_requires_argument() {
         test_support::with_test_provider(|_| {
@@ -946,6 +957,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_unknown_option_errors() {
         test_support::with_test_provider(|_| {
@@ -955,6 +967,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_to_logical_reuploads() {
         test_support::with_test_provider(|provider| {
@@ -981,6 +994,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_logical_to_double_clears_flag() {
         test_support::with_test_provider(|provider| {
@@ -1005,6 +1019,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_applies_size_arguments() {
         test_support::with_test_provider(|_| {
@@ -1021,6 +1036,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_size_arguments_update_shape() {
         test_support::with_test_provider(|provider| {
@@ -1044,6 +1060,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_size_mismatch_errors() {
         test_support::with_test_provider(|_| {
@@ -1057,6 +1074,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_roundtrip() {
@@ -1085,12 +1103,14 @@ pub(crate) mod tests {
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_accepts_int_scalars() {
         test_support::with_test_provider(|_| {

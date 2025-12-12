@@ -1264,6 +1264,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_fir_basic() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1290,6 +1291,7 @@ pub(crate) mod tests {
         approx_eq_slice(&z_data, &[1.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_iir_impulse() {
         let alpha = 0.8;
@@ -1308,6 +1310,7 @@ pub(crate) mod tests {
         approx_eq_slice(&data, &[0.2, 0.16, 0.128, 0.1024, 0.08192]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_with_initial_conditions() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1357,6 +1360,7 @@ pub(crate) mod tests {
         approx_eq_slice(&zf2_data, &[1.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_accepts_empty_initial_placeholder() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1403,6 +1407,7 @@ pub(crate) mod tests {
         approx_eq_slice(&z_def, &z_ph);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_rows_with_dimension_argument() {
         let b = Tensor::new(vec![1.0, -1.0], vec![1, 2]).unwrap();
@@ -1438,6 +1443,7 @@ pub(crate) mod tests {
         approx_eq_slice(&state_data, &[-4.0, -1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_complex_signal() {
         let b = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0)], vec![1, 2]).unwrap();
@@ -1479,6 +1485,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_invalid_initial_shape() {
         let b = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -1496,6 +1503,7 @@ pub(crate) mod tests {
         assert!(err.contains("initial conditions"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_gpu_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -1531,6 +1539,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter_wgpu_matches_cpu() {
@@ -1581,6 +1590,7 @@ pub(crate) mod tests {
         approx_eq_slice(&gathered.data, &cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());

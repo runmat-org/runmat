@@ -230,6 +230,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_returns_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -243,6 +244,7 @@ pub(crate) mod tests {
         assert_eq!(actual, expected.to_string_lossy());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_reflects_directory_changes() {
         let _lock = REPL_FS_TEST_LOCK
@@ -265,6 +267,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_returns_char_array_row_vector() {
         let _lock = REPL_FS_TEST_LOCK
@@ -282,6 +285,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_errors_when_arguments_provided() {
         let _lock = REPL_FS_TEST_LOCK
@@ -293,6 +297,7 @@ pub(crate) mod tests {
         assert_eq!(err, "pwd: too many input arguments");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

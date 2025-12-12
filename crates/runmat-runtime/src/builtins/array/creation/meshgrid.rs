@@ -834,6 +834,7 @@ pub(crate) mod tests {
         Tensor::new(data, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_single_input_duplicates_axis() {
         let x = tensor_from_vec(vec![-1.0, 0.0, 1.0], 1, 3);
@@ -853,6 +854,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_rectangular_inputs() {
         let x = tensor_from_vec(vec![0.0, 0.5, 1.0], 1, 3);
@@ -867,6 +869,7 @@ pub(crate) mod tests {
         assert_eq!(y_out.data, vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_three_inputs_volume() {
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
@@ -889,6 +892,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_keeps_gpu_residency() {
         test_support::with_test_provider(|provider| {
@@ -914,6 +918,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_gpu_inputs_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -936,6 +941,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn meshgrid_wgpu_matches_cpu() {
@@ -980,6 +986,7 @@ pub(crate) mod tests {
         assert_eq!(gathered_y.data, cpu_y.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_complex_inputs_produce_complex_outputs() {
         let complex = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
@@ -994,6 +1001,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_host_prototype() {
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
@@ -1003,6 +1011,7 @@ pub(crate) mod tests {
         assert!(matches!(x_out, Value::Tensor(_) | Value::Num(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

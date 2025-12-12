@@ -962,6 +962,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_matrix_basic() {
         let tensor = Tensor::new(
@@ -986,6 +987,7 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_two_vectors() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -1004,6 +1006,7 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_weighted_vector() {
         let tensor = Tensor::new(
@@ -1029,6 +1032,7 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_omitrows() {
         let tensor = Tensor::new(
@@ -1063,6 +1067,7 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_partialrows() {
         let tensor = Tensor::new(
@@ -1100,6 +1105,7 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1126,12 +1132,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cov_wgpu_matches_cpu() {

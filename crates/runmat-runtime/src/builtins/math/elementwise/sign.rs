@@ -346,6 +346,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_scalar_positive_negative_zero() {
         assert_eq!(sign_builtin(Value::Num(3.5)).unwrap(), Value::Num(1.0));
@@ -353,6 +354,7 @@ pub(crate) mod tests {
         assert_eq!(sign_builtin(Value::Num(0.0)).unwrap(), Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_scalar_nan_propagates() {
         let result = sign_builtin(Value::Num(f64::NAN)).unwrap();
@@ -362,6 +364,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_tensor_mixed_values() {
         let tensor = Tensor::new(vec![-2.0, -0.0, 0.0, 5.0], vec![2, 2]).unwrap();
@@ -375,6 +378,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_scalar_normalises() {
         let result = sign_builtin(Value::Complex(3.0, 4.0)).unwrap();
@@ -387,6 +391,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_tensor_handles_zero() {
         let tensor = ComplexTensor::new(vec![(0.0, 0.0), (1.0, -1.0)], vec![2, 1]).unwrap();
@@ -403,6 +408,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_character_array() {
         let ca = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
@@ -416,6 +422,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_logical_array() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -429,6 +436,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_int_values() {
         let value = Value::Int(IntValue::I32(-7));
@@ -439,6 +447,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_bool_values() {
         let t = sign_builtin(Value::Bool(true)).unwrap();
@@ -447,6 +456,7 @@ pub(crate) mod tests {
         assert_eq!(f, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_infinite_values() {
         let tensor = Tensor::new(
@@ -466,6 +476,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_string_input_errors() {
         let err = sign_builtin(Value::String("runmat".to_string())).unwrap_err();
@@ -475,6 +486,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_with_nan() {
         let result = sign_builtin(Value::Complex(f64::NAN, 1.0)).unwrap();
@@ -487,6 +499,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -503,6 +516,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_gpu_fallback_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -518,12 +532,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sign_wgpu_matches_cpu() {

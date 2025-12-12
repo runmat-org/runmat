@@ -720,6 +720,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_whitespace_default() {
         let input = Value::String("RunMat Accelerate Planner".to_string());
@@ -740,6 +741,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_custom_delimiter() {
         let input = Value::String("alpha,beta,gamma".to_string());
@@ -757,6 +759,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_true() {
         let input = Value::String("A+B-C".to_string());
@@ -786,6 +789,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_whitespace_collapse_default() {
         let input = Value::String("A  B".to_string());
@@ -806,6 +810,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_patterns_include_delimiters_collapse_true() {
         let input = Value::String("a,,b".to_string());
@@ -829,6 +834,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_collapse_false_preserves_empty_segments() {
         let input = Value::String("one,,three,".to_string());
@@ -855,6 +861,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_character_array_rows() {
         let mut row1: Vec<char> = "GPU Accelerate".chars().collect();
@@ -884,6 +891,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_array_multiple_columns() {
         let data = vec![
@@ -916,6 +924,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_outputs_string_array() {
         let values = vec![
@@ -941,6 +950,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_multiple_columns() {
         let values = vec![
@@ -972,6 +982,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_missing_string_propagates() {
         let input = Value::String("<missing>".to_string());
@@ -985,6 +996,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_name_value_pair_errors() {
         let input = Value::String("abc".to_string());
@@ -993,12 +1005,14 @@ pub(crate) mod tests {
         assert!(err.contains("name-value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_text_argument_errors() {
         let err = split_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.contains("first argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_delimiter_type_errors() {
         let err =
@@ -1006,6 +1020,7 @@ pub(crate) mod tests {
         assert!(err.contains("delimiter input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_empty_delimiter_errors() {
         let err = split_builtin(
@@ -1016,6 +1031,7 @@ pub(crate) mod tests {
         assert!(err.contains("at least one character"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_unknown_name_argument_errors() {
         let err = split_builtin(
@@ -1029,6 +1045,7 @@ pub(crate) mod tests {
         assert!(err.contains("unrecognized"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_collapse_delimiters_accepts_logical_array() {
         let logical = LogicalArray::new(vec![1u8], vec![1]).unwrap();
@@ -1047,6 +1064,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_accepts_tensor_scalar() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1068,6 +1086,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_mixed_inputs() {
         let handles: Vec<_> = vec![
@@ -1097,6 +1116,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

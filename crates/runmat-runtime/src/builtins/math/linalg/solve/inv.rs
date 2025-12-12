@@ -365,6 +365,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_scalar_num() {
         let result = inv_builtin(Value::Num(4.0)).expect("inv");
@@ -374,6 +375,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_square_matrix() {
         let data = vec![4.0, 1.0, -2.0, 3.0];
@@ -396,6 +398,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_empty_matrix_returns_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -409,6 +412,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_trailing_singleton_dimension_preserved() {
         let tensor =
@@ -424,6 +428,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_complex_scalar() {
         let result = inv_builtin(Value::Complex(2.0, -1.0)).expect("inv");
@@ -437,6 +442,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_complex_matrix() {
         let raw = vec![(1.0, 2.0), (0.0, 3.0), (0.0, 0.0), (4.0, -1.0)];
@@ -471,6 +477,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_rejects_higher_rank_tensor() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -478,6 +485,7 @@ pub(crate) mod tests {
         assert!(err.contains("2-D"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -485,6 +493,7 @@ pub(crate) mod tests {
         assert!(err.contains("square matrix"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_singular_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -492,6 +501,7 @@ pub(crate) mod tests {
         assert!(err.contains("singular"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -511,6 +521,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_scalar_int_promotes() {
         let result = inv_builtin(Value::Int(IntValue::I32(2))).expect("inv");
@@ -520,12 +531,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn inv_wgpu_matches_cpu() {

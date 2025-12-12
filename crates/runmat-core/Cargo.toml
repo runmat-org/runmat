@@ -23,6 +23,11 @@ log = "0.4"
 uuid = { version = "1", features = ["v4"], default-features = false }
 runmat-time = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
+version = "1"
+features = ["v4", "js"]
+default-features = false
+
 [features]
 default = ["jit"]
 jit = ["dep:runmat-turbine"]
@@ -37,3 +42,4 @@ runmat-snapshot = { workspace = true, default-features = false, features = ["com
 
 [dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks"] }
+wasm-bindgen-test = "0.3"

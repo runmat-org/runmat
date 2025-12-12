@@ -810,6 +810,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_scalar_returns_absolute_value() {
         let result = svd_builtin(Value::Num(-3.0), Vec::new()).expect("svd");
@@ -819,6 +820,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_three_outputs_reconstruct() {
         let matrix = Tensor::new(vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0], vec![3, 2]).expect("tensor");
@@ -833,6 +835,7 @@ pub(crate) mod tests {
         matrix_close(&recon, &original, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_empty_matrix_returns_empty_outputs() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).expect("tensor");
@@ -857,6 +860,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_complex_matrix_reconstructs() {
         let complex = ComplexTensor::new(
@@ -881,6 +885,7 @@ pub(crate) mod tests {
         complex_matrix_close(&recon, &original, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_numeric_zero_and_string_zero_request_economy() {
         let tall = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).expect("tensor");
@@ -900,6 +905,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_matrix_option_overrides_vector() {
         let matrix = Tensor::new(vec![3.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
@@ -917,6 +923,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_invalid_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
@@ -924,6 +931,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_too_many_option_arguments_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
@@ -939,6 +947,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many option arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_numeric_nonzero_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
@@ -949,6 +958,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_logical_input_matches_numeric() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).expect("logical");
@@ -965,6 +975,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_three_dimensional_input_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).expect("tensor");
@@ -972,6 +983,7 @@ pub(crate) mod tests {
         assert!(err.contains("must be 2-D"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_econ_shapes_match_matlab() {
         let tall = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).expect("tensor");
@@ -1007,6 +1019,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_vector_option_returns_column_vector() {
         let matrix = Tensor::new(vec![3.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
@@ -1021,6 +1034,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_gpu_input_gathers_to_host() {
         test_support::with_test_provider(|provider| {
@@ -1039,6 +1053,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn svd_wgpu_matches_cpu() {
@@ -1069,6 +1084,7 @@ pub(crate) mod tests {
         matrix_close(&gpu_v, &host_v, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_vector_matches_host_norm() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
@@ -1081,6 +1097,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

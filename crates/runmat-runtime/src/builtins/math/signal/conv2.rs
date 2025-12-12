@@ -619,6 +619,7 @@ pub(crate) mod tests {
         Tensor::new(col_major, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_full_basic() {
         let a = tensor_from_rows(2, 2, &[1.0, 2.0, 3.0, 4.0]);
@@ -635,6 +636,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_same_matches_reference() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -659,6 +661,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_valid_returns_expected_sum() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -679,6 +682,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_separable_matches_explicit_kernel() {
         let hcol = tensor_from_rows(3, 1, &[1.0, 2.0, 1.0]);
@@ -705,6 +709,7 @@ pub(crate) mod tests {
         assert_eq!(separable, explicit);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_complex_scaling() {
         let tensor = tensor_from_rows(2, 2, &[1.0, 2.0, 3.0, 4.0]);
@@ -723,6 +728,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_empty_inputs_follow_shape_rules() {
         let empty = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -756,6 +762,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_rejects_invalid_shape_keyword() {
         let a = tensor_from_rows(1, 1, &[1.0]);
@@ -769,6 +776,7 @@ pub(crate) mod tests {
         assert!(err.contains("shape argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_promotes_logical_inputs() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -796,6 +804,7 @@ pub(crate) mod tests {
         assert_eq!(logical_tensor.data, numeric_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_same_even_kernel_alignment() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -826,6 +835,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -865,6 +875,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn conv2_wgpu_fallback_matches_cpu() {
@@ -925,6 +936,7 @@ pub(crate) mod tests {
         assert_eq!(gpu_tensor.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

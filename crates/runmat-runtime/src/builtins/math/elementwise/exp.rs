@@ -295,6 +295,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_scalar() {
         let result = exp_builtin(Value::Num(1.0)).expect("exp");
@@ -304,6 +305,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -324,6 +326,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_int_value_promotes() {
         let value = Value::Int(IntValue::I32(2));
@@ -334,6 +337,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_bool_scalar() {
         let result = exp_builtin(Value::Bool(true)).expect("exp");
@@ -343,6 +347,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_complex_scalar() {
         let result = exp_builtin(Value::Complex(1.0, 2.0)).expect("exp");
@@ -356,6 +361,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_complex_tensor_elements() {
         let tensor = ComplexTensor::new(vec![(0.0, 0.0), (1.0, 1.0)], vec![2, 1]).unwrap();
@@ -376,6 +382,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_char_array_roundtrip() {
         let chars = CharArray::new("Hi".chars().collect(), 1, 2).unwrap();
@@ -392,6 +399,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_logical_array_promotes_to_double() {
         let logical =
@@ -409,6 +417,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_string_rejected() {
         let err = exp_builtin(Value::from("runmat")).unwrap_err();
@@ -418,6 +427,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -437,12 +447,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn exp_wgpu_matches_cpu_elementwise() {

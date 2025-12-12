@@ -1102,6 +1102,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_axes_must_match_grid() {
         let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
@@ -1111,6 +1112,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn implicit_axes_respect_tensor_shape() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1119,6 +1121,7 @@ pub(crate) mod tests {
         assert_eq!(args.y_axis, vec![1.0, 2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_vector_must_increase() {
         let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
@@ -1132,6 +1135,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_step_option_generates_sequence() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1147,6 +1151,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_color_option_parses_literal() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1165,6 +1170,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_list_option_accepts_explicit_vector() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1185,6 +1191,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_color_none_suppresses_overlays() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1203,6 +1210,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_list_mode_manual_requires_explicit_levels() {
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));

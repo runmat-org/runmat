@@ -295,6 +295,7 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_false_before_reading() {
         registry::reset_for_tests();
@@ -318,6 +319,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_true_after_reading_to_end() {
         registry::reset_for_tests();
@@ -344,6 +346,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_empty_file_is_true() {
         registry::reset_for_tests();
@@ -364,6 +367,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_invalid_identifier_errors() {
         registry::reset_for_tests();
@@ -371,6 +375,7 @@ pub(crate) mod tests {
         assert!(err.contains("Invalid file identifier"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_integer_identifier() {
         registry::reset_for_tests();
@@ -378,6 +383,7 @@ pub(crate) mod tests {
         assert_eq!(err, "feof: file identifier must be an integer");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_nan_identifier() {
         registry::reset_for_tests();
@@ -385,6 +391,7 @@ pub(crate) mod tests {
         assert_eq!(err, "feof: file identifier must be finite");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_negative_identifier() {
         registry::reset_for_tests();
@@ -392,6 +399,7 @@ pub(crate) mod tests {
         assert_eq!(err, "feof: file identifier must be non-negative");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_numeric_inputs() {
         registry::reset_for_tests();
@@ -399,6 +407,7 @@ pub(crate) mod tests {
         assert_eq!(err, IDENTIFIER_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_scalar_tensor_identifier() {
         registry::reset_for_tests();
@@ -423,6 +432,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_errors_on_closed_identifier() {
         registry::reset_for_tests();
@@ -447,6 +457,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_gpu_identifier_via_gather() {
         registry::reset_for_tests();
@@ -483,6 +494,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_standard_identifier_returns_false() {
         registry::reset_for_tests();
@@ -490,6 +502,7 @@ pub(crate) mod tests {
         assert!(!result);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

@@ -1043,6 +1043,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_basic_positions() {
         let eval = evaluate(
@@ -1062,6 +1063,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_match_output() {
         let eval = evaluate(
@@ -1084,6 +1086,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_tokens_output() {
         let eval = evaluate(
@@ -1115,6 +1118,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_match_once_returns_scalar() {
         let eval = evaluate(
@@ -1131,6 +1135,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_tokens_once_flattens() {
         let eval = evaluate(
@@ -1157,6 +1162,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_token_extents_once_matrix() {
         let eval = evaluate(
@@ -1179,6 +1185,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_names_once_struct() {
         let eval = evaluate(
@@ -1204,6 +1211,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_split_string_array() {
         let array = StringArray::new(vec!["a,b,c".into(), "1,2,3".into()], vec![2, 1]).unwrap();
@@ -1229,6 +1237,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_once_flag() {
         let eval = evaluate(
@@ -1246,6 +1255,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_multi_output_default() {
         let eval = evaluate(
@@ -1272,6 +1282,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_emptymatch_allow() {
         let eval = evaluate(
@@ -1291,6 +1302,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_names_output() {
         let eval = evaluate(
@@ -1337,6 +1349,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_token_extents_output() {
         let eval = evaluate(
@@ -1369,6 +1382,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_force_cell_output_scalar() {
         let eval = evaluate(
@@ -1394,6 +1408,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_string_array_multi_dim_order() {
         let sa = StringArray::new(
@@ -1439,6 +1454,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_cell_array_multi_dim_order() {
         let cell = runmat_builtins::CellArray::new(
@@ -1489,6 +1505,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_ignorecase_flag() {
         let eval = evaluate(
@@ -1521,6 +1538,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_lineanchors_and_dotall_flags() {
         let eval = evaluate(
@@ -1569,6 +1587,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(super::DOC_MD);

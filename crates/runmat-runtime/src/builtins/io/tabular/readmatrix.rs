@@ -1202,6 +1202,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_reads_csv_data() {
         let path = unique_path("readmatrix_csv");
@@ -1219,6 +1220,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_skips_header_lines() {
         let path = unique_path("readmatrix_header");
@@ -1236,6 +1238,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_delimiter_option() {
         let path = unique_path("readmatrix_tab");
@@ -1253,6 +1256,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_range_string() {
         let path = unique_path("readmatrix_range_string");
@@ -1270,6 +1274,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_range_numeric_vector() {
         let path = unique_path("readmatrix_range_numeric");
@@ -1288,6 +1293,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_treats_custom_missing_tokens() {
         let path = unique_path("readmatrix_missing");
@@ -1309,6 +1315,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_uses_decimal_and_thousands_separators() {
         let path = unique_path("readmatrix_decimal");
@@ -1334,6 +1341,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_applies_empty_value() {
         let path = unique_path("readmatrix_empty_value");
@@ -1351,6 +1359,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_accepts_struct_options() {
         let path = unique_path("readmatrix_struct_opts");
@@ -1375,6 +1384,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_errors_on_non_numeric_field() {
         let path = unique_path("readmatrix_error");
@@ -1388,6 +1398,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_returns_empty_on_no_data() {
         let path = unique_path("readmatrix_empty");
@@ -1405,12 +1416,14 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_output_type_logical() {
         let path = unique_path("readmatrix_output_logical");
@@ -1428,6 +1441,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_logical_proto() {
         let path = unique_path("readmatrix_like_logical");
@@ -1446,6 +1460,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_gpu_proto() {
         test_support::with_test_provider(|provider| {
@@ -1471,6 +1486,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_accepts_character_vector_path() {
         let path = unique_path("readmatrix_char_path");
@@ -1491,6 +1507,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_handles_quoted_fields() {
         let path = unique_path("readmatrix_quotes");
@@ -1508,6 +1525,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_preserves_negative_infinity() {
         let path = unique_path("readmatrix_infinity");
@@ -1527,6 +1545,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_supports_whitespace_delimiter() {
         let path = unique_path("readmatrix_whitespace");

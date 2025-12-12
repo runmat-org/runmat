@@ -532,6 +532,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_scalar_positive_and_negative() {
         let value = Value::Num(-2.7);
@@ -542,6 +543,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_integer_tensor() {
         let tensor = Tensor::new(vec![1.2, 4.7, -3.4, 5.0], vec![2, 2]).unwrap();
@@ -555,6 +557,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_complex_value() {
         let result = floor_builtin(Value::Complex(1.7, -2.3), Vec::new()).expect("floor");
@@ -567,6 +570,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_char_array_to_tensor() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -580,6 +584,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_logical_array_remains_same() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -593,6 +598,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_int_value_passthrough() {
         let result = floor_builtin(Value::Int(IntValue::I32(-4)), Vec::new()).expect("floor");
@@ -602,6 +608,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -618,6 +625,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_decimal_digits() {
         let value = Value::Num(21.456);
@@ -629,6 +637,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_negative_digits() {
         let tensor = Tensor::new(vec![123.4, -987.6], vec![2, 1]).unwrap();
@@ -640,6 +649,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_significant_digits() {
         let value = Value::Num(98765.4321);
@@ -651,6 +661,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_significant_requires_positive_digits() {
         let args = vec![Value::Int(IntValue::I32(0)), Value::from("significant")];
@@ -658,12 +669,14 @@ pub(crate) mod tests {
         assert!(err.contains("positive integer"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_string_input_errors() {
         let err = floor_builtin(Value::from("hello"), Vec::new()).unwrap_err();
         assert!(err.contains("numeric"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_like_invalid_prototype_errors() {
         let args = vec![Value::from("like"), Value::from("prototype")];
@@ -671,6 +684,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported prototype"), "unexpected: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_like_gpu_output() {
         test_support::with_test_provider(|provider| {
@@ -696,6 +710,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_bool_value() {
         let result = floor_builtin(Value::Bool(true), Vec::new()).expect("floor");
@@ -705,12 +720,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn floor_wgpu_matches_cpu() {

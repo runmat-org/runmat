@@ -106,6 +106,7 @@ pub(crate) mod tests {
         crate::builtins::plotting::state::disable_rendering_for_tests();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn defaults_to_current() {
         assert!(matches!(
@@ -114,6 +115,7 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parses_all_flag() {
         let values = vec![Value::String("all".to_string())];
@@ -123,6 +125,7 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parses_handles() {
         let values = vec![Value::Num(2.0)];

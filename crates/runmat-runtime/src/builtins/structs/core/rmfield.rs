@@ -394,6 +394,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_removes_single_field_from_scalar_struct() {
         let mut st = StructValue::new();
@@ -408,6 +409,7 @@ pub(crate) mod tests {
         assert!(updated.fields.contains_key("name"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_accepts_cell_array_of_field_names() {
         let mut st = StructValue::new();
@@ -425,6 +427,7 @@ pub(crate) mod tests {
         assert!(updated.fields.contains_key("right"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_supports_string_array_names() {
         let mut st = StructValue::new();
@@ -442,6 +445,7 @@ pub(crate) mod tests {
         assert!(updated.fields.contains_key("beta"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_errors_when_field_missing() {
         let mut st = StructValue::new();
@@ -453,6 +457,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_struct_array_roundtrip() {
         let mut first = StructValue::new();
@@ -486,6 +491,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_struct_array_missing_field_errors() {
         let mut first = StructValue::new();
@@ -507,6 +513,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_rejects_non_struct_inputs() {
         let err = rmfield_builtin(Value::Num(1.0), vec![Value::from("field")]).unwrap_err();
@@ -516,6 +523,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_produces_error_for_empty_field_name() {
         let mut st = StructValue::new();
@@ -527,6 +535,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_accepts_multiple_argument_forms() {
         let mut st = StructValue::new();
@@ -558,6 +567,7 @@ pub(crate) mod tests {
         assert!(updated.fields.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_ignores_duplicate_field_names() {
         let mut st = StructValue::new();
@@ -575,6 +585,7 @@ pub(crate) mod tests {
         assert!(updated.fields.contains_key("keep"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_returns_original_when_no_names_supplied() {
         let mut st = StructValue::new();
@@ -586,6 +597,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Struct(original));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_requires_field_names() {
         let mut st = StructValue::new();
@@ -597,6 +609,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rmfield_preserves_gpu_handles() {
@@ -629,6 +642,7 @@ pub(crate) mod tests {
         assert!(!updated.fields.contains_key("remove"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

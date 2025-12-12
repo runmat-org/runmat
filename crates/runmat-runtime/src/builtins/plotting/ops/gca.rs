@@ -54,6 +54,7 @@ pub(crate) mod tests {
         crate::builtins::plotting::state::disable_rendering_for_tests();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_returns_scalar_handle() {
         let handle = gca_builtin(Vec::new()).unwrap();
@@ -63,6 +64,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_mode_returns_struct() {
         let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();

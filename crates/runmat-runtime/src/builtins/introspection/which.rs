@@ -537,6 +537,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_reports_builtin() {
         let _lock = WHICH_TEST_LOCK
@@ -550,6 +551,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_variable_search_respects_workspace() {
         let _lock = WHICH_TEST_LOCK
@@ -562,6 +564,7 @@ pub(crate) mod tests {
         assert_eq!(String::try_from(&value).unwrap(), "'answer' is a variable.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_finds_files() {
         let _lock = WHICH_TEST_LOCK
@@ -586,6 +589,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_all_returns_cell_array() {
         let _lock = WHICH_TEST_LOCK
@@ -598,6 +602,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_not_found_message() {
         let _lock = WHICH_TEST_LOCK
@@ -608,6 +613,7 @@ pub(crate) mod tests {
         assert_eq!(text, "'definitely_missing' not found.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_parses_leading_option() {
         let _lock = WHICH_TEST_LOCK
@@ -620,6 +626,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_allows_uppercase_and_repeated_flags() {
         let _lock = WHICH_TEST_LOCK
@@ -638,6 +645,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_conflicting_flags_error() {
         let _lock = WHICH_TEST_LOCK
@@ -655,6 +663,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_invalid_flag_error() {
         let _lock = WHICH_TEST_LOCK
@@ -667,6 +676,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_requires_name_argument() {
         let _lock = WHICH_TEST_LOCK
@@ -676,6 +686,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_NOT_ENOUGH_ARGS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_non_string_name() {
         let _lock = WHICH_TEST_LOCK
@@ -685,6 +696,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_NAME_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_too_many_arguments() {
         let _lock = WHICH_TEST_LOCK
@@ -699,6 +711,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_TOO_MANY_ARGS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_accepts_char_and_string_array_inputs() {
         let _lock = WHICH_TEST_LOCK
@@ -722,6 +735,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_file_option_finds_directories() {
         let _lock = WHICH_TEST_LOCK
@@ -744,6 +758,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

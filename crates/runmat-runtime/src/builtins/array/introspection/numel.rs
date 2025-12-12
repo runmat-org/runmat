@@ -287,12 +287,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_scalar_is_one() {
         let result = numel_builtin(Value::Num(42.0), Vec::new()).expect("numel");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_matrix_counts_elements() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -300,6 +302,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_cell_array_counts_cells() {
         let cells = vec![
@@ -313,6 +316,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_char_array_counts_characters() {
         let chars = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
@@ -320,6 +324,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_selected_dimensions_multiplies_extents() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -328,6 +333,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_vector_argument_supported() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -337,6 +343,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_tensor_uses_shape() {
         test_support::with_test_provider(|provider| {
@@ -351,6 +358,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_must_be_positive_integer() {
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -362,6 +370,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_vector_requires_vector_shape() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -374,6 +383,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_arguments_must_be_numeric() {
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -385,12 +395,14 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn numel_wgpu_counts_elements() {

@@ -854,6 +854,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_matrix_default_dimension() {
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
@@ -867,6 +868,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_zero_column_matrix_returns_empty_row() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![2, 0]).unwrap();
@@ -880,6 +882,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_row_dimension() {
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
@@ -894,6 +897,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_zero_row_matrix_dim_two() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -908,6 +912,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_vecdim_multiple_axes() {
         let tensor = Tensor::new((1..=24).map(|v| v as f64).collect(), vec![3, 4, 2]).unwrap();
@@ -922,6 +927,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_all_option_returns_scalar() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -932,6 +938,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_all_on_empty_returns_false() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -942,6 +949,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_handles_nan_modes() {
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -959,6 +967,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_char_array_support() {
         let chars = CharArray::new("a\0c".chars().collect(), 1, 3).unwrap();
@@ -970,6 +979,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_includenan_keyword_allowed() {
         let tensor = Tensor::new(vec![f64::NAN, 0.0], vec![2, 1]).unwrap();
@@ -985,6 +995,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_complex_tensor_with_omitnan() {
         let complex = ComplexTensor::new(vec![(0.0, 0.0), (f64::NAN, 0.0)], vec![2, 1]).unwrap();
@@ -1009,6 +1020,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_vecdim_with_omitnan() {
         let mut data = vec![0.0; 8];
@@ -1026,6 +1038,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_all_with_dim_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
@@ -1034,6 +1047,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1054,6 +1068,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_gpu_provider_omitnan_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1075,6 +1090,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -1082,6 +1098,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_wgpu_default_matches_cpu() {
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1133,6 +1150,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn any_wgpu_omitnan_matches_cpu() {
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

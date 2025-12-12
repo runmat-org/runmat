@@ -251,6 +251,7 @@ pub(crate) mod tests {
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_points_to_existing_directory() {
         let value = tempdir_builtin(Vec::new()).expect("tempdir");
@@ -264,6 +265,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_returns_char_array_row_vector() {
         let value = tempdir_builtin(Vec::new()).expect("tempdir");
@@ -279,6 +281,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_appends_trailing_separator() {
         let value = tempdir_builtin(Vec::new()).expect("tempdir");
@@ -303,6 +306,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_returns_consistent_result() {
         let first = tempdir_builtin(Vec::new()).expect("tempdir");
@@ -315,12 +319,14 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_errors_when_arguments_provided() {
         let err = tempdir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err, ERR_TOO_MANY_INPUTS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_to_char_array_appends_separator_when_missing() {
         let path = Path::new("runmat_tempdir_unit_path");
@@ -334,6 +340,7 @@ pub(crate) mod tests {
         assert_eq!(trimmed, path.to_string_lossy());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_to_char_array_preserves_existing_separator() {
         let sep = std::path::MAIN_SEPARATOR;
@@ -345,12 +352,14 @@ pub(crate) mod tests {
     }
 
     #[cfg(windows)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ends_with_separator_accepts_forward_slash() {
         assert!(ends_with_separator("C:/Temp/"));
         assert!(ends_with_separator("temp/"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

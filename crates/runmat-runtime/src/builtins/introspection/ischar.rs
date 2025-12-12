@@ -214,6 +214,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn character_vector_reports_true() {
         let chars = CharArray::new_row("RunMat");
@@ -221,6 +222,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn character_matrix_reports_true() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd', 'e', 'f'], 2, 3).expect("char array");
@@ -228,6 +230,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_values_report_false() {
         let scalar = Value::String("RunMat".to_string());
@@ -238,6 +241,7 @@ pub(crate) mod tests {
         assert_eq!(ischar_builtin(array).expect("ischar"), Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_and_logical_values_report_false() {
         let numeric = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor"));
@@ -252,6 +256,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_array_reports_false() {
         let cell = CellArray::new(vec![Value::Num(1.0), Value::from("text")], 1, 2).expect("cell");
@@ -259,6 +264,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_value_reports_false() {
         let mut st = StructValue::new();
@@ -267,6 +273,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn function_handle_reports_false() {
         let fh = Value::FunctionHandle("sin".to_string());
@@ -274,6 +281,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ischar_gpu_inputs_return_false() {
         test_support::with_test_provider(|provider| {
@@ -289,6 +297,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ischar_wgpu_numeric_returns_false() {
@@ -305,6 +314,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_character_array_reports_true() {
         let chars = CharArray::new(Vec::new(), 0, 0).expect("empty char array");
@@ -312,6 +322,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

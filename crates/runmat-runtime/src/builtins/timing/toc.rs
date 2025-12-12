@@ -223,6 +223,7 @@ pub(crate) mod tests {
         while let Ok(Some(_)) = take_latest_start() {}
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_requires_matching_tic() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -231,6 +232,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_NO_MATCHING_TIC);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_reports_elapsed_for_latest_start() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -242,6 +244,7 @@ pub(crate) mod tests {
         assert!(take_latest_start().unwrap().is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_with_handle_measures_without_popping_stack() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -255,6 +258,7 @@ pub(crate) mod tests {
         assert!(later >= elapsed);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_invalid_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -263,6 +267,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_future_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -272,6 +277,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_string_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -280,6 +286,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_extra_arguments() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -288,6 +295,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_TOO_MANY_INPUTS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_nested_timers() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -303,6 +311,7 @@ pub(crate) mod tests {
         assert!(outer >= inner);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -310,6 +319,7 @@ pub(crate) mod tests {
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn toc_ignores_wgpu_provider() {

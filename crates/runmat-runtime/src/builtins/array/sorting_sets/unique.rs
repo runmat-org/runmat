@@ -1447,6 +1447,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_sorted_default() {
         let tensor = Tensor::new(vec![3.0, 1.0, 3.0, 2.0], vec![4, 1]).unwrap();
@@ -1470,6 +1471,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_sorted_handles_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
@@ -1486,6 +1488,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_stable_with_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
@@ -1501,6 +1504,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_stable_preserves_order() {
         let tensor = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 2.0], vec![5, 1]).unwrap();
@@ -1516,6 +1520,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_last_occurrence() {
         let tensor = Tensor::new(vec![9.0, 8.0, 9.0, 7.0, 8.0], vec![5, 1]).unwrap();
@@ -1535,6 +1540,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_sorted_default() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 3.0, 3.0, 4.0, 2.0], vec![4, 2]).unwrap();
@@ -1557,6 +1563,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_stable_last() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 1.0, 2.0], vec![3, 2]).unwrap();
@@ -1587,6 +1594,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_elements_sorted() {
         let chars = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
@@ -1610,6 +1618,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_rows_last() {
         let chars = CharArray::new(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
@@ -1637,6 +1646,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_string_elements_stable() {
         let array = StringArray::new(
@@ -1663,6 +1673,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_string_rows() {
         let array = StringArray::new(
@@ -1700,6 +1711,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_complex_sorted() {
         let tensor = ComplexTensor::new(
@@ -1720,6 +1732,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_handles_logical_arrays() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![4, 1]).unwrap();
@@ -1731,6 +1744,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1750,6 +1764,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn unique_wgpu_matches_cpu() {
@@ -1783,6 +1798,7 @@ pub(crate) mod tests {
         assert_eq!(gpu_ic.data, host_ic.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
@@ -1790,6 +1806,7 @@ pub(crate) mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_conflicting_order_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1801,6 +1818,7 @@ pub(crate) mod tests {
         assert!(err.contains("stable"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_conflicting_occurrence_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1812,6 +1830,7 @@ pub(crate) mod tests {
         assert!(err.contains("first"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
@@ -1819,12 +1838,14 @@ pub(crate) mod tests {
         assert!(err.contains("2-D matrix"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_handles_empty_rows() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -1847,6 +1868,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_accepts_integer_scalars() {
         let eval = evaluate(Value::Int(IntValue::I32(42)), &[]).expect("unique");

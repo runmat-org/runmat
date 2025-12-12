@@ -429,6 +429,7 @@ pub(crate) mod tests {
         Value::String("@__timeit_helper_zero_outputs".to_string())
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_measures_time() {
         COUNTER_DEFAULT.store(0, Ordering::SeqCst);
@@ -444,6 +445,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_accepts_num_outputs_argument() {
         COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
@@ -456,6 +458,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_supports_zero_outputs() {
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
@@ -468,6 +471,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn timeit_runs_with_wgpu_provider_registered() {
@@ -481,6 +485,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_non_function_input() {
         let err = timeit_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
@@ -490,6 +495,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_invalid_num_outputs() {
         COUNTER_INVALID.store(0, Ordering::SeqCst);
@@ -498,6 +504,7 @@ pub(crate) mod tests {
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_extra_arguments() {
         let err =
@@ -505,6 +512,7 @@ pub(crate) mod tests {
         assert!(err.to_ascii_lowercase().contains("too many"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

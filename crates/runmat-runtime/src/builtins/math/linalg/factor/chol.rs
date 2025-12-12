@@ -754,6 +754,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_upper_factor_matches_reference() {
         let a = Matrix::new(
@@ -776,6 +777,7 @@ pub(crate) mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_upper_option_matches_default() {
         let a = Matrix::new(
@@ -795,6 +797,7 @@ pub(crate) mod tests {
         tensor_close(&default_tensor, &explicit_tensor, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_lower_option_returns_lower_factor() {
         let a = Matrix::new(
@@ -818,6 +821,7 @@ pub(crate) mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_two_output_lower_variant() {
         let a = Matrix::new(
@@ -837,6 +841,7 @@ pub(crate) mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_two_output_reports_failure() {
         let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("matrix");
@@ -850,6 +855,7 @@ pub(crate) mod tests {
         assert!((factor.data[3] - 0.0).abs() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_single_output_errors_on_failure() {
         let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("matrix");
@@ -857,6 +863,7 @@ pub(crate) mod tests {
         assert!(err.contains("positive definite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_invalid_option_errors() {
         let a = Matrix::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
@@ -864,6 +871,7 @@ pub(crate) mod tests {
         assert!(err.to_ascii_lowercase().contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_non_square_errors() {
         let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -871,6 +879,7 @@ pub(crate) mod tests {
         assert!(err.to_ascii_lowercase().contains("square"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_empty_matrix_returns_empty() {
         let empty = Matrix::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -881,6 +890,7 @@ pub(crate) mod tests {
         assert!(factor.data.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_non_hermitian_reports_failure() {
         let a = Matrix::new(vec![2.0, 1.0, 0.0, 2.0], vec![2, 2]).expect("matrix");
@@ -888,6 +898,7 @@ pub(crate) mod tests {
         assert_eq!(eval.flag_index(), 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_logical_input_factorizes() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical array");
@@ -898,6 +909,7 @@ pub(crate) mod tests {
         tensor_close(&recon, &identity, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_complex_positive_definite() {
         let complex = ComplexTensor::new(
@@ -912,6 +924,7 @@ pub(crate) mod tests {
         complex_tensor_close(&recon, &complex, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_complex_lower_variant() {
         let complex = ComplexTensor::new(
@@ -930,6 +943,7 @@ pub(crate) mod tests {
         complex_tensor_close(&recon, &complex, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -946,6 +960,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_gpu_failure_flag() {
         test_support::with_test_provider(|provider| {
@@ -967,6 +982,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn chol_wgpu_matches_cpu() {
@@ -1010,6 +1026,7 @@ pub(crate) mod tests {
         tensor_close(&gpu_factor, &host_factor, tol);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_accepts_scalar() {
         let result = chol_builtin(Value::Num(9.0), Vec::new()).expect("chol");
@@ -1023,6 +1040,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

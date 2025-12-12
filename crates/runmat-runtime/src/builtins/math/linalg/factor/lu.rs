@@ -708,6 +708,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_single_output_produces_combined_matrix() {
         let a = Matrix::new(
@@ -722,6 +723,7 @@ pub(crate) mod tests {
         assert_tensor_close(&lu, &expected, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_three_outputs_matches_factorization() {
         let data = vec![2.0, 4.0, -2.0, 1.0, -6.0, 7.0, 1.0, 0.0, 2.0];
@@ -736,6 +738,7 @@ pub(crate) mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_complex_matrix_factorization() {
         let data = vec![(1.0, 2.0), (3.0, -1.0), (2.0, -1.0), (4.0, 2.0)];
@@ -752,6 +755,7 @@ pub(crate) mod tests {
         assert_row_major_close(&pa, &lu, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_handles_singular_matrix() {
         let a = Matrix::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -767,6 +771,7 @@ pub(crate) mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_vector_option_returns_pivot_vector() {
         let a = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -778,6 +783,7 @@ pub(crate) mod tests {
         assert_eq!(pivot.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_vector_option_case_insensitive() {
         let a = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -786,6 +792,7 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_matrix_option_returns_permutation_matrix() {
         let a = Matrix::new(vec![2.0, 1.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -798,6 +805,7 @@ pub(crate) mod tests {
         assert_tensor_close(&perm_selected, &perm_matrix, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_handles_rectangular_matrices() {
         let a = Matrix::new(vec![3.0, 6.0, 1.0, 3.0, 2.0, 4.0], vec![2, 3]).unwrap();
@@ -814,6 +822,7 @@ pub(crate) mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_unknown_option() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -824,6 +833,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_non_string_option() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -834,6 +844,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_multiple_options() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -847,6 +858,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many option arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -872,6 +884,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_gpu_vector_option_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -892,6 +905,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_accepts_scalar_inputs() {
         let eval = evaluate(Value::Num(5.0), &[]).expect("evaluate scalar");
@@ -903,6 +917,7 @@ pub(crate) mod tests {
         assert_eq!(p.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn lu_wgpu_matches_cpu() {
@@ -950,6 +965,7 @@ pub(crate) mod tests {
         assert_tensor_close(&pivot_cpu, &pivot_vector, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

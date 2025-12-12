@@ -441,6 +441,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::StringArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_no_arguments_returns_empty() {
         let result = char_builtin(Vec::new()).expect("char");
@@ -454,6 +455,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_scalar() {
         let value = Value::String("RunMat".to_string());
@@ -468,6 +470,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_numeric_tensor() {
         let tensor =
@@ -483,6 +486,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_array_with_padding() {
         let data = vec!["cat".to_string(), "giraffe".to_string()];
@@ -501,6 +505,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_cell_array_of_strings() {
         let cell = CellArray::new(
@@ -527,6 +532,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_numeric_and_text_arguments_concatenate() {
         let text = Value::String("hi".to_string());
@@ -542,6 +548,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_gpu_tensor_round_trip() {
         test_support::with_test_provider(|provider| {
@@ -563,18 +570,21 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_non_integer_numeric() {
         let err = char_builtin(vec![Value::Num(65.5)]).expect_err("non-integer numeric");
         assert!(err.contains("integers"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_high_dimension_tensor() {
         let tensor =
@@ -583,6 +593,7 @@ pub(crate) mod tests {
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_string_array_column_major_order() {
         let data = vec![
@@ -603,6 +614,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_high_dimension_string_array() {
         let sa = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 1, 2])
@@ -612,6 +624,7 @@ pub(crate) mod tests {
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_complex_input() {
         let err = char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input");
@@ -621,6 +634,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn char_wgpu_numeric_codes_matches_cpu() {

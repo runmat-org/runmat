@@ -822,6 +822,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, StringArray};
     use std::convert::TryInto;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_length_uniform_default() {
         let cell = crate::make_cell(
@@ -845,6 +846,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_multiple_cells_plus() {
         let left = crate::make_cell(
@@ -869,6 +871,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_false_returns_cells() {
         let cell = crate::make_cell(
@@ -904,6 +907,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_error_handler_recovers() {
         let cells = crate::make_cell(
@@ -929,6 +933,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_string_identifier() {
         let cells = crate::make_cell(
@@ -955,6 +960,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_string_array_identifier() {
         let cells = crate::make_cell(
@@ -975,6 +981,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_true_non_scalar_errors() {
         let cells = crate::make_cell(
@@ -992,6 +999,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_promotes_logical_to_double() {
         let cells = crate::make_cell(vec![Value::Bool(true), Value::Num(2.5)], 1, 2).unwrap();
@@ -1006,6 +1014,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_promotes_double_to_complex() {
         let cells =
@@ -1021,6 +1030,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_errors_on_mismatched_cell_sizes() {
         let first = crate::make_cell(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap();
@@ -1036,6 +1046,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniformoutput_accepts_char_flags() {
         let strings =
@@ -1055,6 +1066,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_isclass_special_case() {
         let ints = crate::make_cell(
@@ -1080,6 +1092,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_passes_additional_arguments() {
         let matrices = crate::make_cell(
@@ -1102,6 +1115,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_handles_string_array_uniform_false() {
         let sa = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -1128,6 +1142,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_gathers_gpu_inputs() {
         test_support::with_test_provider(|provider| {
@@ -1148,6 +1163,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cellfun_with_wgpu_provider_handles_gpu_cells() {
@@ -1200,6 +1216,7 @@ pub(crate) mod tests {
         Ok(value)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

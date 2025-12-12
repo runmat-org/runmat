@@ -429,6 +429,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_single_match_returns_row_vector() {
         let result = strfind_builtin(
@@ -446,6 +447,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_char_vector_matches() {
         let result = strfind_builtin(
@@ -463,6 +465,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_overlapping_matches() {
         let result = strfind_builtin(
@@ -480,6 +483,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_empty_pattern_returns_boundaries() {
         let result = strfind_builtin(
@@ -497,6 +501,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_string_array_returns_cell() {
         let strings = StringArray::new(
@@ -534,6 +539,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_pattern_array_returns_cell() {
         let patterns =
@@ -568,6 +574,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_name_value() {
         let result = strfind_builtin(
@@ -589,6 +596,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_numeric_value() {
         let result = strfind_builtin(
@@ -610,6 +618,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_off_string() {
         let result = strfind_builtin(
@@ -630,6 +639,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_non_scalar_error() {
         let option_value =
@@ -649,6 +659,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_missing_value_error() {
         let err = strfind_builtin(
@@ -663,6 +674,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_subject_cell_scalar_returns_cell() {
         let subject = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
@@ -685,6 +697,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_pattern_cell_scalar_returns_cell() {
         let pattern = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
@@ -707,6 +720,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_missing_subject_returns_empty() {
         let result = strfind_builtin(
@@ -724,6 +738,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_missing_pattern_returns_empty_vector() {
         let patterns =
@@ -743,6 +758,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_char_matrix_rows() {
         let data = vec!['c', 'a', 't', 'a', 'd', 'a', 'd', 'o', 'g'];
@@ -774,6 +790,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_invalid_option_name_errors() {
         let err = strfind_builtin(
@@ -788,6 +805,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

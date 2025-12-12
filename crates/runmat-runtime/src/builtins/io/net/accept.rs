@@ -695,12 +695,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_non_struct() {
         let err = accept_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.starts_with(MESSAGE_ID_INVALID_SERVER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_establishes_client_connection() {
         let server_value = tcpserver_builtin(
@@ -741,6 +743,7 @@ pub(crate) mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_times_out_when_no_client_connects() {
         let server_value = tcpserver_builtin(
@@ -758,6 +761,7 @@ pub(crate) mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
         let server_value = tcpserver_builtin(
@@ -775,12 +779,14 @@ pub(crate) mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_respects_per_call_timeout_override() {
         let server_value = tcpserver_builtin(

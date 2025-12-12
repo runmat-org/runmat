@@ -1362,6 +1362,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_respects_bin_argument() {
         let data = Value::Tensor(tensor_from(&[1.0, 2.0, 3.0, 4.0]));
@@ -1372,6 +1373,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_bin_centers_vector() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
@@ -1382,6 +1384,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_probability_normalization() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
@@ -1394,6 +1397,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_string_only_normalization() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
@@ -1403,6 +1407,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_normalization_name_value_pair() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
@@ -1418,6 +1423,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_bin_edges_option() {
         let data = Value::Tensor(tensor_from(&[0.1, 0.4, 0.7]));
@@ -1428,6 +1434,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_evaluate_returns_counts_and_centers() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.8, 1.0]));
@@ -1444,6 +1451,7 @@ pub(crate) mod tests {
         assert_eq!(centers.len(), 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_numbins_option() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
@@ -1456,6 +1464,7 @@ pub(crate) mod tests {
         assert_eq!(centers.len(), 4);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_binwidth_and_limits() {
         let data = Value::Tensor(tensor_from(&[0.1, 0.2, 0.6, 0.8]));
@@ -1474,6 +1483,7 @@ pub(crate) mod tests {
         assert!((centers[0] - 0.25).abs() < 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_sqrt_binmethod() {
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.4, 0.6, 0.8]));
@@ -1489,6 +1499,7 @@ pub(crate) mod tests {
         assert!(centers.len() >= 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_normalization_handles_weighted_probability() {
         let mut counts = vec![2.0, 4.0];
@@ -1498,6 +1509,7 @@ pub(crate) mod tests {
         assert!((counts[1] - 4.0 / 6.0).abs() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_normalization_handles_weighted_pdf() {
         let mut counts = vec![5.0];

@@ -251,6 +251,7 @@ pub(crate) mod tests {
         guard.stack.clear();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tic_returns_monotonic_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -260,6 +261,7 @@ pub(crate) mod tests {
         assert!(take_latest_start().expect("take").is_some());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tic_handles_increase_over_time() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -270,6 +272,7 @@ pub(crate) mod tests {
         assert!(second > first);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_roundtrip_matches_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -281,6 +284,7 @@ pub(crate) mod tests {
         assert!(delta < 1e-9, "delta {delta}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn take_latest_start_pops_stack() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -290,6 +294,7 @@ pub(crate) mod tests {
         assert!(take_latest_start().expect("second take").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_handle_rejects_invalid_values() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -297,6 +302,7 @@ pub(crate) mod tests {
         assert!(decode_handle(-1.0).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();

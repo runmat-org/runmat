@@ -320,6 +320,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, StructValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_passes_through_host_values() {
         let value = Value::Num(42.0);
@@ -327,6 +328,7 @@ pub(crate) mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_downloads_gpu_tensor() {
         test_support::with_test_provider(|provider| {
@@ -347,6 +349,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_preserves_logical_gpu_tensors() {
         test_support::with_test_provider(|provider| {
@@ -369,6 +372,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_cells() {
         test_support::with_test_provider(|provider| {
@@ -397,6 +401,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_structs() {
         test_support::with_test_provider(|provider| {
@@ -426,6 +431,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_returns_cell_for_multiple_inputs() {
         let result =
@@ -439,6 +445,7 @@ pub(crate) mod tests {
         assert_eq!(cell.get(0, 1).unwrap(), Value::from("two"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn evaluate_returns_outputs_in_order() {
         let eval =
@@ -449,12 +456,14 @@ pub(crate) mod tests {
         assert_eq!(eval.outputs()[2], Value::from("hello"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_requires_at_least_one_argument() {
         let err = gather_builtin(Vec::new()).expect_err("expected error");
         assert_eq!(err, "gather: not enough input arguments");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gather_wgpu_provider_roundtrip() {
@@ -490,6 +499,7 @@ pub(crate) mod tests {
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

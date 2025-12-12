@@ -498,6 +498,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_lists_workspace_variables() {
         ensure_shared_resolver();
@@ -512,6 +513,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_with_wildcard() {
         ensure_shared_resolver();
@@ -525,6 +527,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_with_regex() {
         ensure_shared_resolver();
@@ -542,6 +545,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["bar".to_string(), "baz".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_combines_wildcard_and_regex_filters() {
         ensure_shared_resolver();
@@ -565,6 +569,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_global_only() {
         ensure_shared_resolver();
@@ -578,6 +583,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["shared".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_global_option_is_case_insensitive() {
         ensure_shared_resolver();
@@ -591,6 +597,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["Shared".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_char_array_arguments() {
         ensure_shared_resolver();
@@ -609,6 +616,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_string_array_arguments() {
         ensure_shared_resolver();
@@ -628,6 +636,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_cell_array_arguments() {
         ensure_shared_resolver();
@@ -646,6 +655,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_numeric_selection() {
         ensure_shared_resolver();
@@ -657,6 +667,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_unknown_option() {
         ensure_shared_resolver();
@@ -668,6 +679,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_requires_filename_for_file_option() {
         ensure_shared_resolver();
@@ -676,6 +688,7 @@ pub(crate) mod tests {
         assert!(err.contains("'-file' requires a filename"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_requires_pattern_for_regexp() {
         ensure_shared_resolver();
@@ -687,6 +700,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_invalid_regex() {
         ensure_shared_resolver();
@@ -696,6 +710,7 @@ pub(crate) mod tests {
         assert!(err.contains("invalid regular expression"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_returns_empty_column_cell_when_no_match() {
         ensure_shared_resolver();
@@ -711,6 +726,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_reads_mat_file() {
         ensure_shared_resolver();
@@ -742,6 +758,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_combines_literal_and_regex_selectors() {
         ensure_shared_resolver();
@@ -782,6 +799,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_adds_mat_extension() {
         ensure_shared_resolver();
@@ -798,6 +816,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["v".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_handles_gpu_workspace_entries() {
         ensure_shared_resolver();
@@ -816,6 +835,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_respects_global_filter_with_gpu_variables() {
         ensure_shared_resolver();
@@ -831,6 +851,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn who_handles_workspace_with_wgpu_provider() {
@@ -850,6 +871,7 @@ pub(crate) mod tests {
         shared_set_workspace(&[], &[]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

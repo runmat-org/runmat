@@ -961,6 +961,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_numeric_variable() {
         ensure_test_resolver();
@@ -984,6 +985,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_string_array_variable_names() {
         ensure_test_resolver();
@@ -1008,6 +1010,7 @@ pub(crate) mod tests {
         assert!(mat.find_by_name("C").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_char_matrix_variable_names() {
         ensure_test_resolver();
@@ -1032,6 +1035,7 @@ pub(crate) mod tests {
         assert!(mat.find_by_name("baz").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_fields() {
         ensure_test_resolver();
@@ -1061,6 +1065,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_field_selection() {
         ensure_test_resolver();
@@ -1092,6 +1097,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_missing_variable_errors() {
         ensure_test_resolver();
@@ -1100,6 +1106,7 @@ pub(crate) mod tests {
         assert!(result.unwrap_err().contains("variable 'x'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_variable_selection() {
         ensure_test_resolver();
@@ -1125,6 +1132,7 @@ pub(crate) mod tests {
         assert!(mat.find_by_name("beta").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_requires_pattern() {
         ensure_test_resolver();
@@ -1135,6 +1143,7 @@ pub(crate) mod tests {
             .contains("'-regexp' requires at least one pattern"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_unsupported_option_errors() {
         ensure_test_resolver();
@@ -1147,6 +1156,7 @@ pub(crate) mod tests {
         assert!(result.unwrap_err().contains("unsupported option '-ascii'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_defaults_to_matlab_mat() {
         ensure_test_resolver();
@@ -1172,6 +1182,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_without_filename_defaults_to_matlab_mat() {
         ensure_test_resolver();
@@ -1201,6 +1212,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_gpu_tensor_roundtrip() {
         ensure_test_resolver();
@@ -1234,6 +1246,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn save_wgpu_tensor_roundtrip() {
@@ -1277,6 +1290,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;

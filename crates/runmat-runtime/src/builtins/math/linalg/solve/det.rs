@@ -562,6 +562,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_basic_2x2() {
         let tensor = Tensor::new(vec![4.0, 1.0, -2.0, 3.0], vec![2, 2]).unwrap();
@@ -572,6 +573,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -579,6 +581,7 @@ pub(crate) mod tests {
         assert!(err.contains("det: input must be a square matrix."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_complex_matrix() {
         let data = vec![(1.0, 2.0), (0.0, 0.0), (0.0, 3.0), (4.0, -1.0)];
@@ -593,6 +596,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_complex_scalar_input() {
         let value = det_builtin(Value::Complex(3.0, -2.0)).expect("det");
@@ -605,6 +609,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_logical_matrix_promotes() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -615,6 +620,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_singular_returns_zero() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -625,6 +631,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_empty_matrix_returns_one() {
         let tensor = Tensor::new(vec![], vec![0, 0]).unwrap();
@@ -635,6 +642,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -658,6 +666,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_gpu_permutation_sign() {
         test_support::with_test_provider(|provider| {
@@ -677,6 +686,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_rejects_higher_rank_arrays() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -684,12 +694,14 @@ pub(crate) mod tests {
         assert!(err.contains("det: input must be a square matrix."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn det_wgpu_matches_cpu() {

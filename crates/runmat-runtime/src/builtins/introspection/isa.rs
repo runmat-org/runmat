@@ -377,6 +377,7 @@ pub(crate) mod tests {
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_reports_expected_results_for_doubles() {
         let double_result = isa_builtin(Value::Num(42.0), Value::from("double")).expect("isa");
@@ -389,6 +390,7 @@ pub(crate) mod tests {
         assert_eq!(integer_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_integer_category_matches_int_values() {
         let value = Value::Int(IntValue::I16(12));
@@ -399,6 +401,7 @@ pub(crate) mod tests {
         assert_eq!(float_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_handles_logical_and_char_types() {
         let logical = Value::LogicalArray(LogicalArray::new(vec![1], vec![1]).unwrap());
@@ -414,6 +417,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_string_and_struct_detection() {
         let string_scalar = Value::String("runmat".into());
@@ -430,6 +434,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_cell_and_function_handle() {
         let cell = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap());
@@ -445,6 +450,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_gpu_arrays_treat_metadata_correctly() {
         test_support::with_test_provider(|provider| {
@@ -464,6 +470,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_gpu_logical_handles_match_categories() {
         test_support::with_test_provider(|provider| {
@@ -484,6 +491,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_handle_aliases_and_inheritance() {
         let handle = HandleRef {
@@ -512,6 +520,7 @@ pub(crate) mod tests {
         assert_eq!(exact, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_listener_alias_matches() {
         let listener = Listener {
@@ -537,6 +546,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_meta_class_detection() {
         let meta = Value::ClassRef("Point".into());
@@ -546,6 +556,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_errors_on_invalid_type_designator() {
         let type_array = Value::StringArray(
@@ -555,12 +566,14 @@ pub(crate) mod tests {
         assert_eq!(err, "isa: TYPE must be a string scalar or character vector");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isa_gpuarray_with_wgpu_provider_matches_numeric_category() {

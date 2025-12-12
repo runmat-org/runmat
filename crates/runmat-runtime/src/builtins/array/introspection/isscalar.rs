@@ -233,6 +233,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, StructValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_numeric_scalar_returns_true() {
         let result = isscalar_builtin(Value::Num(5.0)).expect("isscalar");
@@ -245,6 +246,7 @@ pub(crate) mod tests {
         assert_eq!(complex_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_vector_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -252,6 +254,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_char_array_obeys_dimensions() {
         let single = CharArray::new(vec!['a'], 1, 1).unwrap();
@@ -262,6 +265,7 @@ pub(crate) mod tests {
         assert_eq!(row_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_string_scalar_true_but_empty_array_false() {
         let scalar = runmat_builtins::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
@@ -277,6 +281,7 @@ pub(crate) mod tests {
         assert_eq!(string_value_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_cell_and_struct_follow_dimensions() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -293,6 +298,7 @@ pub(crate) mod tests {
         assert_eq!(struct_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_gpu_tensor_checks_dimensions() {
         test_support::with_test_provider(|provider| {
@@ -317,6 +323,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isscalar_wgpu_provider_respects_metadata() {
@@ -338,6 +345,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -373,6 +373,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_scalar_one() {
         let result = log_builtin(Value::Num(1.0)).expect("log");
@@ -382,6 +383,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_scalar_zero() {
         let result = log_builtin(Value::Num(0.0)).expect("log");
@@ -391,6 +393,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_scalar_negative() {
         let result = log_builtin(Value::Num(-1.0)).expect("log");
@@ -403,6 +406,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_scalar_nan_remains_real() {
         let result = log_builtin(Value::Num(f64::NAN)).expect("log");
@@ -412,6 +416,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_bool_true() {
         let result = log_builtin(Value::Bool(true)).expect("log");
@@ -421,6 +426,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_logical_array_inputs() {
         let logical = LogicalArray::new(vec![1u8, 0, 1, 0], vec![2, 2]).expect("logical");
@@ -437,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_string_input_errors() {
         let err = log_builtin(Value::from("hello")).unwrap_err();
@@ -446,6 +453,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_tensor_with_negatives() {
         let tensor = Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap();
@@ -462,6 +470,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_complex_scalar() {
         let result = log_builtin(Value::Complex(1.0, 2.0)).expect("log");
@@ -476,6 +485,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_char_array_inputs() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
@@ -490,6 +500,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -509,6 +520,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_gpu_negative_falls_back_to_complex() {
         test_support::with_test_provider(|provider| {
@@ -530,6 +542,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log_with_integer_argument() {
         let result = log_builtin(Value::Int(IntValue::I32(4))).expect("log");
@@ -539,12 +552,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn log_wgpu_matches_cpu_elementwise() {

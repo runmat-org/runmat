@@ -1103,6 +1103,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_basic_sin() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1121,6 +1122,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_additional_scalar_argument() {
         let tensor = Tensor::new(vec![0.5, 1.0, -1.0], vec![3, 1]).unwrap();
@@ -1138,6 +1140,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_false_returns_cell() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1161,6 +1164,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_size_mismatch_errors() {
         let taller = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1176,6 +1180,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_error_handler_recovers() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1201,6 +1206,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_error_without_handler_propagates_identifier() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1215,6 +1221,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_logical_result() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 0.0, f64::INFINITY], vec![4, 1]).unwrap();
@@ -1232,6 +1239,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_character_result() {
         let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
@@ -1250,6 +1258,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_false_gpu_returns_cell() {
         test_support::with_test_provider(|provider| {
@@ -1287,6 +1296,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1313,6 +1323,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn arrayfun_wgpu_sin_matches_cpu() {
@@ -1352,6 +1363,7 @@ pub(crate) mod tests {
         let _ = provider.free(&out_handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn arrayfun_wgpu_plus_matches_cpu() {
@@ -1416,6 +1428,7 @@ pub(crate) mod tests {
         Ok(seed)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

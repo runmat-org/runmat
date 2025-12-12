@@ -131,6 +131,7 @@ pub(crate) mod tests {
         std::env::remove_var("RUNMAT_SEQUENCE_GPU_MIN");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_gpu_short_circuits() {
         let _guard = ENV_LOCK.lock().unwrap();
@@ -140,6 +141,7 @@ pub(crate) mod tests {
         assert_eq!(decision.reason, ResidencyReason::ExplicitGpuInput);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn env_disable_blocks_gpu() {
         let _guard = ENV_LOCK.lock().unwrap();
@@ -150,6 +152,7 @@ pub(crate) mod tests {
         reset_env();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn env_min_len_controls_threshold() {
         let _guard = ENV_LOCK.lock().unwrap();

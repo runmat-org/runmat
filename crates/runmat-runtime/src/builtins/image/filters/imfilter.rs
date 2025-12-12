@@ -736,6 +736,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn same_padding_default_zero() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -746,6 +747,7 @@ pub(crate) mod tests {
         assert!(result.data.iter().all(|&v| (v - 10.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replicate_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -762,6 +764,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn full_output_matches_expected_size() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -778,6 +781,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_output_respects_kernel_size() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -791,6 +795,7 @@ pub(crate) mod tests {
         assert!((result.data[0] - 10.0).abs() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn convolution_matches_correlation_with_flipped_kernel() {
         let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 3, 2);
@@ -816,6 +821,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circular_padding_wraps_indices() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -831,6 +837,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_fallback_uses_provider_upload() {
         test_support::with_test_provider(|provider| {
@@ -861,6 +868,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_example_average_filter_matches_expected() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -873,6 +881,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_example_convolution_same_matches_expected() {
         let image = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
@@ -889,6 +898,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn specifying_numeric_pad_value_matches_manual_options() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -914,6 +924,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_option_string_raises_error() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -927,6 +938,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_scalar_value() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -941,6 +953,7 @@ pub(crate) mod tests {
         assert!(err.contains("scalar value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_with_larger_kernel_returns_empty_tensor() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -960,6 +973,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_without_value_defaults_to_zero_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -979,12 +993,14 @@ pub(crate) mod tests {
         assert_eq!(fill_only, default);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let sections = test_support::doc_examples(DOC_MD);
         assert!(!sections.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn imfilter_wgpu_matches_cpu_same_padding() {

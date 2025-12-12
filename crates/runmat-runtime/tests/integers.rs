@@ -1,5 +1,8 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{IntValue, Value};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn integer_scalar_variants_arithmetic() {
     let i8v = Value::Int(IntValue::I8(5));
@@ -24,6 +27,7 @@ fn integer_scalar_variants_arithmetic() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn integer_promotion_with_double() {
     let i = Value::Int(IntValue::I32(4));
@@ -38,6 +42,7 @@ fn integer_promotion_with_double() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn integer_class_and_string() {
     let i = Value::Int(IntValue::U16(42));

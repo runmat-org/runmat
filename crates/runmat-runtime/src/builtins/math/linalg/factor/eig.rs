@@ -781,6 +781,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_scalar_real() {
         let result = eig_builtin(Value::Num(5.0), Vec::new()).expect("eig");
@@ -790,6 +791,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_two_outputs_reconstruct() {
         let tensor = Tensor::new(vec![0.0, -2.0, 1.0, -3.0], vec![2, 2]).unwrap();
@@ -801,6 +803,7 @@ pub(crate) mod tests {
         assert_matrix_close(&a, &recon, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_three_outputs_biorthogonality() {
         let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -818,6 +821,7 @@ pub(crate) mod tests {
         assert_matrix_close(&lhs, &rhs, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_complex_matrix() {
         let data = vec![(1.0, 2.0), (0.0, 0.0), (2.0, -1.0), (0.0, -3.0)];
@@ -829,6 +833,7 @@ pub(crate) mod tests {
         assert!((values[1] - Complex64::new(0.0, -3.0)).norm() < 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_errors_on_non_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -836,6 +841,7 @@ pub(crate) mod tests {
         assert!(err.contains("square"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_accepts_nobalance_option() {
         let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
@@ -852,6 +858,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_vector_option_returns_column_vector() {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.0, -3.0], vec![2, 2]).unwrap();
@@ -867,6 +874,7 @@ pub(crate) mod tests {
         let _ = matrix_from_value(eval.diagonal_matrix());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_vector_option_allows_left_eigenvectors() {
         let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -884,6 +892,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_vector_option_gpu_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -907,6 +916,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_gpu_provider_roundtrip_gathers_to_host() {
         test_support::with_test_provider(|provider| {
@@ -929,12 +939,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eig_handles_single_numeric_argument() {
         let args = vec![Value::Int(IntValue::I32(3))];
@@ -947,6 +959,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn eig_wgpu_matches_cpu_for_real_spectrum() {
@@ -1006,6 +1019,7 @@ pub(crate) mod tests {
         assert_tensor_close(&left_gpu, &left_host, tol);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn eig_wgpu_nobalance_falls_back_to_host() {

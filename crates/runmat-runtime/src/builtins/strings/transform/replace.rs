@@ -453,6 +453,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_string_scalar_single_term() {
         let result = replace_builtin(
@@ -464,6 +465,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat engine".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_string_array_multiple_terms() {
         let strings = StringArray::new(
@@ -495,6 +497,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_char_array_adjusts_width() {
         let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
@@ -515,6 +518,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_char_array_handles_padding() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
@@ -535,6 +539,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -575,6 +580,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_invalid_first_argument() {
         let err = replace_builtin(
@@ -586,6 +592,7 @@ pub(crate) mod tests {
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_invalid_pattern_type() {
         let err = replace_builtin(
@@ -597,6 +604,7 @@ pub(crate) mod tests {
         assert_eq!(err, PATTERN_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_size_mismatch() {
         let err = replace_builtin(
@@ -610,6 +618,7 @@ pub(crate) mod tests {
         assert_eq!(err, SIZE_MISMATCH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_preserves_missing_string() {
         let result = replace_builtin(
@@ -621,6 +630,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

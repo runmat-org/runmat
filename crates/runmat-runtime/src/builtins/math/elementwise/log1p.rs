@@ -385,6 +385,7 @@ pub(crate) mod tests {
     use runmat_builtins::{LogicalArray, Tensor};
     use std::f64::consts::PI;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_zero() {
         let result = log1p_builtin(Value::Num(0.0)).expect("log1p");
@@ -394,6 +395,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_negative_one() {
         let result = log1p_builtin(Value::Num(-1.0)).expect("log1p");
@@ -403,6 +405,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_less_than_negative_one_complex() {
         let result = log1p_builtin(Value::Num(-2.0)).expect("log1p");
@@ -415,6 +418,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_tensor_mixed_values() {
         let tensor = Tensor::new(vec![0.0, -0.5, -2.0, 3.0], vec![2, 2]).unwrap();
@@ -437,6 +441,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_complex_input() {
         let result = log1p_builtin(Value::Complex(0.5, 1.0)).expect("log1p");
@@ -450,6 +455,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_char_array_roundtrip() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -466,6 +472,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_string_rejects() {
         let err = log1p_builtin(Value::from("not numeric")).expect_err("should fail");
@@ -475,6 +482,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -494,6 +502,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_bool_promotes() {
         let result = log1p_builtin(Value::Bool(true)).expect("log1p");
@@ -503,6 +512,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_logical_array_converts() {
         let logical = LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap();
@@ -517,6 +527,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_gpu_complex_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -541,12 +552,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn log1p_wgpu_matches_cpu() {

@@ -999,6 +999,7 @@ pub(crate) mod tests {
             .and_then(|value| String::try_from(value).ok())
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn emits_basic_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1012,6 +1013,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn emits_warning_with_identifier_and_format() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1029,6 +1031,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn off_suppresses_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1041,6 +1044,7 @@ pub(crate) mod tests {
         assert!(last.is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn once_only_emits_first_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1057,6 +1061,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_mode_promotes_to_error() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1068,6 +1073,7 @@ pub(crate) mod tests {
         assert_eq!(err, "MATLAB:warning: Promoted");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_returns_state_struct() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1085,6 +1091,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn state_struct_restores_mode() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1105,6 +1112,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_backtrace_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1119,6 +1127,7 @@ pub(crate) mod tests {
         assert!(!with_manager(|mgr| mgr.backtrace_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_verbose_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1133,6 +1142,7 @@ pub(crate) mod tests {
         assert!(!with_manager(|mgr| mgr.verbose_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn special_mode_rejects_invalid_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1145,6 +1155,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_last_requires_identifier() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1163,6 +1174,7 @@ pub(crate) mod tests {
         assert!(matches!(last_mode, WarningMode::Off));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_returns_snapshot() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1191,6 +1203,7 @@ pub(crate) mod tests {
         assert!(with_manager(|mgr| mgr.rules.is_empty()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_special_modes_reset() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1209,6 +1222,7 @@ pub(crate) mod tests {
         assert!(!with_manager(|mgr| mgr.backtrace_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_backtrace_and_verbose() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1222,6 +1236,7 @@ pub(crate) mod tests {
         assert_state_struct(&backtrace, "backtrace", "off");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_state_struct_special_modes() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1264,6 +1279,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::builtins::common::test_support;
 
+        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
         #[test]
         fn doc_examples_present() {
             let blocks = test_support::doc_examples(DOC_MD);

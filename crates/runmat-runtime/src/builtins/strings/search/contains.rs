@@ -292,6 +292,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_string_scalar_true() {
         let result = contains_builtin(
@@ -303,6 +304,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_string_scalar_false() {
         let result = contains_builtin(
@@ -314,6 +316,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_ignore_case_option() {
         let result = contains_builtin(
@@ -325,6 +328,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_string_array_scalar_pattern() {
         let array = StringArray::new(
@@ -342,6 +346,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_elementwise_patterns() {
         let subjects = StringArray::new(
@@ -361,6 +366,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_broadcast_pattern_column_vector() {
         let patterns = CharArray::new(vec!['s', 'n', 'x'], 3, 1).unwrap();
@@ -374,6 +380,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_cell_array_patterns() {
         let cell = CellArray::new(
@@ -392,6 +399,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_missing_strings_false() {
         let array = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -404,6 +412,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_empty_pattern_true() {
         let result = contains_builtin(
@@ -415,6 +424,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_invalid_option_name() {
         let err = contains_builtin(
@@ -426,6 +436,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_ignore_case_string_flag() {
         let result = contains_builtin(
@@ -440,6 +451,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_ignore_case_numeric_flag() {
         let result = contains_builtin(
@@ -454,6 +466,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_ignore_case_invalid_value() {
         let err = contains_builtin(
@@ -468,6 +481,7 @@ pub(crate) mod tests {
         assert!(err.contains("invalid value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_ignore_case_missing_value() {
         let err = contains_builtin(
@@ -479,6 +493,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected a value after 'IgnoreCase'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_mismatched_shapes_error() {
         let text = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -493,6 +508,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_invalid_subject_type() {
         let err =
@@ -500,6 +516,7 @@ pub(crate) mod tests {
         assert!(err.contains("first argument must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_invalid_pattern_type() {
         let err =
@@ -507,6 +524,7 @@ pub(crate) mod tests {
         assert!(err.contains("pattern must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_cell_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -515,6 +533,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_zero_sized_inputs() {
         let subjects = StringArray::new(Vec::<String>::new(), vec![0, 1]).unwrap();
@@ -533,6 +552,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_missing_pattern_false() {
         let result = contains_builtin(
@@ -544,6 +564,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -381,6 +381,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_scalar_single_pattern() {
         let result = erase_builtin(
@@ -391,6 +392,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_multiple_patterns() {
         let strings = StringArray::new(
@@ -419,6 +421,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_shape_mismatch_applies_all_patterns() {
         let strings =
@@ -438,6 +441,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_adjusts_width() {
         let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
@@ -454,6 +458,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_handles_full_removal() {
         let chars = CharArray::new_row("abc");
@@ -469,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_multiple_rows_sequential_patterns() {
         let chars = CharArray::new(
@@ -496,6 +502,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -533,6 +540,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_preserves_shape() {
         let cell = CellArray::new(
@@ -559,6 +567,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_preserves_missing_string() {
         let result = erase_builtin(
@@ -569,6 +578,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_allows_empty_pattern_list() {
         let strings = StringArray::new(vec!["alpha".into(), "beta".into()], vec![2, 1]).unwrap();
@@ -581,18 +591,21 @@ pub(crate) mod tests {
         assert_eq!(result, Value::StringArray(strings));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_first_argument() {
         let err = erase_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
         assert_eq!(err, PATTERN_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

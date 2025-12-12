@@ -567,6 +567,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_workspace_variables() {
         let _lock = REPL_FS_TEST_LOCK
@@ -579,6 +580,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_builtins() {
         let _lock = REPL_FS_TEST_LOCK
@@ -593,6 +595,7 @@ pub(crate) mod tests {
         assert_eq!(builtin, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_files_and_mex() {
         let _lock = REPL_FS_TEST_LOCK
@@ -619,6 +622,7 @@ pub(crate) mod tests {
         assert_eq!(mex_specific, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -637,6 +641,7 @@ pub(crate) mod tests {
         assert_eq!(any, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_class_files_and_packages() {
         let _lock = REPL_FS_TEST_LOCK
@@ -665,6 +670,7 @@ pub(crate) mod tests {
         assert_eq!(gizmo, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_invalid_type_raises_error() {
         let _lock = REPL_FS_TEST_LOCK
@@ -676,6 +682,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_INVALID_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_errors_on_non_text_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -686,6 +693,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_NAME_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_handle_returns_zero_for_non_handle() {
         let _lock = REPL_FS_TEST_LOCK
@@ -697,6 +705,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

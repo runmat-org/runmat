@@ -419,6 +419,7 @@ pub(crate) mod tests {
     use num_complex::Complex64;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_scalar_real() {
         let value = Value::Num(1.5);
@@ -429,6 +430,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_scalar_complex() {
         let result = acosh_builtin(Value::Num(0.5)).expect("acosh");
@@ -441,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_tensor_mixed() {
         let tensor = Tensor::new(vec![0.5, 1.0, 2.0], vec![3, 1]).expect("tensor construction");
@@ -462,6 +465,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_logical_array_promotes() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).expect("logical array");
@@ -484,6 +488,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_roundtrip() {
         let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
@@ -512,6 +517,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_promotes_to_complex() {
         let chars = CharArray::new(vec!['\0'], 1, 1).expect("char array");
@@ -531,6 +537,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-2.0, 0.5)];
@@ -550,6 +557,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_integer_input() {
         let result = acosh_builtin(Value::Int(IntValue::I32(4))).expect("acosh");
@@ -559,6 +567,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_bool_inputs() {
         let true_result = acosh_builtin(Value::Bool(true)).expect("acosh");
@@ -576,6 +585,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_infinity_inputs() {
         let pos = acosh_builtin(Value::Num(f64::INFINITY)).expect("acosh");
@@ -594,6 +604,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_nan_propagates() {
         let result = acosh_builtin(Value::Num(f64::NAN)).expect("acosh");
@@ -603,12 +614,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_string_errors() {
         let err = acosh_builtin(Value::from("oops")).expect_err("expected error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -629,6 +642,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_gpu_falls_back_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -656,12 +670,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn acosh_wgpu_matches_cpu_when_real() {

@@ -274,6 +274,7 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_reports_true_for_real_scalars() {
         let real = isreal_builtin(Value::Num(42.0)).expect("isreal");
@@ -284,6 +285,7 @@ pub(crate) mod tests {
         assert_eq!(boolean, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_rejects_complex_storage_even_with_zero_imaginary_part() {
         let complex = isreal_builtin(Value::Complex(3.0, 4.0)).expect("isreal");
@@ -295,6 +297,7 @@ pub(crate) mod tests {
         assert_eq!(tensor_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_handles_array_and_container_types() {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5], vec![3, 1]).unwrap();
@@ -327,6 +330,7 @@ pub(crate) mod tests {
         assert_eq!(object_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_handles_function_and_handle_like_types() {
         let function_flag =
@@ -367,6 +371,7 @@ pub(crate) mod tests {
         assert_eq!(mex_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -381,12 +386,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isreal_wgpu_provider_reports_true() {

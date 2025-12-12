@@ -1230,6 +1230,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> String {
 pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn style_string_with_marker_no_longer_forces_cpu_fallback() {
         let rest = vec![Value::String("o--".into())];
@@ -1239,6 +1240,7 @@ pub(crate) mod tests {
         assert!(!parsed.requires_cpu_fallback);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn marker_none_disables_marker_without_fallback() {
         let rest = vec![Value::String("Marker".into()), Value::String("none".into())];
@@ -1248,6 +1250,7 @@ pub(crate) mod tests {
         assert!(!parsed.requires_cpu_fallback);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn marker_color_flat_literal_is_supported() {
         let opts = LineStyleParseOptions::plot();
@@ -1255,6 +1258,7 @@ pub(crate) mod tests {
         assert_eq!(color, MarkerColor::Flat);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_parses_face_and_edge_colors() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
@@ -1272,6 +1276,7 @@ pub(crate) mod tests {
         assert_eq!(style.edge_color, Some(Vec4::new(0.0, 0.0, 0.0, 1.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_accepts_label() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
@@ -1283,6 +1288,7 @@ pub(crate) mod tests {
         assert_eq!(style.label.as_deref(), Some("My Bars"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_accepts_flat_facecolor() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);

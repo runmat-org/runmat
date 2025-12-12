@@ -352,6 +352,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_scalar_real() {
         let result = pinv_builtin(Value::Num(4.0), Vec::new()).expect("pinv");
@@ -361,6 +362,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rank_deficient_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -374,6 +376,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rectangular() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0], vec![3, 2]).unwrap();
@@ -387,6 +390,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_custom_tolerance_zeroes_small_singular_values() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-12], vec![2, 2]).unwrap();
@@ -400,6 +404,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_complex_diagonal() {
         let tensor = ComplexTensor::new(
@@ -426,6 +431,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -442,6 +448,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pinv_wgpu_matches_cpu() {
@@ -474,6 +481,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rejects_negative_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -482,6 +490,7 @@ pub(crate) mod tests {
         assert!(err.contains("tolerance"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_accepts_boolean() {
         let result =
@@ -492,6 +501,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_rejects_non_scalar_tensor() {
         let tol_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -500,6 +510,7 @@ pub(crate) mod tests {
         assert!(err.contains("tolerance must be a real scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_rejects_char_array() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -508,6 +519,7 @@ pub(crate) mod tests {
         assert!(err.contains("tolerance must be a real scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

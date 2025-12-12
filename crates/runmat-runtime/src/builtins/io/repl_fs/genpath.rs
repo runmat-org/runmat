@@ -593,6 +593,7 @@ pub(crate) mod tests {
         canonical_str
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_returns_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -611,6 +612,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_without_arguments_uses_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -648,6 +650,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_char_array_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -665,6 +668,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_string_array_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -682,6 +686,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_tensor_char_codes_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -701,6 +706,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_excludes_relative_entries() {
         let _lock = REPL_FS_TEST_LOCK
@@ -738,6 +744,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_errors_on_invalid_argument_type() {
         let _lock = REPL_FS_TEST_LOCK
@@ -748,6 +755,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_FOLDER_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_excludes_specified_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -790,6 +798,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_skips_matlab_reserved_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -850,6 +859,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(unix)]
     fn genpath_deduplicates_symlink_targets() {
@@ -893,6 +903,7 @@ pub(crate) mod tests {
         assert_eq!(count, 1, "expected canonical alpha path to appear once");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_errors_on_missing_root() {
         let _lock = REPL_FS_TEST_LOCK
@@ -904,6 +915,7 @@ pub(crate) mod tests {
         assert!(err.contains("not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
