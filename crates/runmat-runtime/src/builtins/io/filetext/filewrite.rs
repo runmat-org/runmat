@@ -145,7 +145,7 @@ Provide a numeric array with values in the range 0–255 (for example `uint8`). 
 No. The parent directory must already exist. Use `mkdir` before calling `filewrite` if you need to create folders.
 
 ## See Also
-[fileread](./fileread), [fwrite](../../filetext/fwrite), [fprintf](../../filetext/fprintf), [string](../../../strings/core/string)
+[fileread](./fileread), [fwrite](./fwrite), [fprintf](./fprintf), [string](./string)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs)

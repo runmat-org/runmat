@@ -170,7 +170,7 @@ No. It only checks the container dimensions. To look at the contents, inspect in
 They behave like any other scalar and return `false`.
 
 ## See Also
-[numel](./numel), [size](./size), [length](./length), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[numel](./numel), [size](./size), [length](./length), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]

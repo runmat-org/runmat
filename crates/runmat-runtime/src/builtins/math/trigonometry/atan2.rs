@@ -171,7 +171,7 @@ Double-precision providers match CPU results exactly. Single-precision providers
 Call `rad2deg(atan2(y, x))` or multiply the result by `180/pi`.
 
 ## See Also
-[atan](./atan), [hypot](../elementwise/hypot), [sin](./sin), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[atan](./atan), [hypot](./hypot), [sin](./sin), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the `atan2` builtin is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs)

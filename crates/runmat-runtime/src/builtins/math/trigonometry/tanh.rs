@@ -182,7 +182,7 @@ Shapes are preserved. Empty inputs return empty outputs, and singleton dimension
 Yes. The autograd infrastructure recognises `tanh` as a primitive and records it on the reverse-mode tape for native gradients once acceleration is enabled.
 
 ## See Also
-[sinh](./sinh), [cosh](./cosh), [atanh](./atanh), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sinh](./sinh), [cosh](./cosh), [atanh](./atanh), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `tanh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/tanh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/tanh.rs)

@@ -223,7 +223,7 @@ grids beyond three inputs.
 RunMat raises the MATLAB-compatible error `meshgrid: at least one input vector is required`.
 
 ## See Also
-[linspace](./linspace), [zeros](./zeros), [ones](./ones), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[linspace](./linspace), [zeros](./zeros), [ones](./ones), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `meshgrid` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs)

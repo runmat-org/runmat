@@ -194,7 +194,7 @@ Complex values keep both components intact; the builtin simply ensures they are 
 precision.
 
 ## See Also
-[single](./single), [real](./real), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[single](./single), [real](./real), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/double.rs`

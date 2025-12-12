@@ -165,7 +165,7 @@ computes the scalar on the host, and uploads it back so subsequent GPU operation
 device-resident value.
 
 ## See Also
-[rcond](./rcond), [inv](./inv), [pinv](./pinv), [linsolve](./linsolve), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[rcond](./rcond), [inv](./inv), [pinv](./pinv), [linsolve](./linsolve), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs`

@@ -181,7 +181,7 @@ RunMat returns the input unchanged so that MATLAB-compatible code relying on tha
 Not yet. RunMat currently requires real inputs for `std`. Convert complex data to magnitude or separate real/imaginary parts before calling the builtin.
 
 ## See Also
-[mean](./mean), [sum](./sum), [median](./median), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mean](./mean), [sum](./sum), [median](./median), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `std` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/std.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/std.rs)

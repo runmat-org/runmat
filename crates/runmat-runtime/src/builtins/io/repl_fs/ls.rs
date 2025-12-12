@@ -160,7 +160,7 @@ plot_surface.m
 - **Can I send the output directly to another builtin?** Yes. Because the result is a character array, you can convert it to a string array with `string(ls)` or operate on individual rows using indexing.
 
 ## See Also
-[pwd](./pwd), [cd](./cd), [fopen](../filetext/fopen), [fclose](../filetext/fclose)
+[pwd](./pwd), [cd](./cd), [fopen](./fopen), [fclose](./fclose)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/ls.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/ls.rs)

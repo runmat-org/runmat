@@ -171,7 +171,7 @@ For full-rank systems, yes. `A \\ b` is typically faster and more numerically st
 remains useful for ill-conditioned or rank-deficient problems where the pseudoinverse is desired.
 
 ## See Also
-[inv](../ops/inv), [linsolve](./linsolve), [mldivide](../ops/mldivide), [mrdivide](../ops/mrdivide), [svd](../factor/svd), [rank](../ops/rank), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[inv](./inv), [linsolve](./linsolve), [mldivide](./mldivide), [mrdivide](./mrdivide), [svd](./svd), [rank](./rank), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source lives at `crates/runmat-runtime/src/builtins/math/linalg/solve/pinv.rs`.

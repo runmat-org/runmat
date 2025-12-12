@@ -201,7 +201,7 @@ See MathWorks’ documentation linked above or inspect this builtin’s source f
 implementation.
 
 ## See Also
-[gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather), [logical](../../../logical/ops), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
+[gpuArray](./gpuarray), [gather](./gather), [logical](./ops), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/single.rs`

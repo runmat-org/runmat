@@ -174,7 +174,7 @@ The current in-process provider gathers the tensor to host memory. Providers tha
 norm kernels can keep the computation entirely on device without user-visible changes.
 
 ## See Also
-[sum](../../reduction/sum), [svd](../factor/svd), [cond](./cond), [pinv](./pinv), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [svd](./svd), [cond](./cond), [pinv](./pinv), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `norm` function is available at: [`crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/norm.rs)

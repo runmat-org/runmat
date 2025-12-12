@@ -161,7 +161,7 @@ Inputs are promoted to double precision before evaluation, matching MATLAB behav
 Providers may compile elementwise pipelines during initialization. If `unary_cosh` is unavailable, the CPU fallback avoids the warmup altogether.
 
 ## See Also
-[cos](./cos), [sinh](./sinh), [tanh](./tanh), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[cos](./cos), [sinh](./sinh), [tanh](./tanh), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `cosh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/cosh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cosh.rs)

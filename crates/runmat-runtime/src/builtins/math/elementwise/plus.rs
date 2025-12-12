@@ -201,7 +201,7 @@ Absolutely. The result is complex, with broadcasting rules identical to MATLAB.
 String arrays are not numeric and therefore raise an error when passed to `plus`.
 
 ## See Also
-[mtimes](../linalg/ops/mtimes), [times](./times), [ldivide](./ldivide), [rdivide](./rdivide), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mtimes](./mtimes), [times](./times), [ldivide](./ldivide), [rdivide](./rdivide), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/elementwise/plus.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/plus.rs)

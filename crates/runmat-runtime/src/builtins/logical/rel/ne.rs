@@ -172,7 +172,7 @@ Yes. The builtin registers element-wise fusion metadata so the planner can fuse 
 Yes. You can use the operator form `A ~= B`, which maps directly to this builtin.
 
 ## See Also
-[`eq`](./eq), [`lt`](./lt), [`gt`](./gt), [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
+[`eq`](./eq), [`lt`](./lt), [`gt`](./gt), [`gpuArray`](./gpuarray), [`gather`](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::ne")]

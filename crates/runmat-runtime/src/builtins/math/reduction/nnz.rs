@@ -176,7 +176,7 @@ limitation where values above `2^53` may lose the least significant bit, but Run
 finite double.
 
 ## See Also
-[sum](./sum), [any](./any), [find](../../array/indexing/find), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [any](./any), [find](./find), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `nnz` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/nnz.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/nnz.rs)

@@ -145,7 +145,7 @@ Yes. You can specify both options (in any order) and RunMat mirrors MATLAB’s r
 If the active provider does not natively handle `"omitnan"`, RunMat gathers back to host and computes there to preserve MATLAB semantics.
 
 ## See Also
-[sum](./sum), [cumprod](./cumprod), [diff](./diff), [mean](./mean), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [cumprod](./cumprod), [diff](./diff), [mean](./mean), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/reduction/cumsum.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumsum.rs)

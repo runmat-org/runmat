@@ -180,7 +180,7 @@ Provide the dimension index: `sum(A, 2)` sums rows, `sum(A, 3)` sums along the t
 Only when you explicitly request `'native'` or `'like'`. Otherwise integers are promoted to double precision so you do not have to manage overflow manually.
 
 ## See Also
-[prod](./prod), [mean](./mean), [cumsum](./cumsum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[prod](./prod), [mean](./mean), [cumsum](./cumsum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sum` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/sum.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/sum.rs)

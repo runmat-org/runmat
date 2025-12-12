@@ -177,8 +177,8 @@ Dimensions with length zero propagate through implicit expansion. For example, c
 string array returns an empty array with the broadcasted shape.
 
 ## See Also
-[string](../core/string), [plus](../../core/plus) (string concatenation with operator overloading),
-[join](./join), [cellstr](../../../cells/core/cellstr)
+[string](./string), [plus](./plus) (string concatenation with operator overloading),
+[join](./join), [cellstr](./cellstr)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/strcat.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strcat.rs)

@@ -185,7 +185,7 @@ Yes. The builtin returns a new tensor; fusion may in-place combine kernels to re
 Yes. Logical inputs are promoted to doubles (0 or 1) before applying `abs`, just like MATLAB.
 
 ## See Also
-[sin](../trigonometry/sin), [sum](../reduction/sum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [sum](./sum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `abs` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/abs.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/abs.rs)

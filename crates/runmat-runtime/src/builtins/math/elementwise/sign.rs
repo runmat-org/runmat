@@ -187,7 +187,7 @@ Avoid `gather` unless host data is required. RunMat keeps the outputs of fused e
 beneficial.
 
 ## See Also
-[abs](./abs), [sin](../trigonometry/sin), [sum](../reduction/sum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[abs](./abs), [sin](./sin), [sum](./sum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sign` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/sign.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sign.rs)

@@ -139,8 +139,8 @@ Scalars and row vectors remain in their natural dimensionality. Higher-dimension
 - [`cat`](./cat)
 - [`vertcat`](./vertcat) *(planned)*
 - [`reshape`](./reshape)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/horzcat.rs`

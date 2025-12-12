@@ -160,7 +160,7 @@ Only if the active provider lacks a dedicated implementation. In that case RunMa
 downloads the matrix, computes the estimate on the host, and re-uploads the scalar.
 
 ## See also
-[inv](./inv), [pinv](./pinv), [rank](./rank), [det](./det), [linsolve](./linsolve), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[inv](./inv), [pinv](./pinv), [rank](./rank), [det](./det), [linsolve](./linsolve), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & feedback
 - The implementation lives at `crates/runmat-runtime/src/builtins/math/linalg/solve/rcond.rs`.

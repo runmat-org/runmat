@@ -182,7 +182,7 @@ Yes. Equal elements (including ties when sorting by absolute value) preserve the
 Yes. Logical inputs are promoted to double precision automatically. Scalars are returned unchanged with an index output of `1` when requested.
 
 ## See also
-[sortrows](./sortrows), [unique](./unique), [max](../../math/reduction/max), [min](../../math/reduction/min), [permute](../../array/shape/permute)
+[sortrows](./sortrows), [unique](./unique), [max](./max), [min](./min), [permute](./permute)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/array/sorting_sets/sort.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/sort.rs)

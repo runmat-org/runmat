@@ -187,7 +187,7 @@ If the subscript arrays are empty, `sub2ind` returns an empty double array with 
 No. The output preserves the orientation (shape) of the subscript arrays, so row vectors stay row vectors and column vectors stay column vectors.
 
 ## See Also
-[ind2sub](./ind2sub), [find](./find), [size](../../introspection/size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[ind2sub](./ind2sub), [find](./find), [size](./size), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sub2ind` function is available at: [`crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs)

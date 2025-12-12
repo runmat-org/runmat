@@ -164,7 +164,7 @@ The builtin registers a custom GPU spec rather than a fusion template. The plann
 Yes. Logical arrays are promoted to double precision (0.0/1.0) during filtering, mirroring MATLAB behaviour.
 
 ## See Also
-[fspecial](./fspecial), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fspecial](./fspecial), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/image/filters/imfilter.rs`

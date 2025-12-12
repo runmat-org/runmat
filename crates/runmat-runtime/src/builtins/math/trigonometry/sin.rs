@@ -159,7 +159,7 @@ Absolutely. Real and imaginary parts are handled according to the analytic exten
 Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; complex prototypes raise a descriptive error so you can fall back to the default output rules.
 
 ## See Also
-[cos](./cos), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[cos](./cos), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs)

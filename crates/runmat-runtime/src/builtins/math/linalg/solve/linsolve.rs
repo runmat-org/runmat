@@ -187,7 +187,7 @@ Inputs must behave like matrices. Trailing singleton dimensions are permitted, b
 arrays should be reshaped before calling `linsolve`, just like in MATLAB.
 
 ## See Also
-[mldivide](../../ops/mldivide), [mrdivide](../../ops/mrdivide), [lu](../../factor/lu), [chol](../../factor/chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[mldivide](./mldivide), [mrdivide](./mrdivide), [lu](./lu), [chol](./chol), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::linsolve")]

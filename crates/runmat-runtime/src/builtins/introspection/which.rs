@@ -156,7 +156,7 @@ Expected output (example):
 - **Does `which` gather GPU values?** Yes. GPU-resident arguments are automatically gathered before the search begins.
 
 ## See Also
-[exist](../io/repl_fs/exist), [ls](../io/repl_fs/ls), [dir](../io/repl_fs/dir), [copyfile](../io/repl_fs/copyfile)
+[exist](./exist), [ls](./ls), [dir](./dir), [copyfile](./copyfile)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/introspection/which.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/which.rs)

@@ -217,7 +217,7 @@ Absolutely. The result is complex, with broadcasting rules identical to MATLAB.
 String arrays are not numeric and therefore raise an error when passed to `times`.
 
 ## See Also
-[mtimes](../linalg/ops/mtimes), [rdivide](./rdivide), [ldivide](./ldivide), [plus](./plus), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mtimes](./mtimes), [rdivide](./rdivide), [ldivide](./ldivide), [plus](./plus), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/elementwise/times.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/times.rs)

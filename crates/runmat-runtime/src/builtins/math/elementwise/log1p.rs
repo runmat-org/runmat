@@ -180,7 +180,7 @@ Yes. The fusion planner recognizes `log1p` as an element-wise op. Providers that
 kernels can materialize `log(1 + x)` directly in generated WGSL.
 
 ## See Also
-[log](./log), [expm1](./expm1), [sin](../trigonometry/sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[log](./log), [expm1](./expm1), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `log1p` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs)

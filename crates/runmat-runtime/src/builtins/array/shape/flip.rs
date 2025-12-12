@@ -193,8 +193,8 @@ complex scalars after the operation.
 - [`permute`](./permute)
 - [`ipermute`](./ipermute)
 - [`repmat`](./repmat)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - The implementation lives at [`crates/runmat-runtime/src/builtins/array/shape/flip.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/flip.rs)

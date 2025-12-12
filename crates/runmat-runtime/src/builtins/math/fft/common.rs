@@ -162,9 +162,9 @@ pub fn trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
 /// Kind of circular shift that should be applied to match MATLAB semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShiftKind {
-    /// `fftshift` semantics (floor(N/2)).
+    /// `fftshift` semantics (./2)).
     Fft,
-    /// `ifftshift` semantics (ceil(N/2)).
+    /// `ifftshift` semantics (./2)).
     Ifft,
 }
 

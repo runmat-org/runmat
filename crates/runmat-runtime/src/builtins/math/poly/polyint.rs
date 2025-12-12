@@ -191,7 +191,7 @@ on the host because current providers do not expose complex tensor handles.
 All arithmetic uses IEEE 754 double precision (`f64`), mirroring MATLAB's default numeric type.
 
 ## See Also
-[polyder](./polyder), [polyval](./polyval), [polyfit](./polyfit), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[polyder](./polyder), [polyval](./polyval), [polyfit](./polyfit), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]

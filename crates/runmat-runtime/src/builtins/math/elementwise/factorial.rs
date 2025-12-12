@@ -210,7 +210,7 @@ Passing strings, structs, or complex numbers raises `factorial: unsupported inpu
 can correct the call site quickly.
 
 ## See Also
-[gamma](./gamma), [power](./power), [prod](../reduction/prod), [permute](../../array/shape/permute)
+[gamma](./gamma), [power](./power), [prod](./prod), [permute](./permute)
 
 ## Source & Feedback
 - The full source code for the implementation of the `factorial` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs)

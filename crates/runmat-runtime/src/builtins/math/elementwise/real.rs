@@ -165,7 +165,7 @@ Yes—`real` is an identity for real tensors. Results match within the provider'
 Yes. The fusion planner can fold `real` into neighbouring elementwise kernels, keeping data on the GPU when possible.
 
 ## See Also
-[imag](./imag), [abs](./abs), [sign](./sign), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[imag](./imag), [abs](./abs), [sign](./sign), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `real` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/real.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/real.rs)

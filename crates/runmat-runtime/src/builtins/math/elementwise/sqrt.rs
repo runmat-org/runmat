@@ -187,7 +187,7 @@ Yes. The current design promotes to host computation when complex results are ne
 providers may expose complex buffers, and the builtin will automatically benefit from those hooks.
 
 ## See Also
-[abs](./abs), [exp](./exp), [log](./log), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[abs](./abs), [exp](./exp), [log](./log), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sqrt` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs)

@@ -187,7 +187,7 @@ invokes it. Otherwise the backing field `<property>_backing` is inspected.
 RunMat mirrors MATLAB by raising `Invalid or deleted handle object 'ClassName'.`
 
 ## See Also
-[fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [class](../../introspection/class)
+[fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [class](./class)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::getfield")]

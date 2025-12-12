@@ -179,7 +179,7 @@ Yes. `zeros` always produces a dense array. For sparse matrices of zeros, use `s
 Absolutely. Preallocating with `zeros` (or `ones`) and then filling in values is a recommended practice for efficiency and code clarity when the final values are known to overwrite the initial zeros.
 
 ## See Also
-[ones](./ones), [eye](./eye), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[ones](./ones), [eye](./eye), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `zeros` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/zeros.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/zeros.rs)

@@ -180,7 +180,7 @@ Empty index arrays produce empty subscript arrays with the same shape.
 Definitely—`ind2sub` works for any number of dimensions represented in `siz`.
 
 ## See Also
-[sub2ind](./sub2ind), [size](../../introspection/size), [find](./find), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sub2ind](./sub2ind), [size](./size), [find](./find), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `ind2sub` function is available at: [`crates/runmat-runtime/src/builtins/array/indexing/ind2sub.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/ind2sub.rs)

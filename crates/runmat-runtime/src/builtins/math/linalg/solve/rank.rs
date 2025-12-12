@@ -192,7 +192,7 @@ Only enough memory for the SVD factors. For host execution this is handled by `n
 LAPACK when enabled). GPU providers are free to reuse buffers or stream the computation.
 
 ## See Also
-[pinv](./pinv), [svd](../factor/svd), [inv](./inv), [det](./det), [null](../structure/null), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[pinv](./pinv), [svd](./svd), [inv](./inv), [det](./det), [null](./null), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/solve/rank.rs`

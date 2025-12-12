@@ -175,7 +175,7 @@ Empty arrays are returned unchanged with identical shape metadata.
 Yes. Logical arrays are shifted without changing their logical element type.
 
 ## See Also
-[fft](./fft), [ifft](./ifft), [ifftshift](./ifftshift), [circshift](../../array/shape/circshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fft](./fft), [ifft](./ifft), [ifftshift](./ifftshift), [circshift](./circshift), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/fft/fftshift.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/fftshift.rs)

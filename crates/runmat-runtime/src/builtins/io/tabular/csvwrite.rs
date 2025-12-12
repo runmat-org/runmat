@@ -187,7 +187,7 @@ The builtin uses the platform default (`\r\n` on Windows, `\n` elsewhere). Most
 CSV consumers handle either convention transparently.
 
 ## See Also
-[csvread](./csvread), [readmatrix](./readmatrix), [writematrix](./writematrix), [fprintf](../filetext/fprintf), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[csvread](./csvread), [readmatrix](./readmatrix), [writematrix](./writematrix), [fprintf](./fprintf), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `csvwrite` lives at: [`crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs)

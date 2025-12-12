@@ -167,7 +167,7 @@ The fusion planner recognises `expm1` as an element-wise op. Providers that supp
 can materialise `expm1` directly in generated WGSL.
 
 ## See Also
-[exp](./exp), [log1p](./log1p), [sin](../trigonometry/sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[exp](./exp), [log1p](./log1p), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `expm1` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/expm1.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/expm1.rs)

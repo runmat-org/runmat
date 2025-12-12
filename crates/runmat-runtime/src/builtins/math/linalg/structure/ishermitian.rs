@@ -185,7 +185,7 @@ No. RunMat automatically keeps tensors resident on the GPU when it is profitable
 `gpuArray` calls remain available for MATLAB compatibility.
 
 ## See Also
-[issymmetric](./issymmetric), [eig](../factor/eig), [chol](../factor/chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[issymmetric](./issymmetric), [eig](./eig), [chol](./chol), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - View the source: [`crates/runmat-runtime/src/builtins/math/linalg/structure/ishermitian.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/ishermitian.rs)

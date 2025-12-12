@@ -217,7 +217,7 @@ Not yet. RunMat gathers GPU elements to the host before concatenating. Future re
 introduce GPU-resident cell storage, at which point providers can supply dedicated kernels.
 
 ## See Also
-[cell](../core/cell), [mat2cell](../../array/shape/mat2cell), [num2cell](../../array/shape/num2cell), [cellfun](../../array/shape/cellfun)
+[cell](./cell), [mat2cell](./mat2cell), [num2cell](./num2cell), [cellfun](./cellfun)
 
 ## Source & Feedback
 - The full source code for the implementation of the `cell2mat` function is available at: [`crates/runmat-runtime/src/builtins/cells/core/cell2mat.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cell2mat.rs)

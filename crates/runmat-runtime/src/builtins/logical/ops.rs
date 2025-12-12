@@ -182,7 +182,7 @@ Only when the provider cannot operate in-place. The preferred path performs `ele
 See the references below and the RunMat source for implementation details.
 
 ## See Also
-[`islogical`](./tests/islogical), [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather), [`find`](../../math/reduction/find)
+[`islogical`](./islogical), [`gpuArray`](./gpuarray), [`gather`](./gather), [`find`](./find)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/logical/ops.rs`

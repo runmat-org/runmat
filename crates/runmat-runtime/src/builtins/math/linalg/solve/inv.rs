@@ -173,7 +173,7 @@ If the acceleration provider exposes an `inv` hook, the operation stays on the G
 gathers, computes on the host, and re-uploads so the caller still receives a GPU tensor.
 
 ## See Also
-[pinv](./pinv), [linsolve](./linsolve), [mldivide](../ops/mldivide), [det](../ops/det), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[pinv](./pinv), [linsolve](./linsolve), [mldivide](./mldivide), [det](./det), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]

@@ -173,7 +173,7 @@ The result becomes `1`, matching MATLAB's multiplicative identity semantics for 
 Only when you explicitly request `'native'` or `'like'`. Otherwise, integers are promoted to double precision so you do not have to manage overflow manually.
 
 ## See Also
-[sum](./sum), [mean](./mean), [cumprod](./cumprod), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [mean](./mean), [cumprod](./cumprod), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `prod` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/prod.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/prod.rs)

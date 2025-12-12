@@ -148,7 +148,7 @@ Expected output:
 - **Is `pwd` safe to call from GPU-heavy scripts?** Absolutely. The builtin does not allocate GPU memory or trigger device operations.
 
 ## See Also
-[cd](../../../../builtins/io/repl_fs/cd)
+[cd](./cd)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/pwd.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/pwd.rs)

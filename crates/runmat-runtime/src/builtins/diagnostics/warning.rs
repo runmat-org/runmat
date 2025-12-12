@@ -145,7 +145,7 @@ warning("default", "verbose");   % restore the default verbosity
 12. **Are repeated calls thread-safe?** Internally the warning table is guarded by a mutex, so concurrent invocations are serialised and remain deterministic.
 
 ## See Also
-[error](./error), [sprintf](../strings/core/sprintf), [fprintf](../io/filetext/fprintf)
+[error](./error), [sprintf](./sprintf), [fprintf](./fprintf)
 
 ## Source & Feedback
 - The full source code for the implementation of the `warning` function is available at: [`crates/runmat-runtime/src/builtins/diagnostics/warning.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/warning.rs)

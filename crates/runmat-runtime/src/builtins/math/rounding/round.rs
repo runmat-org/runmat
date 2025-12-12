@@ -152,7 +152,7 @@ No. Non-finite values propagate unchanged for every rounding mode, just like MAT
 Yes. Logical values are converted to doubles (`0` or `1`) and characters are rounded as their numeric code points, returning dense double tensors.
 
 ## See Also
-[floor](./floor), [ceil](./ceil), [fix](./fix), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[floor](./floor), [ceil](./ceil), [fix](./fix), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `round` lives at: [`crates/runmat-runtime/src/builtins/math/rounding/round.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/round.rs)

@@ -197,7 +197,7 @@ Call `[y, zf] = filter(...)` on each chunk and pass `zf` as the fourth argument 
 The planner leverages the same provider hook under the hood. As long as the operands are real and the provider implements `iir_filter`, auto-offload keeps the filter on the GPU.
 
 ## See Also
-[conv](./conv), [deconv](./deconv), [fft](../fft/fft), [filtfilt](https://www.mathworks.com/help/matlab/ref/filtfilt.html)
+[conv](./conv), [deconv](./deconv), [fft](./fft), [filtfilt](https://www.mathworks.com/help/matlab/ref/filtfilt.html)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]

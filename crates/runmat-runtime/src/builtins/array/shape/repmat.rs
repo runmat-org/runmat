@@ -198,7 +198,7 @@ arrays, while char and cell arrays respect their row-major storage conventions
 within RunMat.
 
 ## See Also
-[reshape](./reshape), [permute](./permute), [squeeze](./squeeze), [zeros](../../creation/zeros), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[reshape](./reshape), [permute](./permute), [squeeze](./squeeze), [zeros](./zeros), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/repmat.rs`

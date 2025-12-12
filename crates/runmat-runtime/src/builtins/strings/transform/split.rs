@@ -188,7 +188,7 @@ You may pass string scalars, string arrays, character arrays (each row is a deli
 containing string scalars or character vectors.
 
 ## See Also
-[strsplit](../../search/strsplit), [replace](./replace), [lower](./lower), [upper](./upper), [strip](./strip)
+[strsplit](./strsplit), [replace](./replace), [lower](./lower), [upper](./upper), [strip](./strip)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/split.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/split.rs)

@@ -201,7 +201,7 @@ increment (`start:step:stop`). When `stop` is not exactly reachable, `colon` sto
 nudging the final value.
 
 ## See Also
-[linspace](./linspace), [logspace](./logspace), [range](./range), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[linspace](./linspace), [logspace](./logspace), [range](./range), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `colon` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/colon.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/colon.rs)

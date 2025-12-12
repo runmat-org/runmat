@@ -176,7 +176,7 @@ When the provider supplies a `kron` hook, execution stays on-device. Otherwise R
 host, computes the product, and re-uploads the result when a provider is available.
 
 ## See Also
-[repmat](./repmat), [reshape](./reshape), [sum](../../math/reduction/sum), [matmul](../../math/algebra/matmul), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[repmat](./repmat), [reshape](./reshape), [sum](./sum), [matmul](./matmul), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/kron.rs`

@@ -165,7 +165,7 @@ They propagate through the least-squares solve in the same way as MATLAB. NaNs i
 NaNs in the output wherever they influence the solution.
 
 ## See Also
-[mtimes](./mtimes), [svd](../../factor/svd), [lu](../../factor/lu), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[mtimes](./mtimes), [svd](./svd), [lu](./lu), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/mrdivide.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mrdivide.rs)

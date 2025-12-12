@@ -44,7 +44,7 @@ tested:
 
 # What does the `gpuInfo` function do in MATLAB / RunMat?
 `gpuInfo()` returns a concise, human-readable string that summarises the active GPU acceleration
-provider. It is a convenience wrapper around [`gpuDevice`](./gpuDevice), intended for logging or
+provider. It is a convenience wrapper around [`gpuDevice`](./gpudevice), intended for logging or
 displaying status information in the REPL and notebooks.
 
 ## How does the `gpuInfo` function behave in MATLAB / RunMat?
@@ -142,7 +142,7 @@ Yes. Single quotes are doubled (e.g., `Ada'GPU` becomes `Ada''GPU`) so the summa
 back into MATLAB code without breaking literal syntax.
 
 ## See Also
-[gpuDevice](./gpuDevice), [gpuArray](./gpuArray), [gather](./gather)
+[gpuDevice](./gpudevice), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]

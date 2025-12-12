@@ -176,7 +176,7 @@ RunMat prints a compact cell view using four-space indentation and MATLAB-style 
 Use `fprintf` instead. `disp` always terminates the output with a newline.
 
 ## See Also
-[fprintf](../filetext/fprintf), [sprintf](../../strings/core/sprintf), [string](../../strings/core/string), [gather](../../acceleration/gpu/gather)
+[fprintf](./fprintf), [sprintf](./sprintf), [string](./string), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::disp")]
