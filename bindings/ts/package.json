@@ -23,10 +23,11 @@
   ],
   "scripts": {
     "clean": "rimraf dist pkg pkg-web ../../crates/runmat-wasm/pkg ../../crates/runmat-wasm/pkg-web",
+    "build:registry": "RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown",
     "build:wasm": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release",
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:types": "tsc -p tsconfig.json",
-    "build": "npm run clean && npm run build:wasm && npm run build:wasm:web && npm run build:types",
+    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:types",
     "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
     "lint": "tsc --noEmit",
     "test": "vitest run",

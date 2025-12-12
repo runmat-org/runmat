@@ -1,5 +1,5 @@
 #[cfg(target_arch = "wasm32")]
-use log::warn;
+use log::info;
 #[cfg(target_arch = "wasm32")]
 use std::sync::Once;
 
@@ -17,9 +17,9 @@ static WASM_REGISTRY_ONCE: Once = Once::new();
 #[cfg(target_arch = "wasm32")]
 pub fn register_all() {
     WASM_REGISTRY_ONCE.call_once(|| {
-        warn!("runmat-runtime: executing wasm builtin registry");
+        info!("runmat-runtime: executing wasm builtin registry");
         generated::register_all();
-        warn!(
+        info!(
             "runmat-runtime: registered {} wasm builtins",
             runmat_builtins::builtin_functions().len()
         );

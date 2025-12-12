@@ -893,7 +893,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     apply_plotting_overrides(&parsed_opts);
     wasm_registry::register_all();
     let builtin_count = runmat_builtins::builtin_functions().len();
-    log::warn!("RunMat wasm: builtins registered ({builtin_count})");
+    log::info!("RunMat wasm: builtins registered ({builtin_count})");
+    let builtin_count = runmat_builtins::builtin_functions().len();
+    log::info!("RunMat wasm: builtins registered ({builtin_count})");
     #[cfg(target_arch = "wasm32")]
     web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
 
