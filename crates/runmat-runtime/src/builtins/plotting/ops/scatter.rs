@@ -628,9 +628,10 @@ pub(crate) mod tests {
     };
     use super::*;
     use runmat_builtins::Value;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn test_style() -> ScatterResolvedStyle {
@@ -676,12 +677,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_requires_equal_lengths() {
+        setup_plot_tests();
         assert!(build_scatter_plot(vec![1.0], vec![], &mut test_style()).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_builtin_returns_or_reports_backend_status() {
+        setup_plot_tests();
         let out = scatter_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -695,6 +698,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_resolves_marker_style_from_arguments() {
+        setup_plot_tests();
         let rest = vec![
             Value::Num(12.0),
             Value::String("r".into()),
@@ -712,6 +716,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_supports_flat_marker_face_color() {
+        setup_plot_tests();
         let rest = vec![
             Value::Tensor(tensor_from(&[5.0, 5.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -729,6 +734,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_applies_display_name() {
+        setup_plot_tests();
         let rest = vec![
             Value::String("DisplayName".into()),
             Value::String("Series A".into()),
@@ -742,6 +748,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_rejects_flat_marker_edge_color_without_color_data() {
+        setup_plot_tests();
         let rest = vec![
             Value::Tensor(tensor_from(&[5.0, 5.0])),
             Value::String("Marker".into()),
@@ -757,6 +764,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_accepts_flat_marker_edge_color_when_colors_supplied() {
+        setup_plot_tests();
         let mut appearance = LineAppearance::default();
         appearance.marker = Some(MarkerAppearance {
             kind: MarkerKind::Circle,

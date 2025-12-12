@@ -1083,9 +1083,10 @@ fn implicit_axis(len: usize) -> Vec<f64> {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::NumericDType;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
@@ -1105,6 +1106,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_axes_must_match_grid() {
+        setup_plot_tests();
         let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
         let y = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 3, 1));
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1115,6 +1117,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn implicit_axes_respect_tensor_shape() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let args = parse_contour_args("contour", z, Vec::new()).unwrap();
         assert_eq!(args.x_axis, vec![1.0, 2.0]);
@@ -1124,6 +1127,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_vector_must_increase() {
+        setup_plot_tests();
         let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
         assert!(parse_level_spec(bad_levels, "contour").is_err());
 
@@ -1138,6 +1142,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_step_option_generates_sequence() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let args = parse_contour_args(
             "contour",
@@ -1154,6 +1159,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_color_option_parses_literal() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let args = parse_contour_args(
             "contour",
@@ -1173,6 +1179,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_list_option_accepts_explicit_vector() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let args = parse_contour_args(
             "contour",
@@ -1194,6 +1201,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_color_none_suppresses_overlays() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let args = parse_contour_args(
             "contour",
@@ -1213,6 +1221,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn level_list_mode_manual_requires_explicit_levels() {
+        setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
         let err = parse_contour_args(
             "contour",

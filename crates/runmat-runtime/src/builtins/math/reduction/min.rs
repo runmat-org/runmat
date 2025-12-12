@@ -1656,7 +1656,6 @@ fn choose_complex_elementwise(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;

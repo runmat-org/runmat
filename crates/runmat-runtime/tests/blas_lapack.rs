@@ -1,11 +1,8 @@
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-#![cfg(feature = "blas-lapack")]
+#![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
 use runmat_builtins::{CellArray, Tensor as Matrix, Value};
 use runmat_runtime::{blas::*, call_builtin, lapack::*, matrix_transpose};
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_blas_matrix_multiplication() {
     let a = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -20,7 +17,6 @@ fn test_blas_matrix_multiplication() {
     assert_eq!(result.cols(), 2);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_blas_matrix_vector_multiplication() {
     let matrix = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -33,7 +29,6 @@ fn test_blas_matrix_vector_multiplication() {
     assert_eq!(result, vec![8.0, 18.0]);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_blas_dot_product() {
     let a = vec![1.0, 2.0, 3.0];
@@ -45,7 +40,6 @@ fn test_blas_dot_product() {
     assert_eq!(result, 32.0);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_blas_vector_norm() {
     let vector = vec![3.0, 4.0]; // 3-4-5 triangle
@@ -53,7 +47,6 @@ fn test_blas_vector_norm() {
     assert!((norm - 5.0).abs() < 1e-10);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_blas_vector_operations() {
     let mut x = vec![1.0, 2.0, 3.0];
@@ -69,7 +62,6 @@ fn test_blas_vector_operations() {
     assert_eq!(result, vec![8.0, 13.0, 18.0]);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_linear_solve() {
     // Solve the system:
@@ -86,7 +78,6 @@ fn test_lapack_linear_solve() {
     assert!((solution[1] - 1.4).abs() < 1e-10);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_lu_decomposition() {
     let matrix = Matrix::new_2d(vec![4.0, 3.0, 2.0, 1.0], 2, 2).unwrap();
@@ -99,7 +90,6 @@ fn test_lapack_lu_decomposition() {
     assert_eq!(lu.pivots.len(), 2);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_qr_decomposition() {
     let matrix = Matrix::new_2d(vec![1.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
@@ -123,7 +113,6 @@ fn test_lapack_qr_decomposition() {
     assert!((qt_q.data[3] - 1.0).abs() < tolerance); // [1,1] should be 1
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_eigenvalues() {
     // Test with a symmetric matrix: [[2, 1], [1, 2]]
@@ -142,7 +131,6 @@ fn test_lapack_eigenvalues() {
     assert!((eigenvals[1] - 3.0).abs() < 1e-10);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_determinant() {
     // Test determinant of [[2, 1], [1, 2]]
@@ -154,7 +142,6 @@ fn test_lapack_determinant() {
     assert!((det - 3.0).abs() < 1e-10);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_lapack_matrix_inverse() {
     // Test inverse of [[2, 1], [1, 2]]
@@ -179,7 +166,6 @@ fn test_lapack_matrix_inverse() {
     assert!((identity.data[3] - 1.0).abs() < tolerance);
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_builtin_blas_functions() {
     // Test BLAS matrix multiplication builtin
@@ -220,7 +206,6 @@ fn test_builtin_blas_functions() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_builtin_lapack_functions() {
     // Test linear solve builtin
@@ -253,7 +238,6 @@ fn test_builtin_lapack_functions() {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_error_handling() {
     // Test dimension mismatch errors

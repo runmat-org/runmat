@@ -290,9 +290,10 @@ pub(crate) fn build_color_lut(colormap: ColorMap, samples: usize, alpha: f32) ->
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -308,6 +309,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn surf_requires_matching_grid() {
+        setup_plot_tests();
         let res = surf_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),

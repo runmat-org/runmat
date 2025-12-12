@@ -75,3 +75,16 @@ pub use engine::{render_figure_png_bytes, render_figure_snapshot};
 pub mod ops {
     pub use super::hist;
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::state;
+    use std::sync::Once;
+
+    pub(crate) fn ensure_plot_test_env() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            state::disable_rendering_for_tests();
+        });
+    }
+}

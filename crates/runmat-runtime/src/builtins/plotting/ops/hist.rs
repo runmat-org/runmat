@@ -1339,9 +1339,10 @@ impl HistInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -1365,6 +1366,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_respects_bin_argument() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[1.0, 2.0, 3.0, 4.0]));
         let bins = vec![Value::from(2.0)];
         let result = hist_builtin(data, bins);
@@ -1376,6 +1378,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_bin_centers_vector() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
         let centers = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0]));
         let result = hist_builtin(data, vec![centers]);
@@ -1387,6 +1390,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_probability_normalization() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(
             data,
@@ -1400,6 +1404,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_string_only_normalization() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("pdf".into())]);
         if let Err(msg) = result {
@@ -1410,6 +1415,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_normalization_name_value_pair() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(
             data,
@@ -1426,6 +1432,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_bin_edges_option() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.1, 0.4, 0.7]));
         let edges = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("BinEdges".into()), edges]);
@@ -1437,6 +1444,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_evaluate_returns_counts_and_centers() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.8, 1.0]));
         let eval = evaluate(data, &[]).expect("hist evaluate");
         let counts = match eval.counts_value() {
@@ -1454,6 +1462,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_numbins_option() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
         let args = vec![Value::String("NumBins".into()), Value::Num(4.0)];
         let eval = evaluate(data, &args).expect("hist evaluate");
@@ -1467,6 +1476,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_binwidth_and_limits() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.1, 0.2, 0.6, 0.8]));
         let args = vec![
             Value::String("BinWidth".into()),
@@ -1486,6 +1496,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_supports_sqrt_binmethod() {
+        setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.4, 0.6, 0.8]));
         let args = vec![
             Value::String("BinMethod".into()),
@@ -1502,6 +1513,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_normalization_handles_weighted_probability() {
+        setup_plot_tests();
         let mut counts = vec![2.0, 4.0];
         let widths = vec![1.0, 1.0];
         apply_normalization(&mut counts, &widths, HistNormalization::Probability, 6.0);
@@ -1512,6 +1524,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_normalization_handles_weighted_pdf() {
+        setup_plot_tests();
         let mut counts = vec![5.0];
         let widths = vec![0.5];
         apply_normalization(&mut counts, &widths, HistNormalization::Pdf, 10.0);

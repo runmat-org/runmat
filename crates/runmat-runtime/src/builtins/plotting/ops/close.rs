@@ -97,14 +97,16 @@ fn parse_close_action(args: &[Value]) -> Result<CloseAction, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_defaults_to_current() {
+        setup_plot_tests();
         assert!(matches!(
             parse_close_action(&[]).unwrap(),
             CloseAction::Current
@@ -114,6 +116,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_numeric_handles() {
+        setup_plot_tests();
         let values = vec![Value::Num(3.0), Value::Num(1.0)];
         match parse_close_action(&values).unwrap() {
             CloseAction::Handles(handles) => {
@@ -128,6 +131,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_all_flag() {
+        setup_plot_tests();
         let values = vec![Value::String("all".to_string())];
         assert!(matches!(
             parse_close_action(&values).unwrap(),

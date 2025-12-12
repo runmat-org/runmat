@@ -1053,7 +1053,6 @@ fn clamp_asin(value: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {

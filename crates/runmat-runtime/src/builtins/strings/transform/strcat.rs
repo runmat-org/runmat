@@ -538,7 +538,6 @@ pub(crate) mod tests {
     use runmat_builtins::Tensor;
     use runmat_builtins::{CellArray, CharArray, IntValue, StringArray};
 
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

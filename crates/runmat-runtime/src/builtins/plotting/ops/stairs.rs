@@ -294,9 +294,10 @@ impl StairsInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -312,6 +313,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn stairs_requires_matching_lengths() {
+        setup_plot_tests();
         let res = stairs_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),
@@ -323,6 +325,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn stairs_requires_minimum_length() {
+        setup_plot_tests();
         let res = stairs_builtin(
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(tensor_from(&[1.0])),
