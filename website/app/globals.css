@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "prismjs/themes/prism-okaidia.css";
 
 @layer base {
   :root {
@@ -22,6 +23,7 @@
     --input: 20 5.9% 90%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
+    --code-surface: 210 40% 98%;
   }
 
   .dark {
@@ -44,6 +46,7 @@
     --border: 12 6.5% 15.1%;
     --input: 12 6.5% 15.1%;
     --ring: 221.2 83.2% 53.3%;
+    --code-surface: 222 40% 12%;
   }
 }
 
@@ -123,38 +126,51 @@
 }
 
 @layer utilities {
-  /* Highlight.js / rehype-highlight code block theming tweaks to match site */
   pre {
     overflow-x: auto;
     max-width: 100%;
   }
-  pre code.hljs,
-  pre code:not([class]),
-  pre code[class*="language-"] {
-    display: block;
-    overflow-x: auto;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    line-height: 1.6;
-    background: hsl(var(--muted));
-    color: hsl(var(--foreground));
+
+  .markdown-pre {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 1rem;
     border: 1px solid hsl(var(--border));
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-    white-space: pre;
-    word-wrap: normal;
-    word-break: normal;
+    background-color: hsl(var(--code-surface));
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .dark .markdown-pre {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+
+  .markdown-pre code {
+    display: block;
+    padding: 1.25rem 1.5rem;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    background: transparent !important;
+    color: hsl(var(--foreground));
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
+
   @media (max-width: 640px) {
-    pre code.hljs,
-    pre code:not([class]),
-    pre code[class*="language-"] {
-      font-size: 0.75rem;
-      padding: 0.75rem;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
+    .markdown-pre code {
+      font-size: 0.78rem;
+      padding: 1rem;
     }
+  }
+
+  /* Let Prism token colors shine but ensure inline readability */
+  :not(pre) > code,
+  .markdown-inline-code {
+    background: hsl(var(--muted));
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.35rem;
+    border: 1px solid hsl(var(--border));
+    font-size: 0.9em;
+    word-break: break-word;
+    overflow-wrap: break-word;
   }
 
   /* Mermaid embeds: ensure full width visuals */
@@ -178,63 +194,6 @@
     rx: 8px;
     ry: 8px;
   }
-
-  /* Give code blocks breathing room */
-  pre:has(code.hljs),
-  pre:has(code[class*="language-"]),
-  pre:has(code:not([class])) {
-    margin-top: 1rem;
-    margin-bottom: 1.5rem;
-  }
-  
-  /* Ensure all code blocks inside pre get proper styling */
-  pre > code {
-    display: block;
-    overflow-x: auto;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    line-height: 1.6;
-    background: hsl(var(--muted));
-    color: hsl(var(--foreground));
-    border: 1px solid hsl(var(--border));
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-    white-space: pre;
-    word-wrap: normal;
-    word-break: normal;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  }
-
-  /* Inline code styling */
-  :not(pre) > code {
-    background: hsl(var(--muted));
-    padding: 0.15rem 0.35rem;
-    border-radius: 0.35rem;
-    border: 1px solid hsl(var(--border));
-    font-size: 0.9em;
-    word-break: break-word;
-    overflow-wrap: break-word;
-  }
-
-  /* Ensure readable contrast in light mode */
-  :root {
-    --hljs-key: #1d4ed8; /* blue-700 */
-    --hljs-str: #166534; /* green-700 */
-    --hljs-lit: #b45309; /* amber-700 */
-    --hljs-com: #6b7280; /* gray-500 */
-  }
-  .bg-muted { background-color: hsl(var(--muted)); }
-  .text-foreground { color: hsl(var(--foreground)); }
-  .dark .bg-muted { background-color: #0f172a; } /* slate-900 to match old dark block */
-  .hljs-keyword, .hljs-selector-tag, .hljs-subst { color: var(--hljs-key); }
-  .hljs-string, .hljs-title, .hljs-name, .hljs-type { color: var(--hljs-str); }
-  .hljs-attribute, .hljs-symbol, .hljs-bullet { color: var(--hljs-lit); }
-  .hljs-comment { color: var(--hljs-com); }
-  .hljs-keyword, .hljs-selector-tag, .hljs-subst { color: #7aa2f7; }
-  .hljs-string, .hljs-title, .hljs-name, .hljs-type { color: #9ece6a; }
-  .hljs-attribute, .hljs-symbol, .hljs-bullet { color: #e0af68; }
-  .hljs-built_in, .hljs-builtin-name, .hljs-meta { color: #bb9af7; }
-  .hljs-comment { color: #6b7280; }
 
 .gradient-brand {
     background: linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%);
@@ -355,7 +314,17 @@
   }
 }
 
-.language-matlab {
-  border: none;
-  background: none !important;
+.home-page { 
+  .language-matlab {
+    border: none;
+    background: none !important;
+  }
+
+  .language-example {
+    padding: 20px;
+  }
+}
+
+:not(pre) > code[class*="language-"], pre[class*="language-"] {
+  background: hsl(var(--code-surface));
 }

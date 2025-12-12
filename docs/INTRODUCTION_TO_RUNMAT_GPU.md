@@ -33,9 +33,11 @@ For example, the following script:
 
 ```matlab
 x = rand(1024, 1, 'single');
+
 y = sin(x) .* x + 0.5;
-m = mean(y, 'all');
-fprintf('m=%.6f\n', double(m));
+m = mean(y);
+
+fprintf('m=%.6f', m);
 ```
 
 produces the following acceleration graph:
@@ -235,18 +237,20 @@ Most users can ignore device management; RunMat keeps values resident and transf
   - Compiles WGSL into native compute pipelines and caches them so repeated shapes run without recompile cost.
  
 - Manual gathers (host materialization)
-  - Any host-only builtin (e.g., `fprintf` or converting with `double`) triggers a gather of its inputs.
+  - Any host-only builtin (e.g., `fprintf` or converting with `gather`) triggers a gather of its inputs.
+
   - To force an early gather:
     ```matlab
     y = sin(x) .* x + 0.5;           % runs on GPU
-    y_host = double(y);              % gather to host now
-    fprintf('y_mean=%.6f\n', mean(y_host, 'all'));
+    y_host = gather(y);              % gather to host now
+    m = mean(y_host, 'all');
+    fprintf('m=%.6f\n', m);
     ```
   - To keep residency until the end:
     ```matlab
-    y = sin(x) .* x + 0.5;           % stays on GPU
+    y = sin(x) .* x + 0.5;           % stays on GPU if x is on the GPU (or net benefit calculated to be profitable)
     m = mean(y, 'all');              % stays on GPU
-    fprintf('m=%.6f\n', double(m)); % single download at the sink
+    fprintf('m=%.6f\n', gather(m));  % single download at the sink
     ```
  
 - Capacity and large arrays

@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { GoogleTagManager } from "@/components/GoogleTagManager";
+import AnalyticsBootstrap from "@/components/AnalyticsBootstrap";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -183,6 +184,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <GoogleTagManager />
+        <AnalyticsBootstrap />
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

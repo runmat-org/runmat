@@ -27,6 +27,13 @@ export function GoogleAnalytics() {
             page_title: document.title,
             page_location: window.location.href,
           });
+          try {
+            gtag('get', '${GA_MEASUREMENT_ID}', 'client_id', function (clientId) {
+              if (clientId) {
+                window.dispatchEvent(new CustomEvent('ga_client_id', { detail: clientId }));
+              }
+            });
+          } catch (e) {}
         `}
       </Script>
     </>

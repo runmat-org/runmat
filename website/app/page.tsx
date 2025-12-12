@@ -67,7 +67,7 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen home-page">
       {/* SEO-optimized opening content */}
       <div className="sr-only">
         <h1>RunMat - The Fastest Runtime for Your Math</h1>

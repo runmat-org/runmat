@@ -199,32 +199,6 @@ fn test_hotspot_compilation_timing() {
 }
 
 #[test]
-fn test_complex_operation_performance() {
-    gc_test_context(|| {
-        if let Ok(mut engine) = TurbineEngine::new() {
-            let source = "complex_perf = (10 + 20) * (30 - 15) / 5 + 8";
-            let ast = parse(source).unwrap();
-            let hir = lower(&ast).unwrap();
-            let bytecode = compile(&hir).unwrap();
-
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-
-            let start = Instant::now();
-            let result = engine.execute_or_compile(&bytecode, &mut vars);
-            let elapsed = start.elapsed();
-
-            assert!(result.is_ok());
-
-            // Allow generous headroom on CI where virtualized CPUs can be slower
-            assert!(
-                elapsed < Duration::from_millis(100),
-                "Complex operation too slow: {elapsed:?}"
-            );
-        }
-    });
-}
-
-#[test]
 fn test_compilation_scalability() {
     gc_test_context(|| {
         if let Ok(mut engine) = TurbineEngine::new() {

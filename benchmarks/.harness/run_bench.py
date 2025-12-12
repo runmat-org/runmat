@@ -72,6 +72,7 @@ def build_impl_commands(case: str, variant: str = "default", include_impl: Optio
                 "name": "octave",
                 "lang": "octave",
                 "cmd": ["octave", "-qf", str(runmat_m)],
+                "script": str(runmat_m),
             }
         )
 
@@ -176,8 +177,8 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     env = default_env()
     if env_overrides:
         env.update({k: str(v) for k, v in env_overrides.items()})
-    # For RunMat, optionally inject assignment prelude to avoid top-level if/parse issues
-    if impl.get("name") == "runmat" and "script" in impl:
+    # For MATLAB-like impls (RunMat, Octave), inject assignment prelude when provided
+    if impl.get("lang") in {"matlab-syntax", "octave"} and "script" in impl:
         assign = env.get("HARNESS_ASSIGN", "")
         if assign.strip():
             try:

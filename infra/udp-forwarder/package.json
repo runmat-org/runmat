@@ -1,0 +1,16 @@
+{
+  "name": "runmat-udp-forwarder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
+

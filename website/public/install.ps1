@@ -11,6 +11,7 @@ $WEBSITE_URL = "https://runmat.org"
 
 $TELEMETRY_ENDPOINT = "https://runmat.org/api/telemetry"
 $TELEMETRY_ID_FILE = "$env:USERPROFILE\.runmat\telemetry_id"
+$InstallSession = [guid]::NewGuid().ToString()
 
 function New-AnonymousClientId {
     try {
@@ -47,6 +48,8 @@ function Send-Telemetry {
             release = $Release
             method = "powershell"
             cid = $cid
+            session_id = $script:InstallSession
+            run_kind = "install"
         } | ConvertTo-Json -Compress
         Invoke-WebRequest -Method Post -Uri $TELEMETRY_ENDPOINT -Body $payload -ContentType "application/json" -TimeoutSec 3 -ErrorAction SilentlyContinue | Out-Null
     } catch {}

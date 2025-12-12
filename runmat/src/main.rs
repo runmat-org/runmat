@@ -9,6 +9,7 @@ use env_logger::Env;
 use log::{debug, error, info};
 
 mod config;
+mod telemetry;
 use config::{ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
 use runmat_builtins::Value;
 use runmat_gc::{
@@ -22,11 +23,15 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
+use telemetry::{
+    capture_provider_snapshot, emit_runtime_value, emit_session_start, RuntimeExecutionCounters,
+    RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
+};
 
 #[derive(Parser)]
 #[command(
     name = "runmat",
-    version = "0.0.2",
+    version = env!("CARGO_PKG_VERSION"),
     about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
 RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
@@ -532,6 +537,8 @@ async fn main() -> Result<()> {
     };
     apply_cli_overrides(&mut config, &cli);
 
+    telemetry::init(&config.telemetry);
+
     // Initialize logging based on final config
     let log_level = if config.logging.debug || cli.debug {
         log::LevelFilter::Debug
@@ -856,7 +863,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             file,
             iterations,
             jit,
-        } => execute_benchmark(file, iterations, jit, cli).await,
+        } => execute_benchmark(file, iterations, jit, cli, config).await,
         Commands::Snapshot { snapshot_command } => execute_snapshot_command(snapshot_command).await,
         Commands::Plot {
             mode,
@@ -873,6 +880,13 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     if config.runtime.verbose {
         info!("Verbose mode enabled");
     }
+
+    emit_session_start(TelemetrySessionEvent {
+        kind: TelemetryRunKind::Repl,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
+    let session_start = std::time::Instant::now();
 
     let enable_jit = config.jit.enabled;
     info!(
@@ -1008,6 +1022,24 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         }
     }
 
+    let stats = engine.stats();
+    let counters = RuntimeExecutionCounters {
+        total_executions: stats.total_executions as u64,
+        jit_compiled: stats.jit_compiled as u64,
+        interpreter_fallback: stats.interpreter_fallback as u64,
+    };
+    emit_runtime_value(RuntimeTelemetryRecord {
+        kind: TelemetryRunKind::Repl,
+        duration: Some(session_start.elapsed()),
+        success: true,
+        error: None,
+        jit_enabled: config.jit.enabled,
+        jit_used: stats.jit_compiled > 0,
+        accelerate_enabled: config.accelerate.enabled,
+        counters: Some(counters),
+        provider: capture_provider_snapshot(),
+    });
+
     info!("RunMat REPL exiting");
     Ok(())
 }
@@ -1130,6 +1162,12 @@ async fn execute_script_with_args(
 ) -> Result<()> {
     info!("Executing script: {script:?}");
 
+    emit_session_start(TelemetrySessionEvent {
+        kind: TelemetryRunKind::Script,
+        jit_enabled: config.jit.enabled,
+        accelerate_enabled: config.accelerate.enabled,
+    });
+
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
@@ -1148,7 +1186,22 @@ async fn execute_script_with_args(
 
     let execution_time = start_time.elapsed();
 
-    if let Some(error) = result.error {
+    let provider_snapshot = capture_provider_snapshot();
+    let error_payload = result.error.clone();
+    let success = error_payload.is_none();
+    emit_runtime_value(RuntimeTelemetryRecord {
+        kind: TelemetryRunKind::Script,
+        duration: Some(execution_time),
+        success,
+        error: error_payload.clone(),
+        jit_enabled: config.jit.enabled,
+        jit_used: result.used_jit,
+        accelerate_enabled: config.accelerate.enabled,
+        counters: None,
+        provider: provider_snapshot,
+    });
+
+    if let Some(error) = error_payload {
         error!("Script execution failed: {error}");
         std::process::exit(1);
     } else {
@@ -1378,8 +1431,20 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
     Ok(())
 }
 
-async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli) -> Result<()> {
+async fn execute_benchmark(
+    file: PathBuf,
+    iterations: u32,
+    jit: bool,
+    _cli: &Cli,
+    config: &RunMatConfig,
+) -> Result<()> {
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
+
+    emit_session_start(TelemetrySessionEvent {
+        kind: TelemetryRunKind::Benchmark,
+        jit_enabled: jit,
+        accelerate_enabled: config.accelerate.enabled,
+    });
 
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
@@ -1388,8 +1453,8 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
         .context("Failed to create execution engine")?;
 
     let mut total_time = Duration::ZERO;
-    let mut jit_executions = 0;
-    let mut interpreter_executions = 0;
+    let mut jit_executions: u64 = 0;
+    let mut interpreter_executions: u64 = 0;
 
     println!("Warming up...");
     // Warmup runs
@@ -1401,12 +1466,30 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
     for i in 1..=iterations {
         let result = engine.execute(&content)?;
 
-        if let Some(error) = result.error {
+        let iter_duration = Duration::from_millis(result.execution_time_ms);
+        if let Some(error) = result.error.clone() {
+            total_time += iter_duration;
+            let counters = RuntimeExecutionCounters {
+                total_executions: i as u64,
+                jit_compiled: jit_executions + if result.used_jit { 1 } else { 0 },
+                interpreter_fallback: interpreter_executions + if result.used_jit { 0 } else { 1 },
+            };
+            emit_runtime_value(RuntimeTelemetryRecord {
+                kind: TelemetryRunKind::Benchmark,
+                duration: Some(total_time),
+                success: false,
+                error: Some(error.clone()),
+                jit_enabled: jit,
+                jit_used: result.used_jit,
+                accelerate_enabled: config.accelerate.enabled,
+                counters: Some(counters),
+                provider: capture_provider_snapshot(),
+            });
             error!("Benchmark iteration {i} failed: {error}");
             std::process::exit(1);
         }
 
-        total_time += Duration::from_millis(result.execution_time_ms);
+        total_time += iter_duration;
         if result.used_jit {
             jit_executions += 1;
         } else {
@@ -1429,6 +1512,23 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
         "  Throughput: {:.2} executions/second",
         iterations as f64 / total_time.as_secs_f64()
     );
+
+    let counters = RuntimeExecutionCounters {
+        total_executions: iterations as u64,
+        jit_compiled: jit_executions,
+        interpreter_fallback: interpreter_executions,
+    };
+    emit_runtime_value(RuntimeTelemetryRecord {
+        kind: TelemetryRunKind::Benchmark,
+        duration: Some(total_time),
+        success: true,
+        error: None,
+        jit_enabled: jit,
+        jit_used: jit_executions > 0,
+        accelerate_enabled: config.accelerate.enabled,
+        counters: Some(counters),
+        provider: capture_provider_snapshot(),
+    });
 
     Ok(())
 }

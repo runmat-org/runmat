@@ -1,0 +1,149 @@
+name: Terraform Infra
+
+on:
+  push:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Terraform plan
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ secrets.GCP_REGION }}
+      TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
+      TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
+      TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
+      TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export terraform vars
+        run: |
+          echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Build worker image
+        run: |
+          docker build -t "${RUNMAT_WORKER_IMAGE}" infra/worker
+          docker push "${RUNMAT_WORKER_IMAGE}"
+
+      - name: Build UDP forwarder image
+        run: |
+          docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
+          docker push "${RUNMAT_UDP_IMAGE}"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        working-directory: infra
+        run: terraform fmt -recursive -check
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=infra/terraform.tfstate"
+
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: infra
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/tfplan
+
+  apply:
+    name: Terraform apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ secrets.GCP_REGION }}
+      TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
+      TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
+      TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
+      TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export terraform vars
+        run: |
+          echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Build worker image
+        run: |
+          docker build -t "${RUNMAT_WORKER_IMAGE}" infra/worker
+          docker push "${RUNMAT_WORKER_IMAGE}"
+
+      - name: Build UDP forwarder image
+        run: |
+          docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
+          docker push "${RUNMAT_UDP_IMAGE}"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=infra/terraform.tfstate"
+
+      - name: Terraform plan (safety)
+        working-directory: infra
+        run: terraform plan -input=false
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve
+

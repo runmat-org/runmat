@@ -57,6 +57,22 @@ PY
     echo "$cid"
 }
 
+# Generate a session id for this installer run
+_telemetry_session_id() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+    else
+        echo "$(date +%s)-$RANDOM"
+    fi
+}
+
+INSTALL_SESSION="$(_telemetry_session_id)"
+
 # Send anonymous telemetry event (non-blocking)
 _send_telemetry() {
     # honor opt-out via environment variables
@@ -68,7 +84,7 @@ _send_telemetry() {
     local CID
     CID="$(_telemetry_client_id)"
     curl -s -m 3 -o /dev/null -X POST -H "Content-Type: application/json" \
-      --data "{\"event_label\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\"}" \
+      --data "{\"event_label\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\",\"session_id\":\"$INSTALL_SESSION\",\"run_kind\":\"install\"}" \
       "$TELEMETRY_ENDPOINT" >/dev/null 2>&1 || true
 }
 
@@ -282,7 +298,6 @@ fi
 # Emit completion event
 _send_telemetry install_complete
 
-echo
 log "Installation complete! 🎉"
 echo
 echo "Next steps:"

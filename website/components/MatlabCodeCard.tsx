@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import "prismjs/themes/prism-okaidia.css";
 import Prism from "prismjs";
 import "prismjs/components/prism-matlab";
 import { useEffect, useState } from "react";
@@ -25,7 +24,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
   }, [code]);
 
   return (
-    <div className={cn("w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-[#131a2a] to-[#060a12] p-4 shadow-2xl", className)}>
+    <div className={cn("w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-[#131a2a] to-[#060a12] p-4 shadow-2xl ", className)}>
       <div className="flex items-center gap-2 rounded-2xl bg-[#0d1422] px-4 py-3">
         <div className="flex gap-2">
           <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f56]" />
@@ -33,7 +32,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
           <span className="h-3.5 w-3.5 rounded-full bg-[#27c93f]" />
         </div>
       </div>
-      <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white">
+      <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white language-example">
         {highlighted ? (
           <code className="language-matlab" dangerouslySetInnerHTML={{ __html: highlighted }} />
         ) : (

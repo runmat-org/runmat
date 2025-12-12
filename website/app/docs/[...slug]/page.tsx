@@ -77,7 +77,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   const crumbs = findPathBySlug(slug) ?? [];
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-8">
-      <article className="prose dark:prose-invert max-w-none scroll-smooth">
+      <article className="prose dark:prose-invert max-w-none scroll-smooth min-w-0">
         <nav className="text-sm text-muted-foreground mb-4">
           {crumbs
             .filter((c) => c.title)

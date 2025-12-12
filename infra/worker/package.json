@@ -1,0 +1,20 @@
+{
+  "name": "runmat-telemetry-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "supertest": "^6.3.4",
+    "vitest": "^1.6.0"
+  }
+}
+
