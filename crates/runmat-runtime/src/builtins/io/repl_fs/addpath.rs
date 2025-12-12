@@ -30,7 +30,7 @@ const ERROR_POSITION_REPEATED: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "addpath",
-        wasm_path = "crate::builtins::io::repl_fs::addpath"
+        builtin_path = "crate::builtins::io::repl_fs::addpath"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -175,7 +175,7 @@ Expected behaviour:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::addpath")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "addpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -191,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path manipulation is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::addpath")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "addpath",
     shape: ShapeRequirements::Any,
@@ -220,7 +220,7 @@ struct AddPathSpec {
     summary = "Add folders to the MATLAB search path used by RunMat.",
     keywords = "addpath,search path,matlab path,-begin,-end,-frozen",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::addpath"
+    builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 fn addpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -517,7 +517,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::set_path_string;

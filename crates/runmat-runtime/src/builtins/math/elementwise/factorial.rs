@@ -32,7 +32,7 @@ static FACT_TABLE: Lazy<[f64; MAX_FACTORIAL_N + 1]> = Lazy::new(|| {
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "factorial",
-        wasm_path = "crate::builtins::math::elementwise::factorial"
+        builtin_path = "crate::builtins::math::elementwise::factorial"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -217,7 +217,7 @@ can correct the call site quickly.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::factorial")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::factorial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "factorial",
     op_kind: GpuOpKind::Elementwise,
@@ -235,7 +235,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_factorial; otherwise the runtime gathers to host and mirrors MATLAB overflow/NaN behaviour.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::factorial")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::elementwise::factorial"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "factorial",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -252,7 +254,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise factorial for non-negative integers.",
     keywords = "factorial,n!,permutation,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::factorial"
+    builtin_path = "crate::builtins::math::elementwise::factorial"
 )]
 fn factorial_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let output = parse_output_template(&rest)?;
@@ -459,7 +461,7 @@ fn upload_tensor(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};

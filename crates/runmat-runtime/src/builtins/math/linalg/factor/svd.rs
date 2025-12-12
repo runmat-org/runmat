@@ -23,7 +23,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "svd",
-        wasm_path = "crate::builtins::math::linalg::factor::svd"
+        builtin_path = "crate::builtins::math::linalg::factor::svd"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -176,7 +176,7 @@ device-resident once GPU kernels land.
 - Feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::factor::svd")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::svd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "svd",
     op_kind: GpuOpKind::Custom("svd-factor"),
@@ -193,7 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "GPU inputs are gathered to the host until a provider implements the reserved `svd` hook.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::factor::svd")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::svd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "svd",
     shape: ShapeRequirements::Any,
@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "svd,singular value decomposition,economy,vector",
     accel = "sink",
     sink = true,
-    wasm_path = "crate::builtins::math::linalg::factor::svd"
+    builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
 fn svd_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;
@@ -748,7 +748,7 @@ fn extend_orthonormal_complex(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use nalgebra::DMatrix;

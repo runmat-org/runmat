@@ -14,7 +14,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "nnz",
-        wasm_path = "crate::builtins::math::reduction::nnz"
+        builtin_path = "crate::builtins::math::reduction::nnz"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -183,7 +183,7 @@ finite double.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::nnz")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "nnz",
     op_kind: GpuOpKind::Reduction,
@@ -206,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::nnz")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "nnz",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::nnz"
+    builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 fn nnz_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let dim = parse_dimension_arg(&rest)?;
@@ -536,7 +536,7 @@ fn describe_value_kind(value: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

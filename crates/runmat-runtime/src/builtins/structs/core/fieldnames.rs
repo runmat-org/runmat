@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fieldnames",
-        wasm_path = "crate::builtins::structs::core::fieldnames"
+        builtin_path = "crate::builtins::structs::core::fieldnames"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -196,7 +196,7 @@ No. Passing anything other than a struct, struct array, or object raises
 - Found a bug or behaviour mismatch? Open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::fieldnames")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::fieldnames")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fieldnames",
     op_kind: GpuOpKind::Custom("fieldnames"),
@@ -212,7 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only introspection; providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::fieldnames")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::fieldnames")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fieldnames",
     shape: ShapeRequirements::Any,
@@ -228,7 +228,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "structs/core",
     summary = "List the field names of scalar structs or struct arrays.",
     keywords = "fieldnames,struct,introspection,fields",
-    wasm_path = "crate::builtins::structs::core::fieldnames"
+    builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 fn fieldnames_builtin(value: Value) -> Result<Value, String> {
     let names = match &value {
@@ -330,7 +330,7 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
         Access, CellArray, ClassDef, HandleRef, ObjectInstance, PropertyDef, StructValue, Value,

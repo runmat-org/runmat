@@ -17,7 +17,7 @@ use runmat_filesystem::OpenOptions;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "filewrite",
-        wasm_path = "crate::builtins::io::filetext::filewrite"
+        builtin_path = "crate::builtins::io::filetext::filewrite"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -152,7 +152,7 @@ No. The parent directory must already exist. Use `mkdir` before calling `filewri
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::filewrite")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::filewrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filewrite",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -168,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; GPU providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::filewrite")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::filewrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filewrite",
     shape: ShapeRequirements::Any,
@@ -240,7 +240,7 @@ impl Default for FilewriteOptions {
     summary = "Write text or raw bytes to a file.",
     keywords = "filewrite,io,write file,text file,append,encoding",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::filewrite"
+    builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
 fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let path = gather_if_needed(&path).map_err(|e| format!("filewrite: {e}"))?;
@@ -617,7 +617,7 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> Result<usize, St
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_filesystem as fs;
     use runmat_time::unix_timestamp_ms;

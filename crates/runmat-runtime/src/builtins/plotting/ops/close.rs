@@ -14,7 +14,7 @@ use super::state::{close_figure, figure_handles, FigureHandle};
     summary = "Close figures by handle or the active figure.",
     keywords = "close,figure,plotting",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::close"
+    builtin_path = "crate::builtins::plotting::close"
 )]
 pub fn close_builtin(rest: Vec<Value>) -> Result<String, String> {
     match parse_close_action(&rest)? {
@@ -95,7 +95,7 @@ fn parse_close_action(args: &[Value]) -> Result<CloseAction, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

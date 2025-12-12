@@ -12,7 +12,7 @@ use std::collections::HashSet;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isfield",
-        wasm_path = "crate::builtins::structs::core::isfield"
+        builtin_path = "crate::builtins::structs::core::isfield"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -162,7 +162,7 @@ No. The builtin only inspects field metadata and leaves GPU-resident tensors unt
 [fieldnames](./fieldnames), [struct](./struct), [isprop](../../introspection/isprop), [getfield](./getfield), [setfield](./setfield)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::isfield")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::isfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfield",
     op_kind: GpuOpKind::Custom("isfield"),
@@ -178,7 +178,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata check; acceleration providers do not participate.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::isfield")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::isfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isfield",
     shape: ShapeRequirements::Any,
@@ -194,7 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "structs/core",
     summary = "Test whether a struct or struct array defines specific field names.",
     keywords = "isfield,struct,field existence",
-    wasm_path = "crate::builtins::structs::core::isfield"
+    builtin_path = "crate::builtins::structs::core::isfield"
 )]
 fn isfield_builtin(target: Value, names: Value) -> Result<Value, String> {
     let context = classify_struct(&target)?;
@@ -446,7 +446,7 @@ fn field_name_type_error() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
 

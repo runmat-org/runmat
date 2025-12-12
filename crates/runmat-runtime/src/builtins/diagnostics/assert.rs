@@ -21,7 +21,7 @@ const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "assert",
-        wasm_path = "crate::builtins::diagnostics::assert"
+        builtin_path = "crate::builtins::diagnostics::assert"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -145,7 +145,7 @@ If the dimensions disagree, the assertion stops execution before any costly matr
 - Report issues: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::diagnostics::assert")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "assert",
     op_kind: GpuOpKind::Custom("control"),
@@ -161,7 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::diagnostics::assert")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::assert")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "assert",
     shape: ShapeRequirements::Any,
@@ -178,7 +178,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
     keywords = "assert,diagnostics,validation,error",
     accel = "metadata",
-    wasm_path = "crate::builtins::diagnostics::assert"
+    builtin_path = "crate::builtins::diagnostics::assert"
 )]
 fn assert_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -429,7 +429,7 @@ fn string_scalar_opt(value: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};

@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isa",
-        wasm_path = "crate::builtins::introspection::isa"
+        builtin_path = "crate::builtins::introspection::isa"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -206,7 +206,7 @@ Yes. Meta-class references created with `classref` return `true` for `"meta.clas
 [`class`](./class), [`isnumeric`](../logical/tests/isnumeric), [`islogical`](../logical/tests/islogical), `isaUnderlying`, [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::isa")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isa",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -222,7 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata predicate that returns host logical scalars; no GPU kernels or gathers are required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::isa")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isa",
     shape: ShapeRequirements::Any,
@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
     accel = "metadata",
-    wasm_path = "crate::builtins::introspection::isa"
+    builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> Result<Value, String> {
     let type_name = parse_type_name(&class_designator)?;
@@ -366,7 +366,7 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use runmat_accelerate_api::HostTensorView;

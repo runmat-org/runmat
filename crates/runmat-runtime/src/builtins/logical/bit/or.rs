@@ -12,7 +12,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "or", wasm_path = "crate::builtins::logical::bit::or")
+    runmat_macros::register_doc_text(
+        name = "or",
+        builtin_path = "crate::builtins::logical::bit::or"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -164,7 +167,7 @@ RunMat promotes the other input to the GPU before dispatch when the auto-offload
 [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::bit::or")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::or")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "or",
     op_kind: GpuOpKind::Elementwise,
@@ -183,7 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to host execution when the provider does not implement logical_or; non-zero (including NaN) inputs map to true.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::bit::or")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::or")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "or",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -219,7 +222,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise logical OR for scalars, arrays, and gpuArray values.",
     keywords = "logical,or,elementwise,boolean,gpu",
     accel = "elementwise",
-    wasm_path = "crate::builtins::logical::bit::or"
+    builtin_path = "crate::builtins::logical::bit::or"
 )]
 fn or_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
@@ -367,7 +370,7 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

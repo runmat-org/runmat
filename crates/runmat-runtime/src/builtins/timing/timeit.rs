@@ -24,7 +24,7 @@ const MAX_SAMPLE_COUNT: usize = 21;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "timeit",
-        wasm_path = "crate::builtins::timing::timeit"
+        builtin_path = "crate::builtins::timing::timeit"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -133,7 +133,7 @@ t = timeit(makeMatrix);
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::timing::timeit")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::timeit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "timeit",
     op_kind: GpuOpKind::Custom("timer"),
@@ -149,7 +149,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-side helper; GPU kernels execute only if invoked by the timed function.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::timing::timeit")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::timeit")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "timeit",
     shape: ShapeRequirements::Any,
@@ -166,7 +166,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Measure the execution time of a zero-argument function handle.",
     keywords = "timeit,benchmark,timing,performance,gpu",
     accel = "helper",
-    wasm_path = "crate::builtins::timing::timeit"
+    builtin_path = "crate::builtins::timing::timeit"
 )]
 fn timeit_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     let requested_outputs = parse_num_outputs(&rest)?;
@@ -365,7 +365,7 @@ fn parse_handle_string(text: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -379,7 +379,7 @@ mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_default",
-        wasm_path = "crate::builtins::timing::timeit::tests"
+        builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     fn helper_counter_default() -> Result<Value, String> {
         COUNTER_DEFAULT.fetch_add(1, Ordering::SeqCst);
@@ -388,7 +388,7 @@ mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_outputs",
-        wasm_path = "crate::builtins::timing::timeit::tests"
+        builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     fn helper_counter_outputs() -> Result<Value, String> {
         COUNTER_NUM_OUTPUTS.fetch_add(1, Ordering::SeqCst);
@@ -397,7 +397,7 @@ mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_counter_invalid",
-        wasm_path = "crate::builtins::timing::timeit::tests"
+        builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     fn helper_counter_invalid() -> Result<Value, String> {
         COUNTER_INVALID.fetch_add(1, Ordering::SeqCst);
@@ -406,7 +406,7 @@ mod tests {
 
     #[runtime_builtin(
         name = "__timeit_helper_zero_outputs",
-        wasm_path = "crate::builtins::timing::timeit::tests"
+        builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     fn helper_counter_zero_outputs() -> Result<Value, String> {
         COUNTER_ZERO_OUTPUTS.fetch_add(1, Ordering::SeqCst);

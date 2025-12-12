@@ -14,7 +14,7 @@ use crate::make_cell;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "regexpi",
-        wasm_path = "crate::builtins::strings::regex::regexpi"
+        builtin_path = "crate::builtins::strings::regex::regexpi"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -186,7 +186,7 @@ that must treat scalar and array inputs uniformly.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::regex::regexpi")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexpi",
     op_kind: GpuOpKind::Custom("regex"),
@@ -202,7 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU inputs are gathered before evaluation and results stay on the host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::regex::regexpi")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "regexpi",
     shape: ShapeRequirements::Any,
@@ -229,7 +229,7 @@ pub fn evaluate(
     summary = "Case-insensitive regular expression matching with MATLAB-compatible outputs.",
     keywords = "regexpi,regex,pattern,ignorecase,match",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::regex::regexpi"
+    builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
 fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let evaluation = evaluate(subject, pattern, &rest)?;
@@ -274,7 +274,7 @@ fn option_name(value: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, StringArray};
 

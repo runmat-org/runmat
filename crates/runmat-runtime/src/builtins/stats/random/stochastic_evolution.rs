@@ -27,7 +27,7 @@ pub fn stochastic_evolution_host(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::random;
 

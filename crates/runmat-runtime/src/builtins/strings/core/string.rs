@@ -17,7 +17,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "string",
-        wasm_path = "crate::builtins::strings::core::string"
+        builtin_path = "crate::builtins::strings::core::string"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ No. Existing string arrays pass through unchanged, so `string(["a" "b"])` return
 `char`, `cellstr`, `string.empty`, `strings`
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::string")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "string",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -205,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always converts on the CPU; GPU tensors are gathered to host memory before conversion.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::string")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "string",
     shape: ShapeRequirements::Any,
@@ -223,7 +223,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert numeric, logical, and text inputs into MATLAB string arrays.",
     keywords = "string,convert,text,char,gpu",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::core::string"
+    builtin_path = "crate::builtins::strings::core::string"
 )]
 fn string_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -880,7 +880,7 @@ fn int_value_to_string(value: &IntValue) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue};

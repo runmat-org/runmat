@@ -14,7 +14,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cov",
-        wasm_path = "crate::builtins::stats::summary::cov"
+        builtin_path = "crate::builtins::stats::summary::cov"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -197,7 +197,7 @@ covariance is computed, matching MATLAB's behaviour.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::stats::summary::cov")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::cov")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cov",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -213,7 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU execution is available when rows='all' and no weight vector is supplied; other cases fall back to the CPU path.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::stats::summary::cov")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::summary::cov")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cov",
     shape: ShapeRequirements::Any,
@@ -230,7 +230,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute covariance matrices for vectors, matrices, or paired data sets.",
     keywords = "cov,covariance,statistics,weights,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::stats::summary::cov"
+    builtin_path = "crate::builtins::stats::summary::cov"
 )]
 fn cov_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = CovArgs::parse(value, rest)?;
@@ -939,7 +939,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;

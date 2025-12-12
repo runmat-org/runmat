@@ -19,7 +19,7 @@ const ERR_CELL_CONTENT_NOT_TEXT: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cellstr",
-        wasm_path = "crate::builtins::cells::core::cellstr"
+        builtin_path = "crate::builtins::cells::core::cellstr"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -205,7 +205,7 @@ Elements that are already character vectors are cloned so that downstream code c
 result without mutating the source cell.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::cellstr")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellstr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellstr",
     op_kind: GpuOpKind::Custom("text-convert"),
@@ -221,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text conversion. Inputs originating on the GPU are gathered before processing, and the output is always a host cell array.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::cellstr")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::cells::core::cellstr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellstr",
     shape: ShapeRequirements::Any,
@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert text to a cell array of character vectors.",
     keywords = "cellstr,text,character,string,conversion",
     accel = "gather",
-    wasm_path = "crate::builtins::cells::core::cellstr"
+    builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 fn cellstr_builtin(value: Value) -> Result<Value, String> {
     let host = gather_if_needed(&value).map_err(|e| format!("cellstr: {e}"))?;
@@ -395,7 +395,7 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

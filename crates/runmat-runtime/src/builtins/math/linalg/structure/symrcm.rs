@@ -17,7 +17,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "symrcm",
-        wasm_path = "crate::builtins::math::linalg::structure::symrcm"
+        builtin_path = "crate::builtins::math::linalg::structure::symrcm"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -200,7 +200,9 @@ row vector `[]`.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::structure::symrcm")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "symrcm",
     op_kind: GpuOpKind::Custom("graph-order"),
@@ -218,7 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::symrcm"
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "symrcm",
@@ -236,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the symmetric reverse Cuthill-McKee permutation that reduces matrix bandwidth.",
     keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
     accel = "graph",
-    wasm_path = "crate::builtins::math::linalg::structure::symrcm"
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 fn symrcm_builtin(matrix: Value) -> Result<Value, String> {
     match matrix {
@@ -441,7 +443,7 @@ fn permutation_to_value(ordering: &[usize]) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;

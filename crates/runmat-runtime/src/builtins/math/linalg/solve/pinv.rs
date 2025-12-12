@@ -22,7 +22,7 @@ const NAME: &str = "pinv";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "pinv",
-        wasm_path = "crate::builtins::math::linalg::solve::pinv"
+        builtin_path = "crate::builtins::math::linalg::solve::pinv"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -179,7 +179,7 @@ remains useful for ill-conditioned or rank-deficient problems where the pseudoin
   with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::pinv")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pinv",
     op_kind: GpuOpKind::Custom("pinv"),
@@ -195,7 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::pinv")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pinv",
     shape: ShapeRequirements::Any,
@@ -212,7 +212,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the Moore–Penrose pseudoinverse of a matrix using SVD.",
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
     accel = "pinv",
-    wasm_path = "crate::builtins::math::linalg::solve::pinv"
+    builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 fn pinv_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let tol = parse_tolerance_arg(NAME, &rest)?;
@@ -337,7 +337,7 @@ pub fn pinv_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, Tensor, Value};

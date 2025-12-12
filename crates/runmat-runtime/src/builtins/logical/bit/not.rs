@@ -13,7 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "not",
-        wasm_path = "crate::builtins::logical::bit::not"
+        builtin_path = "crate::builtins::logical::bit::not"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -160,7 +160,7 @@ No. It returns a new logical value. When operating on gpuArrays, the provider wr
 [and](./and), [or](./or), [xor](./xor), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::bit::not")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::not")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "not",
     op_kind: GpuOpKind::Elementwise,
@@ -179,7 +179,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_not` hook when available; otherwise the runtime gathers to host and performs the negation on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::bit::not")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::not")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "not",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -208,7 +208,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise logical negation for scalars, arrays, and gpuArray values.",
     keywords = "logical,not,boolean,gpu",
     accel = "elementwise",
-    wasm_path = "crate::builtins::logical::bit::not"
+    builtin_path = "crate::builtins::logical::bit::not"
 )]
 fn not_builtin(value: Value) -> Result<Value, String> {
     if let Value::GpuTensor(ref handle) = value {
@@ -341,7 +341,7 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::tensor;

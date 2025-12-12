@@ -35,7 +35,7 @@ fn to_positive_index(value: f64, name: &str) -> Result<usize, String> {
     category = "plotting",
     summary = "Select a subplot grid location.",
     keywords = "subplot,axes,plotting",
-    wasm_path = "crate::builtins::plotting::ops::subplot"
+    builtin_path = "crate::builtins::plotting::subplot"
 )]
 pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> Result<String, String> {
     let m = scalar_from_value(&rows, "subplot")?;

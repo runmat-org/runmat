@@ -37,7 +37,7 @@ use super::style::{LineStyleParseOptions, MarkerColor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "scatter",
-        wasm_path = "crate::builtins::plotting::ops::scatter"
+        builtin_path = "crate::builtins::plotting::scatter"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -90,7 +90,7 @@ device is active, their buffers are consumed zero-copy by the renderer. Otherwis
 gathered before plotting, matching MATLAB semantics.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::scatter")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -106,7 +106,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "2-D scatter rendering happens outside fusion; tensors are gathered first.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::scatter")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "scatter",
     shape: ShapeRequirements::Any,
@@ -123,7 +123,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create MATLAB-compatible 2-D scatter plots.",
     keywords = "scatter,plotting,2d,markers",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::scatter"
+    builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
@@ -620,7 +620,7 @@ fn ensure_host_marker_metadata(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::point::{PointArgs, PointColorArg, PointSizeArg};
     use super::super::style::{
         LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor, MarkerKind,

@@ -18,7 +18,7 @@ use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextE
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "startsWith",
-        wasm_path = "crate::builtins::strings::search::startswith"
+        builtin_path = "crate::builtins::strings::search::startswith"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -205,7 +205,7 @@ contains exactly one element, the builtin returns a logical scalar.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::search::startswith")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::startswith")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "startsWith",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -221,7 +221,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on the host; inputs are gathered from the GPU before evaluating prefix checks.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::search::startswith")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::search::startswith"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "startsWith",
     shape: ShapeRequirements::Any,
@@ -238,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return logical values indicating whether text inputs start with specific patterns.",
     keywords = "startswith,prefix,text,ignorecase,search",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::search::startswith"
+    builtin_path = "crate::builtins::strings::search::startswith"
 )]
 fn startswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("startsWith: {e}"))?;
@@ -307,7 +309,7 @@ fn evaluate_startswith(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};

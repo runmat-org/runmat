@@ -25,7 +25,7 @@ const MESSAGE_ID_INTERNAL: &str = "MATLAB:write:InternalError";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "write",
-        wasm_path = "crate::builtins::io::net::write"
+        builtin_path = "crate::builtins::io::net::write"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -160,7 +160,7 @@ timeout and byte-order settings.
   differences from MATLAB.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::write")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "write",
     op_kind: GpuOpKind::Custom("network"),
@@ -176,7 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket writes always execute on the host CPU; GPU providers are never consulted.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::write")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "write",
     shape: ShapeRequirements::Any,
@@ -192,7 +192,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Write numeric or text data to a TCP/IP client.",
     keywords = "write,tcpclient,networking",
-    wasm_path = "crate::builtins::io::net::write"
+    builtin_path = "crate::builtins::io::net::write"
 )]
 fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let client = gather_if_needed(&client)
@@ -815,7 +815,7 @@ fn is_connection_closed_error(err: &io::Error) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{

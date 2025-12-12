@@ -11,7 +11,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "struct",
-        wasm_path = "crate::builtins::structs::core::r#struct"
+        builtin_path = "crate::builtins::structs::core::r#struct"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -152,7 +152,7 @@ arrays. Passing other types raises an error.
 [load](../../io/mat/load), [whos](../../introspection/whos), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::r#struct")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::r#struct")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "struct",
     op_kind: GpuOpKind::Custom("struct"),
@@ -168,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only construction; GPU values are preserved as handles without gathering.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::r#struct")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::r#struct")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "struct",
     shape: ShapeRequirements::Any,
@@ -194,7 +194,7 @@ enum FieldValue {
     category = "structs/core",
     summary = "Create scalar structs or struct arrays from name/value pairs.",
     keywords = "struct,structure,name-value,record",
-    wasm_path = "crate::builtins::structs::core::r#struct"
+    builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 fn struct_builtin(rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {
@@ -395,7 +395,7 @@ fn is_subsequent_char_valid(c: char) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::GpuTensorHandle;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};

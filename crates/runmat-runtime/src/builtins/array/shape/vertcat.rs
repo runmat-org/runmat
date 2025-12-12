@@ -11,7 +11,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "vertcat",
-        wasm_path = "crate::builtins::array::shape::vertcat"
+        builtin_path = "crate::builtins::array::shape::vertcat"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -191,7 +191,7 @@ No. Concatenation materialises results immediately and is treated as a fusion si
 - Found an issue or behavioral difference? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::vertcat")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "vertcat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -207,7 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to cat(dim=1); providers without cat fall back to host gather + upload.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::vertcat")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "vertcat",
     shape: ShapeRequirements::Any,
@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Concatenate inputs vertically (dimension 1) just like MATLAB semicolons.",
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::shape::vertcat"
+    builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 fn vertcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -260,7 +260,7 @@ fn adapt_cat_error(message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};

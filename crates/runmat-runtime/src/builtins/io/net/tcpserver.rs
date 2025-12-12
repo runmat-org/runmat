@@ -137,7 +137,7 @@ static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "tcpserver",
-        wasm_path = "crate::builtins::io::net::tcpserver"
+        builtin_path = "crate::builtins::io::net::tcpserver"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -279,7 +279,7 @@ No. `tcpserver` is a host-side operation. RunMat transparently gathers GPU scala
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::tcpserver")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
     op_kind: GpuOpKind::Custom("network"),
@@ -295,7 +295,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::tcpserver")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tcpserver",
     shape: ShapeRequirements::Any,
@@ -311,7 +311,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Create a TCP server that listens for MATLAB-compatible client connections.",
     keywords = "tcpserver,tcp,network,server",
-    wasm_path = "crate::builtins::io::net::tcpserver"
+    builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) fn tcpserver_builtin(
     address: Value,
@@ -598,7 +598,7 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};

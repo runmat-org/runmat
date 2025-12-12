@@ -231,7 +231,7 @@ pub(crate) fn default_level_count() -> usize {
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "contour",
-        wasm_path = "crate::builtins::plotting::ops::contour"
+        builtin_path = "crate::builtins::plotting::contour"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -293,7 +293,7 @@ contour(x, y, z, 'LevelStep', 0.25, 'LineColor', 'none');
 ```
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::contour")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::contour")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contour",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -309,7 +309,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Contour rendering consumes tensors for plotting and terminates fusion graphs.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::contour")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::contour")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "contour",
     shape: ShapeRequirements::Any,
@@ -326,7 +326,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render MATLAB-compatible contour plots.",
     keywords = "contour,plotting,isolines",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::contour"
+    builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
     let mut call = Some(ContourCall::parse("contour", first, rest)?);
@@ -1080,7 +1080,7 @@ fn implicit_axis(len: usize) -> Vec<f64> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::NumericDType;
     #[ctor::ctor]

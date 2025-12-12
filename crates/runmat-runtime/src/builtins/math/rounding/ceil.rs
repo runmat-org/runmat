@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ceil",
-        wasm_path = "crate::builtins::math::rounding::ceil"
+        builtin_path = "crate::builtins::math::rounding::ceil"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -198,7 +198,7 @@ You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding::ceil")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::ceil")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ceil",
     op_kind: GpuOpKind::Elementwise,
@@ -215,7 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute ceil directly on the device; the runtime gathers to the host when unary_ceil is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding::ceil")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::ceil")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ceil",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -241,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Round values toward positive infinity.",
     keywords = "ceil,rounding,integers,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::rounding::ceil"
+    builtin_path = "crate::builtins::math::rounding::ceil"
 )]
 fn ceil_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = parse_arguments(&rest)?;
@@ -562,7 +562,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

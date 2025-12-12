@@ -18,7 +18,7 @@ use runmat_filesystem::OpenOptions;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fopen",
-        wasm_path = "crate::builtins::io::filetext::fopen"
+        builtin_path = "crate::builtins::io::filetext::fopen"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -160,7 +160,7 @@ RunMat relies on the operating system for path resolution, so UNC paths and moun
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fopen")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fopen")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fopen",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -177,7 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only file I/O. Inputs gathered from GPU when necessary; outputs remain on the host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fopen")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fopen")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fopen",
     shape: ShapeRequirements::Any,
@@ -194,7 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Open a file and obtain a MATLAB-compatible file identifier.",
     keywords = "fopen,file,io,permission,encoding",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::fopen"
+    builtin_path = "crate::builtins::io::filetext::fopen"
 )]
 fn fopen_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -770,7 +770,7 @@ fn make_cell_column(values: Vec<Value>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::registry;
     use runmat_filesystem as fs;

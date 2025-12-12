@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ismatrix",
-        wasm_path = "crate::builtins::array::introspection::ismatrix"
+        builtin_path = "crate::builtins::array::introspection::ismatrix"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -203,7 +203,9 @@ Future sparse tensors will report their dimensions through the same metadata, so
 [isscalar](./isscalar), [isvector](./isvector), [ndims](./ndims), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::ismatrix")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismatrix",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -220,7 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::array::introspection::ismatrix"
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismatrix",
@@ -238,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when an array has at most two dimensions (m-by-n, including vectors and scalars).",
     keywords = "ismatrix,matrix detection,metadata query,logical,gpu",
     accel = "metadata",
-    wasm_path = "crate::builtins::array::introspection::ismatrix"
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 fn ismatrix_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_matrix(&value)))
@@ -249,7 +251,7 @@ fn value_is_matrix(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{

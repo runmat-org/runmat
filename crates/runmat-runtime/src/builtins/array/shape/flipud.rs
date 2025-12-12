@@ -18,7 +18,7 @@ const UD_DIM: [usize; 1] = [1];
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "flipud",
-        wasm_path = "crate::builtins::array::shape::flipud"
+        builtin_path = "crate::builtins::array::shape::flipud"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ Yes. The function only reorders elements; values are never modified, so it is nu
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::flipud")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flipud")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "flipud",
     op_kind: GpuOpKind::Custom("flip"),
@@ -210,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the generic flip hook with axis=0; falls back to host mirror when the hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::flipud")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::flipud")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "flipud",
     shape: ShapeRequirements::Any,
@@ -227,7 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Flip an array up-to-down along the first dimension.",
     keywords = "flipud,flip,vertical,matrix,gpu",
     accel = "custom",
-    wasm_path = "crate::builtins::array::shape::flipud"
+    builtin_path = "crate::builtins::array::shape::flipud"
 )]
 fn flipud_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -307,7 +307,7 @@ fn flip_cell_array_rows(cell: CellArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

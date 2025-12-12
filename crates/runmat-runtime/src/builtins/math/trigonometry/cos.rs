@@ -15,7 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cos",
-        wasm_path = "crate::builtins::math::trigonometry::cos"
+        builtin_path = "crate::builtins::math::trigonometry::cos"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -171,7 +171,7 @@ Yes. Character arrays are converted to their Unicode code points before cosine i
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::cos")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cos",
     op_kind: GpuOpKind::Elementwise,
@@ -188,7 +188,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute cosine directly on device; runtimes gather to host when unary_cos is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::cos")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cos",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "cos,cosine,trigonometry,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::trigonometry::cos"
+    builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
 fn cos_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -370,7 +370,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray, Tensor};

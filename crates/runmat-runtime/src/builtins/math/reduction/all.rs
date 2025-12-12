@@ -14,7 +14,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "all",
-        wasm_path = "crate::builtins::math::reduction::all"
+        builtin_path = "crate::builtins::math::reduction::all"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -176,7 +176,7 @@ Providers may expose specialised AND-reduction kernels (`reduce_all_dim`, `reduc
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::all")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "all",
     op_kind: GpuOpKind::Reduction,
@@ -199,7 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side AND reductions; runtimes gather to host when hooks are unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::all")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "all",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether every element of an array is nonzero with MATLAB-compatible options.",
     keywords = "all,logical,reduction,omitnan,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::all"
+    builtin_path = "crate::builtins::math::reduction::all"
 )]
 fn all_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (spec, nan_mode) = parse_arguments(&rest)?;
@@ -802,7 +802,7 @@ fn product(dims: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

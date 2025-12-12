@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fix",
-        wasm_path = "crate::builtins::math::rounding::fix"
+        builtin_path = "crate::builtins::math::rounding::fix"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -152,7 +152,7 @@ Yes, when the active provider implements `unary_fix`. Otherwise, RunMat gathers 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding::fix")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::fix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fix",
     op_kind: GpuOpKind::Elementwise,
@@ -168,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_fix to keep fix on device; otherwise the runtime gathers to host and applies CPU truncation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding::fix")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::fix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fix",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Round scalars, vectors, matrices, or N-D tensors toward zero.",
     keywords = "fix,truncate,rounding,toward zero,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::rounding::fix"
+    builtin_path = "crate::builtins::math::rounding::fix"
 )]
 fn fix_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -282,7 +282,7 @@ fn fix_scalar(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};

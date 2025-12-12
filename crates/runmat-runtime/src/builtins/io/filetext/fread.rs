@@ -21,7 +21,7 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fread",
-        wasm_path = "crate::builtins::io::filetext::fread"
+        builtin_path = "crate::builtins::io::filetext::fread"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -226,7 +226,7 @@ explicitly with `fopen` before calling `fread`.
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fread")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fread",
     op_kind: GpuOpKind::Custom("file-io-read"),
@@ -243,7 +243,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that reads from the shared file registry; GPU arguments are gathered to the CPU before I/O.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fread")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fread",
     shape: ShapeRequirements::Any,
@@ -260,7 +260,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read binary data from a file identifier.",
     keywords = "fread,file,io,binary,precision",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::fread"
+    builtin_path = "crate::builtins::io::filetext::fread"
 )]
 fn fread_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &rest)?;
@@ -1273,7 +1273,7 @@ fn column_to_row_major(data: &[char], rows: usize, cols: usize) -> Vec<char> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;

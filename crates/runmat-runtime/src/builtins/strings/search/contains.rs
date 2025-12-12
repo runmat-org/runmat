@@ -18,7 +18,7 @@ use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextE
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "contains",
-        wasm_path = "crate::builtins::strings::search::contains"
+        builtin_path = "crate::builtins::strings::search::contains"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -185,7 +185,7 @@ Yes. The output is a logical array whose shape is the implicit-expansion result 
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::search::contains")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::contains")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contains",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -201,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on the host; inputs are gathered from the GPU before performing substring checks.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::search::contains")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::contains")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "contains",
     shape: ShapeRequirements::Any,
@@ -218,7 +218,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return logical values indicating whether text inputs contain specific patterns.",
     keywords = "contains,substring,text,ignorecase,search",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::search::contains"
+    builtin_path = "crate::builtins::strings::search::contains"
 )]
 fn contains_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("contains: {e}"))?;
@@ -287,7 +287,7 @@ fn evaluate_contains(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray};

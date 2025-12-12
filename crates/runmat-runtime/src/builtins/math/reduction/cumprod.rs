@@ -13,7 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cumprod",
-        wasm_path = "crate::builtins::math::reduction::cumprod"
+        builtin_path = "crate::builtins::math::reduction::cumprod"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -146,7 +146,7 @@ Only when the active provider offers a native prefix-product kernel with missing
 - Found a bug or behavioral difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::cumprod")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cumprod",
     op_kind: GpuOpKind::Custom("scan"),
@@ -162,7 +162,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose device prefix-product kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::cumprod")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cumprod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -191,7 +191,7 @@ enum CumprodNanMode {
     summary = "Cumulative product of scalars, vectors, matrices, or N-D tensors.",
     keywords = "cumprod,cumulative product,running product,reverse,omitnan,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::cumprod"
+    builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
 fn cumprod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
@@ -596,7 +596,7 @@ fn dim_product(dims: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor as BuiltinsTensor};

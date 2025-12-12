@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "numel",
-        wasm_path = "crate::builtins::array::introspection::numel"
+        builtin_path = "crate::builtins::array::introspection::numel"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -165,7 +165,7 @@ an error that mirrors MATLAB.
 [size](./size), [length](./length), [MathWorks numel reference](https://www.mathworks.com/help/matlab/ref/numel.html), [MathWorks size reference](https://www.mathworks.com/help/matlab/ref/size.html)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::numel")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::numel")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "numel",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -182,7 +182,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Counts elements using tensor metadata; gathers once only if provider metadata is missing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::numel")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::numel"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "numel",
     shape: ShapeRequirements::Any,
@@ -199,7 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Count the number of elements in scalars, vectors, matrices, and N-D arrays.",
     keywords = "numel,number of elements,array length,gpu metadata,dimensions",
     accel = "metadata",
-    wasm_path = "crate::builtins::array::introspection::numel"
+    builtin_path = "crate::builtins::array::introspection::numel"
 )]
 fn numel_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -280,7 +282,7 @@ fn dimension_extent(dimensions: &[usize], dim: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, Tensor};

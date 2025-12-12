@@ -23,7 +23,7 @@ use std::convert::TryFrom;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "setfield",
-        wasm_path = "crate::builtins::structs::core::setfield"
+        builtin_path = "crate::builtins::structs::core::setfield"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -188,7 +188,7 @@ subsequent GPU-aware operations; `setfield` itself never launches kernels.
 [getfield](./getfield), [fieldnames](./fieldnames), [struct](./struct), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::setfield")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::setfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "setfield",
     op_kind: GpuOpKind::Custom("setfield"),
@@ -204,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata mutation; GPU tensors are gathered before assignment.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::setfield")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::setfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "setfield",
     shape: ShapeRequirements::Any,
@@ -220,7 +220,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "structs/core",
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
     keywords = "setfield,struct,assignment,object property",
-    wasm_path = "crate::builtins::structs::core::setfield"
+    builtin_path = "crate::builtins::structs::core::setfield"
 )]
 fn setfield_builtin(base: Value, rest: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_arguments(rest)?;
@@ -1229,7 +1229,7 @@ fn is_struct_array(cell: &CellArray) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
         Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,

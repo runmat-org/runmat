@@ -22,7 +22,7 @@ const MESSAGE_ID_INTERNAL: &str = "MATLAB:readline:InternalError";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "readline",
-        wasm_path = "crate::builtins::io::net::readline"
+        builtin_path = "crate::builtins::io::net::readline"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -192,7 +192,7 @@ on the CPU and there is no benefit to calling `gpuArray` for networking builtins
 - Issues & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::readline")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readline",
     op_kind: GpuOpKind::Custom("network"),
@@ -208,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Networking occurs on the host CPU; GPU providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::readline")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readline",
     shape: ShapeRequirements::Any,
@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Read ASCII text until the terminator from a TCP/IP client.",
     keywords = "readline,tcpclient,networking",
-    wasm_path = "crate::builtins::io::net::readline"
+    builtin_path = "crate::builtins::io::net::readline"
 )]
 fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -410,7 +410,7 @@ fn runtime_error(message_id: &'static str, message: impl Into<String>) -> String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{

@@ -21,7 +21,7 @@ const EPS_NAN: f64 = 1.0e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "polyfit",
-        wasm_path = "crate::builtins::math::poly::polyfit"
+        builtin_path = "crate::builtins::math::poly::polyfit"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -204,7 +204,7 @@ raising an error unless the degree is zero.
 - Found an issue? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::poly::polyfit")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyfit",
     op_kind: GpuOpKind::Custom("polyfit"),
@@ -221,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::poly::polyfit")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyfit",
     shape: ShapeRequirements::Any,
@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyfit,polynomial,least-squares,gpu",
     accel = "sink",
     sink = true,
-    wasm_path = "crate::builtins::math::poly::polyfit"
+    builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(x, y, degree, &rest)?;
@@ -937,7 +937,7 @@ pub fn polyfit_host_real_for_provider(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

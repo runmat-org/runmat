@@ -12,7 +12,7 @@ use std::collections::HashSet;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "rmfield",
-        wasm_path = "crate::builtins::structs::core::rmfield"
+        builtin_path = "crate::builtins::structs::core::rmfield"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -171,7 +171,7 @@ the device until another operation decides otherwise.
 [fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [orderfields](./orderfields)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::structs::core::rmfield")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::rmfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmfield",
     op_kind: GpuOpKind::Custom("rmfield"),
@@ -187,7 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only struct metadata update; acceleration providers are not consulted.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::structs::core::rmfield")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::rmfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmfield",
     shape: ShapeRequirements::Any,
@@ -203,7 +203,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "structs/core",
     summary = "Remove one or more fields from scalar structs or struct arrays.",
     keywords = "rmfield,struct,remove field,struct array",
-    wasm_path = "crate::builtins::structs::core::rmfield"
+    builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 fn rmfield_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let names = parse_field_names(&rest)?;
@@ -386,7 +386,7 @@ fn is_struct_array(cell: &CellArray) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 

@@ -34,7 +34,7 @@ const ERR_FLAG_ARG: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "copyfile",
-        wasm_path = "crate::builtins::io::repl_fs::copyfile"
+        builtin_path = "crate::builtins::io::repl_fs::copyfile"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -178,7 +178,7 @@ MATLAB:COPYFILE:FileDoesNotExist
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::copyfile")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "copyfile",
     op_kind: GpuOpKind::Custom("io"),
@@ -195,7 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path and flag arguments are gathered automatically before performing the copy.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::copyfile")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "copyfile",
     shape: ShapeRequirements::Any,
@@ -213,7 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::copyfile"
+    builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 fn copyfile_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -781,7 +781,7 @@ fn path_to_display(path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use std::fs::{self, File};

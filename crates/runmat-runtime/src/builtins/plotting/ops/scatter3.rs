@@ -35,7 +35,7 @@ use super::style::LineStyleParseOptions;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "scatter3",
-        wasm_path = "crate::builtins::plotting::ops::scatter3"
+        builtin_path = "crate::builtins::plotting::scatter3"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -87,7 +87,7 @@ implementations zero-copy. Until that lands, expect the builtin to behave like M
 to the host, rendering completes, and execution returns immediately.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::scatter3")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter3",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -103,7 +103,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Rendering executes outside fusion; gpuArray inputs are gathered prior to plotting.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::scatter3")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "scatter3",
     shape: ShapeRequirements::Any,
@@ -120,7 +120,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible 3-D scatter plot.",
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::scatter3"
+    builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
@@ -539,7 +539,7 @@ fn ensure_scatter3_host_metadata(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
     use runmat_builtins::Value;

@@ -1227,7 +1227,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "gpuInfo",
-        wasm_path = "crate::builtins::acceleration::gpu::gpuinfo"
+        builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -145,7 +145,7 @@ back into MATLAB code without breaking literal syntax.
 [gpuDevice](./gpuDevice), [gpuArray](./gpuArray), [gather](./gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::gpuinfo")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuInfo",
     op_kind: GpuOpKind::Custom("device-summary"),
@@ -161,7 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formats metadata reported by the active provider; no GPU kernels are launched.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::gpuinfo")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuInfo",
     shape: ShapeRequirements::Any,
@@ -178,7 +178,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return a formatted status string that describes the active GPU provider.",
     keywords = "gpu,gpuInfo,device,info,accelerate",
     examples = "disp(gpuInfo())",
-    wasm_path = "crate::builtins::acceleration::gpu::gpuinfo"
+    builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
 fn gpu_info_builtin() -> Result<Value, String> {
     match active_device_struct() {
@@ -231,7 +231,7 @@ fn escape_single_quotes(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

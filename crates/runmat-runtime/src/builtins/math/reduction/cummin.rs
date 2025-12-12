@@ -17,7 +17,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cummin",
-        wasm_path = "crate::builtins::math::reduction::cummin"
+        builtin_path = "crate::builtins::math::reduction::cummin"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -149,7 +149,7 @@ The input is returned unchanged. Every index is `1`, matching MATLAB's treatment
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::cummin")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cummin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cummin",
     op_kind: GpuOpKind::Custom("scan"),
@@ -166,7 +166,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose prefix-min kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::cummin")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cummin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cummin",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -219,7 +219,7 @@ impl CumminEvaluation {
     summary = "Cumulative minimum and index tracking for scalars, vectors, matrices, or N-D tensors.",
     keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,indices,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::cummin"
+    builtin_path = "crate::builtins::math::reduction::cummin"
 )]
 fn cummin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_value())
@@ -809,7 +809,7 @@ fn dim_product(dims: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;

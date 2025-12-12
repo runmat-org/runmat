@@ -25,7 +25,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "csvwrite",
-        wasm_path = "crate::builtins::io::tabular::csvwrite"
+        builtin_path = "crate::builtins::io::tabular::csvwrite"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -194,7 +194,7 @@ CSV consumers handle either convention transparently.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::csvwrite")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "csvwrite",
     op_kind: GpuOpKind::Custom("io-csvwrite"),
@@ -210,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::csvwrite")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "csvwrite",
     shape: ShapeRequirements::Any,
@@ -227,7 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
     keywords = "csvwrite,csv,write,row offset,column offset",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::tabular::csvwrite"
+    builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
 fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let filename_value = gather_if_needed(&filename).map_err(|e| format!("csvwrite: {e}"))?;
@@ -482,7 +482,7 @@ fn normalize_exponent(exponent: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_time::unix_timestamp_ms;
     use std::fs;

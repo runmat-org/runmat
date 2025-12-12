@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "issymmetric",
-        wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+        builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -206,7 +206,7 @@ Only the execution strategy changes (device-side predicate vs. host fallback).
 "#;
 
 #[runmat_macros::register_gpu_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issymmetric",
@@ -224,7 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issymmetric",
@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Test whether a matrix is symmetric or skew-symmetric.",
     keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
     accel = "metadata",
-    wasm_path = "crate::builtins::math::linalg::structure::issymmetric"
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mode, tol) = parse_optional_args(&rest)?;
@@ -559,7 +559,7 @@ pub fn issymmetric_host_complex_data(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

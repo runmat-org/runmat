@@ -20,7 +20,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "tril",
-        wasm_path = "crate::builtins::array::shape::tril"
+        builtin_path = "crate::builtins::array::shape::tril"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -194,7 +194,7 @@ the triangular mask is applied, matching MATLAB's behaviour.
 - Issues & feedback: [github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::tril")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::tril")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tril",
     op_kind: GpuOpKind::Custom("tril"),
@@ -210,7 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement tril directly; the runtime falls back to gather→compute→upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::tril")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::tril")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tril",
     shape: ShapeRequirements::Any,
@@ -228,7 +228,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Lower triangular portion of a matrix or paged tensor.",
     keywords = "tril,lower triangular,matrix,diagonal,gpu",
     accel = "custom",
-    wasm_path = "crate::builtins::array::shape::tril"
+    builtin_path = "crate::builtins::array::shape::tril"
 )]
 fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -410,7 +410,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

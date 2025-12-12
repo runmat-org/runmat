@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 
 #[derive(Parser)]
 struct Args {
-    /// Only check for missing wasm_path entries (do not modify files)
+    /// Only check for missing builtin_path entries (do not modify files)
     #[arg(long)]
     check: bool,
 
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
 
     if args.check && !missing.is_empty() {
         bail!(
-            "missing wasm_path in {} files:\n{}",
+            "missing builtin_path in {} files:\n{}",
             missing.len(),
             missing
                 .iter()
@@ -328,7 +328,7 @@ fn add_wasm_to_cfg_attr(attr: &Attribute, module_path: &str) -> Option<String> {
             for nested in list.nested.iter_mut() {
                 if let NestedMeta::Meta(Meta::List(inner)) = nested {
                     let path = path_to_string(&inner.path);
-                    if needs_wasm_path(&path) {
+                    if needs_builtin_path(&path) {
                         changed |= ensure_wasm_meta(inner, module_path);
                     }
                 }
@@ -348,14 +348,14 @@ fn ensure_wasm_meta(list: &mut MetaList, module_path: &str) -> bool {
     let has = list.nested.iter().any(|nested| {
         matches!(
             nested,
-            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("wasm_path")
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("builtin_path")
         )
     });
     if has {
         return false;
     }
     let lit = LitStr::new(module_path, Span::call_site());
-    let new_meta: Meta = parse_quote!(wasm_path = #lit);
+    let new_meta: Meta = parse_quote!(builtin_path = #lit);
     list.nested.push(NestedMeta::Meta(new_meta));
     true
 }
@@ -368,7 +368,7 @@ fn path_to_string(path: &syn::Path) -> String {
         .join("::")
 }
 
-fn needs_wasm_path(path: &str) -> bool {
+fn needs_builtin_path(path: &str) -> bool {
     matches!(
         path,
         "runtime_builtin"

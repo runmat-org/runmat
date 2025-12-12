@@ -17,7 +17,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fill",
-        wasm_path = "crate::builtins::array::creation::fill"
+        builtin_path = "crate::builtins::array::creation::fill"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -242,7 +242,7 @@ host tensor, ensuring identical results.
 - Issues or questions: [RunMat GitHub issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::fill")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::fill")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fill",
     op_kind: GpuOpKind::Custom("generator"),
@@ -261,7 +261,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs dedicated constant-fill kernels; falls back to host upload when the provider reports an error.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::fill")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::fill")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fill",
     shape: ShapeRequirements::Any,
@@ -287,7 +287,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with a constant value.",
     keywords = "fill,constant,array,gpu,like",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::fill"
+    builtin_path = "crate::builtins::array::creation::fill"
 )]
 fn fill_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_value =
@@ -632,7 +632,7 @@ fn make_logical_array(fill: &FillScalar, shape: &[usize]) -> Result<LogicalArray
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

@@ -24,7 +24,10 @@ use runmat_core::{
     MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
 };
-use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
+use runmat_runtime::builtins::{
+    plotting::{set_scatter_target_points, set_surface_vertex_budget},
+    wasm_registry,
+};
 use runmat_runtime::warning_store::RuntimeWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
@@ -213,6 +216,13 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = resetSession)]
     pub fn reset_session(&self) -> Result<(), JsValue> {
+        wasm_registry::register_all();
+        let builtin_count = runmat_builtins::builtin_functions().len();
+        log::warn!("RunMat wasm: builtins registered ({builtin_count})");
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!("RunMat wasm: builtins registered ({builtin_count})").into(),
+        );
         let config = self.config.borrow();
         let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_snapshot_bytes(
@@ -881,6 +891,11 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     }
 
     apply_plotting_overrides(&parsed_opts);
+    wasm_registry::register_all();
+    let builtin_count = runmat_builtins::builtin_functions().len();
+    log::warn!("RunMat wasm: builtins registered ({builtin_count})");
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
 
     let config = SessionConfig::from_options(&parsed_opts);
     let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await.map_err(|err| {

@@ -33,7 +33,7 @@ struct ParsedScalar {
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "colon",
-        wasm_path = "crate::builtins::array::creation::colon"
+        builtin_path = "crate::builtins::array::creation::colon"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -208,7 +208,7 @@ nudging the final value.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::colon")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::colon")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "colon",
     op_kind: GpuOpKind::Custom("generator"),
@@ -224,7 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to uploading the host-generated vector when provider linspace kernels are unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::colon")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::colon")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "colon",
     shape: ShapeRequirements::Any,
@@ -241,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Arithmetic progression that mirrors MATLAB's colon operator.",
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::colon"
+    builtin_path = "crate::builtins::array::creation::colon"
 )]
 fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -592,7 +592,7 @@ fn build_char_sequence(data: Vec<f64>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, Tensor};

@@ -18,7 +18,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "repmat",
-        wasm_path = "crate::builtins::array::shape::repmat"
+        builtin_path = "crate::builtins::array::shape::repmat"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -205,7 +205,7 @@ within RunMat.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::repmat")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::repmat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "repmat",
     op_kind: GpuOpKind::Custom("tile"),
@@ -221,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to gather + upload when providers lack a native tiling implementation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::repmat")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::repmat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "repmat",
     shape: ShapeRequirements::Any,
@@ -238,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Replicate arrays by tiling an input across one or more dimensions.",
     keywords = "repmat,tile,replicate,array,gpu",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::shape::repmat"
+    builtin_path = "crate::builtins::array::shape::repmat"
 )]
 fn repmat_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -588,7 +588,7 @@ fn checked_total(shape: &[usize], context: &str) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

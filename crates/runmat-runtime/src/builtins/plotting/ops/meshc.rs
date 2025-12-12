@@ -20,7 +20,7 @@ use std::sync::Arc;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "meshc",
-        wasm_path = "crate::builtins::plotting::ops::meshc"
+        builtin_path = "crate::builtins::plotting::meshc"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -61,7 +61,7 @@ tested:
     summary = "Render a MATLAB-compatible mesh with contour overlay.",
     keywords = "meshc,plotting,mesh,contour",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::meshc"
+    builtin_path = "crate::builtins::plotting::meshc"
 )]
 pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);
@@ -145,7 +145,7 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

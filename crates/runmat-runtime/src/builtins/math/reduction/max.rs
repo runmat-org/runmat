@@ -20,7 +20,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "max",
-        wasm_path = "crate::builtins::math::reduction::max"
+        builtin_path = "crate::builtins::math::reduction::max"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -170,7 +170,7 @@ Yes. Logical arrays are promoted to double precision, and integer inputs are con
 - The full source code for the implementation of the `max` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/max.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/max.rs)
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::max")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::max")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "max",
     op_kind: GpuOpKind::Reduction,
@@ -194,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_max_dim / reduce_max. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::max")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::max")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "max",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -241,7 +241,7 @@ impl MaxEvaluation {
     summary = "Return the maximum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::max"
+    builtin_path = "crate::builtins::math::reduction::max"
 )]
 fn max_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_value())
@@ -1763,7 +1763,7 @@ fn choose_complex_elementwise(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;

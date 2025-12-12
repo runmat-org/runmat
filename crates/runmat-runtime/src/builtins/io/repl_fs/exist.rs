@@ -29,7 +29,7 @@ const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var'
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "exist",
-        wasm_path = "crate::builtins::io::repl_fs::exist"
+        builtin_path = "crate::builtins::io::repl_fs::exist"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -173,7 +173,7 @@ No. `exist` gathers any GPU-resident string inputs transparently. The lookup, fi
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::exist")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exist",
     op_kind: GpuOpKind::Custom("io"),
@@ -189,7 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem and workspace lookup run on the host; arguments are gathered from the GPU when necessary.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::exist")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exist",
     shape: ShapeRequirements::Any,
@@ -206,7 +206,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Determine whether a variable, file, folder, built-in, or class exists.",
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::exist"
+    builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -506,7 +506,7 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use once_cell::sync::OnceCell;

@@ -18,7 +18,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "writematrix",
-        wasm_path = "crate::builtins::io::tabular::writematrix"
+        builtin_path = "crate::builtins::io::tabular::writematrix"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -192,7 +192,7 @@ prepend header lines manually with `fprintf` before calling `writematrix` in `'a
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::writematrix")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "writematrix",
     op_kind: GpuOpKind::Custom("io-writematrix"),
@@ -208,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::writematrix")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "writematrix",
     shape: ShapeRequirements::Any,
@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Write numeric or string matrices to delimited text files with MATLAB-compatible defaults.",
     keywords = "writematrix,csv,delimited text,write,append,quote strings",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::tabular::writematrix"
+    builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
 fn writematrix_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -763,7 +763,7 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_time::unix_timestamp_ms;
     use std::fs;

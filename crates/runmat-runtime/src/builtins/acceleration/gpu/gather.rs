@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "gather",
-        wasm_path = "crate::builtins::acceleration::gpu::gather"
+        builtin_path = "crate::builtins::acceleration::gpu::gather"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -203,7 +203,7 @@ no longer need it.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::gather")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gather",
     op_kind: GpuOpKind::Custom("gather"),
@@ -219,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Downloads gpuArray handles via the provider's `download` hook and clears residency metadata; host inputs pass through unchanged.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::gather")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gather",
     shape: ShapeRequirements::Any,
@@ -236,7 +236,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Bring gpuArray data back to host memory.",
     keywords = "gather,gpuArray,accelerate,download",
     accel = "sink",
-    wasm_path = "crate::builtins::acceleration::gpu::gather"
+    builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 fn gather_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -314,7 +314,7 @@ fn gather_argument(value: &Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

@@ -1,64 +1,64 @@
 //! Plotting builtins backed by the runmat-plot renderer.
 
 #[path = "core/common.rs"]
-mod common;
+pub(crate) mod common;
 #[path = "core/context.rs"]
 pub mod context;
 #[path = "core/engine.rs"]
-mod engine;
+pub(crate) mod engine;
 #[path = "core/gpu_helpers.rs"]
-mod gpu_helpers;
+pub(crate) mod gpu_helpers;
 #[path = "core/perf.rs"]
-mod perf;
+pub(crate) mod perf;
 #[path = "core/point.rs"]
-mod point;
+pub(crate) mod point;
 #[path = "core/state.rs"]
-mod state;
+pub(crate) mod state;
 #[path = "core/style.rs"]
-mod style;
+pub(crate) mod style;
 #[path = "core/web.rs"]
 pub mod web;
 
 #[path = "ops/bar.rs"]
-mod bar;
+pub(crate) mod bar;
 #[path = "ops/clf.rs"]
-mod clf;
+pub(crate) mod clf;
 #[path = "ops/close.rs"]
-mod close;
+pub(crate) mod close;
 #[path = "ops/contour.rs"]
-mod contour;
+pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
-mod contourf;
+pub(crate) mod contourf;
 #[path = "ops/figure.rs"]
-mod figure;
+pub(crate) mod figure;
 #[path = "ops/gca.rs"]
-mod gca;
+pub(crate) mod gca;
 #[path = "ops/gcf.rs"]
-mod gcf;
+pub(crate) mod gcf;
 #[path = "ops/handle_args.rs"]
-mod handle_args;
+pub(crate) mod handle_args;
 #[path = "ops/hist.rs"]
 pub mod hist;
 #[path = "ops/hold.rs"]
-mod hold;
+pub(crate) mod hold;
 #[path = "ops/mesh.rs"]
-mod mesh;
+pub(crate) mod mesh;
 #[path = "ops/meshc.rs"]
-mod meshc;
+pub(crate) mod meshc;
 #[path = "ops/plot.rs"]
-mod plot;
+pub(crate) mod plot;
 #[path = "ops/scatter.rs"]
-mod scatter;
+pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
-mod scatter3;
+pub(crate) mod scatter3;
 #[path = "ops/stairs.rs"]
-mod stairs;
+pub(crate) mod stairs;
 #[path = "ops/subplot.rs"]
-mod subplot;
+pub(crate) mod subplot;
 #[path = "ops/surf.rs"]
-mod surf;
+pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
-mod surfc;
+pub(crate) mod surfc;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{

@@ -15,7 +15,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "strlength",
-        wasm_path = "crate::builtins::strings::core::strlength"
+        builtin_path = "crate::builtins::strings::core::strlength"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -156,7 +156,7 @@ No. The builtin inspects metadata and operates on host strings. If your data alr
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strlength")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strlength")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strlength",
     op_kind: GpuOpKind::Custom("string-metadata"),
@@ -172,7 +172,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Measures string lengths on the CPU; any GPU-resident inputs are gathered before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strlength")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strlength")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strlength",
     shape: ShapeRequirements::Any,
@@ -194,7 +194,7 @@ const CELL_ELEMENT_ERROR: &str =
     summary = "Count characters in string arrays, character arrays, or cell arrays of character vectors.",
     keywords = "strlength,string length,text,count,characters",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::core::strlength"
+    builtin_path = "crate::builtins::strings::core::strlength"
 )]
 fn strlength_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strlength: {e}"))?;
@@ -278,7 +278,7 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

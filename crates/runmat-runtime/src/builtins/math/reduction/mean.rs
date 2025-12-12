@@ -17,7 +17,7 @@ use crate::dispatcher;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "mean",
-        wasm_path = "crate::builtins::math::reduction::mean"
+        builtin_path = "crate::builtins::math::reduction::mean"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -208,7 +208,7 @@ Yes. When you pass `'like', prototype`, RunMat mirrors both the class and reside
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::mean")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mean",
     op_kind: GpuOpKind::Reduction,
@@ -231,7 +231,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::mean")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mean",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -383,7 +383,7 @@ enum MeanAxes {
     summary = "Average elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::mean"
+    builtin_path = "crate::builtins::math::reduction::mean"
 )]
 fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     // Normalise argument order defensively:
@@ -1442,7 +1442,7 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;

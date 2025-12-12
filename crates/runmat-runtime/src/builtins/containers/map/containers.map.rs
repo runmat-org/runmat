@@ -24,7 +24,7 @@ const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present 
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "containers.Map",
-        wasm_path = "crate::builtins::containers::map::containers_map"
+        builtin_path = "crate::builtins::containers::map::containers_map"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -215,7 +215,9 @@ error pointing to the offending argument.
 [remove](./containers.Map.remove), [length](../../array/introspection/length)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::containers::map::containers_map")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "containers.Map",
     op_kind: GpuOpKind::Custom("map"),
@@ -232,7 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "containers.Map",
@@ -537,7 +539,7 @@ struct KeyCandidate {
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
     sink = true,
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_constructor_args(args)?;
@@ -547,7 +549,7 @@ fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
 
 #[runtime_builtin(
     name = "containers.Map.keys",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_keys(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
@@ -558,7 +560,7 @@ fn containers_map_keys(map: Value) -> Result<Value, String> {
 
 #[runtime_builtin(
     name = "containers.Map.values",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_values(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
@@ -569,7 +571,7 @@ fn containers_map_values(map: Value) -> Result<Value, String> {
 
 #[runtime_builtin(
     name = "containers.Map.isKey",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store(&map, |store| {
@@ -592,7 +594,7 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
 
 #[runtime_builtin(
     name = "containers.Map.remove",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store_mut(&map, |store| {
@@ -608,7 +610,7 @@ fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
 
 #[runtime_builtin(
     name = "containers.Map.subsref",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Value, String> {
     if !matches!(map, Value::HandleObject(_)) {
@@ -669,7 +671,7 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Va
 
 #[runtime_builtin(
     name = "containers.Map.subsasgn",
-    wasm_path = "crate::builtins::containers::map::containers_map"
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_subsasgn(
     map: Value,
@@ -1412,7 +1414,7 @@ pub fn map_length(value: &Value) -> Option<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

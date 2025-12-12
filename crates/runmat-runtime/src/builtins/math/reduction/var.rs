@@ -15,7 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "var",
-        wasm_path = "crate::builtins::math::reduction::var"
+        builtin_path = "crate::builtins::math::reduction::var"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -178,7 +178,7 @@ Not yet. RunMat currently requires real inputs for `var`. Convert complex data t
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::var")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "var",
     op_kind: GpuOpKind::Reduction,
@@ -201,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers compute variance via standard-deviation reductions followed by an in-device squaring pass.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::var")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "var",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -246,7 +246,7 @@ enum NormParse {
     summary = "Variance of scalars, vectors, matrices, or N-D tensors.",
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::var"
+    builtin_path = "crate::builtins::math::reduction::var"
 )]
 fn var_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_arguments(&rest)?;
@@ -741,7 +741,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

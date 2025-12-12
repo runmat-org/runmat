@@ -20,7 +20,7 @@ const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "gpuArray",
-        wasm_path = "crate::builtins::acceleration::gpu::gpuarray"
+        builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -216,7 +216,7 @@ numeric or logical types.
 - Found a bug or behavior mismatch? Please open an issue with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::gpuarray")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuarray")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuArray",
     op_kind: GpuOpKind::Custom("upload"),
@@ -232,7 +232,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Invokes the provider `upload` hook, reuploading gpuArray inputs when dtype conversion is requested. Handles class strings, size vectors, and `'like'` prototypes.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::gpuarray")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuArray",
     shape: ShapeRequirements::Any,
@@ -251,7 +253,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "gpuArray,gpu,accelerate,upload,dtype,like",
     examples = "G = gpuArray([1 2 3], 'single');",
     accel = "array_construct",
-    wasm_path = "crate::builtins::acceleration::gpu::gpuarray"
+    builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
 fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_options(&rest)?;
@@ -746,7 +748,7 @@ fn char_array_to_tensor(ca: &CharArray) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

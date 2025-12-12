@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "conv",
-        wasm_path = "crate::builtins::math::signal::conv"
+        builtin_path = "crate::builtins::math::signal::conv"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -216,7 +216,7 @@ Not yet. Current providers choose kernel launch parameters automatically; user-f
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::signal::conv")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv",
     op_kind: GpuOpKind::Custom("conv1d"),
@@ -233,7 +233,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement `conv1d` to keep results on the device; when unavailable the runtime gathers inputs and runs on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::signal::conv")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::conv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conv",
     shape: ShapeRequirements::Any,
@@ -250,7 +250,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
     keywords = "conv,convolution,signal processing,gpu",
     accel = "custom",
-    wasm_path = "crate::builtins::math::signal::conv"
+    builtin_path = "crate::builtins::math::signal::conv"
 )]
 fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mode = parse_mode(&rest)?;
@@ -584,7 +584,7 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> Result<V
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

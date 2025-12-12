@@ -14,7 +14,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isstring",
-        wasm_path = "crate::builtins::introspection::isstring"
+        builtin_path = "crate::builtins::introspection::isstring"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -204,7 +204,7 @@ No. It only checks the value’s type metadata, so the cost is constant regardle
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::isstring")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isstring",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -220,7 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata-only predicate; gpuArray inputs stay on device while the result is returned on the host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::isstring")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isstring",
     shape: ShapeRequirements::Any,
@@ -237,7 +237,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value is a MATLAB string array.",
     keywords = "isstring,string array,string scalar,type checking,introspection",
     accel = "metadata",
-    wasm_path = "crate::builtins::introspection::isstring"
+    builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(matches!(
@@ -247,7 +247,7 @@ fn isstring_builtin(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

@@ -24,7 +24,7 @@ const UNSUPPORTED_TYPE_ERROR: &str =
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_doc_text(
     name = "jsonencode",
-    wasm_path = "crate::builtins::io::json::jsonencode"
+    builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 pub const DOC_MD: &str = r#"---
 title: "jsonencode"
@@ -211,7 +211,7 @@ standard JSON escape sequences.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::json::jsonencode")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsonencode",
     op_kind: GpuOpKind::Custom("serialization"),
@@ -228,7 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::json::jsonencode")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsonencode",
     shape: ShapeRequirements::Any,
@@ -277,7 +277,7 @@ enum JsonNumber {
     summary = "Serialize MATLAB values to UTF-8 JSON text.",
     keywords = "jsonencode,json,serialization,struct,gpu",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::json::jsonencode"
+    builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let host_value = gather_if_needed(&value)?;
@@ -902,7 +902,7 @@ fn format_number(value: f64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{

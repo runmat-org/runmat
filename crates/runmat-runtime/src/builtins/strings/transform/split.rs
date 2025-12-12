@@ -16,7 +16,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "split",
-        wasm_path = "crate::builtins::strings::transform::split"
+        builtin_path = "crate::builtins::strings::transform::split"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -195,7 +195,7 @@ containing string scalars or character vectors.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::split")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "split",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -211,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered to host memory before splitting.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::split")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::split")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "split",
     shape: ShapeRequirements::Any,
@@ -239,7 +239,7 @@ const CELL_ELEMENT_ERROR: &str =
     summary = "Split strings, character arrays, and cell arrays into substrings using delimiters.",
     keywords = "split,strsplit,delimiter,CollapseDelimiters,IncludeDelimiters",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::split"
+    builtin_path = "crate::builtins::strings::transform::split"
 )]
 fn split_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("split: {e}"))?;
@@ -715,7 +715,7 @@ fn name_key(value: &Value) -> Option<NameKey> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, LogicalArray, Tensor};

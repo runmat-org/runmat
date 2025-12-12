@@ -19,7 +19,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "arrayfun",
-        wasm_path = "crate::builtins::acceleration::gpu::arrayfun"
+        builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -187,7 +187,7 @@ back into a logical array automatically.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::arrayfun")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::arrayfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "arrayfun",
     op_kind: GpuOpKind::Elementwise,
@@ -226,7 +226,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement the listed kernels can run supported callbacks entirely on the GPU; unsupported callbacks fall back to the host path with re-upload.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::arrayfun")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "arrayfun",
     shape: ShapeRequirements::Any,
@@ -243,7 +245,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Apply a function element-wise to array inputs.",
     keywords = "arrayfun,gpu,array,map,functional",
     accel = "host",
-    wasm_path = "crate::builtins::acceleration::gpu::arrayfun"
+    builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -1095,7 +1097,7 @@ fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -1407,7 +1409,7 @@ mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__arrayfun_test_handler",
-        wasm_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
+        builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]
     fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         let _ = rest;

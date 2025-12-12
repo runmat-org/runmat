@@ -16,7 +16,7 @@ const LABEL: &str = "string.empty";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "string.empty",
-        wasm_path = "crate::builtins::strings::core::string_empty"
+        builtin_path = "crate::builtins::strings::core::string_empty"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -197,7 +197,7 @@ guessing.
 `string`, `strings`, `char`, `zeros`, `ones`
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::string_empty")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string_empty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "string.empty",
     op_kind: GpuOpKind::Custom("constructor"),
@@ -213,7 +213,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only constructor that returns a new empty string array without contacting GPU providers.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::string_empty")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::core::string_empty"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "string.empty",
     shape: ShapeRequirements::Any,
@@ -230,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Construct an empty string array with MATLAB-compatible dimensions.",
     keywords = "string.empty,empty,string array,preallocate",
     accel = "none",
-    wasm_path = "crate::builtins::strings::core::string_empty"
+    builtin_path = "crate::builtins::strings::core::string_empty"
 )]
 fn string_empty_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let shape = parse_shape(&rest)?;
@@ -349,7 +351,7 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

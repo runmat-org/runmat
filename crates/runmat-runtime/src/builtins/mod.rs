@@ -18,6 +18,7 @@ pub mod stats;
 pub mod strings;
 pub mod structs;
 pub mod timing;
+pub mod wasm_registry;
 
 // Temporary: expose legacy modules while migration is in progress.
 pub mod legacy {

@@ -14,7 +14,7 @@ const DEFAULT_PROMPT: &str = "Input: ";
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "input", wasm_path = "crate::builtins::io::input")
+    runmat_macros::register_doc_text(name = "input", builtin_path = "crate::builtins::io::input")
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -97,7 +97,7 @@ Yes. Prompts always flow through the host console/UI. GPU-resident prompt argume
 once before display, and the response itself is always a host value.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::input")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::input")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "input",
     op_kind: GpuOpKind::Custom("interaction"),
@@ -113,7 +113,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prompts execute on the host. Input text is always delivered via the host handler; GPU tensors are only gathered when used as prompt strings.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::input")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::input")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "input",
     shape: ShapeRequirements::Any,
@@ -124,7 +124,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Side-effecting builtin; excluded from fusion plans.",
 };
 
-#[runtime_builtin(name = "input", wasm_path = "crate::builtins::io::input")]
+#[runtime_builtin(name = "input", builtin_path = "crate::builtins::io::input")]
 fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.len() > 2 {
         return Err("MATLAB:input:TooManyInputs".to_string());
@@ -221,7 +221,7 @@ fn parse_numeric_response(line: &str) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::interaction::{push_queued_response, InteractionResponse};
 

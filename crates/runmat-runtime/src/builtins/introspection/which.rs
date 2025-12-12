@@ -31,7 +31,7 @@ const ERROR_OPTION_ARG: &str = "which: option must be a character vector or stri
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "which",
-        wasm_path = "crate::builtins::introspection::which"
+        builtin_path = "crate::builtins::introspection::which"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -163,7 +163,7 @@ Expected output (example):
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::which")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "which",
     op_kind: GpuOpKind::Custom("io"),
@@ -180,7 +180,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::which")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "which",
     shape: ShapeRequirements::Any,
@@ -197,7 +197,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
     accel = "cpu",
-    wasm_path = "crate::builtins::introspection::which"
+    builtin_path = "crate::builtins::introspection::which"
 )]
 fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -493,7 +493,7 @@ fn push_unique(results: &mut Vec<String>, seen: &mut HashSet<String>, entry: Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use once_cell::sync::{Lazy, OnceCell};
     use runmat_builtins::{CharArray, StringArray, Value};

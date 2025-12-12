@@ -15,7 +15,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "reshape",
-        wasm_path = "crate::builtins::array::shape::reshape"
+        builtin_path = "crate::builtins::array::shape::reshape"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -161,7 +161,7 @@ Yes. Complex scalars become complex tensors when the target shape has more than 
 - Found a bug or behavioral difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::reshape")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "reshape",
     op_kind: GpuOpKind::Custom("reshape"),
@@ -183,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers update residency metadata via custom reshape hook; no kernel launches required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::reshape")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "reshape",
     shape: ShapeRequirements::Any,
@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Rearrange the dimensions of an array without changing its data.",
     keywords = "reshape,resize,dimensions,gpu,auto",
     accel = "shape",
-    wasm_path = "crate::builtins::array::shape::reshape"
+    builtin_path = "crate::builtins::array::shape::reshape"
 )]
 fn reshape_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -532,7 +532,7 @@ fn is_vector(t: &Tensor) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

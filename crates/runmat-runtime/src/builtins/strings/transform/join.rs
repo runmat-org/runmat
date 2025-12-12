@@ -14,7 +14,7 @@ use crate::{gather_if_needed, make_cell};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "join",
-        wasm_path = "crate::builtins::strings::transform::join"
+        builtin_path = "crate::builtins::strings::transform::join"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -193,7 +193,7 @@ MATLAB.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::join")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::join")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "join",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -209,7 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host; GPU-resident inputs and delimiters are gathered before concatenation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::join")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::join")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "join",
     shape: ShapeRequirements::Any,
@@ -234,7 +234,7 @@ const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer s
     summary = "Combine text across a specified dimension inserting delimiters between elements.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
     accel = "none",
-    wasm_path = "crate::builtins::strings::transform::join"
+    builtin_path = "crate::builtins::strings::transform::join"
 )]
 fn join_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("join: {e}"))?;
@@ -703,7 +703,7 @@ fn increment_coords(coords: &mut [usize], shape: &[usize], axis_idx: usize) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

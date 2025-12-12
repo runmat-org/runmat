@@ -17,7 +17,7 @@ use crate::builtins::common::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "logical",
-        wasm_path = "crate::builtins::logical::ops"
+        builtin_path = "crate::builtins::logical::ops"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ See the references below and the RunMat source for implementation details.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::ops")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logical",
     op_kind: GpuOpKind::Elementwise,
@@ -208,7 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Preferred path issues elem_ne(X, 0) on the device; missing hooks trigger a gather → host cast → re-upload sequence flagged as logical.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::ops")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logical",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert scalars, arrays, and gpuArray values to logical outputs.",
     keywords = "logical,boolean,gpuArray,mask,conversion",
     accel = "unary",
-    wasm_path = "crate::builtins::logical::ops"
+    builtin_path = "crate::builtins::logical::ops"
 )]
 fn logical_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -430,7 +430,7 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

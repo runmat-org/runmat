@@ -109,7 +109,7 @@ fn propagate_to_plot_crate(context: &WgpuContextHandle) {
 }
 
 #[cfg(all(test, feature = "plot-core"))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use pollster::FutureExt;
     use std::sync::Arc;

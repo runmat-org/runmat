@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "round",
-        wasm_path = "crate::builtins::math::rounding::round"
+        builtin_path = "crate::builtins::math::rounding::round"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -159,7 +159,7 @@ Yes. Logical values are converted to doubles (`0` or `1`) and characters are rou
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding::round")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::round")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "round",
     op_kind: GpuOpKind::Elementwise,
@@ -175,7 +175,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute round directly on the device; digit-aware rounding currently gathers to the host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding::round")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "round",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -211,7 +211,7 @@ impl RoundStrategy {
     summary = "Round values to the nearest integers, decimal places, or significant digits.",
     keywords = "round,rounding,significant,decimals,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::rounding::round"
+    builtin_path = "crate::builtins::math::rounding::round"
 )]
 fn round_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let strategy = parse_arguments(&rest)?;
@@ -400,7 +400,7 @@ fn parse_mode(value: &Value) -> Result<RoundMode, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};

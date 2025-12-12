@@ -23,7 +23,10 @@ use crate::{gather_if_needed, make_cell};
 
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "load", wasm_path = "crate::builtins::io::mat::load")
+    runmat_macros::register_doc_text(
+        name = "load",
+        builtin_path = "crate::builtins::io::mat::load"
+    )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -150,7 +153,7 @@ Use the struct form: `info = load(filename);` and then inspect `fieldnames(info)
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::mat::load")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "load",
     op_kind: GpuOpKind::Custom("io-load"),
@@ -166,7 +169,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads MAT-files on the host and produces CPU-resident values. Providers are not involved until accelerated code later promotes the results.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::mat::load")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "load",
     shape: ShapeRequirements::Any,
@@ -184,7 +187,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "load,mat,workspace",
     accel = "cpu",
     sink = true,
-    wasm_path = "crate::builtins::io::mat::load"
+    builtin_path = "crate::builtins::io::mat::load"
 )]
 fn load_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -888,7 +891,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> Result<Option<Tagged
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::workspace::WorkspaceResolver;
     use once_cell::sync::OnceCell;

@@ -17,7 +17,7 @@ const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "error",
-        wasm_path = "crate::builtins::diagnostics::error"
+        builtin_path = "crate::builtins::diagnostics::error"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -127,7 +127,7 @@ end
 8. **Does formatting follow MATLAB rules?** Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `MATLAB:error` if the format string is invalid or under-specified.
 #"#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::diagnostics::error")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "error",
     op_kind: GpuOpKind::Custom("control"),
@@ -143,7 +143,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; never dispatched to GPU backends.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::diagnostics::error")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "error",
     shape: ShapeRequirements::Any,
@@ -160,7 +160,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Throw an exception with an identifier and a formatted diagnostic message.",
     keywords = "error,exception,diagnostics,throw",
     accel = "metadata",
-    wasm_path = "crate::builtins::diagnostics::error"
+    builtin_path = "crate::builtins::diagnostics::error"
 )]
 fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -297,7 +297,7 @@ fn looks_like_unqualified_identifier(text: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, MException};
 

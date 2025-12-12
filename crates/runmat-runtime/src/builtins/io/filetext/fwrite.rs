@@ -16,7 +16,7 @@ use runmat_filesystem::File;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fwrite",
-        wasm_path = "crate::builtins::io::filetext::fwrite"
+        builtin_path = "crate::builtins::io::filetext::fwrite"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -209,7 +209,7 @@ saturate to the min/max integer representable by the target precision.
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fwrite")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fwrite",
     op_kind: GpuOpKind::Custom("file-io-write"),
@@ -225,7 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only binary file I/O; GPU arguments are gathered to the CPU prior to writing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fwrite")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fwrite",
     shape: ShapeRequirements::Any,
@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Write binary data to a file identifier.",
     keywords = "fwrite,file,io,binary,precision",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::fwrite"
+    builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &data, &rest)?;
@@ -827,7 +827,7 @@ fn parse_input_label(label: &str) -> Result<InputType, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;

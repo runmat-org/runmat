@@ -18,7 +18,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ldivide",
-        wasm_path = "crate::builtins::math::elementwise::ldivide"
+        builtin_path = "crate::builtins::math::elementwise::ldivide"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -206,7 +206,7 @@ Absolutely. Mixed cases return complex doubles with full MATLAB semantics.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::ldivide")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ldivide",
     op_kind: GpuOpKind::Elementwise,
@@ -229,7 +229,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses elem_div for B./A when shapes match, scalar_div for tensor ./ scalar cases (B ./ a), and scalar_rdiv for scalar ./ tensor cases (b ./ A); implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::ldivide")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ldivide",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -256,7 +256,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise left division (B ./ A) with MATLAB-compatible implicit expansion.",
     keywords = "ldivide,element-wise left division,gpu,.\\",
     accel = "elementwise",
-    wasm_path = "crate::builtins::math::elementwise::ldivide"
+    builtin_path = "crate::builtins::math::elementwise::ldivide"
 )]
 fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -753,7 +753,7 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

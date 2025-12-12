@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "sign",
-        wasm_path = "crate::builtins::math::elementwise::sign"
+        builtin_path = "crate::builtins::math::elementwise::sign"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -194,7 +194,7 @@ beneficial.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::sign")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sign",
     op_kind: GpuOpKind::Elementwise,
@@ -211,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sign on-device via unary_sign; the runtime gathers to the host when the hook is unavailable or complex normalisation is required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::sign")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sign",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -237,7 +237,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sign of scalars, vectors, matrices, or N-D tensors with real or complex values.",
     keywords = "sign,signum,elementwise,complex,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::sign"
+    builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 fn sign_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -341,7 +341,7 @@ fn sign_complex(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

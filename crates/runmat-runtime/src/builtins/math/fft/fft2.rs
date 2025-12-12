@@ -16,7 +16,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fft2",
-        wasm_path = "crate::builtins::math::fft::fft2"
+        builtin_path = "crate::builtins::math::fft::fft2"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -152,7 +152,7 @@ control, particularly when interoperating with MATLAB code that expects it.
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::fft2")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fft2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fft2",
     op_kind: GpuOpKind::Custom("fft2"),
@@ -168,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs two sequential `fft_dim` passes (dimensions 0 and 1); falls back to host execution when the hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::fft2")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::fft::fft2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fft2",
     shape: ShapeRequirements::Any,
@@ -185,7 +185,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/fft",
     summary = "Compute the two-dimensional discrete Fourier transform (DFT) of numeric or complex data.",
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
-    wasm_path = "crate::builtins::math::fft::fft2"
+    builtin_path = "crate::builtins::math::fft::fft2"
 )]
 fn fft2_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let lengths = parse_fft2_arguments(&rest)?;
@@ -335,7 +335,7 @@ fn parse_length_pair(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

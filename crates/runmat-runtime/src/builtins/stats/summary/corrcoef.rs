@@ -16,7 +16,7 @@ use crate::builtins::common::tensor::{self, value_to_string};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "corrcoef",
-        wasm_path = "crate::builtins::stats::summary::corrcoef"
+        builtin_path = "crate::builtins::stats::summary::corrcoef"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -183,7 +183,7 @@ Yes. Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::stats::summary::corrcoef")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "corrcoef",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -199,7 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side corrcoef kernels when rows='all'; other cases fall back to host execution.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::stats::summary::corrcoef")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "corrcoef",
     shape: ShapeRequirements::Any,
@@ -216,7 +216,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute Pearson correlation coefficients for the columns of matrices or paired data sets.",
     keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::stats::summary::corrcoef"
+    builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = CorrcoefArgs::parse(value, rest)?;
@@ -753,7 +753,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor, Value};

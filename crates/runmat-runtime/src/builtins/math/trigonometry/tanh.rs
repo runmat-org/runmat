@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "tanh",
-        wasm_path = "crate::builtins::math::trigonometry::tanh"
+        builtin_path = "crate::builtins::math::trigonometry::tanh"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ Yes. The autograd infrastructure recognises `tanh` as a primitive and records it
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::tanh")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tanh",
     op_kind: GpuOpKind::Elementwise,
@@ -206,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute tanh directly on the device; runtimes gather to the host when unary_tanh is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::tanh")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tanh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -230,7 +230,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Hyperbolic tangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "tanh,hyperbolic tangent,trigonometry,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::trigonometry::tanh"
+    builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
 fn tanh_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -300,7 +300,7 @@ fn tanh_complex_parts(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex64;

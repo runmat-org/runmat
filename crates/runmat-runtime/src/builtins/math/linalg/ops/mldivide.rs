@@ -20,7 +20,7 @@ const NAME: &str = "mldivide";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "mldivide",
-        wasm_path = "crate::builtins::math::linalg::ops::mldivide"
+        builtin_path = "crate::builtins::math::linalg::ops::mldivide"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -187,7 +187,7 @@ NaNs will typically produce NaNs in the corresponding output entries.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::mldivide")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mldivide",
     op_kind: GpuOpKind::Custom("solve"),
@@ -203,7 +203,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider mldivide hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::mldivide")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::ops::mldivide"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mldivide",
     shape: ShapeRequirements::Any,
@@ -220,7 +222,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Solve A * X = B using MATLAB-compatible left division.",
     keywords = "mldivide,matrix division,linear algebra,least squares,gpu",
     accel = "mldivide",
-    wasm_path = "crate::builtins::math::linalg::ops::mldivide"
+    builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
 fn mldivide_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     mldivide_eval(&lhs, &rhs)
@@ -544,7 +546,7 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use nalgebra::DMatrix;

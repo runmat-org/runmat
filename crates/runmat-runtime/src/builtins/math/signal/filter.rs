@@ -19,7 +19,7 @@ const EPS: f64 = 1.0e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "filter",
-        wasm_path = "crate::builtins::math::signal::filter"
+        builtin_path = "crate::builtins::math::signal::filter"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -200,7 +200,7 @@ The planner leverages the same provider hook under the hood. As long as the oper
 [conv](./conv), [deconv](./deconv), [fft](../fft/fft), [filtfilt](https://www.mathworks.com/help/matlab/ref/filtfilt.html)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::signal::filter")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter",
     op_kind: GpuOpKind::Custom("iir-filter"),
@@ -216,7 +216,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses the provider hook `iir_filter` when available. Complex filters or missing hooks fall back to the host implementation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::signal::filter")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::filter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filter",
     shape: ShapeRequirements::Any,
@@ -233,7 +233,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Apply an IIR/FIR digital filter to scalars, vectors, or tensors.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
     accel = "custom",
-    wasm_path = "crate::builtins::math::signal::filter"
+    builtin_path = "crate::builtins::math::signal::filter"
 )]
 fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(b, a, x, &rest).map(|eval| eval.into_value())
@@ -1223,7 +1223,7 @@ fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;

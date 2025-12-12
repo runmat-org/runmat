@@ -26,7 +26,7 @@ const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_doc_text(
     name = "webwrite",
-    wasm_path = "crate::builtins::io::http::webwrite"
+    builtin_path = "crate::builtins::io::http::webwrite"
 )]
 pub const DOC_MD: &str = r#"---
 title: "webwrite"
@@ -185,7 +185,7 @@ the payload, and results are created on the host. Manually gathering is unnecess
 [webread](./webread), [jsonencode](../json/jsonencode), [jsondecode](../json/jsondecode), [gpuArray](../../acceleration/gpu/gpuArray)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::http::webwrite")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "webwrite",
     op_kind: GpuOpKind::Custom("http-write"),
@@ -201,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP uploads run on the CPU and gather gpuArray inputs before serialisation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::http::webwrite")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "webwrite",
     shape: ShapeRequirements::Any,
@@ -218,7 +218,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Send data to web services using HTTP POST/PUT requests and return the response.",
     keywords = "webwrite,http post,rest client,json upload,form post",
     accel = "sink",
-    wasm_path = "crate::builtins::io::http::webwrite"
+    builtin_path = "crate::builtins::io::http::webwrite"
 )]
 fn webwrite_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_url = gather_if_needed(&url).map_err(|e| format!("webwrite: {e}"))?;
@@ -988,7 +988,7 @@ fn infer_response_content_type(header: Option<&str>) -> ResolvedContentType {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};

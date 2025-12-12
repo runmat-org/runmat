@@ -20,7 +20,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "readmatrix",
-        wasm_path = "crate::builtins::io::tabular::readmatrix"
+        builtin_path = "crate::builtins::io::tabular::readmatrix"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -203,7 +203,7 @@ No. Relative paths are resolved against the current working directory, exactly l
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::readmatrix")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readmatrix",
     op_kind: GpuOpKind::Custom("io-readmatrix"),
@@ -219,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::readmatrix")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readmatrix",
     shape: ShapeRequirements::Any,
@@ -236,7 +236,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Import numeric data from delimited text files into a RunMat matrix.",
     keywords = "readmatrix,csv,delimited text,numeric import,table",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::tabular::readmatrix"
+    builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let path_value = gather_if_needed(&path).map_err(|e| format!("readmatrix: {e}"))?;
@@ -1185,7 +1185,7 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_time::unix_timestamp_ms;
     use std::fs;

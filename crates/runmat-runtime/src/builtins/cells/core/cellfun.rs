@@ -16,7 +16,7 @@ use crate::{gather_if_needed, make_cell_with_shape};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "cellfun",
-        wasm_path = "crate::builtins::cells::core::cellfun"
+        builtin_path = "crate::builtins::cells::core::cellfun"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -222,7 +222,7 @@ Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write
 - Issue tracker: [RunMat GitHub Issues](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::cells::core::cellfun")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellfun",
     op_kind: GpuOpKind::Custom("host-cell-map"),
@@ -238,7 +238,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host and gathers GPU-resident inputs before evaluating callbacks.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::cells::core::cellfun")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellfun",
     shape: ShapeRequirements::Any,
@@ -255,7 +255,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Apply a function to the contents of each cell array element.",
     keywords = "cellfun,cell,array,functional",
     accel = "host",
-    wasm_path = "crate::builtins::cells::core::cellfun"
+    builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -815,7 +815,7 @@ fn classify_value(value: &Value) -> Result<ClassifiedValue, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_test_handler",
-        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
@@ -1184,7 +1184,7 @@ mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_add",
-        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_add(lhs: Value, rhs: Value) -> Result<Value, String> {
         let a: f64 = (&lhs).try_into()?;
@@ -1194,7 +1194,7 @@ mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_identity",
-        wasm_path = "crate::builtins::cells::core::cellfun::tests"
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
     fn cellfun_identity(value: Value) -> Result<Value, String> {
         Ok(value)

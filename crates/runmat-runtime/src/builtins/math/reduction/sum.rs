@@ -22,7 +22,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "sum",
-        wasm_path = "crate::builtins::math::reduction::sum"
+        builtin_path = "crate::builtins::math::reduction::sum"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -187,7 +187,7 @@ Only when you explicitly request `'native'` or `'like'`. Otherwise integers are 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::sum")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::sum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sum",
     op_kind: GpuOpKind::Reduction,
@@ -206,7 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_sum_dim / reduce_sum; omitnan and multi-axis reductions fall back to the CPU path when unsupported.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::sum")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Sum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::sum"
+    builtin_path = "crate::builtins::math::reduction::sum"
 )]
 fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input_meta = InputMeta::from_value(&value);
@@ -1203,7 +1203,7 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

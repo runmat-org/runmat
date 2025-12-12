@@ -13,7 +13,7 @@ use crate::{gather_if_needed, make_cell_with_shape};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "erase",
-        wasm_path = "crate::builtins::strings::transform::erase"
+        builtin_path = "crate::builtins::strings::transform::erase"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -174,7 +174,7 @@ removal rather than literal substring erasure.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::erase")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::erase")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "erase",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -191,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before substrings are removed.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::erase")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::erase")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "erase",
     shape: ShapeRequirements::Any,
@@ -216,7 +216,7 @@ const CELL_ELEMENT_ERROR: &str =
     summary = "Remove substring occurrences from strings, character arrays, and cell arrays.",
     keywords = "erase,remove substring,strings,character array,text",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::erase"
+    builtin_path = "crate::builtins::strings::transform::erase"
 )]
 fn erase_builtin(text: Value, pattern: Value) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("erase: {e}"))?;
@@ -377,7 +377,7 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> Result<Value, St
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

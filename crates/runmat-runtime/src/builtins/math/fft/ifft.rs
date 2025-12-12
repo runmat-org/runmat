@@ -20,7 +20,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ifft",
-        wasm_path = "crate::builtins::math::fft::ifft"
+        builtin_path = "crate::builtins::math::fft::ifft"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -177,7 +177,7 @@ Apply `ifft` sequentially along each dimension (e.g., `ifft(ifft(X, [], 1), [], 
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::fft::ifft")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifft")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ifft",
     op_kind: GpuOpKind::Custom("ifft"),
@@ -193,7 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers should expose `ifft_dim` (or reuse `fft_dim` with inverse scaling); when absent, the runtime gathers to the host and evaluates the inverse FFT in software.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::fft::ifft")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::fft::ifft")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ifft",
     shape: ShapeRequirements::Any,
@@ -209,7 +209,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/fft",
     summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
-    wasm_path = "crate::builtins::math::fft::ifft"
+    builtin_path = "crate::builtins::math::fft::ifft"
 )]
 fn ifft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (length, dimension, symmetric) = parse_arguments(&rest)?;
@@ -492,7 +492,7 @@ fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex;

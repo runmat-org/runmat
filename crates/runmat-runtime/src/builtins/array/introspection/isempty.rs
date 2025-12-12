@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isempty",
-        wasm_path = "crate::builtins::array::introspection::isempty"
+        builtin_path = "crate::builtins::array::introspection::isempty"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -173,7 +173,7 @@ They behave like any other scalar and return `false`.
 [numel](./numel), [size](./size), [length](./length), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::isempty")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isempty",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -189,7 +189,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Queries tensor metadata; gathers only when the provider fails to expose shapes.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::introspection::isempty")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::isempty"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isempty",
     shape: ShapeRequirements::Any,
@@ -206,7 +208,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when an array has zero elements, matching MATLAB semantics.",
     keywords = "isempty,empty array,metadata query,gpu,logical",
     accel = "metadata",
-    wasm_path = "crate::builtins::array::introspection::isempty"
+    builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 fn isempty_builtin(value: Value) -> Result<Value, String> {
     let is_empty = value_is_empty(&value);
@@ -218,7 +220,7 @@ fn value_is_empty(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

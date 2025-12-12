@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "angle",
-        wasm_path = "crate::builtins::math::elementwise::angle"
+        builtin_path = "crate::builtins::math::elementwise::angle"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -182,7 +182,7 @@ Yes for double-precision providers. Single-precision backends may exhibit minor 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::angle")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "angle",
     op_kind: GpuOpKind::Elementwise,
@@ -198,7 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers implement unary_angle to evaluate atan2(imag(x), real(x)) on device; the runtime gathers to host whenever the hook is unavailable or when complex tensors need host conversion.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::angle")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "angle",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Phase angle of scalars, vectors, matrices, or N-D tensors.",
     keywords = "angle,phase,argument,complex,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::angle"
+    builtin_path = "crate::builtins::math::elementwise::angle"
 )]
 fn angle_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -291,7 +291,7 @@ fn angle_scalar(re: f64, im: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};

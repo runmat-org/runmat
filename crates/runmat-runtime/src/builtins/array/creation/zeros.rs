@@ -17,7 +17,7 @@ use runmat_builtins::NumericDType;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "zeros",
-        wasm_path = "crate::builtins::array::creation::zeros"
+        builtin_path = "crate::builtins::array::creation::zeros"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -186,7 +186,7 @@ Absolutely. Preallocating with `zeros` (or `ones`) and then filling in values is
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::zeros")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "zeros",
     op_kind: GpuOpKind::Custom("generator"),
@@ -205,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device zeros when providers expose dedicated hooks; otherwise falls back to host upload.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::zeros")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
     shape: ShapeRequirements::Any,
@@ -233,7 +233,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with zeros.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::zeros"
+    builtin_path = "crate::builtins::array::creation::zeros"
 )]
 fn zeros_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedZeros::parse(rest)?;
@@ -595,7 +595,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

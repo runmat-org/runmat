@@ -22,7 +22,7 @@ const ZERO_EPS: f64 = 1e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "sqrt",
-        wasm_path = "crate::builtins::math::elementwise::sqrt"
+        builtin_path = "crate::builtins::math::elementwise::sqrt"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -194,7 +194,7 @@ providers may expose complex buffers, and the builtin will automatically benefit
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::sqrt")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sqrt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sqrt",
     op_kind: GpuOpKind::Elementwise,
@@ -211,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers execute sqrt directly on device buffers when inputs are non-negative; runtime gathers to host when complex promotion is required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::sqrt")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::sqrt")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sqrt",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -237,7 +237,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sqrt,square root,elementwise,gpu,complex",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::sqrt"
+    builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 fn sqrt_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -406,7 +406,7 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};

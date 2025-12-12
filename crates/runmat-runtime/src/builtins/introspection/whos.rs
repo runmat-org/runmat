@@ -21,7 +21,7 @@ use crate::{gather_if_needed, make_cell};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "whos",
-        wasm_path = "crate::builtins::introspection::whos"
+        builtin_path = "crate::builtins::introspection::whos"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -149,7 +149,7 @@ ans =
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::introspection::whos")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::whos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "whos",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -165,7 +165,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; gpuArray metadata is derived from provider precision without launching kernels.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::introspection::whos")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::whos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "whos",
     shape: ShapeRequirements::Any,
@@ -182,7 +182,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
     keywords = "whos,workspace variables,memory usage,struct array",
     accel = "cpu",
-    wasm_path = "crate::builtins::introspection::whos"
+    builtin_path = "crate::builtins::introspection::whos"
 )]
 fn whos_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut gathered = Vec::with_capacity(args.len());

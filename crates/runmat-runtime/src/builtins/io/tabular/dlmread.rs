@@ -25,7 +25,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "dlmread",
-        wasm_path = "crate::builtins::io::tabular::dlmread"
+        builtin_path = "crate::builtins::io::tabular::dlmread"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -223,7 +223,7 @@ No. Relative paths are resolved against the current working directory. `dlmread`
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::dlmread")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmread",
     op_kind: GpuOpKind::Custom("io-dlmread"),
@@ -239,7 +239,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host CPU; providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::dlmread")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::dlmread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dlmread",
     shape: ShapeRequirements::Any,
@@ -256,7 +256,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read numeric data from a delimiter-separated text file.",
     keywords = "dlmread,delimiter,ascii import,range",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::tabular::dlmread"
+    builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
 fn dlmread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("dlmread: {e}"))?;
@@ -938,7 +938,7 @@ fn rows_to_tensor(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_time::unix_timestamp_ns;
     use std::fs;

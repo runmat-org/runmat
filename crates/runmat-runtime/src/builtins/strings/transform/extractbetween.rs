@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "extractBetween",
-        wasm_path = "crate::builtins::strings::transform::extractbetween"
+        builtin_path = "crate::builtins::strings::transform::extractbetween"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -195,7 +195,7 @@ host-side results, and fusion planning treats the builtin as a residency sink.
 "#;
 
 #[runmat_macros::register_gpu_spec(
-    wasm_path = "crate::builtins::strings::transform::extractbetween"
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "extractBetween",
@@ -213,7 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::strings::transform::extractbetween"
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "extractBetween",
@@ -251,7 +251,7 @@ enum BoundariesMode {
     summary = "Extract substrings between boundary markers using MATLAB-compatible semantics.",
     keywords = "extractBetween,substring,boundaries,strings",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::extractbetween"
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 fn extract_between_builtin(
     text: Value,
@@ -842,7 +842,7 @@ fn parse_position_int(value: IntValue) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;

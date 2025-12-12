@@ -231,7 +231,7 @@ impl<'a> Iterator for BroadcastIter<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

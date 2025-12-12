@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isnumeric",
-        wasm_path = "crate::builtins::logical::tests::isnumeric"
+        builtin_path = "crate::builtins::logical::tests::isnumeric"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -200,7 +200,7 @@ No. Both host and device numeric arrays return `true`; only logical GPU handles 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isnumeric")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isnumeric")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isnumeric",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -217,7 +217,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider metadata to distinguish logical gpuArrays from numeric ones; otherwise falls back to runtime residency tracking.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isnumeric")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isnumeric")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isnumeric",
     shape: ShapeRequirements::Any,
@@ -234,7 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value is stored as numeric data.",
     keywords = "isnumeric,numeric,type,gpu",
     accel = "metadata",
-    wasm_path = "crate::builtins::logical::tests::isnumeric"
+    builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
 fn isnumeric_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -282,7 +282,7 @@ fn isnumeric_value(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

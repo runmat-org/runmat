@@ -82,7 +82,7 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

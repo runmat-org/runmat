@@ -181,7 +181,7 @@ performs a gather/transpose/upload round-trip automatically.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::ctranspose")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::ctranspose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Transpose,
@@ -202,7 +202,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider transpose/permute hooks followed by unary_conj; falls back to host conjugate transpose when either hook is missing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::ctranspose")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -219,7 +221,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Swap the first two dimensions of arrays and conjugate complex values.",
     keywords = "ctranspose,conjugate transpose,hermitian,gpu",
     accel = "transpose",
-    wasm_path = "crate::builtins::math::linalg::ops::ctranspose"
+    builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
 fn ctranspose_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -523,7 +525,7 @@ fn ctranspose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::array::shape::permute::permute_tensor;
     use crate::builtins::common::test_support;

@@ -18,7 +18,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "sort",
-        wasm_path = "crate::builtins::array::sorting_sets::sort"
+        builtin_path = "crate::builtins::array::sorting_sets::sort"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ Yes. Logical inputs are promoted to double precision automatically. Scalars are 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::sort")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::sort")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sort",
     op_kind: GpuOpKind::Custom("sort"),
@@ -205,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may add a dedicated sort kernel in the future; today tensors are gathered to host memory before sorting.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::sort")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::sorting_sets::sort")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sort",
     shape: ShapeRequirements::Any,
@@ -223,7 +223,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
     accel = "sink",
     sink = true,
-    wasm_path = "crate::builtins::array::sorting_sets::sort"
+    builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
 fn sort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_sorted_value())
@@ -674,7 +674,7 @@ impl SortEvaluation {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};

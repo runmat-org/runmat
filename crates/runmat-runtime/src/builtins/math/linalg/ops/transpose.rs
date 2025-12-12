@@ -174,7 +174,7 @@ perform a gather/transpose/upload round-trip automatically.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::transpose")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::transpose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Transpose,
@@ -191,7 +191,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider transpose hook when available; otherwise gathers, transposes on the host, and uploads the result back to the GPU.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::transpose")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::ops::transpose"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -209,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Swap the first two dimensions of arrays without conjugating complex values.",
     keywords = "transpose,swap rows and columns,non-conjugate",
     accel = "transpose",
-    wasm_path = "crate::builtins::math::linalg::ops::transpose"
+    builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
 fn transpose_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -438,7 +440,7 @@ fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

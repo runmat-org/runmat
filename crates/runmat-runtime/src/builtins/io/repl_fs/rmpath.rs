@@ -26,7 +26,7 @@ const ERROR_TOO_FEW_ARGS: &str = "rmpath: at least one folder must be specified"
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "rmpath",
-        wasm_path = "crate::builtins::io::repl_fs::rmpath"
+        builtin_path = "crate::builtins::io::repl_fs::rmpath"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -157,7 +157,7 @@ Error: rmpath: folder 'nonexistent/toolbox' not found
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::rmpath")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::rmpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -173,7 +173,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path manipulation is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::rmpath")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::rmpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmpath",
     shape: ShapeRequirements::Any,
@@ -190,7 +190,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Remove folders from the MATLAB search path used by RunMat.",
     keywords = "rmpath,search path,matlab path,remove folder",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::rmpath"
+    builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 fn rmpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -435,7 +435,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::{current_path_segments, set_path_string};

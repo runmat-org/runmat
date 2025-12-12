@@ -70,7 +70,7 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
 }
 
 // Internal builtin to construct a cell from a vector of values (used by ignition)
-#[runmat_macros::runtime_builtin(name = "__make_cell", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "__make_cell", builtin_path = "crate")]
 fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let rows = 1usize;
     let cols = rest.len();
@@ -103,14 +103,14 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "strtrim", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "strtrim", builtin_path = "crate")]
 fn strtrim_builtin(a: Value) -> Result<Value, String> {
     let s = to_string_scalar(&a)?;
     Ok(Value::String(s.trim().to_string()))
 }
 
 // Adjust strjoin semantics: join rows (row-wise)
-#[runmat_macros::runtime_builtin(name = "strjoin", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "strjoin", builtin_path = "crate")]
 fn strjoin_rowwise(a: Value, delim: Value) -> Result<Value, String> {
     let d = to_string_scalar(&delim)?;
     let sa = to_string_array(&a)?;
@@ -139,7 +139,7 @@ fn strjoin_rowwise(a: Value, delim: Value) -> Result<Value, String> {
 }
 
 // deal: distribute inputs to multiple outputs (via cell for expansion)
-#[runmat_macros::runtime_builtin(name = "deal", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "deal", builtin_path = "crate")]
 fn deal_builtin(rest: Vec<Value>) -> Result<Value, String> {
     // Return cell row vector of inputs for expansion
     let cols = rest.len();
@@ -148,7 +148,7 @@ fn deal_builtin(rest: Vec<Value>) -> Result<Value, String> {
 
 // Object/handle utilities used by interpreter lowering for OOP/func handles
 
-#[runmat_macros::runtime_builtin(name = "rethrow", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "rethrow", builtin_path = "crate")]
 fn rethrow_builtin(e: Value) -> Result<Value, String> {
     match e {
         Value::MException(me) => Err(format!("{}: {}", me.identifier, me.message)),
@@ -157,7 +157,7 @@ fn rethrow_builtin(e: Value) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "call_method", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "call_method", builtin_path = "crate")]
 fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<Value, String> {
     match base {
         Value::Object(obj) => {
@@ -197,7 +197,7 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
 }
 
 // Global dispatch helpers for overloaded indexing (subsref/subsasgn) to support fallback resolution paths
-#[runmat_macros::runtime_builtin(name = "subsasgn", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "subsasgn", builtin_path = "crate")]
 fn subsasgn_dispatch(
     obj: Value,
     kind: String,
@@ -222,7 +222,7 @@ fn subsasgn_dispatch(
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "subsref", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
 fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, String> {
     match &obj {
         Value::Object(o) => {
@@ -244,7 +244,7 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
 
 // -------- Handle classes & events --------
 
-#[runmat_macros::runtime_builtin(name = "new_handle_object", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "new_handle_object", builtin_path = "crate")]
 fn new_handle_object_builtin(class_name: String) -> Result<Value, String> {
     // Create an underlying object instance and wrap it in a handle
     let obj = new_object_builtin(class_name.clone())?;
@@ -256,7 +256,7 @@ fn new_handle_object_builtin(class_name: String) -> Result<Value, String> {
     }))
 }
 
-#[runmat_macros::runtime_builtin(name = "isvalid", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "isvalid", builtin_path = "crate")]
 fn isvalid_builtin(v: Value) -> Result<Value, String> {
     match v {
         Value::HandleObject(h) => Ok(Value::Bool(h.valid)),
@@ -279,7 +279,7 @@ fn events() -> &'static Mutex<EventRegistry> {
     EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
 }
 
-#[runmat_macros::runtime_builtin(name = "addlistener", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "addlistener", builtin_path = "crate")]
 fn addlistener_builtin(
     target: Value,
     event_name: String,
@@ -318,7 +318,7 @@ fn addlistener_builtin(
     Ok(Value::Listener(listener))
 }
 
-#[runmat_macros::runtime_builtin(name = "notify", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "notify", builtin_path = "crate")]
 fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> Result<Value, String> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
@@ -367,7 +367,7 @@ fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> Result
 // Test-oriented dependent property handlers (global). If a class defines a Dependent
 // property named 'p', the VM will try to call get.p / set.p. We provide generic
 // implementations that read/write a conventional backing field 'p_backing'.
-#[runmat_macros::runtime_builtin(name = "get.p", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "get.p", builtin_path = "crate")]
 fn get_p_builtin(obj: Value) -> Result<Value, String> {
     match obj {
         Value::Object(o) => {
@@ -381,7 +381,7 @@ fn get_p_builtin(obj: Value) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "set.p", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "set.p", builtin_path = "crate")]
 fn set_p_builtin(obj: Value, val: Value) -> Result<Value, String> {
     match obj {
         Value::Object(mut o) => {
@@ -392,17 +392,17 @@ fn set_p_builtin(obj: Value, val: Value) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "make_handle", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "make_handle", builtin_path = "crate")]
 fn make_handle_builtin(name: String) -> Result<Value, String> {
     Ok(Value::String(format!("@{name}")))
 }
 
-#[runmat_macros::runtime_builtin(name = "make_anon", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "make_anon", builtin_path = "crate")]
 fn make_anon_builtin(params: String, body: String) -> Result<Value, String> {
     Ok(Value::String(format!("@anon({params}) {body}")))
 }
 
-#[runmat_macros::runtime_builtin(name = "new_object", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "new_object", builtin_path = "crate")]
 pub(crate) fn new_object_builtin(class_name: String) -> Result<Value, String> {
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
@@ -440,12 +440,12 @@ pub(crate) fn new_object_builtin(class_name: String) -> Result<Value, String> {
 
 // handle-object builtins removed for now
 
-#[runmat_macros::runtime_builtin(name = "classref", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "classref", builtin_path = "crate")]
 fn classref_builtin(class_name: String) -> Result<Value, String> {
     Ok(Value::ClassRef(class_name))
 }
 
-#[runmat_macros::runtime_builtin(name = "__register_test_classes", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "__register_test_classes", builtin_path = "crate")]
 fn register_test_classes_builtin() -> Result<Value, String> {
     use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
@@ -654,7 +654,7 @@ pub fn test_register_classes() {
 }
 
 // Example method implementation: Point.move(obj, dx, dy) -> updated obj
-#[runmat_macros::runtime_builtin(name = "Point.move", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "Point.move", builtin_path = "crate")]
 fn point_move_method(obj: Value, dx: f64, dy: f64) -> Result<Value, String> {
     match obj {
         Value::Object(mut o) => {
@@ -676,7 +676,7 @@ fn point_move_method(obj: Value, dx: f64, dy: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "Point.origin", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "Point.origin", builtin_path = "crate")]
 fn point_origin_method() -> Result<Value, String> {
     let mut o = runmat_builtins::ObjectInstance::new("Point".to_string());
     o.properties.insert("x".to_string(), Value::Num(0.0));
@@ -684,12 +684,12 @@ fn point_origin_method() -> Result<Value, String> {
     Ok(Value::Object(o))
 }
 
-#[runmat_macros::runtime_builtin(name = "Shape.area", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "Shape.area", builtin_path = "crate")]
 fn shape_area_method(_obj: Value) -> Result<Value, String> {
     Ok(Value::Num(0.0))
 }
 
-#[runmat_macros::runtime_builtin(name = "Circle.area", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "Circle.area", builtin_path = "crate")]
 fn circle_area_method(obj: Value) -> Result<Value, String> {
     match obj {
         Value::Object(o) => {
@@ -707,7 +707,7 @@ fn circle_area_method(obj: Value) -> Result<Value, String> {
 }
 
 // --- Test-only helpers to validate constructors and subsref/subsasgn ---
-#[runmat_macros::runtime_builtin(name = "Ctor.Ctor", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "Ctor.Ctor", builtin_path = "crate")]
 fn ctor_ctor_method(x: f64) -> Result<Value, String> {
     // Construct object with property 'x' initialized
     let mut o = runmat_builtins::ObjectInstance::new("Ctor".to_string());
@@ -716,17 +716,17 @@ fn ctor_ctor_method(x: f64) -> Result<Value, String> {
 }
 
 // --- Test-only package functions to exercise import precedence ---
-#[runmat_macros::runtime_builtin(name = "PkgF.foo", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "PkgF.foo", builtin_path = "crate")]
 fn pkgf_foo() -> Result<Value, String> {
     Ok(Value::Num(10.0))
 }
 
-#[runmat_macros::runtime_builtin(name = "PkgG.foo", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "PkgG.foo", builtin_path = "crate")]
 fn pkgg_foo() -> Result<Value, String> {
     Ok(Value::Num(20.0))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.subsref", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.subsref", builtin_path = "crate")]
 fn overidx_subsref(obj: Value, kind: String, payload: Value) -> Result<Value, String> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
@@ -758,7 +758,7 @@ fn overidx_subsref(obj: Value, kind: String, payload: Value) -> Result<Value, St
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.subsasgn", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.subsasgn", builtin_path = "crate")]
 fn overidx_subsasgn(
     mut obj: Value,
     kind: String,
@@ -789,7 +789,7 @@ fn overidx_subsasgn(
 }
 
 // --- Operator overloading methods for OverIdx (test scaffolding) ---
-#[runmat_macros::runtime_builtin(name = "OverIdx.plus", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.plus", builtin_path = "crate")]
 fn overidx_plus(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -804,7 +804,7 @@ fn overidx_plus(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(k + r))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.times", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.times", builtin_path = "crate")]
 fn overidx_times(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -819,7 +819,7 @@ fn overidx_times(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(k * r))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.mtimes", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.mtimes", builtin_path = "crate")]
 fn overidx_mtimes(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -834,7 +834,7 @@ fn overidx_mtimes(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(k * r))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.lt", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.lt", builtin_path = "crate")]
 fn overidx_lt(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -849,7 +849,7 @@ fn overidx_lt(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if k < r { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.gt", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.gt", builtin_path = "crate")]
 fn overidx_gt(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -864,7 +864,7 @@ fn overidx_gt(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if k > r { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.eq", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.eq", builtin_path = "crate")]
 fn overidx_eq(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -879,13 +879,13 @@ fn overidx_eq(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if (k - r).abs() < 1e-12 { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.uplus", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.uplus", builtin_path = "crate")]
 fn overidx_uplus(obj: Value) -> Result<Value, String> {
     // Identity
     Ok(obj)
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.rdivide", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.rdivide", builtin_path = "crate")]
 fn overidx_rdivide(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -900,7 +900,7 @@ fn overidx_rdivide(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(k / r))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.ldivide", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.ldivide", builtin_path = "crate")]
 fn overidx_ldivide(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -915,7 +915,7 @@ fn overidx_ldivide(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(r / k))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.and", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.and", builtin_path = "crate")]
 fn overidx_and(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -930,7 +930,7 @@ fn overidx_and(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if (k != 0.0) && (r != 0.0) { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.or", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.or", builtin_path = "crate")]
 fn overidx_or(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -945,7 +945,7 @@ fn overidx_or(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if (k != 0.0) || (r != 0.0) { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "OverIdx.xor", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "OverIdx.xor", builtin_path = "crate")]
 fn overidx_xor(obj: Value, rhs: Value) -> Result<Value, String> {
     let o = match obj {
         Value::Object(o) => o,
@@ -962,7 +962,7 @@ fn overidx_xor(obj: Value, rhs: Value) -> Result<Value, String> {
     Ok(Value::Num(if a ^ b { 1.0 } else { 0.0 }))
 }
 
-#[runmat_macros::runtime_builtin(name = "feval", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
     match f {
         // Current handles are strings like "@sin"
@@ -1108,7 +1108,7 @@ fn prod_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "prod", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "prod", builtin_path = "crate")]
 fn prod_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return prod_all_or_cols(a);
@@ -1199,7 +1199,7 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "any", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "any", builtin_path = "crate")]
 fn any_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return any_all_or_cols(a);
@@ -1290,7 +1290,7 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "all", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "all", builtin_path = "crate")]
 fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return all_all_or_cols(a);
@@ -1305,14 +1305,14 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     Err("all: unsupported arguments".to_string())
 }
 
-#[runmat_macros::runtime_builtin(name = "warning", sink = true, wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "warning", sink = true, builtin_path = "crate")]
 fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
     eprintln!("Warning: {s}");
     Ok(Value::Num(0.0))
 }
 
-#[runmat_macros::runtime_builtin(name = "getmethod", wasm_path = "crate")]
+#[runmat_macros::runtime_builtin(name = "getmethod", builtin_path = "crate")]
 fn getmethod_builtin(obj: Value, name: String) -> Result<Value, String> {
     match obj {
         Value::Object(o) => {

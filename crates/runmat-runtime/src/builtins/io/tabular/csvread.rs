@@ -22,7 +22,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "csvread",
-        wasm_path = "crate::builtins::io::tabular::csvread"
+        builtin_path = "crate::builtins::io::tabular::csvread"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -221,7 +221,7 @@ No. Relative paths are resolved against the current working directory and do not
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::tabular::csvread")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "csvread",
     op_kind: GpuOpKind::Custom("io-csvread"),
@@ -237,7 +237,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::tabular::csvread")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "csvread",
     shape: ShapeRequirements::Any,
@@ -254,7 +254,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read numeric data from a comma-separated text file.",
     keywords = "csvread,csv,dlmread,numeric import,range",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::tabular::csvread"
+    builtin_path = "crate::builtins::io::tabular::csvread"
 )]
 fn csvread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("csvread: {e}"))?;
@@ -767,7 +767,7 @@ fn rows_to_tensor(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_time::unix_timestamp_ns;
     use std::fs;

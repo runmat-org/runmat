@@ -22,7 +22,7 @@ const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector 
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "genpath",
-        wasm_path = "crate::builtins::io::repl_fs::genpath"
+        builtin_path = "crate::builtins::io::repl_fs::genpath"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -167,7 +167,7 @@ savepath();
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::genpath")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "genpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -183,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem traversal is a host-only operation; inputs are gathered before processing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::genpath")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "genpath",
     shape: ShapeRequirements::Any,
@@ -201,7 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Generate a MATLAB-style search path string for a folder tree.",
     keywords = "genpath,recursive path,search path,addpath",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::genpath"
+    builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 fn genpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(args)?;
@@ -557,7 +557,7 @@ fn tensor_to_string(tensor: &Tensor, type_error: &str) -> Result<String, String>
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;

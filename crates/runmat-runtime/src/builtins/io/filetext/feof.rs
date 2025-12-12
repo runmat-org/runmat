@@ -24,7 +24,7 @@ const IDENTIFIER_TYPE_ERROR: &str = "feof: file identifier must be a numeric sca
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "feof",
-        wasm_path = "crate::builtins::io::filetext::feof"
+        builtin_path = "crate::builtins::io::filetext::feof"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -166,7 +166,7 @@ array, the runtime gathers it before performing the host-only check.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::feof")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::feof")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "feof",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -182,7 +182,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O query; providers are not involved.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::feof")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::feof")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "feof",
     shape: ShapeRequirements::Any,
@@ -199,7 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Query whether a file identifier is positioned at end-of-file.",
     keywords = "feof,end of file,io,file identifier",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::feof"
+    builtin_path = "crate::builtins::io::filetext::feof"
 )]
 fn feof_builtin(fid: Value) -> Result<Value, String> {
     let at_end = evaluate(&fid)?;
@@ -284,7 +284,7 @@ fn parse_scalar_fid(value: f64) -> Result<i32, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use runmat_accelerate_api::HostTensorView;

@@ -175,7 +175,7 @@ norm kernels can keep the computation entirely on device without user-visible ch
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::norm")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::norm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Reduction,
@@ -191,7 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Awaiting specialized kernels; RunMat gathers to host when providers omit the optional norm hook.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::norm")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::norm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -209,7 +209,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Vector and matrix norms with MATLAB semantics.",
     keywords = "norm,vector norm,matrix norm,frobenius,nuclear,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::linalg::solve::norm"
+    builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
 fn norm_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let order = parse_order(&rest)?;
@@ -737,7 +737,7 @@ pub fn norm_host_real_for_provider(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, Tensor};

@@ -19,7 +19,7 @@ use std::sync::Arc;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "surfc",
-        wasm_path = "crate::builtins::plotting::ops::surfc"
+        builtin_path = "crate::builtins::plotting::surfc"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -61,7 +61,7 @@ RunMat reuses the same surface renderer as `surf` and complements it with GPU-ge
     summary = "Render a MATLAB-compatible surface with contour overlay.",
     keywords = "surfc,plotting,surface,contour",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::surfc"
+    builtin_path = "crate::builtins::plotting::surfc"
 )]
 pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
     let x_axis = numeric_vector(x);
@@ -144,7 +144,7 @@ pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "pwd",
-        wasm_path = "crate::builtins::io::repl_fs::pwd"
+        builtin_path = "crate::builtins::io::repl_fs::pwd"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -155,7 +155,7 @@ Expected output:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::pwd")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pwd",
     op_kind: GpuOpKind::Custom("io"),
@@ -171,7 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only operation that queries the process working folder; no GPU provider hooks are required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::pwd")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pwd",
     shape: ShapeRequirements::Any,
@@ -188,7 +188,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return the absolute path to the folder where RunMat is currently executing.",
     keywords = "pwd,current directory,working folder,present working directory",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::pwd"
+    builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
 fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
     if !args.is_empty() {
@@ -205,7 +205,7 @@ fn path_to_value(path: &Path) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::CharArray;

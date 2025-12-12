@@ -19,7 +19,7 @@ use crate::builtins::common::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "single",
-        wasm_path = "crate::builtins::math::elementwise::single"
+        builtin_path = "crate::builtins::math::elementwise::single"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -208,7 +208,7 @@ implementation.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::single")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::single")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "single",
     op_kind: GpuOpKind::Elementwise,
@@ -226,7 +226,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts tensors to float32. Providers may implement `unary_single`; otherwise the runtime gathers, converts, and re-uploads to keep gpuArray results resident.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::single")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::single")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "single",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -253,7 +253,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert scalars, arrays, and gpuArray values to single precision.",
     keywords = "single,float32,cast,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::single"
+    builtin_path = "crate::builtins::math::elementwise::single"
 )]
 fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -466,7 +466,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

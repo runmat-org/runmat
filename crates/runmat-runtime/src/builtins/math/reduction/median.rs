@@ -16,7 +16,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "median",
-        wasm_path = "crate::builtins::math::reduction::median"
+        builtin_path = "crate::builtins::math::reduction::median"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -189,7 +189,7 @@ Otherwise the runtime gathers to the CPU to guarantee MATLAB-compatible semantic
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::reduction::median")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "median",
     op_kind: GpuOpKind::Reduction,
@@ -213,7 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute medians entirely on device; runtimes fall back to host when hooks are missing or omitnan is requested.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::reduction::median")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "median",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -244,7 +244,7 @@ struct ParsedArguments {
     summary = "Median of scalars, vectors, matrices, or N-D tensors.",
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::math::reduction::median"
+    builtin_path = "crate::builtins::math::reduction::median"
 )]
 fn median_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_arguments(&rest)?;
@@ -669,7 +669,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;

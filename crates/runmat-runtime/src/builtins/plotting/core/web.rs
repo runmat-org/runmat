@@ -3,7 +3,7 @@ use super::common::ERR_PLOTTING_UNAVAILABLE;
 use runmat_plot::plots::Figure;
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-mod wasm {
+pub(crate) mod wasm {
     use super::*;
     use runmat_plot::web::WebRenderer;
     use std::cell::RefCell;
@@ -79,7 +79,7 @@ mod wasm {
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
-mod wasm {
+pub(crate) mod wasm {
     use super::*;
 
     pub struct RendererPlaceholder;

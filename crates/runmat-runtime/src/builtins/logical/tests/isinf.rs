@@ -13,7 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isinf",
-        wasm_path = "crate::builtins::logical::tests::isinf"
+        builtin_path = "crate::builtins::logical::tests::isinf"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -162,7 +162,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 [isfinite](./isfinite), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::logical::tests::isinf")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isinf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isinf",
     op_kind: GpuOpKind::Elementwise,
@@ -181,7 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isinf` hook when available; otherwise the runtime gathers to host and builds the logical mask on the CPU.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::logical::tests::isinf")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isinf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isinf",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -209,7 +209,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return a logical mask indicating which elements of the input are ±Inf.",
     keywords = "isinf,infinity,logical,gpu",
     accel = "elementwise",
-    wasm_path = "crate::builtins::logical::tests::isinf"
+    builtin_path = "crate::builtins::logical::tests::isinf"
 )]
 fn isinf_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -304,7 +304,7 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;

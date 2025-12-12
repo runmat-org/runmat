@@ -21,7 +21,7 @@ const ZERO_EPS: f64 = 1.0e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "acosh",
-        wasm_path = "crate::builtins::math::trigonometry::acosh"
+        builtin_path = "crate::builtins::math::trigonometry::acosh"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -212,7 +212,7 @@ metadata to generate gradients.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::trigonometry::acosh")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "acosh",
     op_kind: GpuOpKind::Elementwise,
@@ -228,7 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acosh directly on device buffers when inputs stay within the real domain (x ≥ 1); otherwise the runtime gathers to the host for complex promotion.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::trigonometry::acosh")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acosh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -251,7 +251,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Inverse hyperbolic cosine with MATLAB-compatible complex promotion.",
     keywords = "acosh,inverse hyperbolic cosine,arccosh,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::trigonometry::acosh"
+    builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
 fn acosh_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -413,7 +413,7 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex64;

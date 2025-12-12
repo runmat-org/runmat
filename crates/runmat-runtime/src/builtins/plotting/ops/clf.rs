@@ -14,7 +14,7 @@ use super::state::{clear_figure, figure_handles, FigureHandle};
     summary = "Clear figure contents, optionally targeting specific handles.",
     keywords = "clf,clear figure,plotting",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::clf"
+    builtin_path = "crate::builtins::plotting::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> Result<String, String> {
     let (action, _reset) = parse_clf_action(&rest)?;
@@ -99,7 +99,7 @@ fn parse_clf_action(args: &[Value]) -> Result<(ClfAction, bool), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

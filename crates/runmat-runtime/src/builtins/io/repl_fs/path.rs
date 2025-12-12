@@ -19,7 +19,7 @@ const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or strin
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "path",
-        wasm_path = "crate::builtins::io::repl_fs::path"
+        builtin_path = "crate::builtins::io::repl_fs::path"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -136,7 +136,7 @@ Expected output:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::path")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "path",
     op_kind: GpuOpKind::Custom("io"),
@@ -152,7 +152,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path management is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::path")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "path",
     shape: ShapeRequirements::Any,
@@ -169,7 +169,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Query or replace the MATLAB search path used by RunMat.",
     keywords = "path,search path,matlab path,addpath,rmpath",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::path"
+    builtin_path = "crate::builtins::io::repl_fs::path"
 )]
 fn path_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;
@@ -281,7 +281,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_search::search_directories;

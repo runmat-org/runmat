@@ -19,7 +19,7 @@ const EPS: f64 = 1.0e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "polyder",
-        wasm_path = "crate::builtins::math::poly::polyder"
+        builtin_path = "crate::builtins::math::poly::polyder"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -220,7 +220,7 @@ All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB’s defau
 [polyval](./polyval), [polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::poly::polyder")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyder",
     op_kind: GpuOpKind::Custom("polynomial-derivative"),
@@ -240,7 +240,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on-device when providers expose polyder hooks; falls back to the host for complex coefficients or unsupported shapes.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::poly::polyder")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyder",
     shape: ShapeRequirements::Any,
@@ -256,7 +256,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "math/poly",
     summary = "Differentiate polynomials, products, and ratios with MATLAB-compatible coefficient vectors.",
     keywords = "polyder,polynomial,derivative,product,quotient",
-    wasm_path = "crate::builtins::math::poly::polyder"
+    builtin_path = "crate::builtins::math::poly::polyder"
 )]
 fn polyder_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {
@@ -605,7 +605,7 @@ struct Polynomial {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};

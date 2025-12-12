@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "isscalar",
-        wasm_path = "crate::builtins::array::introspection::isscalar"
+        builtin_path = "crate::builtins::array::introspection::isscalar"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -175,7 +175,9 @@ Yes. The builtin returns a host logical scalar and the fusion planner treats it 
 [isempty](./isempty), [numel](./numel), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::introspection::isscalar")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::introspection::isscalar"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isscalar",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -192,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::array::introspection::isscalar"
+    builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isscalar",
@@ -210,7 +212,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return true when a value has exactly one element and unit dimensions.",
     keywords = "isscalar,scalar,metadata query,gpu,logical",
     accel = "metadata",
-    wasm_path = "crate::builtins::array::introspection::isscalar"
+    builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 fn isscalar_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_scalar(&value)))
@@ -224,7 +226,7 @@ fn value_is_scalar(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

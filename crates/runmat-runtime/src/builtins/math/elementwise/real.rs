@@ -13,7 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "real",
-        wasm_path = "crate::builtins::math::elementwise::real"
+        builtin_path = "crate::builtins::math::elementwise::real"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -172,7 +172,7 @@ Yes. The fusion planner can fold `real` into neighbouring elementwise kernels, k
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::real")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "real",
     op_kind: GpuOpKind::Elementwise,
@@ -189,7 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute real in-place via unary_real; the runtime gathers to the host when the hook is absent or when host-only conversions (e.g. complex tensors) are required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::real")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "real",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -215,7 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Extract the real part of scalars, vectors, matrices, or N-D tensors.",
     keywords = "real,real part,complex,elementwise,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::real"
+    builtin_path = "crate::builtins::math::elementwise::real"
 )]
 fn real_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -272,7 +272,7 @@ fn real_char_array(ca: CharArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

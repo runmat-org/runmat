@@ -16,7 +16,7 @@ const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_doc_text(
     name = "weboptions",
-    wasm_path = "crate::builtins::io::http::weboptions"
+    builtin_path = "crate::builtins::io::http::weboptions"
 )]
 pub const DOC_MD: &str = r#"---
 title: "weboptions"
@@ -148,7 +148,7 @@ Pass an empty struct (`struct()`) or empty cell array (`{}`) to reset the respec
 [webread](./webread), [webwrite](./webwrite), [jsondecode](../json/jsondecode), [jsonencode](../json/jsonencode)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::http::weboptions")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::weboptions")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "weboptions",
     op_kind: GpuOpKind::Custom("http-options"),
@@ -164,7 +164,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "weboptions validates CPU metadata only; gpuArray inputs are gathered eagerly.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::http::weboptions")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::weboptions")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "weboptions",
     shape: ShapeRequirements::Any,
@@ -181,7 +181,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create an options struct that configures webread and webwrite HTTP behaviour.",
     keywords = "weboptions,http options,timeout,headers,rest client",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::http::weboptions"
+    builtin_path = "crate::builtins::io::http::weboptions"
 )]
 fn weboptions_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let mut gathered = Vec::with_capacity(rest.len());
@@ -488,7 +488,7 @@ fn expect_string_scalar(value: &Value, context: &str) -> Result<String, String> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};

@@ -14,7 +14,7 @@ use crate::builtins::common::{linalg, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "mtimes",
-        wasm_path = "crate::builtins::math::linalg::ops::mtimes"
+        builtin_path = "crate::builtins::math::linalg::ops::mtimes"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -213,7 +213,7 @@ Providers may fuse GEMM with adjacent operations; otherwise fusion falls back to
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::ops::mtimes")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mtimes",
     op_kind: GpuOpKind::MatMul,
@@ -232,7 +232,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Calls the provider `matmul` hook when available; otherwise gathers inputs and executes the CPU fallback.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::ops::mtimes")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mtimes",
     shape: ShapeRequirements::Any,
@@ -249,7 +249,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Matrix multiplication with MATLAB-compatible semantics.",
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
     accel = "matmul",
-    wasm_path = "crate::builtins::math::linalg::ops::mtimes"
+    builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 fn mtimes_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     mtimes_eval(&lhs, &rhs)
@@ -529,7 +529,7 @@ impl PreparedOperand {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};

@@ -21,7 +21,7 @@ const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "warning",
-        wasm_path = "crate::builtins::diagnostics::warning"
+        builtin_path = "crate::builtins::diagnostics::warning"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -152,7 +152,7 @@ warning("default", "verbose");   % restore the default verbosity
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::diagnostics::warning")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::warning")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "warning",
     op_kind: GpuOpKind::Custom("control"),
@@ -168,7 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU backends are never invoked.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::diagnostics::warning")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::warning")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "warning",
     shape: ShapeRequirements::Any,
@@ -200,7 +200,7 @@ where
     keywords = "warning,diagnostics,state,query,backtrace",
     accel = "metadata",
     sink = true,
-    wasm_path = "crate::builtins::diagnostics::warning"
+    builtin_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -947,7 +947,7 @@ fn structs_to_cell(structs: Vec<StructValue>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -1260,7 +1260,7 @@ mod tests {
         }
     }
 
-    mod doc_tests {
+    pub(crate) mod doc_tests {
         use super::*;
         use crate::builtins::common::test_support;
 

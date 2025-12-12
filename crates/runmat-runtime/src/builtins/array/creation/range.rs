@@ -15,7 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "range",
-        wasm_path = "crate::builtins::array::creation::range"
+        builtin_path = "crate::builtins::array::creation::range"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -190,7 +190,7 @@ Use `range(X, 'all')` to flatten all dimensions into a single scalar spread.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::range")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "range",
     op_kind: GpuOpKind::Reduction,
@@ -223,7 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Requires provider min/max reductions plus elem_sub; omitnan and multi-axis reductions gather to host when hooks are absent.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::range")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the difference between the maximum and minimum values.",
     keywords = "range,max,min,spread,gpu",
     accel = "reduction",
-    wasm_path = "crate::builtins::array::creation::range"
+    builtin_path = "crate::builtins::array::creation::range"
 )]
 fn range_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
@@ -751,7 +751,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

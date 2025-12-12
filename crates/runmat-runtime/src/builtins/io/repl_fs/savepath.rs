@@ -26,7 +26,7 @@ const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "savepath",
-        wasm_path = "crate::builtins::io::repl_fs::savepath"
+        builtin_path = "crate::builtins::io::repl_fs::savepath"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -202,7 +202,7 @@ Expected behavior:
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::savepath")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "savepath",
     op_kind: GpuOpKind::Custom("io"),
@@ -219,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Filesystem persistence executes on the host; GPU-resident filenames are gathered before writing pathdef.m.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::savepath")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "savepath",
     shape: ShapeRequirements::Any,
@@ -237,7 +237,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::savepath"
+    builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 fn savepath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -493,7 +493,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::{current_path_string, set_path_string};

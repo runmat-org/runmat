@@ -21,7 +21,7 @@ const INVALID_IDENTIFIER_MESSAGE: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fclose",
-        wasm_path = "crate::builtins::io::filetext::fclose"
+        builtin_path = "crate::builtins::io::filetext::fclose"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -194,7 +194,7 @@ No. It only closes identifiers that the current RunMat process opened via
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::filetext::fclose")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fclose",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -211,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::filetext::fclose")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fclose",
     shape: ShapeRequirements::Any,
@@ -228,7 +228,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Close one file, multiple files, or all files opened with fopen.",
     keywords = "fclose,file,close,io,identifier",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::filetext::fclose"
+    builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 fn fclose_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -423,7 +423,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fopen, registry};
     use once_cell::sync::Lazy;

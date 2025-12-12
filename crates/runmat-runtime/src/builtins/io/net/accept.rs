@@ -172,7 +172,7 @@ pub(super) fn remove_client_for_test(id: u64) {
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "accept",
-        wasm_path = "crate::builtins::io::net::accept"
+        builtin_path = "crate::builtins::io::net::accept"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -330,7 +330,7 @@ Not yet. TLS will be layered on top of the same client identifier once RunMat’
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::net::accept")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "accept",
     op_kind: GpuOpKind::Custom("network"),
@@ -346,7 +346,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only networking builtin; GPU inputs are gathered to CPU before accepting clients.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::net::accept")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "accept",
     shape: ShapeRequirements::Any,
@@ -362,7 +362,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "io/net",
     summary = "Accept a pending client connection on a TCP server.",
     keywords = "accept,tcpserver,tcpclient",
-    wasm_path = "crate::builtins::io::net::accept"
+    builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, String> {
     let server = gather_if_needed(&server)?;
@@ -658,7 +658,7 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::tcpserver::{
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };

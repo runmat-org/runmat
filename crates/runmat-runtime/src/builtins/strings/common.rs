@@ -45,7 +45,7 @@ pub(crate) fn char_row_to_string_slice(data: &[char], cols: usize, row: usize) -
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

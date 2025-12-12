@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "imag",
-        wasm_path = "crate::builtins::math::elementwise::imag"
+        builtin_path = "crate::builtins::math::elementwise::imag"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -160,7 +160,7 @@ Yes. The fusion planner can fold `imag` into neighbouring elementwise kernels, l
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::imag")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imag",
     op_kind: GpuOpKind::Elementwise,
@@ -176,7 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_imag to materialise zero tensors in-place; the runtime gathers to the host whenever complex storage or string conversions are required.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::imag")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imag",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -203,7 +203,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Extract the imaginary component of scalars, vectors, matrices, or N-D tensors.",
     keywords = "imag,imaginary,complex,elementwise,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::imag"
+    builtin_path = "crate::builtins::math::elementwise::imag"
 )]
 fn imag_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -257,7 +257,7 @@ fn imag_char_array(ca: CharArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};

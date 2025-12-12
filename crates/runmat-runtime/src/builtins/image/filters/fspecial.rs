@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "fspecial",
-        wasm_path = "crate::builtins::image::filters::fspecial"
+        builtin_path = "crate::builtins::image::filters::fspecial"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -137,7 +137,7 @@ and disk filters that rely on geometric integration.
 [imfilter](../imfilter), [conv2](../../math/convolution/conv2), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::image::filters::fspecial")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fspecial",
     op_kind: GpuOpKind::Custom("kernel-generator"),
@@ -153,7 +153,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Average, gaussian, laplacian, prewitt, sobel, and unsharp execute on the device when supported; disk/log/motion currently gather to host.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::image::filters::fspecial")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fspecial",
     shape: ShapeRequirements::Any,
@@ -345,7 +345,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> Result<FspecialFilterSpec, 
     summary = "Generate classical 2-D correlation kernels used in MATLAB image processing workflows.",
     keywords = "fspecial,filter,gaussian,sobel,motion,laplacian,disk",
     accel = "array_construct",
-    wasm_path = "crate::builtins::image::filters::fspecial"
+    builtin_path = "crate::builtins::image::filters::fspecial"
 )]
 fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> Result<Value, String> {
     let spec = build_filter_spec(&kind, &rest)?;
@@ -1051,7 +1051,7 @@ fn clamp_asin(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;

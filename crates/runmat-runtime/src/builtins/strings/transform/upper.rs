@@ -13,7 +13,7 @@ use crate::{gather_if_needed, make_cell};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "upper",
-        wasm_path = "crate::builtins::strings::transform::upper"
+        builtin_path = "crate::builtins::strings::transform::upper"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -170,7 +170,7 @@ compatible.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::upper")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "upper",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -187,7 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before conversion.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::upper")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::upper")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "upper",
     shape: ShapeRequirements::Any,
@@ -209,7 +209,7 @@ const CELL_ELEMENT_ERROR: &str =
     summary = "Convert strings, character arrays, and cell arrays of character vectors to uppercase.",
     keywords = "upper,uppercase,strings,character array,text",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::upper"
+    builtin_path = "crate::builtins::strings::transform::upper"
 )]
 fn upper_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("upper: {e}"))?;
@@ -289,7 +289,7 @@ fn upper_cell_element(value: &Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

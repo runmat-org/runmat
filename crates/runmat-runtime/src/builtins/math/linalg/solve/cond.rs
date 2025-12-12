@@ -167,7 +167,7 @@ device-resident value.
   with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::linalg::solve::cond")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("cond"),
@@ -183,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a direct condition-number kernel; the reference backends gather to the host, evaluate the shared implementation, and upload the scalar result.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::linalg::solve::cond")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute the matrix condition number with MATLAB-compatible norms.",
     keywords = "cond,condition number,norm,gpu",
     accel = "cond",
-    wasm_path = "crate::builtins::math::linalg::solve::cond"
+    builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
 fn cond_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let norm = parse_norm_argument(&rest)?;
@@ -575,7 +575,7 @@ impl From<ProviderCondNorm> for CondNorm {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

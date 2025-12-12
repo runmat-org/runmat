@@ -19,7 +19,7 @@ use crate::builtins::common::{
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "double",
-        wasm_path = "crate::builtins::math::elementwise::double"
+        builtin_path = "crate::builtins::math::elementwise::double"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -201,7 +201,7 @@ precision.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::double")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "double",
     op_kind: GpuOpKind::Elementwise,
@@ -219,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts inputs to float64. Providers without native float64 support gather to host; float64-capable providers keep results on device.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::double")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::double")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "double",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Convert scalars, arrays, logical masks, and gpuArray values to double precision.",
     keywords = "double,float64,cast,gpu",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::double"
+    builtin_path = "crate::builtins::math::elementwise::double"
 )]
 fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -429,7 +429,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

@@ -22,7 +22,7 @@ const IMAG_EPS: f64 = 1e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "log1p",
-        wasm_path = "crate::builtins::math::elementwise::log1p"
+        builtin_path = "crate::builtins::math::elementwise::log1p"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -187,7 +187,7 @@ kernels can materialize `log(1 + x)` directly in generated WGSL.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::elementwise::log1p")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::log1p")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "log1p",
     op_kind: GpuOpKind::Elementwise,
@@ -204,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should supply unary_log1p and reduce_min; runtimes gather to host when complex outputs are required or either hook is unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::elementwise::log1p")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::log1p")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log1p",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -235,7 +235,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Accurate element-wise computation of log(1 + x).",
     keywords = "log1p,log(1+x),natural logarithm,elementwise,gpu,precision",
     accel = "unary",
-    wasm_path = "crate::builtins::math::elementwise::log1p"
+    builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
 fn log1p_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -379,7 +379,7 @@ fn log1p_complex_parts(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{LogicalArray, Tensor};

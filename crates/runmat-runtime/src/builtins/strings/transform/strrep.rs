@@ -14,7 +14,7 @@ use crate::{gather_if_needed, make_cell_with_shape};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "strrep",
-        wasm_path = "crate::builtins::strings::transform::strrep"
+        builtin_path = "crate::builtins::strings::transform::strrep"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -191,7 +191,7 @@ and returning a cell array of the same shape.
 [replace](./replace), [regexprep](../../regex/regexprep), [string](../core/string), [char](../core/char), [join](./join)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::strrep")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strrep")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strrep",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -207,7 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered before replacements are applied.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::strrep")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::strrep")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strrep",
     shape: ShapeRequirements::Any,
@@ -237,7 +237,7 @@ enum PatternKind {
     summary = "Replace substring occurrences with MATLAB-compatible semantics.",
     keywords = "strrep,replace,strings,character array,text",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::strrep"
+    builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> Result<Value, String> {
     let gathered_str = gather_if_needed(&str_value).map_err(|e| format!("strrep: {e}"))?;
@@ -353,7 +353,7 @@ fn strrep_cell_element(value: &Value, old: &str, new: &str) -> Result<Value, Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

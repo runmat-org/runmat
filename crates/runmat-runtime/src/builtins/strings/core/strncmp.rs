@@ -18,7 +18,7 @@ const FN_NAME: &str = "strncmp";
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "strncmp",
-        wasm_path = "crate::builtins::strings::core::strncmp"
+        builtin_path = "crate::builtins::strings::core::strncmp"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -157,7 +157,7 @@ Yes. Scalar comparisons yield logical scalars; array inputs produce logical arra
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::strncmp")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
     op_kind: GpuOpKind::Custom("string-prefix-compare"),
@@ -173,7 +173,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs host-side prefix comparisons; GPU inputs are gathered before evaluation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::strncmp")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strncmp",
     shape: ShapeRequirements::Any,
@@ -190,7 +190,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compare text inputs for equality up to N leading characters (case-sensitive).",
     keywords = "strncmp,string compare,prefix,text equality",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::core::strncmp"
+    builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 fn strncmp_builtin(a: Value, b: Value, n: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("{FN_NAME}: {e}"))?;
@@ -326,7 +326,7 @@ fn parse_prefix_length_from_float(value: f64) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

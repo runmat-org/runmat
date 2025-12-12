@@ -25,7 +25,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "unique",
-        wasm_path = "crate::builtins::array::sorting_sets::unique"
+        builtin_path = "crate::builtins::array::sorting_sets::unique"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -284,7 +284,7 @@ Sorting is stable where applicable; ties preserve their relative order. You can 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::unique")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::unique")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "unique",
     op_kind: GpuOpKind::Custom("unique"),
@@ -300,7 +300,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement the `unique` hook; default providers download tensors and reuse the CPU implementation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::unique")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::unique"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "unique",
     shape: ShapeRequirements::Any,
@@ -318,7 +320,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "unique,set,distinct,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
-    wasm_path = "crate::builtins::array::sorting_sets::unique"
+    builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
 fn unique_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_values_value())
@@ -1440,7 +1442,7 @@ impl UniqueEvaluation {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};

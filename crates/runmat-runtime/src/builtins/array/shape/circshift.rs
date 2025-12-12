@@ -21,7 +21,7 @@ use std::collections::HashSet;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "circshift",
-        wasm_path = "crate::builtins::array::shape::circshift"
+        builtin_path = "crate::builtins::array::shape::circshift"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -210,7 +210,7 @@ Providers may reuse buffers internally, but from the user’s perspective the re
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::circshift")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::circshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "circshift",
     op_kind: GpuOpKind::Custom("circshift"),
@@ -232,7 +232,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement a dedicated circshift hook; otherwise the runtime gathers, rotates, and re-uploads once.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::circshift")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::circshift")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "circshift",
     shape: ShapeRequirements::Any,
@@ -250,7 +250,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Rotate arrays circularly along one or more dimensions.",
     keywords = "circshift,circular shift,rotate array,gpu,cyclic shift",
     accel = "custom",
-    wasm_path = "crate::builtins::array::shape::circshift"
+    builtin_path = "crate::builtins::array::shape::circshift"
 )]
 fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -810,7 +810,7 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};

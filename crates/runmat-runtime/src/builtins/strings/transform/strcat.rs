@@ -15,7 +15,7 @@ use crate::{gather_if_needed, make_cell_with_shape};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "strcat",
-        wasm_path = "crate::builtins::strings::transform::strcat"
+        builtin_path = "crate::builtins::strings::transform::strcat"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -185,7 +185,7 @@ string array returns an empty array with the broadcasted shape.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::strcat")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcat",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -201,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU with trailing-space trimming; GPU inputs are gathered before concatenation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::strcat")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::strcat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strcat",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -421,7 +421,7 @@ fn cell_element_to_text(value: &Value) -> Result<TextElement, String> {
     summary = "Concatenate strings, character arrays, or cell arrays of character vectors element-wise.",
     keywords = "strcat,string concatenation,character arrays,cell arrays",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::strcat"
+    builtin_path = "crate::builtins::strings::transform::strcat"
 )]
 fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -532,7 +532,7 @@ fn build_char_output(data: Vec<String>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;

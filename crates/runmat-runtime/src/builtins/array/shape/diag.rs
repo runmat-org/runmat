@@ -13,7 +13,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "diag",
-        wasm_path = "crate::builtins::array::shape::diag"
+        builtin_path = "crate::builtins::array::shape::diag"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -270,7 +270,7 @@ once single-precision support lands.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::shape::diag")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diag",
     op_kind: GpuOpKind::Custom("diag"),
@@ -289,7 +289,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement custom diag hooks; runtimes fall back to a host gather + upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::shape::diag")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diag",
     shape: ShapeRequirements::Any,
@@ -560,7 +560,7 @@ fn checked_total_len(dims: MatrixDims) -> Result<usize, String> {
     summary = "Create diagonal matrices from vectors or extract diagonals from matrices.",
     keywords = "diag,diagonal,matrix,extraction,gpu",
     accel = "shape",
-    wasm_path = "crate::builtins::array::shape::diag"
+    builtin_path = "crate::builtins::array::shape::diag"
 )]
 fn diag_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = DiagOptions::parse(rest)?;
@@ -1181,7 +1181,7 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]

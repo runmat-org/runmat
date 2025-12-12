@@ -23,7 +23,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "intersect",
-        wasm_path = "crate::builtins::array::sorting_sets::intersect"
+        builtin_path = "crate::builtins::array::sorting_sets::intersect"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -193,7 +193,9 @@ gathers automatically, so explicit residency management is rarely needed. Explic
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::intersect")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "intersect",
     op_kind: GpuOpKind::Custom("intersect"),
@@ -211,7 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::array::sorting_sets::intersect"
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "intersect",
@@ -230,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
-    wasm_path = "crate::builtins::array::sorting_sets::intersect"
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())
@@ -1399,7 +1401,7 @@ fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;

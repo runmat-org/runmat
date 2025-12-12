@@ -11,7 +11,7 @@ use super::style::value_as_string;
     category = "plotting",
     summary = "Return the handle for the current axes.",
     keywords = "gca,axes,plotting",
-    wasm_path = "crate::builtins::plotting::ops::gca"
+    builtin_path = "crate::builtins::plotting::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let state = current_axes_state();
@@ -47,7 +47,7 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

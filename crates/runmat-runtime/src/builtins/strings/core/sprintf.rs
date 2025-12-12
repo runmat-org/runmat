@@ -17,7 +17,7 @@ use crate::gather_if_needed;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "sprintf",
-        wasm_path = "crate::builtins::strings::core::sprintf"
+        builtin_path = "crate::builtins::strings::core::sprintf"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -209,7 +209,7 @@ arrays raise `sprintf: formatSpec must be a character row vector or string scala
 [compose](./compose), [string](./string), [num2str](./num2str), [strlength](./strlength)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::core::sprintf")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sprintf",
     op_kind: GpuOpKind::Custom("format"),
@@ -225,7 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting runs on the CPU; GPU tensors are gathered before substitution.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::core::sprintf")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sprintf",
     shape: ShapeRequirements::Any,
@@ -243,7 +243,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sprintf,format,printf,text",
     accel = "format",
     sink = true,
-    wasm_path = "crate::builtins::strings::core::sprintf"
+    builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;
@@ -283,7 +283,7 @@ fn char_row_value(text: &str) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};

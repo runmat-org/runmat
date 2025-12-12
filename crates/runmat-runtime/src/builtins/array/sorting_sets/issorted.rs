@@ -15,7 +15,7 @@ use crate::builtins::common::tensor;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "issorted",
-        wasm_path = "crate::builtins::array::sorting_sets::issorted"
+        builtin_path = "crate::builtins::array::sorting_sets::issorted"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -203,7 +203,7 @@ Empty slices are considered sorted. Passing a dimension larger than `ndims(A)` a
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::sorting_sets::issorted")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::issorted")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issorted",
     op_kind: GpuOpKind::Custom("predicate"),
@@ -219,7 +219,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU inputs gather to the host until providers implement dedicated predicate kernels.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::sorting_sets::issorted")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::issorted"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issorted",
     shape: ShapeRequirements::Any,
@@ -237,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "issorted,sorted,monotonic,rows",
     accel = "sink",
     sink = true,
-    wasm_path = "crate::builtins::array::sorting_sets::issorted"
+    builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 fn issorted_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input = normalize_input(value)?;
@@ -1216,7 +1218,7 @@ fn char_array_to_tensor(array: &CharArray) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Value};

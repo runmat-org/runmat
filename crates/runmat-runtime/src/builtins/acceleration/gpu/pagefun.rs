@@ -20,7 +20,7 @@ type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "pagefun",
-        wasm_path = "crate::builtins::acceleration::gpu::pagefun"
+        builtin_path = "crate::builtins::acceleration::gpu::pagefun"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -161,7 +161,7 @@ barrier. Upstream expressions are evaluated before entering `pagefun`.
 [gpuArray](./gpuarray), [arrayfun](./arrayfun), [gather](./gather)
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::acceleration::gpu::pagefun")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pagefun",
     op_kind: GpuOpKind::Custom("pagefun"),
@@ -177,7 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider accelerates batched @mtimes; runtimes gather to host when no provider hook is available.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::acceleration::gpu::pagefun")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pagefun",
     shape: ShapeRequirements::Any,
@@ -194,7 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Apply MATLAB operators page-by-page across higher-dimensional arrays.",
     keywords = "pagefun,gpuArray,mtimes,pages,batch",
     accel = "custom",
-    wasm_path = "crate::builtins::acceleration::gpu::pagefun"
+    builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
 fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value, String> {
     let operation = PageOperation::from_callable(func)?;
@@ -973,7 +973,7 @@ impl TypeName for Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray};

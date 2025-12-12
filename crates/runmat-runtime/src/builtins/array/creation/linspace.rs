@@ -15,7 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "linspace",
-        wasm_path = "crate::builtins::array::creation::linspace"
+        builtin_path = "crate::builtins::array::creation::linspace"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -180,7 +180,7 @@ Every element equals `a` (and `b`). For example, `linspace(5, 5, 4)` returns
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::linspace")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::linspace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "linspace",
     op_kind: GpuOpKind::Custom("generator"),
@@ -196,7 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may generate sequences directly; the runtime uploads host-generated data when hooks are absent.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::linspace")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::linspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linspace",
     shape: ShapeRequirements::Any,
@@ -214,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "linspace,range,vector,gpu",
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::linspace"
+    builtin_path = "crate::builtins::array::creation::linspace"
 )]
 fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -464,7 +464,7 @@ fn generate_complex_sequence(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};

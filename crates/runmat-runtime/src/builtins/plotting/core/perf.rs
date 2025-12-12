@@ -173,7 +173,7 @@ pub(crate) fn scatter3_lod_stride(point_count: u32, extent_hint: f32) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

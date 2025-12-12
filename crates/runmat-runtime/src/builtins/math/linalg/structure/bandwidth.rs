@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "bandwidth",
-        wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+        builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -202,7 +202,7 @@ and contribute to the bandwidth calculation.
 "#;
 
 #[runmat_macros::register_gpu_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bandwidth",
@@ -221,7 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "bandwidth",
@@ -246,7 +246,7 @@ enum BandSelector {
     summary = "Compute the lower and upper bandwidth of a matrix.",
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
     accel = "structure",
-    wasm_path = "crate::builtins::math::linalg::structure::bandwidth"
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> Result<Value, String> {
     let selector = parse_selector(&rest)?;
@@ -425,7 +425,7 @@ fn compute_complex_bandwidth(rows: usize, cols: usize, data: &[(f64, f64)]) -> (
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;

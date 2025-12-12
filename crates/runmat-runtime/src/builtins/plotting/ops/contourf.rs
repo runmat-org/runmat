@@ -16,7 +16,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "contourf",
-        wasm_path = "crate::builtins::plotting::ops::contourf"
+        builtin_path = "crate::builtins::plotting::contourf"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -61,7 +61,7 @@ behaviour (10).
     summary = "Render MATLAB-compatible filled contour plots.",
     keywords = "contourf,plotting,filled,contour",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::contourf"
+    builtin_path = "crate::builtins::plotting::contourf"
 )]
 pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
     let mut args = Some(parse_contour_args("contourf", first, rest)?);
@@ -142,7 +142,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[ctor::ctor]
     fn init_plot_test_env() {

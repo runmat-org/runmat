@@ -18,7 +18,7 @@ const MAX_SAFE_INTEGER: u64 = 1 << 53;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "randperm",
-        wasm_path = "crate::builtins::array::creation::randperm"
+        builtin_path = "crate::builtins::array::creation::randperm"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -204,7 +204,7 @@ the fallback without changing user code.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::randperm")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "randperm",
     op_kind: GpuOpKind::Custom("permutation"),
@@ -223,7 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider random_permutation(_like) hooks (WGPU implements a native kernel); falls back to host generation + upload when unavailable.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::randperm")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
     shape: ShapeRequirements::Any,
@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Random permutations of 1:n.",
     keywords = "randperm,permutation,random,indices,gpu,like",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::randperm"
+    builtin_path = "crate::builtins::array::creation::randperm"
 )]
 fn randperm_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRandPerm::parse(args)?;
@@ -494,7 +494,7 @@ fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> Result<usize, S
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 

@@ -20,7 +20,7 @@ const RANGE_EPS: f64 = 1.0e-12;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "histcounts2",
-        wasm_path = "crate::builtins::stats::hist::histcounts2"
+        builtin_path = "crate::builtins::stats::hist::histcounts2"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -190,7 +190,7 @@ ensures the resulting edges align with integer boundaries, respecting any suppli
 - Found a discrepancy? Please open an issue with a minimal reproduction example.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::stats::hist::histcounts2")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::hist::histcounts2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histcounts2",
     op_kind: GpuOpKind::Custom("histcounts2"),
@@ -207,7 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may install a custom 2-D histogram kernel; current builds gather to host memory.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::stats::hist::histcounts2")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::hist::histcounts2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "histcounts2",
     shape: ShapeRequirements::Any,
@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "histcounts2,2d histogram,joint distribution,binning,probability,gpu",
     accel = "reduction",
     sink = true,
-    wasm_path = "crate::builtins::stats::hist::histcounts2"
+    builtin_path = "crate::builtins::stats::hist::histcounts2"
 )]
 fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(x, y, &rest).map(|eval| eval.into_counts_value())
@@ -1302,7 +1302,7 @@ fn parse_normalization(text: &str) -> Result<HistogramNormalization, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

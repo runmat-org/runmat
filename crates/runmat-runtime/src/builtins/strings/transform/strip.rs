@@ -14,7 +14,7 @@ use crate::{gather_if_needed, make_cell};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "strip",
-        wasm_path = "crate::builtins::strings::transform::strip"
+        builtin_path = "crate::builtins::strings::transform::strip"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -184,7 +184,7 @@ maintain MATLAB compatibility.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "###;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::strings::transform::strip")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strip")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strip",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -201,7 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before trimming characters.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::strings::transform::strip")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::strip")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strip",
     shape: ShapeRequirements::Any,
@@ -293,7 +293,7 @@ impl PatternSpec {
     summary = "Remove leading and trailing characters from strings, character arrays, and cell arrays.",
     keywords = "strip,trim,strings,character array,text",
     accel = "sink",
-    wasm_path = "crate::builtins::strings::transform::strip"
+    builtin_path = "crate::builtins::strings::transform::strip"
 )]
 fn strip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strip: {e}"))?;
@@ -645,7 +645,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

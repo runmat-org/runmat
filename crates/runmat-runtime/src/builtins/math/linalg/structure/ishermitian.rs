@@ -14,7 +14,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ishermitian",
-        wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+        builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -193,7 +193,7 @@ No. RunMat automatically keeps tensors resident on the GPU when it is profitable
 "#;
 
 #[runmat_macros::register_gpu_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+    builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ishermitian",
@@ -211,7 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+    builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ishermitian",
@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Determine whether a matrix is Hermitian or skew-Hermitian.",
     keywords = "ishermitian,hermitian,skew-hermitian,matrix structure,gpu",
     accel = "metadata",
-    wasm_path = "crate::builtins::math::linalg::structure::ishermitian"
+    builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mode, tol) = parse_optional_args(&rest)?;
@@ -545,7 +545,7 @@ pub fn ishermitian_host_complex_data(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};

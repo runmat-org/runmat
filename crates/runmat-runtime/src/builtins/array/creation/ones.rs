@@ -16,7 +16,7 @@ use runmat_builtins::NumericDType;
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "ones",
-        wasm_path = "crate::builtins::array::creation::ones"
+        builtin_path = "crate::builtins::array::creation::ones"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -186,7 +186,7 @@ Absolutely. Preallocating with `ones` (or `zeros`) and then filling in values is
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::array::creation::ones")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ones",
     op_kind: GpuOpKind::Custom("generator"),
@@ -205,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device ones when providers expose dedicated hooks; otherwise falls back to scalar fill or host upload.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::array::creation::ones")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ones",
     shape: ShapeRequirements::Any,
@@ -233,7 +233,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create arrays filled with ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
-    wasm_path = "crate::builtins::array::creation::ones"
+    builtin_path = "crate::builtins::array::creation::ones"
 )]
 fn ones_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedOnes::parse(rest)?;
@@ -531,7 +531,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 

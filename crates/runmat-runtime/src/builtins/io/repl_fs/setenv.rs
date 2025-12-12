@@ -29,7 +29,7 @@ const MESSAGE_OPERATION_FAILED: &str = "Unable to update environment variable: "
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "setenv",
-        wasm_path = "crate::builtins::io::repl_fs::setenv"
+        builtin_path = "crate::builtins::io::repl_fs::setenv"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -185,7 +185,7 @@ status =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::setenv")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::setenv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "setenv",
     op_kind: GpuOpKind::Custom("io"),
@@ -202,7 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only environment mutation. GPU-resident arguments are gathered automatically before invoking the OS APIs.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::setenv")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::setenv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "setenv",
     shape: ShapeRequirements::Any,
@@ -219,7 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Set or clear environment variables with MATLAB-compatible status outputs.",
     keywords = "setenv,environment variable,status,message,unset",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::setenv"
+    builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
 fn setenv_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -375,7 +375,7 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};

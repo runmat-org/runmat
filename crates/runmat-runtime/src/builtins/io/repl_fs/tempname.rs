@@ -29,7 +29,7 @@ static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "tempname",
-        wasm_path = "crate::builtins::io::repl_fs::tempname"
+        builtin_path = "crate::builtins::io::repl_fs::tempname"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -178,7 +178,7 @@ No. The builtin is host-only and ignores GPU providers entirely.
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::tempname")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::tempname")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tempname",
     op_kind: GpuOpKind::Custom("io"),
@@ -194,7 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only path generation. Providers are not expected to supply kernels for temporary name creation.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::tempname")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::tempname")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tempname",
     shape: ShapeRequirements::Any,
@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return a unique temporary file path.",
     keywords = "tempname,temporary file,unique name,temp directory",
     accel = "cpu",
-    wasm_path = "crate::builtins::io::repl_fs::tempname"
+    builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
 fn tempname_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {
@@ -316,7 +316,7 @@ fn path_exists(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::fs::home_directory;

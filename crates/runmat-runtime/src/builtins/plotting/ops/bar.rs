@@ -26,7 +26,7 @@ use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "bar",
-        wasm_path = "crate::builtins::plotting::ops::bar"
+        builtin_path = "crate::builtins::plotting::bar"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -77,7 +77,7 @@ bar(values);
 shared WebGPU context; other precisions gather to the host before plotting.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::plotting::ops::bar")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::bar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bar",
     op_kind: GpuOpKind::Custom("plot-render"),
@@ -93,7 +93,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Single-precision gpuArray vectors render zero-copy when the shared renderer is active; other contexts gather first.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::plotting::ops::bar")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::bar")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "bar",
     shape: ShapeRequirements::Any,
@@ -110,7 +110,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible bar chart.",
     keywords = "bar,barchart,plotting",
     sink = true,
-    wasm_path = "crate::builtins::plotting::ops::bar"
+    builtin_path = "crate::builtins::plotting::bar"
 )]
 pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
@@ -570,7 +570,7 @@ fn compute_stack_offsets(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::Value;
     #[ctor::ctor]

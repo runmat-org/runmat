@@ -15,7 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "rem",
-        wasm_path = "crate::builtins::math::rounding::rem"
+        builtin_path = "crate::builtins::math::rounding::rem"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -174,7 +174,7 @@ It stays on-device when the provider implements `elem_div`, `unary_fix`, `elem_m
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::math::rounding::rem")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::rem")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rem",
     op_kind: GpuOpKind::Elementwise,
@@ -205,7 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers can compose rem from elem_div → unary_fix → elem_mul → elem_sub. Kernels fall back to host when any hook is missing or shapes differ.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::math::rounding::rem")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::rem")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rem",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "MATLAB-compatible remainder a - b .* fix(a./b) with support for complex values and broadcasting.",
     keywords = "rem,remainder,truncate,gpu",
     accel = "binary",
-    wasm_path = "crate::builtins::math::rounding::rem"
+    builtin_path = "crate::builtins::math::rounding::rem"
 )]
 fn rem_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     match (lhs, rhs) {
@@ -459,7 +459,7 @@ fn into_complex(name: &str, input: NumericArray) -> Result<ComplexTensor, String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};

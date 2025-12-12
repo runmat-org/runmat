@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
 #[cfg_attr(
     feature = "doc_export",
-    runmat_macros::register_doc_text(name = "toc", wasm_path = "crate::builtins::timing::toc")
+    runmat_macros::register_doc_text(name = "toc", builtin_path = "crate::builtins::timing::toc")
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
@@ -149,7 +149,7 @@ resolution depends on your operating system.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::timing::toc")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "toc",
     op_kind: GpuOpKind::Custom("timer"),
@@ -165,7 +165,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for toc.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::timing::toc")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::toc")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "toc",
     shape: ShapeRequirements::Any,
@@ -186,7 +186,7 @@ const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
     category = "timing",
     summary = "Read the elapsed time since the most recent tic or an explicit handle.",
     keywords = "toc,timing,profiling,benchmark",
-    wasm_path = "crate::builtins::timing::toc"
+    builtin_path = "crate::builtins::timing::toc"
 )]
 pub fn toc_builtin(args: Vec<Value>) -> Result<f64, String> {
     match args.len() {
@@ -212,7 +212,7 @@ fn elapsed_from_value(value: &Value) -> Result<f64, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::timing::tic::{encode_instant, record_tic, take_latest_start, TEST_GUARD};
     use std::time::Duration;

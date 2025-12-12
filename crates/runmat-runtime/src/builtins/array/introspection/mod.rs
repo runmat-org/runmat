@@ -1,10 +1,10 @@
 //! Array-introspection builtins.
 
-mod isempty;
-mod ismatrix;
-mod isscalar;
-mod isvector;
-mod length;
-mod ndims;
-mod numel;
-mod size;
+pub(crate) mod isempty;
+pub(crate) mod ismatrix;
+pub(crate) mod isscalar;
+pub(crate) mod isvector;
+pub(crate) mod length;
+pub(crate) mod ndims;
+pub(crate) mod numel;
+pub(crate) mod size;

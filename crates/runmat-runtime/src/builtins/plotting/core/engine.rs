@@ -56,7 +56,7 @@ pub async fn render_figure_snapshot(
 }
 
 #[cfg(feature = "gui")]
-mod native {
+pub(crate) mod native {
     use super::super::state::{install_figure_observer, FigureEventKind, FigureEventView};
     use super::*;
     use once_cell::sync::OnceCell;

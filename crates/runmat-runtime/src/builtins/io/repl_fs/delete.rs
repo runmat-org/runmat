@@ -30,7 +30,7 @@ const ERR_FILENAME_ARG: &str =
     feature = "doc_export",
     runmat_macros::register_doc_text(
         name = "delete",
-        wasm_path = "crate::builtins::io::repl_fs::delete"
+        builtin_path = "crate::builtins::io::repl_fs::delete"
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
@@ -166,7 +166,7 @@ No. `delete` executes on the CPU. If a script accidentally wraps path strings in
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[runmat_macros::register_gpu_spec(wasm_path = "crate::builtins::io::repl_fs::delete")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "delete",
     op_kind: GpuOpKind::Custom("io"),
@@ -183,7 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path values are gathered automatically before deletion.",
 };
 
-#[runmat_macros::register_fusion_spec(wasm_path = "crate::builtins::io::repl_fs::delete")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "delete",
     shape: ShapeRequirements::Any,
@@ -202,7 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "delete,remove file,wildcard delete,cleanup,temporary files,MATLAB delete",
     accel = "cpu",
     sink = true,
-    wasm_path = "crate::builtins::io::repl_fs::delete"
+    builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 fn delete_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -529,7 +529,7 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, Value};
