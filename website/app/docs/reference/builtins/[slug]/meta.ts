@@ -1,15 +1,39 @@
 import type { Metadata } from 'next';
-import { loadBuiltins } from '@/lib/builtins';
+import builtinsData from '@/content/builtins.json';
+import type { Builtin } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
 
+const BUILTINS: Builtin[] = builtinsData as Builtin[];
+const BUILTIN_MAP: Map<string, Builtin> = new Map(BUILTINS.map(b => [b.slug, b]));
+const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
+
 export function builtinMetadataForSlug(slug: string): Metadata {
-    const builtin = loadBuiltins().find(x => x.slug === slug);
-    if (!builtin) return {};
+    const builtin = BUILTIN_MAP.get(slug);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/adc5a0ef-9c26-4e0c-abc4-335154a72020',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'docs/reference/builtins/[slug]/meta.ts:builtinMetadataForSlug',message:'Lookup builtin metadata',data:{slug,found:!!builtin,name:builtin?.name,hasDescription:!!builtin?.description,hasSummary:!!builtin?.summary},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (!builtin) {
+        const title = `${slug} | MATLAB Language Function Reference`;
+        return {
+            title,
+            description: FALLBACK_DESCRIPTION,
+            openGraph: {
+                title: slug,
+                description: FALLBACK_DESCRIPTION,
+            },
+            twitter: {
+                card: 'summary_large_image',
+                title: slug,
+                description: FALLBACK_DESCRIPTION,
+            },
+            alternates: { canonical: `/docs/reference/builtins/${slug}` },
+        } satisfies Metadata;
+    }
 
     const description = (
         builtin.description ||
         builtin.summary ||
-        'RunMat / MATLAB Language Function documentation'
+        FALLBACK_DESCRIPTION
     ).trim();
 
     return {
@@ -30,5 +54,18 @@ export function builtinMetadataForSlug(slug: string): Metadata {
 
 export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle: string } {
     const meta = builtinMetadataForSlug(slug);
-    return resolveOgFields(meta);
+    let result: { title: string; subtitle: string };
+    try {
+        result = resolveOgFields(meta);
+    } catch {
+        // Guard against missing data to avoid 500s in OG route
+        result = {
+            title: typeof meta.title === 'string' ? meta.title : slug,
+            subtitle: typeof meta.description === 'string' ? meta.description : FALLBACK_DESCRIPTION,
+        };
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/adc5a0ef-9c26-4e0c-abc4-335154a72020',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'docs/reference/builtins/[slug]/meta.ts:builtinOgTitleSubtitle',message:'Resolved OG fields',data:{slug,title:result.title,subtitle:result.subtitle},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return result;
 }
