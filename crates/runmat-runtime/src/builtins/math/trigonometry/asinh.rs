@@ -194,7 +194,7 @@ Yes. The fusion and acceleration metadata mark `asinh` as an element-wise operat
 infrastructure can reuse the same kernel hooks.
 
 ## See Also
-[sinh](./sinh), [tanh](./tanh), [sin](./sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sinh](./sinh), [tanh](./tanh), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `asinh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/asinh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/asinh.rs)

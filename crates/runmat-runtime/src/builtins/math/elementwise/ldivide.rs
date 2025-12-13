@@ -199,7 +199,7 @@ Yes. Both promote to double precision before division so you get MATLAB-compatib
 Absolutely. Mixed cases return complex doubles with full MATLAB semantics.
 
 ## See Also
-[times](./times), [rdivide](./rdivide), [mldivide](../linalg/ops/mldivide), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[times](./times), [rdivide](./rdivide), [mldivide](./mldivide), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/ldivide.rs)

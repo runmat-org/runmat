@@ -197,7 +197,7 @@ If the active provider advertises an `ismember` hook, the runtime can keep tenso
 Otherwise the data is gathered to the host with no behavioural differences.
 
 ## See Also
-[unique](./unique), [intersect](./intersect), [setdiff](./setdiff), [union](./union), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[unique](./unique), [intersect](./intersect), [setdiff](./setdiff), [union](./union), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/array/sorting_sets/ismember.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/ismember.rs)

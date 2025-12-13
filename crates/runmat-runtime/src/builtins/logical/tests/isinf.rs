@@ -159,7 +159,7 @@ String scalars return `false`. Character arrays and string arrays return logical
 Each predicate performs a single elementwise test. Performance is dominated by memory bandwidth, so they have comparable cost on both CPU and GPU.
 
 ## See Also
-[isfinite](./isfinite), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isfinite](./isfinite), [isnan](./isnan), [isreal](./isreal), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isinf")]

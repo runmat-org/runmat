@@ -185,7 +185,7 @@ Yes. When residency metadata marks the handle as logical, gathering produces a h
 `logical` array, and `islogical` continues to report `true`.
 
 ## See Also
-[isreal](./isreal), [isfinite](./isfinite), [isnan](./isnan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isreal](./isreal), [isfinite](./isfinite), [isnan](./isnan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `islogical` function is available at: [`crates/runmat-runtime/src/builtins/logical/tests/islogical.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/islogical.rs)

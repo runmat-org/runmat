@@ -191,7 +191,7 @@ You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps 
 9. **Can fusion keep `ceil` on the GPU?** Yes. `ceil` participates in elementwise fusion, so fused graphs can stay resident on the device when supported.
 
 ## See Also
-[floor](./floor), [round](./round), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[floor](./floor), [round](./round), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `ceil` lives at: [`crates/runmat-runtime/src/builtins/math/rounding/ceil.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/ceil.rs)

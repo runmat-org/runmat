@@ -146,7 +146,7 @@ GPU-resident values are serialised to host data when saved. Loading the resultin
 Use the struct form: `info = load(filename);` and then inspect `fieldnames(info)` or `isfield` to programmatically check what was present in the MAT-file.
 
 ## See Also
-[save](./save), [who](../../introspection/who), [fileread](../filetext/fileread), [matfile](https://www.mathworks.com/help/matlab/ref/matfile.html)
+[save](./save), [who](./who), [fileread](./fileread), [matfile](https://www.mathworks.com/help/matlab/ref/matfile.html)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/io/mat/load.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load.rs)

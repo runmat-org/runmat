@@ -54,7 +54,7 @@ tested:
 
 # What does the `containers.Map` function do in MATLAB / RunMat?
 `containers.Map` builds dictionary objects that associate unique keys with values. Keys can be
-character vectors, string scalars, or numeric scalars (double/int32/uint32/int64/uint64/logical).
+character vectors, string scalars, or numeric scalars (./logical).
 Values default to MATLAB's `'any'` semantics, letting you store arbitrary scalars, arrays, structs,
 or handle objects. Each map tracks insertion order, supports key-based indexing, and exposes methods
 such as `keys`, `values`, `isKey`, and `remove`.
@@ -212,7 +212,7 @@ error pointing to the offending argument.
 
 ## See Also
 [keys](./containers.Map.keys), [values](./containers.Map.values), [isKey](./containers.Map.isKey),
-[remove](./containers.Map.remove), [length](../../array/introspection/length)
+[remove](./containers.Map.remove), [length](./length)
 "#;
 
 #[runmat_macros::register_gpu_spec(

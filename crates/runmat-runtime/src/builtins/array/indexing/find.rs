@@ -183,7 +183,7 @@ Absolutely. If you call `find(gpuArray(X))`, the runtime ensures outputs stay on
 Use `find` to get linear indices and then call `ind2sub(size(X), ...)` if you need explicit per-dimension subscripts for N-D arrays.
 
 ## See Also
-[ind2sub](./ind2sub), [sub2ind](./sub2ind), [logical](../../comparison/logical), [gpuArray](../../acceleration/gpu/gpuArray)
+[ind2sub](./ind2sub), [sub2ind](./sub2ind), [logical](./logical), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - The full source code for the implementation of the `find` function is available at: [`crates/runmat-runtime/src/builtins/array/indexing/find.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/find.rs)

@@ -169,7 +169,7 @@ returns host tensors. The GPU spec already reserves a hook so providers can keep
 device-resident once GPU kernels land.
 
 ## See Also
-[eig](./eig), [qr](./qr), [lu](./lu), [chol](./chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[eig](./eig), [qr](./qr), [lu](./lu), [chol](./chol), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/factor/svd.rs`

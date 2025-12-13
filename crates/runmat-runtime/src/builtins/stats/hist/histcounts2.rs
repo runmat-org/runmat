@@ -183,7 +183,7 @@ Use `'BinMethod', 'integers'` or `'XBinMethod'/'YBinMethod'` with the value `'in
 ensures the resulting edges align with integer boundaries, respecting any supplied bin limits.
 
 ## See Also
-[histcounts](./histcounts), [accumarray](../../array/accumarray), [sum](../../math/reduction/sum), [gpuArray](../../acceleration/gpu/gpuArray)
+[histcounts](./histcounts), [accumarray](./accumarray), [sum](./sum), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - The full source code for this builtin lives at `crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs`.

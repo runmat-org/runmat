@@ -216,7 +216,7 @@ No. Relative paths are resolved against the current working directory. `dlmread`
 `dlmread` performs synchronous file I/O, so the result resides in host memory. Wrap the result with `gpuArray` if you want a device-resident tensor.
 
 ## See Also
-[csvread](./csvread), [readmatrix](./readmatrix), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[csvread](./csvread), [readmatrix](./readmatrix), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `dlmread` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/dlmread.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/dlmread.rs)

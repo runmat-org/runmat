@@ -171,7 +171,7 @@ RunMat preserves the operating system’s separators (backslash on Windows, slas
 RunMat raises `tempdir: too many input arguments`, matching MATLAB’s diagnostic.
 
 ## See Also
-[mkdir](../mkdir), [rmdir](../rmdir), [delete](../delete), [dir](../dir), [pwd](../pwd)
+[mkdir](./mkdir), [rmdir](./rmdir), [delete](./delete), [dir](./dir), [pwd](./pwd)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/tempdir.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/tempdir.rs)

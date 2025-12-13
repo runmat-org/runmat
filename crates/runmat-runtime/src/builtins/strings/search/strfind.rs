@@ -172,7 +172,7 @@ No. `strfind` is case-sensitive like MATLAB. Use `contains`, `startsWith`, or th
 expression functions when you need case-insensitive searches.
 
 ## See Also
-[`contains`](./contains), [`startsWith`](./startswith), [`endsWith`](./endswith), [`regexp`](../regex/regexp)
+[`contains`](./contains), [`startsWith`](./startswith), [`endsWith`](./endswith), [`regexp`](./regexp)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/search/strfind.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/strfind.rs)

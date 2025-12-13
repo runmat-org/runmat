@@ -173,7 +173,7 @@ perform a gather/transpose/upload round-trip automatically.
     Yes—`transpose` is equivalent to `permute(A, [2 1 3 ...])`.
 
 ## See Also
-[ctranspose](./ctranspose), [permute](../../../array/shape/permute), [mtimes](../mtimes), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[ctranspose](./ctranspose), [permute](./permute), [mtimes](./mtimes), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/transpose.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/transpose.rs)

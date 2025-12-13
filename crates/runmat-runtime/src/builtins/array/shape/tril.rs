@@ -182,12 +182,12 @@ Character arrays are converted to their numeric codes (double precision) before
 the triangular mask is applied, matching MATLAB's behaviour.
 
 ## See Also
-- [`triu`](../triu) *(upper triangular complement)*
-- [`diag`](../../creation/diag)
-- [`kron`](../kron)
-- [`reshape`](../reshape)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`triu`](./triu) *(upper triangular complement)*
+- [`diag`](./diag)
+- [`kron`](./kron)
+- [`reshape`](./reshape)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/array/shape/tril.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/tril.rs)

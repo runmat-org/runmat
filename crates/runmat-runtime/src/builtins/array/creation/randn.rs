@@ -191,7 +191,7 @@ Yes. Any dimension argument equal to zero yields an empty array, matching MATLAB
 No. Random generation is treated as a sink operation and excluded from fusion planning to preserve statistical properties.
 
 ## See Also
-[rand](./rand), [randi](./randi), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[rand](./rand), [randi](./randi), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `randn` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/randn.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randn.rs)

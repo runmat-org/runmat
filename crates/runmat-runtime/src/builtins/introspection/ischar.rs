@@ -159,7 +159,7 @@ No. `ischar` only inspects the value’s metadata; it does not copy or iterate o
 elements, so the cost is constant regardless of array size.
 
 ## See Also
-[isa](./isa), [char](../strings/core/char), [string](../strings/core/string), [strcmp](../strings/core/strcmp), [gpuArray](../acceleration/gpu/gpuArray)
+[isa](./isa), [char](./char), [string](./string), [strcmp](./strcmp), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - The full source code for the implementation of the `ischar` function is available at: [`crates/runmat-runtime/src/builtins/introspection/ischar.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/ischar.rs)

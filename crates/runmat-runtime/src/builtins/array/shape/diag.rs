@@ -263,7 +263,7 @@ Not yet. Requesting `'single'` currently raises an error. Use `'like'` with an a
 once single-precision support lands.
 
 ## See Also
-[eye](../creation/eye), [zeros](../creation/zeros), [ones](../creation/ones), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[eye](./eye), [zeros](./zeros), [ones](./ones), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `diag` function is available at: [`crates/runmat-runtime/src/builtins/array/shape/diag.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/diag.rs)

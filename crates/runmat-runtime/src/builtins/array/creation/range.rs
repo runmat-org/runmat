@@ -183,7 +183,7 @@ The output collapses the selected dimensions to size `1`, leaving other dimensio
 Use `range(X, 'all')` to flatten all dimensions into a single scalar spread.
 
 ## See Also
-[max](../../math/reduction/max), [min](../../math/reduction/min), [sum](../../math/reduction/sum), [mean](../../math/reduction/mean), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[max](./max), [min](./min), [sum](./sum), [mean](./mean), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `range` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/range.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/range.rs)

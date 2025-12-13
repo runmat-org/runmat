@@ -194,7 +194,7 @@ to the host implementation.
 
 ## See Also
 [`flip`](./flip), [`permute`](./permute), [`reshape`](./reshape), [`kron`](./kron),
-[`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
+[`gpuArray`](./gpuarray), [`gather`](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/array/shape/rot90.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/rot90.rs)

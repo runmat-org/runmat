@@ -201,7 +201,7 @@ No. Paths are passed directly to the OS after optional `~` expansion, exactly li
 Prefer `writematrix` for new code. Use `dlmwrite` only when maintaining legacy scripts that rely on its exact output.
 
 ## See Also
-[dlmread](./dlmread), [csvwrite](./csvwrite), [writematrix](./writematrix), [fprintf](../filetext/fprintf), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[dlmread](./dlmread), [csvwrite](./csvwrite), [writematrix](./writematrix), [fprintf](./fprintf), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs)

@@ -180,7 +180,7 @@ NaNs and Infs propagate through the least-squares solver exactly as MATLAB doesâ
 NaNs will typically produce NaNs in the corresponding output entries.
 
 ## See Also
-[mrdivide](./mrdivide), [mtimes](./mtimes), [svd](../../factor/svd), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[mrdivide](./mrdivide), [mtimes](./mtimes), [svd](./svd), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs)

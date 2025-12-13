@@ -172,7 +172,7 @@ No. It is a metadata query and never launches GPU kernels. At most it might gath
 Yes. The builtin returns a host logical scalar and the fusion planner treats it as a metadata operation.
 
 ## See Also
-[isempty](./isempty), [numel](./numel), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isempty](./isempty), [numel](./numel), [size](./size), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(

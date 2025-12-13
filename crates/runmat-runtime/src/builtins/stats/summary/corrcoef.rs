@@ -176,7 +176,7 @@ All rows that contain any `NaN` or `Inf` values are discarded before computing t
 Yes. Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before the correlation matrix is computed.
 
 ## See Also
-[mean](../../math/reduction/mean), [sum](../../math/reduction/sum), [histcounts](../hist/histcounts), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mean](./mean), [sum](./sum), [histcounts](./histcounts), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `corrcoef` function is available at: [`crates/runmat-runtime/src/builtins/stats/summary/corrcoef.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef.rs)

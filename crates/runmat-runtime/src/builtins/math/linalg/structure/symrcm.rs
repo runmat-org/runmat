@@ -193,7 +193,7 @@ row vector `[]`.
 [symamd](https://www.mathworks.com/help/matlab/ref/symamd.html),
 [bandwidth](./bandwidth),
 [issymmetric](./issymmetric),
-[gpuArray](../../../acceleration/gpu/gpuArray)
+[gpuArray](./gpuarray)
 
 ## Source & Feedback
 - View the source: [`crates/runmat-runtime/src/builtins/math/linalg/structure/symrcm.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/symrcm.rs)

@@ -214,7 +214,7 @@ An empty file results in a `0×0` double tensor. MATLAB behaves the same way.
 No. Relative paths are resolved against the current working directory and do not modify it.
 
 ## See Also
-[readmatrix](./readmatrix), [writematrix](./writematrix), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[readmatrix](./readmatrix), [writematrix](./writematrix), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `csvread` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/csvread.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread.rs)

@@ -200,7 +200,7 @@ Yes. Objects and structs are treated as 1-by-1 unless they represent arrays of i
 Future sparse tensors will report their dimensions through the same metadata, so the `ismatrix` predicate will remain unchanged.
 
 ## See Also
-[isscalar](./isscalar), [isvector](./isvector), [ndims](./ndims), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isscalar](./isscalar), [isvector](./isvector), [ndims](./ndims), [size](./size), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(

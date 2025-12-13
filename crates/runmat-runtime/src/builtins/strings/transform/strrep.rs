@@ -188,7 +188,7 @@ descriptive error when they differ.
 and returning a cell array of the same shape.
 
 ## See Also
-[replace](./replace), [regexprep](../../regex/regexprep), [string](../core/string), [char](../core/char), [join](./join)
+[replace](./replace), [regexprep](./regexprep), [string](./string), [char](./char), [join](./join)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strrep")]

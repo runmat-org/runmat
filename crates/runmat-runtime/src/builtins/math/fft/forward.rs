@@ -153,7 +153,7 @@ Call `fft` repeatedly along each dimension (`fft(fft(X, [], 1), [], 2)` for a 2-
 `fft` assumes unit spacing. You can multiply the result by appropriate phase factors to account for custom sampling intervals.
 
 ## See Also
-[ifft](./ifft), [fftshift](./fftshift), [abs](../elementwise/abs), [angle](../elementwise/angle), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[ifft](./ifft), [fftshift](./fftshift), [abs](./abs), [angle](./angle), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/fft/fft.rs`

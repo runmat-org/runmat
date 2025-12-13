@@ -145,7 +145,7 @@ No. `NaN`, `Inf`, and `-Inf` propagate unchanged.
 Yes, when the active provider implements `unary_fix`. Otherwise, RunMat gathers to the host and applies the CPU implementation, guaranteeing MATLAB-compatible behaviour.
 
 ## See Also
-[floor](./floor), [ceil](./ceil), [round](./round), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[floor](./floor), [ceil](./ceil), [round](./round), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `fix` lives at: [`crates/runmat-runtime/src/builtins/math/rounding/fix.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/fix.rs)

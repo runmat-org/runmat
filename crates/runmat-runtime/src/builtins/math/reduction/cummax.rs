@@ -147,7 +147,7 @@ Indices are still reported using 1-based positions along the chosen dimension. `
 The input is returned unchanged. Every index is `1`, matching MATLAB's treatment of singleton trailing dimensions.
 
 ## See Also
-[max](./max), [cummin](./cummin), [cumsum](./cumsum), [cumprod](./cumprod), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[max](./max), [cummin](./cummin), [cumsum](./cumsum), [cumprod](./cumprod), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/reduction/cummax.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cummax.rs)

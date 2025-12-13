@@ -177,7 +177,7 @@ Yes. The builtin returns a fresh tensor. Fusion may elide intermediate buffers w
 Use `hypot` repeatedly: `hypot(x, hypot(y, z))` computes the Euclidean norm of `(x, y, z)` element-wise without manual squaring.
 
 ## See Also
-[sqrt](./sqrt), [abs](./abs), [sin](../trigonometry/sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sqrt](./sqrt), [abs](./abs), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `hypot` lives at: [`crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs)

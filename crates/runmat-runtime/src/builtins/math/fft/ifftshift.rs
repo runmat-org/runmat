@@ -174,7 +174,7 @@ Yes. RunMat keeps GPU data on-device whenever possible and falls back to a
 single gather/upload cycle otherwise.
 
 ## See Also
-[fftshift](./fftshift), [fft](./fft), [ifft](./ifft), [circshift](../../array/shape/circshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fftshift](./fftshift), [fft](./fft), [ifft](./ifft), [circshift](./circshift), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs)

@@ -183,7 +183,7 @@ Yes. `rand` always produces a dense array. For sparse matrices of random numbers
 `rand()` returns a scalar double drawn from `U(0, 1)`.
 
 ## See Also
-[randn](./randn), [randi](./randi), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[randn](./randn), [randi](./randi), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `rand` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/rand.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/rand.rs)

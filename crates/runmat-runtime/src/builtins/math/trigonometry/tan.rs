@@ -203,7 +203,7 @@ Yes. Logical arrays are promoted to `0.0`/`1.0` doubles before evaluation so dow
 Definitely. The fusion planner emits WGSL `tan` calls for GPU execution, and providers may specialise fused kernels for additional throughput.
 
 ## See Also
-[sin](./sin), [cos](./cos), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [cos](./cos), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `tan` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/tan.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/tan.rs)

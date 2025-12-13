@@ -164,10 +164,10 @@ Use `reshape` with the original size vector (for example, captured via `size(A)`
 ## See Also
 - [`reshape`](./reshape)
 - [`permute`](./permute)
-- [`ndims`](../introspection/ndims)
-- [`size`](../introspection/size)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`ndims`](./ndims)
+- [`size`](./size)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]

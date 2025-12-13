@@ -171,7 +171,7 @@ Wrap the output in `string(tempname())` or `string(tempname(folder))`.
 No. The builtin is host-only and ignores GPU providers entirely.
 
 ## See Also
-[tempdir](./tempdir), [mkdir](./mkdir), [fopen](../filetext/fopen), [delete](./delete), [movefile](./movefile)
+[tempdir](./tempdir), [mkdir](./mkdir), [fopen](./fopen), [delete](./delete), [movefile](./movefile)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/tempname.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/tempname.rs)

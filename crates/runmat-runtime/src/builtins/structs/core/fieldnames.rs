@@ -189,7 +189,7 @@ No. Passing anything other than a struct, struct array, or object raises
 `fieldnames: expected struct, struct array, or object`.
 
 ## See Also
-[struct](./struct), [isfield](./isfield), [getfield](./getfield), [setfield](./setfield), [class](../../introspection/class)
+[struct](./struct), [isfield](./isfield), [getfield](./getfield), [setfield](./setfield), [class](./class)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs`

@@ -143,7 +143,7 @@ Yes. Specify `'raw'` (or `'bytes'`) as the encoding argument to receive a charac
 Relative paths are evaluated against the current working directory of the RunMat process. Use `pwd` or `cd` to control where `fileread` looks.
 
 ## See Also
-[fopen](../../io/filetext/fopen), [fread](../../io/filetext/fread), [string](../../../strings/core/string), [strlength](../../../strings/core/strlength)
+[fopen](./fopen), [fread](./fread), [string](./string), [strlength](./strlength)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/io/filetext/fileread.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fileread.rs)

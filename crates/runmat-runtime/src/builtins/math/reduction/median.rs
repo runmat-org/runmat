@@ -182,7 +182,7 @@ When the active provider implements the `reduce_median*` hooks (e.g., the WGPU b
 Otherwise the runtime gathers to the CPU to guarantee MATLAB-compatible semantics.
 
 ## See Also
-[mean](./mean), [sum](./sum), [prod](./prod), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mean](./mean), [sum](./sum), [prod](./prod), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `median` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/median.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/median.rs)

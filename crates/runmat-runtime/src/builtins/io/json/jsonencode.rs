@@ -204,7 +204,7 @@ Printable Unicode characters are emitted verbatim. Control characters and quotes
 standard JSON escape sequences.
 
 ## See Also
-[jsondecode](./jsondecode), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[jsondecode](./jsondecode), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `jsonencode` function is available at: [`crates/runmat-runtime/src/builtins/io/json/jsonencode.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode.rs)

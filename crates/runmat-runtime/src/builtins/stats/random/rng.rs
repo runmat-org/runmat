@@ -206,7 +206,7 @@ reconfigure the seed. Sampling routines (`rand`, `randn`, `randperm`, etc.)
 consume the current stream but do not reseed it.
 
 ## See Also
-[rand](../../array/creation/rand), [randn](../../array/creation/randn), [randi](../../array/creation/randi), [randperm](../../array/creation/randperm), [gpuArray](../../acceleration/gpu/gpuArray)
+[rand](./rand), [randn](./randn), [randi](./randi), [randperm](./randperm), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - Implementation lives at [`crates/runmat-runtime/src/builtins/stats/random/rng.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/rng.rs)

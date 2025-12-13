@@ -152,7 +152,7 @@ transform on the CPU with `rustfft`, and returns a MATLAB-compatible result auto
     It simply states the default behaviour (return complex outputs) but is accepted for MATLAB compatibility.
 
 ## See Also
-[fft2](./fft2), [ifft](./ifft), [fft](./fft), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fft2](./fft2), [ifft](./ifft), [fft](./fft), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/fft/ifft2.rs`

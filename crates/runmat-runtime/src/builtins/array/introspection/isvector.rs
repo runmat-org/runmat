@@ -205,7 +205,7 @@ Sparse inputs will follow the same dimension check once sparse tensors are intro
 `isscalar(A)` implies `isvector(A)` but not vice versa. Conversely, `ismatrix(A)` can be `true` even when `isvector(A)` is `false`.
 
 ## See Also
-[isscalar](./isscalar), [isempty](./isempty), [length](./length), [numel](./numel), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isscalar](./isscalar), [isempty](./isempty), [length](./length), [numel](./numel), [size](./size), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(

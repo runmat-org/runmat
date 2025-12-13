@@ -209,7 +209,7 @@ Use `cconv` for circular convolution, or compute the FFT manually and multiply i
 Not yet. Current providers choose kernel launch parameters automatically; user-facing tuning switches will arrive alongside future backend updates.
 
 ## See Also
-[fft](../fft/fft), [ifft](../fft/ifft), [fftshift](../fft/fftshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fft](./fft), [ifft](./ifft), [fftshift](./fftshift), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/signal/conv.rs`

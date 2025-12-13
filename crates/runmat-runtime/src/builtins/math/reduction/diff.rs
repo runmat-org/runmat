@@ -165,7 +165,7 @@ Yes. When a provider lacks a finite-difference kernel, RunMat gathers the data a
 to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces identical results on the GPU.
 
 ## See Also
-[cumsum](./cumsum), [sum](./sum), [cumprod](./cumprod), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[cumsum](./cumsum), [sum](./sum), [cumprod](./cumprod), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/reduction/diff.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/diff.rs)

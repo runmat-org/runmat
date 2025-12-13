@@ -145,7 +145,7 @@ No. A copy is made before overrides are applied, preserving the original struct 
 Pass an empty struct (`struct()`) or empty cell array (`{}`) to reset the respective option.
 
 ## See Also
-[webread](./webread), [webwrite](./webwrite), [jsondecode](../json/jsondecode), [jsonencode](../json/jsonencode)
+[webread](./webread), [webwrite](./webwrite), [jsondecode](./jsondecode), [jsonencode](./jsonencode)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::weboptions")]

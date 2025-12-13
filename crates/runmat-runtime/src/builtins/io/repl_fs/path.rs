@@ -129,7 +129,7 @@ Expected output:
 - **Do other builtins see the new path immediately?** Yes. `exist`, `which`, `run`, and other filesystem-aware builtins query the shared path state on each call.
 
 ## See Also
-[addpath](https://www.mathworks.com/help/matlab/ref/addpath.html), [rmpath](https://www.mathworks.com/help/matlab/ref/rmpath.html), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](../../introspection/which), [exist](./exist)
+[addpath](https://www.mathworks.com/help/matlab/ref/addpath.html), [rmpath](https://www.mathworks.com/help/matlab/ref/rmpath.html), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](./which), [exist](./exist)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/path.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/path.rs)

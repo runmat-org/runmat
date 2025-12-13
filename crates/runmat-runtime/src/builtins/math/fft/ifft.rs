@@ -170,7 +170,7 @@ gathers to the host transparently.
 Apply `ifft` sequentially along each dimension (e.g., `ifft(ifft(X, [], 1), [], 2)`).
 
 ## See Also
-[fft](./fft), [fftshift](./fftshift), [ifftshift](./ifftshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fft](./fft), [fftshift](./fftshift), [ifftshift](./ifftshift), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/fft/ifft.rs`
