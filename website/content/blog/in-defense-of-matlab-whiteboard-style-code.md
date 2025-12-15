@@ -8,7 +8,7 @@ slug: "in-defense-of-matlab-whiteboard-style-code"
 tags: ["matlab", "runmat", "whiteboard-code", "scientific-computing", "engineering-math", "llm-codegen"]
 keywords: "MATLAB, MATLAB syntax, whiteboard-style code, RunMat, scientific computing, engineering math, code review, LLM code generation, MATLAB alternative"
 excerpt: "People joke about MATLAB, but the syntax is not the problem. Whiteboard-style code is still one of the safest ways for engineers to write and review math-heavy logic. This article explains why readable math matters in an AI coding world and how RunMat keeps the syntax while modernizing the engine."
-image: "https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png"
+image: "https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
 imageAlt: "Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop."
 ogType: "article"
 ogTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
@@ -36,7 +36,7 @@ We need to separate the **language syntax** (which is excellent) from the **runt
 
 ## What is "whiteboard-style code"?
 
-![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png)
+![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png)
 
 When I say "whiteboard-style code," I am referring to a specific level of abstraction.
 In engineering, the "truth" is derived on a whiteboard or a notepad. That is where the physics is worked out. You draw matrices, you transpose vectors, and you define relationships ($F = ma$, $V = IR$, $Y = Hx$).
