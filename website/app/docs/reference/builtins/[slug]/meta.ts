@@ -9,9 +9,6 @@ const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
 
 export function builtinMetadataForSlug(slug: string): Metadata {
     const builtin = BUILTIN_MAP.get(slug);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/adc5a0ef-9c26-4e0c-abc4-335154a72020',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'docs/reference/builtins/[slug]/meta.ts:builtinMetadataForSlug',message:'Lookup builtin metadata',data:{slug,found:!!builtin,name:builtin?.name,hasDescription:!!builtin?.description,hasSummary:!!builtin?.summary},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!builtin) {
         const title = `${slug} | MATLAB Language Function Reference`;
         return {
@@ -64,8 +61,5 @@ export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle:
             subtitle: typeof meta.description === 'string' ? meta.description : FALLBACK_DESCRIPTION,
         };
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/adc5a0ef-9c26-4e0c-abc4-335154a72020',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'docs/reference/builtins/[slug]/meta.ts:builtinOgTitleSubtitle',message:'Resolved OG fields',data:{slug,title:result.title,subtitle:result.subtitle},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return result;
 }
