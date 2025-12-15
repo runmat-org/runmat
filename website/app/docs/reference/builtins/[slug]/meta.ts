@@ -55,7 +55,10 @@ export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle:
     try {
         result = resolveOgFields(meta);
     } catch {
-        // Guard against missing data to avoid 500s in OG route
+        console.warn(
+            '[builtins-og] Falling back to slug-based OG metadata',
+            { slug, meta }
+        );
         result = {
             title: typeof meta.title === 'string' ? meta.title : slug,
             subtitle: typeof meta.description === 'string' ? meta.description : FALLBACK_DESCRIPTION,
