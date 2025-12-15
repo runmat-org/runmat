@@ -36,7 +36,7 @@ We need to separate the **language syntax** (which is excellent) from the **runt
 
 ## What is "whiteboard-style code"?
 
-![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/whiteboard-math-vs-matlab-syntax-sm.png)
+![Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop.](https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png)
 
 When I say "whiteboard-style code," I am referring to a specific level of abstraction.
 In engineering, the "truth" is derived on a whiteboard or a notepad. That is where the physics is worked out. You draw matrices, you transpose vectors, and you define relationships ($F = ma$, $V = IR$, $Y = Hx$).
