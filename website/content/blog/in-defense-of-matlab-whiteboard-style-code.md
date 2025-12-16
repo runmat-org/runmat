@@ -130,7 +130,6 @@ To be fair, the backlash against MATLAB is largely justified. The frustration us
 
 This friction pushed a generation of engineers toward Python, not because they preferred writing `np.concatenate`, but because they needed tools that played nice with the modern stack.
 
-![MATLAB meme](https://web.runmatstatic.com/matlab-meme-sm.png)
 
 ## A vision for a modern "whiteboard" runtime
 
