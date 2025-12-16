@@ -38,6 +38,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./fs": {
+      "types": "./dist/fs/index.d.ts",
+      "import": "./dist/fs/index.js"
+    },
+    "./fs/*": {
+      "types": "./dist/fs/*.d.ts",
+      "import": "./dist/fs/*.js"
+    },
     "./pkg/*": "./pkg/*"
   },
   "sideEffects": false,
