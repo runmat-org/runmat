@@ -23,15 +23,16 @@ impl<'window> PlotWindow<'window> {
         #[cfg(target_os = "windows")]
         let event_loop = {
             use winit::platform::windows::EventLoopBuilderExtWindows;
-            winit::event_loop::EventLoopBuilder::new()
+            EventLoopBuilder::new()
                 .with_any_thread(true)
                 .build()
                 .map_err(|e| format!("Failed to create EventLoop: {e}"))?
         };
         
         #[cfg(not(target_os = "windows"))]
-        let event_loop =
-            EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {e}"))?;
+        let event_loop = EventLoopBuilder::new()
+            .build()
+            .map_err(|e| format!("Failed to create EventLoop: {e}"))?;
         let window = WindowBuilder::new()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
