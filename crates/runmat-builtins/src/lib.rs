@@ -1239,7 +1239,16 @@ impl fmt::Display for Value {
                     l.valid
                 )
             }
-            Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
+            Value::Struct(st) => {
+                write!(f, "struct {{")?;
+                for (i, (key, val)) in st.fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, val)?;
+                }
+                write!(f, "}}")
+            }
             Value::FunctionHandle(name) => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
