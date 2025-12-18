@@ -13,8 +13,13 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
-#[allow(unused_imports)]  // Conditional compilation may not use all imports
-use winit::{dpi::PhysicalSize, event::Event, event_loop::{EventLoop, EventLoopBuilder}, window::WindowBuilder};
+#[allow(unused_imports)] // Conditional compilation may not use all imports
+use winit::{
+    dpi::PhysicalSize,
+    event::Event,
+    event_loop::{EventLoop, EventLoopBuilder},
+    window::WindowBuilder,
+};
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
@@ -28,7 +33,7 @@ impl<'window> PlotWindow<'window> {
                 .build()
                 .map_err(|e| format!("Failed to create EventLoop: {e}"))?
         };
-        
+
         #[cfg(not(target_os = "windows"))]
         let event_loop = EventLoopBuilder::new()
             .build()

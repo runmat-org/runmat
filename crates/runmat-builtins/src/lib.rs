@@ -579,11 +579,11 @@ impl fmt::Display for CharArray {
             }
             Ok(())
         } else {
-             // Keep single row behavior mostly similar but cleaner? 
-             // Actually, for consistency let's just print chars.
-             // But existing code used ['...'] format.
-             // Let's standardise on just printing the content for CharArray (like disp)
-             for r in 0..self.rows {
+            // Keep single row behavior mostly similar but cleaner?
+            // Actually, for consistency let's just print chars.
+            // But existing code used ['...'] format.
+            // Let's standardise on just printing the content for CharArray (like disp)
+            for r in 0..self.rows {
                 if r > 0 {
                     writeln!(f)?;
                 }
