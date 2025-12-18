@@ -13,12 +13,23 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
-use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
+#[allow(unused_imports)]  // Conditional compilation may not use all imports
+use winit::{dpi::PhysicalSize, event::Event, event_loop::{EventLoop, EventLoopBuilder}, window::WindowBuilder};
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        // Create a new EventLoop (assumes this is the only EventLoop creation)
+        // Create EventLoop with platform-specific support for background threads
+        #[cfg(target_os = "windows")]
+        let event_loop = {
+            use winit::platform::windows::EventLoopBuilderExtWindows;
+            winit::event_loop::EventLoopBuilder::new()
+                .with_any_thread(true)
+                .build()
+                .map_err(|e| format!("Failed to create EventLoop: {e}"))?
+        };
+        
+        #[cfg(not(target_os = "windows"))]
         let event_loop =
             EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {e}"))?;
         let window = WindowBuilder::new()
