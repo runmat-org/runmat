@@ -5453,6 +5453,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-turbine",
+ "rustyline",
  "serde",
  "serde_json",
  "serde_yaml",
