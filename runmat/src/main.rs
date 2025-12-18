@@ -905,7 +905,10 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     info!("RunMat REPL ready");
 
     // Use rustyline for better REPL experience
-    use std::io::{self, Write};
+    use rustyline::error::ReadlineError;
+    use rustyline::DefaultEditor;
+
+    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
 
     println!(
         "RunMat v{} by Dystr (https://dystr.com)",
@@ -938,26 +941,13 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
-    let mut input = String::new();
-    let is_interactive = atty::is(atty::Stream::Stdin);
-
     loop {
-        if is_interactive {
-            print!("runmat> ");
-            io::stdout().flush().unwrap();
-        }
-
-        input.clear();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => {
-                // EOF reached (e.g., pipe closed)
-                if !is_interactive {
-                    break;
-                }
-                continue;
-            }
-            Ok(_) => {
-                let line = input.trim();
+        let readline = rl.readline("runmat> ");
+        match readline {
+            Ok(line) => {
+                let line = line.trim();
+                let _ = rl.add_history_entry(line);
+                
                 if line == "exit" || line == "quit" {
                     break;
                 }
@@ -1015,8 +1005,16 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("Error reading input: {e}");
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
                 break;
             }
         }
