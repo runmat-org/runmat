@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { use } from 'react';
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -101,8 +101,8 @@ export async function generateStaticParams() {
   }
 }
 
-export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const post = getBlogPost(slug);
   
   if (!post) {
