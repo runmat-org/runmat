@@ -996,8 +996,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                                     }
                                 );
                             }
-                        } else if let Some(type_info) = result.type_info {
-                            println!("ans = {type_info}");
                         }
                     }
                     Err(e) => {

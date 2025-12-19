@@ -3950,7 +3950,6 @@ pub fn interpret_with_vars(
                                     }
                                     for vi in 0..need {
                                         stack.push((*ca.data[vi]).clone());
-                                        pushed += 1;
                                     }
                                 }
                             }
