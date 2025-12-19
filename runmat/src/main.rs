@@ -947,7 +947,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
             Ok(line) => {
                 let line = line.trim();
                 let _ = rl.add_history_entry(line);
-                
+
                 if line == "exit" || line == "quit" {
                     break;
                 }

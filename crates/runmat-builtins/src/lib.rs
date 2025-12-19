@@ -570,7 +570,7 @@ impl fmt::Display for CharArray {
             }
             Ok(())
         } else {
-             for r in 0..self.rows {
+            for r in 0..self.rows {
                 writeln!(f)?;
                 write!(f, "  ")?; // Indent
                 for c in 0..self.cols {
