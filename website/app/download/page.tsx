@@ -57,9 +57,6 @@ export default function DownloadPage() {
                 <CardTitle className="flex items-center">
                   <Package className="h-5 w-5 mr-2 text-primary" />
                   Homebrew (macOS/Linux)
-                  <Badge className="ml-auto bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                    Available
-                  </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -89,9 +86,6 @@ export default function DownloadPage() {
                 <CardTitle className="flex items-center">
                   <Cpu className="h-5 w-5 mr-2 text-primary" />
                   Cargo (Rust)
-                  <Badge className="ml-auto bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                    Available
-                  </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
