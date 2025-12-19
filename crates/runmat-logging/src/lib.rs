@@ -219,11 +219,25 @@ where
 }
 
 fn current_trace_id() -> Option<String> {
-    None
+    current_trace_span_ids().0
 }
 
 fn current_span_id() -> Option<String> {
-    None
+    current_trace_span_ids().1
+}
+
+fn current_trace_span_ids() -> (Option<String>, Option<String>) {
+    #[cfg(feature = "otlp")]
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let span = tracing::Span::current();
+        let ctx = span.context();
+        let sc = ctx.span().span_context();
+        if sc.is_valid() {
+            return (Some(sc.trace_id().to_string()), Some(sc.span_id().to_string()));
+        }
+    }
+    (None, None)
 }
 
 #[derive(Default)]

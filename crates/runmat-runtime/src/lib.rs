@@ -1311,7 +1311,7 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
 #[runmat_macros::runtime_builtin(name = "warning", sink = true, builtin_path = "crate")]
 fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
-    eprintln!("Warning: {s}");
+    tracing::warn!("Warning: {s}");
     Ok(Value::Num(0.0))
 }
 

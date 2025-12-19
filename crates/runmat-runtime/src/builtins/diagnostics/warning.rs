@@ -310,7 +310,7 @@ fn print_warning(identifier: &str, message: &str) {
 }
 
 fn emit_stderr_line(line: String) {
-    eprintln!("{line}");
+    tracing::warn!("{line}");
     record_console_output(ConsoleStream::Stderr, line);
 }
 
