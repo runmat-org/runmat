@@ -559,27 +559,15 @@ impl fmt::Display for LogicalArray {
 
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.rows > 1 {
-            for r in 0..self.rows {
-                writeln!(f)?;
-                write!(f, "  ")?; // Indent
-                for c in 0..self.cols {
-                    let ch = self.data[r * self.cols + c];
-                    write!(f, "{ch}")?;
-                }
+        for r in 0..self.rows {
+            writeln!(f)?;
+            write!(f, "  ")?; // Indent
+            for c in 0..self.cols {
+                let ch = self.data[r * self.cols + c];
+                write!(f, "{ch}")?;
             }
-            Ok(())
-        } else {
-            for r in 0..self.rows {
-                writeln!(f)?;
-                write!(f, "  ")?; // Indent
-                for c in 0..self.cols {
-                    let ch = self.data[r * self.cols + c];
-                    write!(f, "{ch}")?;
-                }
-            }
-            Ok(())
         }
+        Ok(())
     }
 }
 
