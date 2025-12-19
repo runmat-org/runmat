@@ -113,6 +113,26 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
 }
 
 #[test]
+fn apostrophe_conjugates_complex() {
+    let ast = parse(
+        "z = sqrt(-1); A = [1 z; 0 1]; B = A'; C = A.'; b = imag(B); c = imag(C); b21 = b(2,1); c21 = c(2,1);",
+    )
+    .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let b21: f64 = (&vars[6]).try_into().unwrap();
+    let c21: f64 = (&vars[7]).try_into().unwrap();
+    assert!(
+        (b21 + 1.0).abs() < 1e-9,
+        "expected imag(B(2,1)) == -1, got {b21}"
+    );
+    assert!(
+        (c21 - 1.0).abs() < 1e-9,
+        "expected imag(C(2,1)) == 1, got {c21}"
+    );
+}
+
+#[test]
 fn too_many_inputs_mex() {
     let src = r#"
         function y = f(a)

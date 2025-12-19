@@ -16,6 +16,7 @@ pub enum Instr {
     Neg,
     UPlus,
     Transpose,
+    ConjugateTranspose,
     // Element-wise operations
     ElemMul,
     ElemDiv,

@@ -1132,6 +1132,7 @@ impl TurbineEngine {
                 Instr::Pow => "Pow".hash(&mut hasher),
                 Instr::Neg => "Neg".hash(&mut hasher),
                 Instr::Transpose => "Transpose".hash(&mut hasher),
+                Instr::ConjugateTranspose => "ConjugateTranspose".hash(&mut hasher),
                 Instr::ElemMul => "ElemMul".hash(&mut hasher),
                 Instr::ElemDiv => "ElemDiv".hash(&mut hasher),
                 Instr::ElemPow => "ElemPow".hash(&mut hasher),

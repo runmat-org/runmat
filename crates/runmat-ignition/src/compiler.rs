@@ -1728,7 +1728,7 @@ impl Compiler {
                         self.emit(Instr::Neg);
                     }
                     runmat_parser::UnOp::Transpose => {
-                        self.emit(Instr::Transpose);
+                        self.emit(Instr::ConjugateTranspose);
                     }
                     runmat_parser::UnOp::NonConjugateTranspose => {
                         self.emit(Instr::Transpose);

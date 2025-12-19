@@ -30,9 +30,6 @@ extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
 
-// Transitional public shim for tests using matrix_transpose
-pub use crate::matrix::matrix_transpose;
-
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers
 pub use arrays::create_range;
@@ -998,34 +995,8 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 /// Transpose operation for Values
 pub fn transpose(value: Value) -> Result<Value, String> {
-    match value {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                if let Ok(hc) = p.transpose(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("transpose: unsupported for gpuArray".to_string())
-        }
-        Value::Tensor(ref m) => Ok(Value::Tensor(crate::matrix::matrix_transpose(m))),
-        // For complex scalars, transpose is conjugate transpose => scalar transpose is conjugate
-        Value::Complex(re, im) => Ok(Value::Complex(re, -im)),
-        Value::ComplexTensor(ref ct) => {
-            let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); ct.rows * ct.cols];
-            // Conjugate transpose for complex matrices
-            for i in 0..ct.rows {
-                for j in 0..ct.cols {
-                    let (re, im) = ct.data[i + j * ct.rows];
-                    data[j + i * ct.cols] = (re, -im);
-                }
-            }
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, ct.cols, ct.rows).unwrap(),
-            ))
-        }
-        Value::Num(n) => Ok(Value::Num(n)), // Scalar transpose is identity
-        _ => Err("transpose not supported for this type".to_string()),
-    }
+    let args = [value];
+    crate::call_builtin("transpose", &args)
 }
 
 // -------- Reductions: sum/prod/mean/any/all --------

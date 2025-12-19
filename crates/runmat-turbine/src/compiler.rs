@@ -361,6 +361,12 @@ impl BytecodeCompiler {
                             "Matrix transpose not supported in JIT mode".to_string(),
                         ));
                     }
+                    Instr::ConjugateTranspose => {
+                        // Matrix transpose is complex - fall back to interpreter
+                        return Err(TurbineError::ExecutionError(
+                            "Matrix transpose not supported in JIT mode".to_string(),
+                        ));
+                    }
                     Instr::ElemMul => {
                         let (a, b) = local_stack.pop_two()?;
                         let result = Self::call_runtime_elementwise_mul_static(builder, a, b);
@@ -1266,6 +1272,7 @@ impl BytecodeCompiler {
                 | "matrix_ones"
                 | "matrix_eye"
                 | "matrix_transpose"
+                | "transpose"
                 | "blas_matmul"
                 | "inv"
                 | "solve"

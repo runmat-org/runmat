@@ -1999,6 +1999,15 @@ pub fn interpret_with_vars(
                 let result = runmat_runtime::transpose(promoted)?;
                 stack.push(result);
             }
+            Instr::ConjugateTranspose => {
+                let value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("ctranspose", &args)?;
+                stack.push(result);
+            }
             Instr::ElemMul => {
                 let b = stack
                     .pop()
