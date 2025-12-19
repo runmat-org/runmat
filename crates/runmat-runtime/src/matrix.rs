@@ -193,8 +193,6 @@ fn matrix_transpose_builtin(a: Tensor) -> Result<Tensor, String> {
     let result = crate::call_builtin("transpose", &args)?;
     match result {
         Value::Tensor(tensor) => Ok(tensor),
-        other => Err(format!(
-            "matrix_transpose: expected tensor, got {other:?}"
-        )),
+        other => Err(format!("matrix_transpose: expected tensor, got {other:?}")),
     }
 }
