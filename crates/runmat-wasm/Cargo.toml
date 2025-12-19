@@ -32,10 +32,12 @@ web-sys = { version = "0.3", features = ["Window", "Response", "ReadableStream",
 log = { workspace = true }
 anyhow = { workspace = true }
 console_error_panic_hook = "0.1"
-wasm-logger = "0.2"
 thiserror = { workspace = true }
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
+runmat-logging = { path = "../runmat-logging", version = "0.1.0" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false, features = ["plot-web"] }

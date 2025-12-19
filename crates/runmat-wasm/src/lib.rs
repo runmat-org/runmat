@@ -29,9 +29,11 @@ use runmat_runtime::builtins::{
     wasm_registry,
 };
 use runmat_runtime::warning_store::RuntimeWarning;
+use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use std::backtrace::Backtrace;
+use serde_wasm_bindgen;
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
@@ -147,6 +149,16 @@ static STDOUT_FORWARDER: OnceLock<
     Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
 > = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
+        RefCell::new(HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static RUNTIME_LOG_FORWARDER: OnceLock<Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>> =
+    OnceLock::new();
+static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone)]
 struct SessionConfig {
@@ -637,6 +649,41 @@ pub fn unsubscribe_stdout(id: u32) {
 pub fn unsubscribe_stdout(_id: u32) {}
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = subscribeRuntimeLog)]
+pub fn subscribe_runtime_log(callback: JsValue) -> Result<u32, JsValue> {
+    init_logging_once();
+    let function = callback
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| js_error("subscribeRuntimeLog expects a Function"))?;
+    ensure_runtime_log_forwarder_installed();
+    let id = RUNTIME_LOG_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().insert(id, function);
+    });
+    Ok(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = subscribeRuntimeLog)]
+pub fn subscribe_runtime_log(_callback: JsValue) -> Result<u32, JsValue> {
+    Err(js_error(
+        "subscribeRuntimeLog is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
+pub fn unsubscribe_runtime_log(id: u32) {
+    RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().remove(&id);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
+pub fn unsubscribe_runtime_log(_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
 fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
     JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
@@ -993,6 +1040,26 @@ fn ensure_figure_event_bridge() {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
             Arc::new(|event| emit_js_figure_event(event));
         let _ = runtime_install_figure_observer(observer);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_runtime_log_forwarder_installed() {
+    RUNTIME_LOG_FORWARDER.get_or_init(|| {
+        let forwarder: Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync> =
+            Arc::new(|record: &RuntimeLogRecord| {
+                let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+                RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+                    for cb in cell.borrow().values() {
+                        let _ = cb.call1(&JsValue::NULL, &js_value);
+                    }
+                });
+            });
+        let hook = forwarder.clone();
+        set_runtime_log_hook(move |rec| {
+            (hook)(rec);
+        });
+        forwarder
     });
 }
 
@@ -1510,7 +1577,8 @@ fn init_logging_once() {
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = wasm_logger::init(wasm_logger::Config::default());
+            let _ = init_logging(LoggingOptions { enable_otlp: false });
+            ensure_runtime_log_forwarder_installed();
         }
     });
 }

@@ -17,6 +17,7 @@ members = [
     "crates/runmat-gc-api",
     "crates/runmat-gc",
     "crates/runmat-snapshot",
+    "crates/runmat-logging",
     "crates/runmat-lsp",
     "crates/runmat-cli",
     "tools/runmatfunc",
