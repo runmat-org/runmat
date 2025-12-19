@@ -991,14 +991,6 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 }
 
-// Common mathematical functions that tests expect
-
-/// Transpose operation for Values
-pub fn transpose(value: Value) -> Result<Value, String> {
-    let args = [value];
-    crate::call_builtin("transpose", &args)
-}
-
 // -------- Reductions: sum/prod/mean/any/all --------
 
 #[allow(dead_code)]

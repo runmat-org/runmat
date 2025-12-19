@@ -2634,7 +2634,8 @@ fn explained_variance_matches_cpu() {
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             let q_tensor_value = Value::Tensor(q_tensor.clone());
             let g_tensor_value = Value::Tensor(g_tensor.clone());
-            let q_t_value = runmat_runtime::transpose(q_tensor_value.clone()).expect("transpose");
+            let q_t_value = runmat_runtime::call_builtin("transpose", &[q_tensor_value.clone()])
+                .expect("transpose");
             if let Value::Tensor(ref q_t_tensor) = q_t_value {
                 println!("q_t tensor data {:?}", q_t_tensor.data);
             }

@@ -187,7 +187,7 @@ fn left_scalar_and_transpose_on_device() {
     }
 
     // transpose(G)
-    let gt = runmat_runtime::transpose(g).unwrap();
+    let gt = runmat_runtime::call_builtin("transpose", &[g]).unwrap();
     if let Value::GpuTensor(_) = gt {
     } else {
         panic!("expected gpu result");
