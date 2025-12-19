@@ -5,7 +5,7 @@ fn logical_array_construction_and_display() {
     let la = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
     let v = Value::LogicalArray(la.clone());
     let s = format!("{v}");
-    assert!(s.contains("["));
+    assert!(s.eq("\n  0  1\n  1  0"));
 }
 
 #[test]
