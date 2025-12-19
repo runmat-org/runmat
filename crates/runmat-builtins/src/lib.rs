@@ -467,9 +467,7 @@ impl fmt::Display for Tensor {
                 let cols = self.cols();
                 // Display as matrix
                 for r in 0..rows {
-                    if r > 0 {
-                        writeln!(f)?;
-                    }
+                    writeln!(f)?;
                     write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
@@ -505,9 +503,7 @@ impl fmt::Display for StringArray {
                 let cols = self.cols();
                 // Display as matrix
                 for r in 0..rows {
-                    if r > 0 {
-                        writeln!(f)?;
-                    }
+                    writeln!(f)?;
                     write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
@@ -544,9 +540,7 @@ impl fmt::Display for LogicalArray {
                 let cols = self.shape[1];
                 // Display as matrix
                 for r in 0..rows {
-                    if r > 0 {
-                        writeln!(f)?;
-                    }
+                    writeln!(f)?;
                     write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
@@ -565,13 +559,10 @@ impl fmt::Display for LogicalArray {
 
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Display as single-quoted rows separated by ;
-        // Display multi-row char array nicely without brackets/quotes per row if it's 2D
         if self.rows > 1 {
             for r in 0..self.rows {
-                if r > 0 {
-                    writeln!(f)?;
-                }
+                writeln!(f)?;
+                write!(f, "  ")?; // Indent
                 for c in 0..self.cols {
                     let ch = self.data[r * self.cols + c];
                     write!(f, "{ch}")?;
@@ -579,14 +570,9 @@ impl fmt::Display for CharArray {
             }
             Ok(())
         } else {
-             // Keep single row behavior mostly similar but cleaner? 
-             // Actually, for consistency let's just print chars.
-             // But existing code used ['...'] format.
-             // Let's standardise on just printing the content for CharArray (like disp)
              for r in 0..self.rows {
-                if r > 0 {
-                    writeln!(f)?;
-                }
+                writeln!(f)?;
+                write!(f, "  ")?; // Indent
                 for c in 0..self.cols {
                     let ch = self.data[r * self.cols + c];
                     write!(f, "{ch}")?;
