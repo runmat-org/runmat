@@ -136,6 +136,9 @@ curl -fsSL https://runmat.org/install.sh | sh
 # Quick install (Windows PowerShell)
 iwr https://runmat.org/install.ps1 | iex
 
+# Homebrew (macOS/Linux)
+brew install runmat-org/tap/runmat
+
 # Or install from crates.io
 cargo install runmat --features gui
 
