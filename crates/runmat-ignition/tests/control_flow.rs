@@ -160,8 +160,9 @@ fn apostrophe_is_transpose_when_adjacent() {
             A = [1 2; 3 4];
             B = A';
             s = sum(B(:));
-            "#
-    ).unwrap();
+            "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // sum is invariant under transpose: sum 10
@@ -198,7 +199,7 @@ fn apostrophe_conjugates_complex() {
             c = imag(C);
             b21 = b(2,1);
             c21 = c(2,1);
-            "#
+            "#,
     )
     .unwrap();
     let hir = lower(&ast).unwrap();
