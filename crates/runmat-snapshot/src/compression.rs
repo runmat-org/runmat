@@ -619,12 +619,7 @@ mod tests {
         let data = b"Hello, World! This is a longer test string for LZ4 compression.".repeat(50);
         let result = engine.compress(&data).unwrap();
 
-        println!(
-            "Original size: {}, Compressed size: {}, Algorithm: {:?}",
-            data.len(),
-            result.data.len(),
-            result.info.algorithm
-        );
+        assert!(result.data.len() <= data.len(), "Compression did not reduce size");
 
         // Check that compression was attempted (either compressed or fell back to None if not effective)
         assert!(matches!(
@@ -638,8 +633,6 @@ mod tests {
                 assert_eq!(decompressed, data);
             }
             Err(e) => {
-                println!("Decompression error: {e:?}");
-                println!("This is expected if compression fell back to None due to ineffective compression ratio");
                 // If decompression fails, ensure we're dealing with uncompressed data
                 if matches!(result.info.algorithm, CompressionAlgorithm::None) {
                     assert_eq!(result.data, data);

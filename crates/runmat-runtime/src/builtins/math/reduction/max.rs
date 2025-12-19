@@ -256,9 +256,11 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<MaxEvaluation, String> {
             ParsedCall::Elementwise(_) => "elementwise",
         };
         let first_arg = rest.first().map(debug_value_kind).unwrap_or("None");
-        eprintln!(
-            "[runmat-debug-max] call_type={call_label} rest_len={} first_arg={first_arg}",
-            rest.len()
+        tracing::debug!(
+            call_type = call_label,
+            rest_len = rest.len(),
+            first_arg = first_arg,
+            "[runmat-debug-max]"
         );
     }
     match parsed {

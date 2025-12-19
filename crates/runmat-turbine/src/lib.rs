@@ -17,6 +17,7 @@ use runmat_ignition::{Bytecode, Instr};
 
 use target_lexicon::Triple;
 use thiserror::Error;
+use tracing::info_span;
 
 #[cfg(feature = "native-accel")]
 fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
@@ -1031,6 +1032,12 @@ impl TurbineEngine {
         vars: &mut [Value],
     ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
+        let _span = info_span!(
+            "turbine.execute_or_compile",
+            hash = hash,
+            instrs = bytecode.instructions.len()
+        )
+        .entered();
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {

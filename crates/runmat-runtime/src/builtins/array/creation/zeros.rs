@@ -504,9 +504,12 @@ fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
         return;
     }
     let elems = tensor::element_count(shape);
-    eprintln!(
-        "[zeros_debug] fallback dtype={:?} elems={} shape={:?} reason={}",
-        dtype, elems, shape, reason
+    tracing::debug!(
+        dtype = ?dtype,
+        elems,
+        shape = ?shape,
+        reason,
+        "[zeros_debug] fallback"
     );
 }
 

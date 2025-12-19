@@ -351,6 +351,20 @@ impl RunMatWasm {
         }
     }
 
+    /// Compile-only fusion plan snapshot (no execution).
+    #[wasm_bindgen(js_name = fusionPlanForSource)]
+    pub fn fusion_plan_for_source(&self, source: String) -> Result<JsValue, JsValue> {
+        let session = self.session.borrow();
+        let snapshot = session
+            .compile_fusion_plan(&source)
+            .map_err(|err| js_error(&format!("Failed to compile fusion plan: {err}")))?;
+        match snapshot {
+            Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
+                .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
     #[wasm_bindgen(js_name = materializeVariable)]
     pub fn materialize_variable(
         &self,

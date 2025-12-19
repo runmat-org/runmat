@@ -1061,11 +1061,11 @@ pub(crate) mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            eprintln!("skipping all_wgpu_default_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!("skipping all_wgpu_default_matches_cpu: wgpu provider panicked during init");
             return;
         };
         if reg_result.is_err() {
-            eprintln!("skipping all_wgpu_default_matches_cpu: wgpu provider unavailable");
+            tracing::warn!("skipping all_wgpu_default_matches_cpu: wgpu provider unavailable");
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
@@ -1082,14 +1082,14 @@ pub(crate) mod tests {
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => {
-                eprintln!("skipping all_wgpu_default_matches_cpu: provider not registered");
+                tracing::warn!("skipping all_wgpu_default_matches_cpu: provider not registered");
                 return;
             }
         };
         let handle = match provider.upload(&view) {
             Ok(h) => h,
             Err(err) => {
-                eprintln!("skipping all_wgpu_default_matches_cpu: upload failed: {err}");
+                tracing::warn!("skipping all_wgpu_default_matches_cpu: upload failed: {err}");
                 return;
             }
         };
@@ -1113,11 +1113,11 @@ pub(crate) mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            eprintln!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider panicked during init");
             return;
         };
         if reg_result.is_err() {
-            eprintln!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider unavailable");
+            tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider unavailable");
             return;
         }
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -1134,14 +1134,14 @@ pub(crate) mod tests {
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => {
-                eprintln!("skipping all_wgpu_omitnan_matches_cpu: provider not registered");
+                tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: provider not registered");
                 return;
             }
         };
         let handle = match provider.upload(&view) {
             Ok(h) => h,
             Err(err) => {
-                eprintln!("skipping all_wgpu_omitnan_matches_cpu: upload failed: {err}");
+                tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: upload failed: {err}");
                 return;
             }
         };

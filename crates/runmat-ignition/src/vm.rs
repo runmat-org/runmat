@@ -25,6 +25,7 @@ use runmat_runtime::{
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use runmat_time::Instant;
+use tracing::{debug, info_span};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -1274,6 +1275,8 @@ fn run_interpreter(
     state: InterpreterState,
     initial_vars: &mut [Value],
 ) -> Result<InterpreterOutcome, String> {
+    let run_span = info_span!("interpreter.run", function = state.current_function_name.as_str());
+    let _run_guard = run_span.enter();
     ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
     activate_fusion_plan(state.fusion_plan.clone());
@@ -1431,6 +1434,13 @@ fn run_interpreter(
                 }
                 #[cfg(feature = "native-accel")]
                 log_fusion_span_window(&plan, &bytecode, pc);
+                let _fusion_span = info_span!(
+                    "fusion.execute",
+                    span_start = plan.group.span.start,
+                    span_end = plan.group.span.end,
+                    kind = ?plan.group.kind
+                )
+                .entered();
                 match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
                     Ok(result) => {
                         stack.push(result);
@@ -1445,11 +1455,11 @@ fn run_interpreter(
         }
         interpreter_timing.note_host_instr(pc);
         if debug_stack {
-            eprintln!(
-                "Instr pc={} {:?} stack_len={}",
+            debug!(
                 pc,
-                &bytecode.instructions[pc],
-                stack.len()
+                instr = ?bytecode.instructions[pc],
+                stack_len = stack.len(),
+                "[vm] instr"
             );
         }
         match bytecode.instructions[pc].clone() {
@@ -1658,7 +1668,7 @@ fn run_interpreter(
             Instr::LoadConst(c) => {
                 stack.push(Value::Num(c));
                 if debug_stack {
-                    eprintln!("  -> LoadConst pushed {}, new_len={}", c, stack.len());
+                    debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
                 }
             }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
@@ -1673,13 +1683,10 @@ fn run_interpreter(
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &v {
                         Value::GpuTensor(h) => {
-                            eprintln!(
-                                "LoadVar pc={} var={} => GpuTensor shape={:?}",
-                                pc, i, h.shape
-                            );
+                            debug!(pc, var = i, shape = ?h.shape, "[vm] LoadVar GPU tensor");
                         }
                         Value::Tensor(t) => {
-                            eprintln!("LoadVar pc={} var={} => Tensor shape={:?}", pc, i, t.shape);
+                            debug!(pc, var = i, shape = ?t.shape, "[vm] LoadVar tensor");
                         }
                         _ => {}
                     }
@@ -1699,19 +1706,16 @@ fn run_interpreter(
                         false
                     };
                     if log_this {
-                        eprintln!("StoreVar pc={} var={} value={:?}", pc, i, val);
+                        debug!(pc, var = i, ?val, "[vm] StoreVar value");
                     }
                 }
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &val {
                         Value::GpuTensor(h) => {
-                            eprintln!(
-                                "StoreVar pc={} var={} := GpuTensor shape={:?}",
-                                pc, i, h.shape
-                            );
+                            debug!(pc, var = i, shape = ?h.shape, "[vm] StoreVar GPU tensor");
                         }
                         Value::Tensor(t) => {
-                            eprintln!("StoreVar pc={} var={} := Tensor shape={:?}", pc, i, t.shape);
+                            debug!(pc, var = i, shape = ?t.shape, "[vm] StoreVar tensor");
                         }
                         _ => {}
                     }
@@ -2833,13 +2837,13 @@ fn run_interpreter(
             }
             Instr::CallBuiltin(name, arg_count) => {
                 if debug_stack {
-                    eprintln!(
-                        "CallBuiltin pc={} name={} arg_count={} stack_len={} top={:?}",
+                    debug!(
                         pc,
                         name,
                         arg_count,
-                        stack.len(),
-                        stack.last()
+                        stack_len = stack.len(),
+                        top = ?stack.last(),
+                        "[vm] CallBuiltin"
                     );
                 }
                 if name == "nargin" {
@@ -9264,11 +9268,11 @@ fn run_interpreter(
                         .map(|v| match v {
                             Value::Object(_) => "Object",
                             Value::Tensor(t) => {
-                                eprintln!("StoreIndex pre-snap Tensor shape={:?}", t.shape);
+                                debug!(shape = ?t.shape, "[vm] StoreIndex pre-snap tensor");
                                 "Tensor"
                             }
                             Value::GpuTensor(h) => {
-                                eprintln!("StoreIndex pre-snap GpuTensor shape={:?}", h.shape);
+                                debug!(shape = ?h.shape, "[vm] StoreIndex pre-snap GPU tensor");
                                 "GpuTensor"
                             }
                             Value::Num(_) => "Num",
@@ -9278,7 +9282,7 @@ fn run_interpreter(
                             _ => "Other",
                         })
                         .collect::<Vec<_>>();
-                    eprintln!("StoreIndex pre-snap pc={} stack_top_types={:?}", pc, snap);
+                    debug!(pc, stack_top_types = ?snap, "[vm] StoreIndex pre-snap");
                 }
                 let rhs = stack
                     .pop()
@@ -9463,9 +9467,13 @@ fn run_interpreter(
                             }
                             if i == 0 || i > rows {
                                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                                    eprintln!(
-                                        "StoreIndex Tensor OOB: i={} j(clamped)={} rows={} cols={} shape={:?}",
-                                        i, j, rows, cols, t.shape
+                                    debug!(
+                                        i,
+                                        j_clamped = j,
+                                        rows,
+                                        cols,
+                                        shape = ?t.shape,
+                                        "[vm] StoreIndex Tensor OOB"
                                     );
                                 }
                                 return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
@@ -9535,9 +9543,13 @@ fn run_interpreter(
                             }
                             if i == 0 || i > rows {
                                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                                    eprintln!(
-                                        "StoreIndex GpuTensor OOB: i={} j(clamped)={} rows={} cols={} shape={:?}",
-                                        i, j, rows, cols, t.shape
+                                    debug!(
+                                        i,
+                                        j_clamped = j,
+                                        rows,
+                                        cols,
+                                        shape = ?t.shape,
+                                        "[vm] StoreIndex GpuTensor OOB"
                                     );
                                 }
                                 return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
@@ -9573,12 +9585,12 @@ fn run_interpreter(
                                 Value::Int(_) => "Int",
                                 _ => "Other",
                             };
-                            eprintln!(
-                                "StoreIndex default-branch pc={} base_kind={} rhs_kind={} indices={:?}",
+                            debug!(
                                 pc,
-                                kind(&base),
-                                kind(&rhs),
-                                indices
+                                base_kind = kind(&base),
+                                rhs_kind = kind(&rhs),
+                                ?indices,
+                                "[vm] StoreIndex default branch"
                             );
                         }
                         return Err("Index assignment only for tensors".to_string());
@@ -10252,7 +10264,7 @@ fn run_interpreter(
             }
         }
         if debug_stack {
-            eprintln!("After exec pc={} stack_len={}", pc, stack.len());
+            debug!(pc, stack_len = stack.len(), "[vm] after exec");
         }
         pc += 1;
     }

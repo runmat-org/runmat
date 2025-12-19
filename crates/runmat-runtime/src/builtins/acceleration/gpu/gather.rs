@@ -492,7 +492,7 @@ pub(crate) mod tests {
                 let _ = provider.free(&handle);
             }
             Err(err) => {
-                eprintln!("Skipping gather_wgpu_provider_roundtrip: {err}");
+                tracing::warn!("Skipping gather_wgpu_provider_roundtrip: {err}");
             }
         }
         // Restore the simple provider so subsequent tests see a predictable backend.

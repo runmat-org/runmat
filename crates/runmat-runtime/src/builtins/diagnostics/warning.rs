@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::console::{record_console_output, ConsoleStream};
 use crate::warning_store;
+use tracing;
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
 

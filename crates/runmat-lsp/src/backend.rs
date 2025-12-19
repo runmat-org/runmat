@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write as FmtWrite;
 use std::sync::Arc;
 
-use log::{debug, info};
+use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use runmat_builtins::{self, AccelTag, BuiltinDoc, BuiltinFunction, Type};
 use runmat_hir::{
@@ -10,6 +10,7 @@ use runmat_hir::{
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 use runmat_parser::parse;
+use runmat_core::{FusionPlanEdge, FusionPlanNode, FusionPlanSnapshot, RunMatSession};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
@@ -17,14 +18,15 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeConfigurationParams, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation, Hover,
-    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, Position,
-    PositionEncodingKind, Range, ServerCapabilities, ServerInfo, SymbolKind,
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation, ExecuteCommandOptions,
+    ExecuteCommandParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType,
+    OneOf, Position, PositionEncodingKind, Range, ServerCapabilities, ServerInfo, SymbolKind,
     TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
+use serde_json::{json, Value};
 
 const RUNMAT_DOC_BASE_URL: &str = "https://runmat.dev/docs/builtins/";
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
@@ -254,6 +256,7 @@ struct DocumentState {
 #[derive(Default)]
 struct AnalyzerState {
     documents: HashMap<Url, DocumentState>,
+    fusion_session: Option<runmat_core::RunMatSession>,
 }
 
 pub struct RunMatLanguageServer {
@@ -401,6 +404,10 @@ impl LanguageServer for RunMatLanguageServer {
                 }),
                 file_operations: None,
             }),
+            execute_command_provider: Some(ExecuteCommandOptions {
+                commands: vec!["runmat/fusionPlan".to_string()],
+                work_done_progress_options: Default::default(),
+            }),
             ..Default::default()
         };
 
@@ -455,6 +462,80 @@ impl LanguageServer for RunMatLanguageServer {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.reanalyze(&params.text_document.uri).await;
+    }
+
+    async fn execute_command(&self, params: ExecuteCommandParams) -> RpcResult<Option<Value>> {
+        if params.command != "runmat/fusionPlan" {
+            return Ok(None);
+        }
+
+        let Some(uri) = extract_uri_from_args(&params.arguments) else {
+            return Ok(Some(json!({
+                "status": "unavailable",
+                "reason": "missing uri"
+            })));
+        };
+
+        let (analysis, fusion_plan_result) = {
+            let mut state = self.state.write().await;
+            let Some(doc) = state.documents.get(&uri).cloned() else {
+                return Ok(Some(json!({
+                    "status": "unavailable",
+                    "reason": "no document available"
+                })));
+            };
+            if state.fusion_session.is_none() {
+                state.fusion_session = RunMatSession::new().ok();
+            }
+            let session = match state.fusion_session.as_mut() {
+                Some(session) => session,
+                None => {
+                    return Ok(Some(json!({
+                        "status": "unavailable",
+                        "reason": "fusion session init failed"
+                    })));
+                }
+            };
+            let plan = session.compile_fusion_plan(&doc.text);
+            (doc.analysis, plan)
+        };
+
+        match fusion_plan_result {
+            Ok(Some(plan)) => {
+                return Ok(Some(json!({
+                    "status": "ok",
+                    "plan": {
+                        "nodes": plan.nodes,
+                        "edges": plan.edges,
+                        "notes": "Fusion snapshot from runtime compile (no execution)"
+                    }
+                })));
+            }
+            Ok(None) => {
+                // Fall through to static analysis fallback below.
+            }
+            Err(err) => {
+                warn!("Failed to compile fusion plan via runtime pipeline: {err}");
+            }
+        }
+
+        let Some(analysis) = analysis else {
+            return Ok(Some(json!({
+                "status": "unavailable",
+                "reason": "no analysis available"
+            })));
+        };
+
+        let plan = fusion_plan_from_analysis(&analysis);
+
+        Ok(Some(json!({
+            "status": "ok",
+            "plan": {
+                "nodes": plan.nodes,
+                "edges": plan.edges,
+                "notes": "Static fusion preview from semantic analysis"
+            }
+        })))
     }
 
     async fn hover(&self, params: HoverParams) -> RpcResult<Option<Hover>> {
@@ -730,6 +811,69 @@ fn analyze_document(text: &str) -> DocumentAnalysis {
                 semantic: None,
             }
         }
+    }
+}
+
+fn extract_uri_from_args(args: &Option<Vec<Value>>) -> Option<Url> {
+    let list = args.as_ref()?;
+    for val in list {
+        if let Some(s) = val.as_str() {
+            if let Ok(uri) = Url::parse(s) {
+                return Some(uri);
+            }
+        }
+        if let Some(obj) = val.as_object() {
+            if let Some(s) = obj.get("uri").and_then(|v| v.as_str()) {
+                if let Ok(uri) = Url::parse(s) {
+                    return Some(uri);
+                }
+            }
+            if let Some(s) = obj
+                .get("textDocument")
+                .and_then(|td| td.get("uri"))
+                .and_then(|v| v.as_str())
+            {
+                if let Ok(uri) = Url::parse(s) {
+                    return Some(uri);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn fusion_plan_from_analysis(analysis: &DocumentAnalysis) -> FusionPlanSnapshot {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    if let Some(semantic) = &analysis.semantic {
+        for func in &semantic.functions {
+            nodes.push(FusionPlanNode {
+                id: func.name.clone(),
+                kind: "function".to_string(),
+                label: func.signature.display(),
+                shape: Vec::new(),
+                residency: None,
+            });
+        }
+
+        // Simple heuristic: connect functions in declaration order
+        for win in semantic.functions.windows(2) {
+            if let [a, b] = win {
+                edges.push(FusionPlanEdge {
+                    from: a.name.clone(),
+                    to: b.name.clone(),
+                    reason: Some("static order".to_string()),
+                });
+            }
+        }
+    }
+
+    FusionPlanSnapshot {
+        nodes,
+        edges,
+        shaders: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 

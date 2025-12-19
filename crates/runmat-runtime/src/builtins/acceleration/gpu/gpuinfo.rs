@@ -351,7 +351,7 @@ pub(crate) mod tests {
         let provider = match register_wgpu_provider(options) {
             Ok(p) => p,
             Err(err) => {
-                eprintln!("Skipping gpuInfo WGPU provider test: {err}");
+                tracing::warn!("Skipping gpuInfo WGPU provider test: {err}");
                 return;
             }
         };

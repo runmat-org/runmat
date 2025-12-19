@@ -774,9 +774,7 @@ mod tests {
         validator
             .validate_header(&header, &mut errors, &mut warnings)
             .unwrap();
-        if !errors.is_empty() {
-            eprintln!("Validation errors: {errors:?}");
-        }
+        assert!(errors.is_empty(), "Validation errors: {errors:?}");
         assert!(errors.is_empty());
     }
 

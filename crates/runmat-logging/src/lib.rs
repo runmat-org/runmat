@@ -2,11 +2,15 @@ use once_cell::sync::OnceCell;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
+use tracing::subscriber::DefaultGuard;
 use tracing::Subscriber;
 use tracing_log::LogTracer;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeLogRecord {
@@ -47,8 +51,11 @@ type TraceHook = Arc<dyn Fn(&[TraceEvent]) + Send + Sync>;
 
 static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
 static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
+static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 
-pub struct LoggingGuard;
+pub struct LoggingGuard {
+    _guard: Option<DefaultGuard>,
+}
 
 #[derive(Clone, Default)]
 pub struct LoggingOptions {
@@ -76,16 +83,22 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
     let _ = LogTracer::init();
 
     let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_from_env("RUNMAT_LOG"))
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let bridge_layer = LogBridgeLayer;
-    let trace_layer = TraceBridgeLayer { pid: opts.pid };
-
-    let subscriber = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(bridge_layer)
-        .with(trace_layer);
+    let build_subscriber = || {
+        let bridge_layer = LogBridgeLayer;
+        let trace_layer = if opts.enable_traces {
+            Some(TraceBridgeLayer { pid: opts.pid })
+        } else {
+            None
+        };
+        tracing_subscriber::registry()
+            .with(env_filter.clone())
+            .with(bridge_layer)
+            .with(trace_layer.clone())
+    };
 
     #[cfg(feature = "otlp")]
     let subscriber = if opts.enable_otlp {
@@ -94,14 +107,42 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
         subscriber
     };
 
-    tracing::subscriber::set_global_default(subscriber).ok();
+    let guard = match tracing::subscriber::set_global_default(build_subscriber()) {
+        Ok(()) => None,
+        Err(_) => Some(tracing::subscriber::set_default(build_subscriber())),
+    };
 
-    LoggingGuard
+    LoggingGuard { _guard: guard }
 }
 
 struct LogBridgeLayer;
+#[derive(Clone)]
 struct TraceBridgeLayer {
     pid: i64,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_rfc3339() -> String {
+    js_sys::Date::new_0()
+        .to_iso_string()
+        .as_string()
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_timestamp_micros() -> i64 {
+    // Date::now returns milliseconds since epoch as f64
+    (js_sys::Date::now() * 1000.0).round() as i64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_timestamp_micros() -> i64 {
+    chrono::Utc::now().timestamp_micros()
 }
 
 impl<S> Layer<S> for LogBridgeLayer
@@ -113,7 +154,7 @@ where
         event.record(&mut visitor);
 
         let record = RuntimeLogRecord {
-            ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            ts: now_rfc3339(),
             level: event.metadata().level().to_string(),
             target: event.metadata().target().to_string(),
             message: visitor.message.unwrap_or_else(|| event.metadata().name().to_string()),
@@ -121,9 +162,8 @@ where
             span_id: current_span_id(),
             fields: visitor
                 .fields
-                .as_object()
-                .filter(|obj| !obj.is_empty())
-                .cloned(),
+                .and_then(|v| v.as_object().cloned().map(JsonValue::Object))
+                .filter(|obj| obj.as_object().map(|m| !m.is_empty()).unwrap_or(false)),
         };
 
         if let Some(hook) = LOG_HOOK.get() {
@@ -136,7 +176,7 @@ impl<S> Layer<S> for TraceBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
         // Only emit trace events if a hook is set
         let hook = match TRACE_HOOK.get() {
             Some(h) => h,
@@ -144,7 +184,7 @@ where
         };
 
         let meta = event.metadata();
-        let ts = chrono::Utc::now().timestamp_micros();
+        let ts = now_timestamp_micros();
 
         let trace_id = current_trace_id();
         let span_id = current_span_id();
@@ -198,7 +238,7 @@ where
         None => return,
     };
     let meta = span.metadata();
-    let ts = chrono::Utc::now().timestamp_micros();
+    let ts = now_timestamp_micros();
 
     let trace_id = current_trace_id();
     let span_id = current_span_id();
@@ -237,7 +277,31 @@ fn current_trace_span_ids() -> (Option<String>, Option<String>) {
             return (Some(sc.trace_id().to_string()), Some(sc.span_id().to_string()));
         }
     }
-    (None, None)
+    let span_id = tracing::Span::current().id().map(|id| id.into_u64().to_string());
+    let trace_id = Some(fallback_trace_id());
+    (trace_id, span_id)
+}
+
+fn fallback_trace_id() -> String {
+    FALLBACK_TRACE_ID
+        .get_or_init(|| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let micros = now_timestamp_micros() as u128;
+                let rand = (js_sys::Math::random() * 1_000_000.0) as u128;
+                format!("{:x}-{:x}", micros, rand)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let nanos = SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or_default();
+                let tid = format!("{:?}", std::thread::current().id());
+                format!("{:x}-{tid}", nanos)
+            }
+        })
+        .clone()
 }
 
 #[derive(Default)]
@@ -295,5 +359,76 @@ fn otel_layer() -> impl Layer<tracing_subscriber::Registry> {
         .expect("failed to install OTEL pipeline");
 
     OpenTelemetryLayer::new(otel_tracer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing::info;
+
+    #[test]
+    fn log_hook_receives_record() {
+        let captured: Arc<Mutex<Vec<RuntimeLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
+        let hook = {
+            let c = captured.clone();
+            move |rec: &RuntimeLogRecord| {
+                c.lock().unwrap().push(rec.clone());
+            }
+        };
+        set_runtime_log_hook(hook);
+        let _guard = init_logging(LoggingOptions {
+            enable_otlp: false,
+            enable_traces: false,
+            pid: 1,
+        });
+
+        info!("hello world");
+
+        let items = captured.lock().unwrap();
+        assert!(!items.is_empty());
+        assert!(items.iter().any(|r| r.message.contains("hello world")));
+    }
+
+    #[test]
+    fn trace_hook_receives_events() {
+        let captured: Arc<Mutex<Vec<TraceEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let hook = {
+            let c = captured.clone();
+            move |events: &[TraceEvent]| {
+                c.lock().unwrap().extend_from_slice(events);
+            }
+        };
+        set_trace_hook(hook);
+        let _guard = init_logging(LoggingOptions {
+            enable_otlp: false,
+            enable_traces: true,
+            pid: 1,
+        });
+
+        let span = tracing::info_span!("test_span");
+        let _enter = span.enter();
+        info!("inside span");
+
+        let items = captured.lock().unwrap();
+        assert!(!items.is_empty());
+        assert!(items
+            .iter()
+            .any(|e| e.name == "test_span" || e.message().unwrap_or_else(|| "".to_string()).contains("inside span")));
+    }
+
+    // helper to get message from TraceEvent args if present
+    impl TraceEvent {
+        fn message(&self) -> Option<String> {
+            if let Some(args) = &self.args {
+                if let Some(obj) = args.as_object() {
+                    if let Some(val) = obj.get("message") {
+                        return val.as_str().map(|s| s.to_string());
+                    }
+                }
+            }
+            None
+        }
+    }
 }
 

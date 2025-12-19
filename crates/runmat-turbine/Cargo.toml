@@ -16,6 +16,7 @@ cranelift-codegen = { workspace = true }
 cranelift-native = { workspace = true }
 target-lexicon = { workspace = true }
 log = { workspace = true }
+tracing = "0.1"
 thiserror = { workspace = true }
 libm = "0.2"
 runmat-ignition = { workspace = true }

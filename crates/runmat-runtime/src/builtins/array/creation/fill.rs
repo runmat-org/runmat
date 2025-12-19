@@ -867,22 +867,22 @@ pub(crate) mod tests {
                     if let Some(p) = runmat_accelerate_api::provider() {
                         p
                     } else {
-                        eprintln!(
-                        "skipping fill_wgpu_like_matches_cpu: provider not registered after init"
-                    );
+                        tracing::warn!(
+                            "skipping fill_wgpu_like_matches_cpu: provider not registered after init"
+                        );
                         return;
                     }
                 }
                 Ok(Err(err)) => {
-                    eprintln!(
+                    tracing::warn!(
                         "skipping fill_wgpu_like_matches_cpu: wgpu provider unavailable ({err})"
                     );
                     return;
                 }
                 Err(_) => {
-                    eprintln!(
-                    "skipping fill_wgpu_like_matches_cpu: wgpu provider initialisation panicked"
-                );
+                    tracing::warn!(
+                        "skipping fill_wgpu_like_matches_cpu: wgpu provider initialisation panicked"
+                    );
                     return;
                 }
             };

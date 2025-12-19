@@ -1148,7 +1148,7 @@ pub(crate) mod tests {
             match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(options) {
                 Ok(p) => p,
                 Err(err) => {
-                    eprintln!("polyfit_wgpu_matches_cpu: skipping test ({err})");
+                    warn!("polyfit_wgpu_matches_cpu: skipping test ({err})");
                     return;
                 }
             };

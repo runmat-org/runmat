@@ -464,9 +464,12 @@ fn log_rand_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
         return;
     }
     let elems = tensor::element_count(shape);
-    eprintln!(
-        "[rand_debug] fallback dtype={:?} elems={} shape={:?} reason={}",
-        dtype, elems, shape, reason
+    tracing::debug!(
+        dtype = ?dtype,
+        elems,
+        shape = ?shape,
+        reason,
+        "[rand_debug] fallback"
     );
 }
 

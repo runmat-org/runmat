@@ -686,11 +686,11 @@ pub(crate) mod tests {
         let provider = match registration {
             Ok(Ok(_)) => runmat_accelerate_api::provider().expect("wgpu provider registered"),
             Ok(Err(err)) => {
-                eprintln!("skipping wgpu randperm test: {err}");
+                tracing::warn!("skipping wgpu randperm test: {err}");
                 return;
             }
             Err(_) => {
-                eprintln!("skipping wgpu randperm test: provider initialization panicked");
+                tracing::warn!("skipping wgpu randperm test: provider initialization panicked");
                 return;
             }
         };

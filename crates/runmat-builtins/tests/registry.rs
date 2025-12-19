@@ -1,22 +1,22 @@
 use runmat_builtins::{builtin_functions, CellArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[runtime_builtin(name = "add")]
+#[runtime_builtin(name = "add", builtin_path = "tests::add")]
 fn add(x: i32, y: i32) -> Result<i32, String> {
     Ok(x + y)
 }
 
-#[runtime_builtin(name = "sub")]
+#[runtime_builtin(name = "sub", builtin_path = "tests::sub")]
 fn sub(x: i32, y: i32) -> Result<i32, String> {
     Ok(x - y)
 }
 
-#[runtime_builtin(name = "matrix_sum")]
+#[runtime_builtin(name = "matrix_sum", builtin_path = "tests::matrix_sum")]
 fn matrix_sum(m: Tensor) -> Result<f64, String> {
     Ok(m.data.iter().sum())
 }
 
-#[runtime_builtin(name = "str_length")]
+#[runtime_builtin(name = "str_length", builtin_path = "tests::str_length")]
 fn str_length(s: String) -> Result<i32, String> {
     Ok(s.len() as i32)
 }

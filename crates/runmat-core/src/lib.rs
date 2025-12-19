@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{debug, info, warn};
+use tracing::{debug, info, info_span, warn};
 use runmat_builtins::{Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 
@@ -27,10 +27,8 @@ use uuid::Uuid;
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-#[cfg(not(target_arch = "wasm32"))]
 mod fusion_snapshot;
 mod value_metadata;
-#[cfg(not(target_arch = "wasm32"))]
 use fusion_snapshot::build_fusion_snapshot;
 
 pub use value_metadata::{
@@ -782,6 +780,41 @@ impl RunMatSession {
         self.snapshot.is_some()
     }
 
+    /// Compile the input and produce a fusion plan snapshot without executing.
+    pub fn compile_fusion_plan(&self, input: &str) -> Result<Option<FusionPlanSnapshot>> {
+        // Parse the input (reuses the same pipeline as full execution).
+        let ast = {
+            let _span = info_span!("runtime.parse").entered();
+            parse(input)
+                .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
+        };
+
+        // Lower to HIR with existing variable and function context.
+        let lowering_result = {
+            let _span = info_span!("runtime.lower").entered();
+            runmat_hir::lower_with_full_context(
+                &ast,
+                &self.variable_names,
+                &self.function_definitions,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?
+        };
+
+        // Compile to bytecode to surface the accelerator graph + fusion groups.
+        let hir = lowering_result.hir;
+        let existing_functions = self.convert_hir_functions_to_user_functions();
+        let bytecode = {
+            let _span = info_span!("runtime.compile.bytecode").entered();
+            runmat_ignition::compile_with_functions(&hir, &existing_functions)
+                .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?
+        };
+
+        Ok(build_fusion_snapshot(
+            bytecode.accel_graph.as_ref(),
+            &bytecode.fusion_groups,
+        ))
+    }
+
     /// Execute MATLAB/Octave code
     pub fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
         if !self.pending_executions.is_empty() {
@@ -794,6 +827,12 @@ impl RunMatSession {
     }
 
     fn execute_internal(&mut self, input: &str) -> Result<ExecutionResult> {
+        let exec_span = info_span!(
+            "runtime.execute",
+            input_len = input.len(),
+            verbose = self.verbose
+        );
+        let _exec_guard = exec_span.enter();
         runmat_runtime::console::reset_thread_buffer();
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
@@ -813,19 +852,25 @@ impl RunMatSession {
         }
 
         // Parse the input
-        let ast = parse(input)
-            .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?;
+        let ast = {
+            let _span = info_span!("runtime.parse").entered();
+            parse(input)
+                .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
+        };
         if self.verbose {
             debug!("AST: {ast:?}");
         }
 
         // Lower to HIR with existing variable and function context
-        let lowering_result = runmat_hir::lower_with_full_context(
-            &ast,
-            &self.variable_names,
-            &self.function_definitions,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
+        let lowering_result = {
+            let _span = info_span!("runtime.lower").entered();
+            runmat_hir::lower_with_full_context(
+                &ast,
+                &self.variable_names,
+                &self.function_definitions,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?
+        };
         let (hir, updated_vars, updated_functions, var_names_map) = (
             lowering_result.hir,
             lowering_result.variables,
@@ -834,10 +879,10 @@ impl RunMatSession {
         );
         let max_var_id = updated_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
-            println!("updated_vars: {:?}", updated_vars);
+            debug!(?updated_vars, "[repl] updated_vars");
         }
         if debug_trace {
-            println!("workspace_values_before: {:?}", self.workspace_values);
+            debug!(workspace_values_before = ?self.workspace_values, "[repl] workspace snapshot before execution");
         }
         let id_to_name: HashMap<usize, String> = var_names_map
             .iter()
@@ -851,7 +896,7 @@ impl RunMatSession {
             .collect();
         let prev_assigned_snapshot = assigned_snapshot.clone();
         if debug_trace {
-            println!("assigned_snapshot: {:?}", assigned_snapshot);
+            debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
         let mut pending_workspace_guard = Some(runmat_ignition::push_pending_workspace(
             updated_vars.clone(),
@@ -872,8 +917,11 @@ impl RunMatSession {
 
         // Compile to bytecode with existing function definitions
         let existing_functions = self.convert_hir_functions_to_user_functions();
-        let bytecode = runmat_ignition::compile_with_functions(&hir, &existing_functions)
-            .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?;
+        let bytecode = {
+            let _span = info_span!("runtime.compile.bytecode").entered();
+            runmat_ignition::compile_with_functions(&hir, &existing_functions)
+                .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?
+        };
         if self.verbose {
             debug!(
                 "Bytecode compiled: {} instructions",
@@ -1211,8 +1259,7 @@ impl RunMatSession {
             if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
             {
                 if debug_trace {
-                    println!("mutated_names: {:?}", mutated_names);
-                    println!("assigned_returned: {:?}", assigned);
+                    debug!(?mutated_names, ?assigned, "[repl] mutated names and assigned return values");
                 }
                 self.variable_names = mutated_names.clone();
                 let mut new_assigned: HashSet<String> = assigned
@@ -1234,7 +1281,7 @@ impl RunMatSession {
                     }
                 }
                 if debug_trace {
-                    println!("new_assigned: {:?}", new_assigned);
+                    debug!(?new_assigned, "[repl] new assignments");
                 }
                 for name in new_assigned {
                     let var_id = mutated_names.get(&name).copied().or_else(|| {
@@ -1249,7 +1296,7 @@ impl RunMatSession {
                                 .insert(name.clone(), value_clone.clone());
                             workspace_updates.push(workspace_entry(&name, &value_clone));
                             if debug_trace {
-                                println!("workspace_update: {} -> {:?}", name, value_clone);
+                                debug!(name, ?value_clone, "[repl] workspace update");
                             }
                         }
                     }
@@ -1676,9 +1723,11 @@ impl RunMatSession {
         let required_len = std::cmp::max(bytecode.var_count, max_var_id + 1);
         let mut new_variable_array = vec![Value::Num(0.0); required_len];
         if debug_trace {
-            println!(
-                "prepare: bytecode.var_count={} required_len={} max_var_id={}",
-                bytecode.var_count, required_len, max_var_id
+            debug!(
+                bytecode_var_count = bytecode.var_count,
+                required_len,
+                max_var_id,
+                "[repl] prepare variable array"
             );
         }
 
@@ -1687,19 +1736,21 @@ impl RunMatSession {
             if new_var_id < new_variable_array.len() {
                 if let Some(value) = self.workspace_values.get(var_name) {
                     if debug_trace {
-                        println!(
-                            "prepare: setting {} (var_id={}) -> {:?}",
-                            var_name, new_var_id, value
+                        debug!(
+                            var_name,
+                            var_id = new_var_id,
+                            ?value,
+                            "[repl] prepare set var"
                         );
                     }
                     new_variable_array[new_var_id] = value.clone();
                 }
             } else if debug_trace {
-                println!(
-                    "prepare: skipping {} (var_id={}) because len={}",
+                debug!(
                     var_name,
-                    new_var_id,
-                    new_variable_array.len()
+                    var_id = new_var_id,
+                    len = new_variable_array.len(),
+                    "[repl] prepare skipping var"
                 );
             }
         }
@@ -1759,60 +1810,31 @@ impl RunMatSession {
 
     /// Show detailed system information
     pub fn show_system_info(&self) {
-        println!("RunMat Session Status");
-        println!("==========================");
-        println!();
-
-        println!(
-            "JIT Compiler: {}",
-            if self.has_jit() {
-                "Available"
-            } else {
-                "Disabled/Failed"
-            }
-        );
-        println!("Verbose Mode: {}", self.verbose);
-        println!();
-
-        println!("Execution Statistics:");
-        println!("  Total Executions: {}", self.stats.total_executions);
-        println!("  JIT Compiled: {}", self.stats.jit_compiled);
-        println!("  Interpreter Used: {}", self.stats.interpreter_fallback);
-        println!(
-            "  Average Time: {:.2}ms",
-            self.stats.average_execution_time_ms
-        );
-        println!();
-
         let gc_stats = self.gc_stats();
-        println!("Garbage Collector:");
-        println!(
-            "  Total Allocations: {}",
-            gc_stats
+        info!(
+            jit = %if self.has_jit() { "available" } else { "disabled/failed" },
+            verbose = self.verbose,
+            total_executions = self.stats.total_executions,
+            jit_compiled = self.stats.jit_compiled,
+            interpreter_fallback = self.stats.interpreter_fallback,
+            avg_time_ms = self.stats.average_execution_time_ms,
+            total_allocations = gc_stats
                 .total_allocations
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-        println!(
-            "  Minor Collections: {}",
-            gc_stats
+                .load(std::sync::atomic::Ordering::Relaxed),
+            minor_collections = gc_stats
                 .minor_collections
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-        println!(
-            "  Major Collections: {}",
-            gc_stats
+                .load(std::sync::atomic::Ordering::Relaxed),
+            major_collections = gc_stats
                 .major_collections
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-        println!(
-            "  Current Memory: {:.2} MB",
-            gc_stats
+                .load(std::sync::atomic::Ordering::Relaxed),
+            current_memory_mb = gc_stats
                 .current_memory_usage
                 .load(std::sync::atomic::Ordering::Relaxed) as f64
                 / 1024.0
-                / 1024.0
+                / 1024.0,
+            workspace_vars = self.workspace_values.len(),
+            "RunMat Session Status"
         );
-        println!();
     }
 
     #[cfg(feature = "jit")]

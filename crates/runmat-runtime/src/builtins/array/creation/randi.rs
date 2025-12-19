@@ -950,7 +950,7 @@ pub(crate) mod tests {
         ) {
             Ok(_) => runmat_accelerate_api::provider().expect("wgpu provider registered"),
             Err(err) => {
-                eprintln!("randi_wgpu_like_produces_in_range_values skipped: {err}");
+                tracing::warn!("randi_wgpu_like_produces_in_range_values skipped: {err}");
                 return;
             }
         };

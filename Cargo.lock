@@ -5949,6 +5949,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror 1.0.69",
+ "tracing",
  "wgpu",
 ]
 
@@ -5994,6 +5995,7 @@ dependencies = [
  "runmat-snapshot",
  "runmat-time",
  "runmat-turbine",
+ "tracing",
  "uuid",
  "wasm-bindgen-test",
 ]
@@ -6070,6 +6072,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-time",
  "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -6113,6 +6116,7 @@ name = "runmat-logging"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "js-sys",
  "once_cell",
  "opentelemetry 0.21.0",
  "opentelemetry-otlp",
@@ -6133,6 +6137,7 @@ dependencies = [
  "log",
  "once_cell",
  "runmat-builtins",
+ "runmat-core",
  "runmat-hir",
  "runmat-lexer",
  "runmat-parser",
@@ -6263,6 +6268,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+ "tracing",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -6349,6 +6355,7 @@ dependencies = [
  "runmat-time",
  "target-lexicon",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

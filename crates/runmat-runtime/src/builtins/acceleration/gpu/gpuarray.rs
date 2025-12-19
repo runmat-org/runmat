@@ -1097,7 +1097,7 @@ pub(crate) mod tests {
                 provider.free(&handle).ok();
             }
             Err(err) => {
-                eprintln!("Skipping gpu_array_wgpu_roundtrip: {err}");
+                tracing::warn!("Skipping gpu_array_wgpu_roundtrip: {err}");
             }
         }
         runmat_accelerate::simple_provider::register_inprocess_provider();

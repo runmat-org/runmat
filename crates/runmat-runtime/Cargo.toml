@@ -26,6 +26,7 @@ encoding_rs = "0.8.35"
 chrono = { workspace = true }
 libc = "0.2"
 log = { workspace = true }
+tracing = "0.1"
 num-complex = "0.4"
 num-traits = "0.2"
 nalgebra = "0.32"

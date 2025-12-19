@@ -33,6 +33,7 @@ num-complex = "0.4"
 rustfft = "6.2"
 smallvec = "1.13"
 rand = "0.8"
+tracing = "0.1"
 
 # Optional backend deps
 wgpu = { version = "0.19", optional = true }

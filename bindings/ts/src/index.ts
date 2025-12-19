@@ -332,6 +332,7 @@ export interface RunMatSessionHandle {
     options?: MaterializeVariableOptions
   ): Promise<MaterializedVariable>;
   setFusionPlanEnabled(enabled: boolean): void;
+  fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
 }
 
 interface NativeInitOptions {
@@ -369,6 +370,7 @@ interface RunMatNativeSession {
     options?: MaterializeVariableOptionsWire
   ) => MaterializedVariable;
   setFusionPlanEnabled?: (enabled: boolean) => void;
+   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
 }
 
 interface ResumeInputWireValue {
@@ -749,6 +751,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "setFusionPlanEnabled");
     this.native.setFusionPlanEnabled(enabled);
+  }
+
+  async fusionPlanForSource(source: string): Promise<FusionPlanSnapshot | null> {
+    this.ensureActive();
+    if (typeof this.native.fusionPlanForSource !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose fusionPlanForSource yet.");
+    }
+    return this.native.fusionPlanForSource(source) ?? null;
   }
 }
 
