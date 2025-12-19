@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { use } from 'react';
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -46,8 +46,8 @@ function getBlogPost(slug: string): BlogPost | null {
   }
 }
 
-export async function generateMetadata({ params }: { params: { slug: string } }) {
-  const { slug } = params;
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const post = getBlogPost(slug);
   if (!post) return {};
 
@@ -101,8 +101,8 @@ export async function generateStaticParams() {
   }
 }
 
-export default async function BlogPostPage({ params }: { params: { slug: string } }) {
-  const { slug } = params;
+export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const post = getBlogPost(slug);
   
   if (!post) {
