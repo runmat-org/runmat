@@ -22,15 +22,39 @@ pub struct RuntimeLogRecord {
     pub fields: Option<JsonValue>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceEvent {
+    pub name: String,
+    pub cat: String,
+    pub ph: String,
+    pub ts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dur: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tid: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<JsonValue>,
+}
+
 type LogHook = Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync>;
+type TraceHook = Arc<dyn Fn(&[TraceEvent]) + Send + Sync>;
 
 static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
+static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 
 pub struct LoggingGuard;
 
 #[derive(Clone, Default)]
 pub struct LoggingOptions {
     pub enable_otlp: bool,
+    pub enable_traces: bool,
+    pub pid: i64,
 }
 
 pub fn set_runtime_log_hook<F>(hook: F)
@@ -38,6 +62,13 @@ where
     F: Fn(&RuntimeLogRecord) + Send + Sync + 'static,
 {
     let _ = LOG_HOOK.set(Arc::new(hook));
+}
+
+pub fn set_trace_hook<F>(hook: F)
+where
+    F: Fn(&[TraceEvent]) + Send + Sync + 'static,
+{
+    let _ = TRACE_HOOK.set(Arc::new(hook));
 }
 
 pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
@@ -49,8 +80,12 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
     let bridge_layer = LogBridgeLayer;
+    let trace_layer = TraceBridgeLayer { pid: opts.pid };
 
-    let subscriber = tracing_subscriber::registry().with(env_filter).with(bridge_layer);
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(bridge_layer)
+        .with(trace_layer);
 
     #[cfg(feature = "otlp")]
     let subscriber = if opts.enable_otlp {
@@ -65,6 +100,9 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
 }
 
 struct LogBridgeLayer;
+struct TraceBridgeLayer {
+    pid: i64,
+}
 
 impl<S> Layer<S> for LogBridgeLayer
 where
@@ -79,8 +117,8 @@ where
             level: event.metadata().level().to_string(),
             target: event.metadata().target().to_string(),
             message: visitor.message.unwrap_or_else(|| event.metadata().name().to_string()),
-            trace_id: None,
-            span_id: None,
+            trace_id: current_trace_id(),
+            span_id: current_span_id(),
             fields: visitor
                 .fields
                 .as_object()
@@ -92,6 +130,100 @@ where
             hook(&record);
         }
     }
+}
+
+impl<S> Layer<S> for TraceBridgeLayer
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        // Only emit trace events if a hook is set
+        let hook = match TRACE_HOOK.get() {
+            Some(h) => h,
+            None => return,
+        };
+
+        let meta = event.metadata();
+        let ts = chrono::Utc::now().timestamp_micros();
+
+        let trace_id = current_trace_id();
+        let span_id = current_span_id();
+
+        let mut visitor = JsonVisitor::default();
+        event.record(&mut visitor);
+
+        let args = visitor.fields.as_ref().and_then(|v| v.as_object()).cloned().map(JsonValue::Object);
+
+        let ev = TraceEvent {
+          name: visitor.message.unwrap_or_else(|| meta.name().to_string()),
+          cat: meta.target().to_string(),
+          ph: "i".to_string(), // instant event
+          ts,
+          dur: None,
+          pid: Some(self.pid),
+          tid: None,
+          trace_id,
+          span_id,
+          args,
+        };
+
+        hook(&[ev]);
+    }
+
+    fn on_enter(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        if TRACE_HOOK.get().is_none() {
+            return;
+        }
+        if let Some(span) = ctx.span(id) {
+            emit_span_event(span, "B", self.pid);
+        }
+    }
+
+    fn on_exit(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        if TRACE_HOOK.get().is_none() {
+            return;
+        }
+        if let Some(span) = ctx.span(id) {
+            emit_span_event(span, "E", self.pid);
+        }
+    }
+}
+
+fn emit_span_event<S>(span: tracing_subscriber::registry::SpanRef<'_, S>, phase: &str, pid: i64)
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    let hook = match TRACE_HOOK.get() {
+        Some(h) => h,
+        None => return,
+    };
+    let meta = span.metadata();
+    let ts = chrono::Utc::now().timestamp_micros();
+
+    let trace_id = current_trace_id();
+    let span_id = current_span_id();
+
+    let ev = TraceEvent {
+        name: meta.name().to_string(),
+        cat: meta.target().to_string(),
+        ph: phase.to_string(),
+        ts,
+        dur: None,
+        pid: Some(pid),
+        tid: None,
+        trace_id,
+        span_id,
+        args: None,
+    };
+    hook(&[ev]);
+}
+
+fn current_trace_id() -> Option<String> {
+    None
+}
+
+fn current_span_id() -> Option<String> {
+    None
 }
 
 #[derive(Default)]

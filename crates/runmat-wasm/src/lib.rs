@@ -160,6 +160,16 @@ static RUNTIME_LOG_FORWARDER: OnceLock<Arc<dyn Fn(&runmat_logging::RuntimeLogRec
     OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
+        RefCell::new(HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static TRACE_FORWARDER: OnceLock<Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>> =
+    OnceLock::new();
+static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
 #[derive(Clone)]
 struct SessionConfig {
     enable_jit: bool,
@@ -684,6 +694,41 @@ pub fn unsubscribe_runtime_log(id: u32) {
 pub fn unsubscribe_runtime_log(_id: u32) {}
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = subscribeTraceEvents)]
+pub fn subscribe_trace_events(callback: JsValue) -> Result<u32, JsValue> {
+    init_logging_once();
+    let function = callback
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| js_error("subscribeTraceEvents expects a Function"))?;
+    ensure_trace_forwarder_installed();
+    let id = TRACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    TRACE_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().insert(id, function);
+    });
+    Ok(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = subscribeTraceEvents)]
+pub fn subscribe_trace_events(_callback: JsValue) -> Result<u32, JsValue> {
+    Err(js_error(
+        "subscribeTraceEvents is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = unsubscribeTraceEvents)]
+pub fn unsubscribe_trace_events(id: u32) {
+    TRACE_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().remove(&id);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = unsubscribeTraceEvents)]
+pub fn unsubscribe_trace_events(_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
 fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
     JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
@@ -1058,6 +1103,28 @@ fn ensure_runtime_log_forwarder_installed() {
         let hook = forwarder.clone();
         set_runtime_log_hook(move |rec| {
             (hook)(rec);
+        });
+        forwarder
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_trace_forwarder_installed() {
+    use runmat_logging::{set_trace_hook, TraceEvent};
+
+    TRACE_FORWARDER.get_or_init(|| {
+        let forwarder: Arc<dyn Fn(&[TraceEvent]) + Send + Sync> =
+            Arc::new(|events: &[TraceEvent]| {
+                let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+                TRACE_SUBSCRIBERS.with(|cell| {
+                    for cb in cell.borrow().values() {
+                        let _ = cb.call1(&JsValue::NULL, &js_value);
+                    }
+                });
+            });
+        let hook = forwarder.clone();
+        set_trace_hook(move |events| {
+            (hook)(events);
         });
         forwarder
     });
@@ -1577,8 +1644,9 @@ fn init_logging_once() {
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = init_logging(LoggingOptions { enable_otlp: false });
+            let _ = init_logging(LoggingOptions { enable_otlp: false, enable_traces: false, pid: 1 });
             ensure_runtime_log_forwarder_installed();
+            ensure_trace_forwarder_installed();
         }
     });
 }
