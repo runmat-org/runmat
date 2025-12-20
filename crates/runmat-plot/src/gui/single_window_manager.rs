@@ -31,7 +31,7 @@ pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
     WINDOW_ACTIVE.store(true, Ordering::Release);
 
     // Spawn a background thread for the window (now supported on Windows via any_thread)
-    std::thread::Builder::new()
+    match std::thread::Builder::new()
         .name("runmat-plot-window".to_string())
         .spawn(move || {
             let result = show_plot_internal(figure);
@@ -40,10 +40,14 @@ pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
             if let Err(e) = result {
                 eprintln!("Plot window error: {e}");
             }
-        })
-        .map_err(|e| format!("Failed to spawn plot thread: {e}"))?;
-
-    Ok("Plot window opened in background".to_string())
+        }) {
+        Ok(_) => Ok("Plot window opened in background".to_string()),
+        Err(e) => {
+            // Reset WINDOW_ACTIVE before returning error
+            WINDOW_ACTIVE.store(false, Ordering::Release);
+            Err(format!("Failed to spawn plot thread: {e}"))
+        }
+    }
 }
 
 /// Internal function that actually creates and runs the window

@@ -139,7 +139,9 @@ fn main() -> Result<()> {
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl+C: return to prompt, don't exit
+                // Ctrl+C: return to prompt, don't exit (per REPL spec)
+                // This differs from some other REPL implementations that exit on Ctrl+C.
+                // See docs/repl-spec.md section 3.4 for design rationale.
                 continue;
             }
             Err(ReadlineError::Eof) => {

@@ -113,6 +113,53 @@ fn pty_semicolon_suppresses_output() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Test how semicolon-suppressed expressions interact with `ans`.
+/// Verifies that suppressed assignments do not update `ans`,
+/// while unsuppressed expressions do.
+#[test]
+fn pty_semicolon_suppression_with_ans() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+    // Set a known ans value
+    stdin.write_all(b"ans = 10\n")?;
+    // Suppressed expression should not update ans
+    stdin.write_all(b"y = 99;\n")?;
+    // Unsuppressed expression should update ans
+    stdin.write_all(b"z = 42\n")?;
+    stdin.write_all(b"exit\n")?;
+    drop(stdin);
+
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    // Verify ans is initially set to 10
+    assert!(
+        stdout.contains("ans = 10"),
+        "Expected initial 'ans = 10', got:\n{stdout}"
+    );
+    // Verify that the suppressed assignment (y = 99;) produces no output
+    let y_99_count = stdout.matches("ans = 99").count();
+    assert_eq!(
+        y_99_count, 0,
+        "Expected NO 'ans = 99' from suppressed assignment, but found some, got:\n{stdout}"
+    );
+    // Verify that ans is updated to 42 after unsuppressed assignment
+    assert!(
+        stdout.contains("ans = 42"),
+        "Expected 'ans = 42' after unsuppressed assignment, got:\n{stdout}"
+    );
+
+    println!("✓ PTY semicolon suppression with ans persistence passed");
+    Ok(())
+}
+
 /// Test that ans persists across statements (history and previous computation).
 #[test]
 fn pty_ans_persistence() -> Result<(), Box<dyn std::error::Error>> {

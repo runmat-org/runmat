@@ -279,7 +279,7 @@ Current piped tests cannot validate:
 ### Long-term
 1. Windows ConPTY integration
 2. Persistent history (.runmat_history)
-3. Tab completion (requires buslines library)
+3. Tab completion (via [rustyline](https://crates.io/crates/rustyline) completion API)
 4. Help system improvements
 
 ---

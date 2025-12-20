@@ -20,18 +20,23 @@ pub enum CommandResult {
 /// Returns CommandResult if it's a recognized command, or NotCommand if it should be evaluated as MATLAB code
 pub fn parse_and_execute(input: &str, engine: &mut ReplEngine) -> CommandResult {
     let trimmed = input.trim();
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    let mut parts = trimmed.split_whitespace();
 
-    if parts.is_empty() {
-        return CommandResult::NotCommand;
-    }
+    let cmd = match parts.next() {
+        Some(c) => c,
+        None => return CommandResult::NotCommand,
+    };
 
-    match parts[0] {
+    // Collect remaining tokens as path/argument (handles spaces in paths)
+    let rest: String = parts.collect::<Vec<_>>().join(" ");
+    let arg = if rest.is_empty() { "." } else { &rest };
+
+    match cmd {
         "pwd" => cmd_pwd(),
-        "cd" => cmd_cd(if parts.len() > 1 { parts[1] } else { "." }),
-        "dir" | "ls" => cmd_dir_ls(if parts.len() > 1 { parts[1] } else { "." }),
+        "cd" => cmd_cd(arg),
+        "dir" | "ls" => cmd_dir_ls(arg),
         "clear" | "clearvars" => {
-            if parts.len() == 1 {
+            if rest.is_empty() {
                 // clear all variables
                 CommandResult::Clear
             } else {
