@@ -12,6 +12,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
+pub mod commands;
+
 /// Enhanced REPL execution engine that integrates all RunMat components
 pub struct ReplEngine {
     /// JIT compiler engine (optional for fallback mode)

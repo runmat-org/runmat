@@ -229,6 +229,17 @@ Add support for `RUNMAT_REPL_TEST=1` or `--repl-test`:
 
 **KNOWN LIMITATION:** Tests use piped stdin (non-TTY), so interactive features (arrow keys, real Ctrl+C, line editing) are NOT tested. Need real PTY infrastructure for full validation. See Milestone 3.
 
+### Milestone 2 (Shell Commands Complete)
+- [x] Implement `pwd` command (print working directory)
+- [x] Implement `cd <path>` command (change directory)
+- [x] Implement `dir` / `ls` command (list directory contents)
+- [x] Implement `clear` / `clearvars` command (clear all variables)
+- [x] Implement `who` command (list variable names)
+- [x] Implement `whos` command (detailed variable listing)
+- [x] Write 6 integration tests for all commands
+- [x] All 94 tests pass (3 cmd units + 6 cmd integration + 7 pty + 9 repl units + 9 semicolon + 10 persistence + 41 other)
+- [x] `cargo fmt` and `cargo clippy` clean
+
 ---
 
 ## 8. Appendix: Example REPL Sessions

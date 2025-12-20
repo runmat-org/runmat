@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::info;
 use runmat_gc::gc_test_context;
-use runmat_repl::ReplEngine;
+use runmat_repl::{commands::CommandResult, ReplEngine};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
                     let _ = rl.add_history_entry(input);
                 }
 
-                // Handle special commands
+                // Handle special commands first
                 match input {
                     "exit" | "quit" => {
                         println!("Goodbye!");
@@ -88,7 +88,27 @@ fn main() -> Result<()> {
                         continue;
                     }
                     "" => continue, // Empty line
-                    _ => {}
+                    _ => {
+                        // Try to parse as a shell command
+                        match runmat_repl::commands::parse_and_execute(input, &mut engine) {
+                            CommandResult::Handled(output) => {
+                                println!("{output}");
+                                continue;
+                            }
+                            CommandResult::Clear => {
+                                engine.clear_variables();
+                                println!("Variables cleared");
+                                continue;
+                            }
+                            CommandResult::Exit => {
+                                println!("Goodbye!");
+                                break;
+                            }
+                            CommandResult::NotCommand => {
+                                // Fall through to expression evaluation
+                            }
+                        }
+                    }
                 }
 
                 // Execute the input
