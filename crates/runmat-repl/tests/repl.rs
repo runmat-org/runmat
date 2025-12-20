@@ -56,10 +56,12 @@ fn multiple_statements() {
 #[test]
 fn repl_binary_processes_single_line() -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
     child.stdin.as_mut().unwrap().write_all(b"x=1\n")?;
+    child.stdin.as_mut().unwrap().write_all(b"exit\n")?;
     let output = child.wait_with_output()?;
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);

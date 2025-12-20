@@ -1,8 +1,8 @@
 # RunMat REPL Behavioral Specification
 
-**Version:** 0.1 (In Progress)  
+**Version:** 0.2 (In Progress)  
 **Last Updated:** 2025-12-20  
-**Status:** Milestone 0 (Discovery) - Spec skeleton with current and target behavior
+**Status:** Milestone 1 (MVP Complete) - History, editing, interrupt, and testing implemented
 
 ---
 
@@ -199,15 +199,33 @@ Add support for `RUNMAT_REPL_TEST=1` or `--repl-test`:
 
 ---
 
-## 7. Checklist (Milestone 0)
+## 7. Checklist
 
+### Milestone 0 (Complete)
 - [x] Document current REPL state
 - [x] Enumerate target features (MVP scope)
 - [x] List commands and keybindings
 - [x] Define test strategy
-- [ ] Create minimal PTY test to spawn REPL and detect prompt
-- [ ] Verify CI can run PTY tests on Linux
-- [ ] Add Milestone 1 task list
+- [x] Create minimal PTY test to spawn REPL and detect prompt
+- [x] Verify CI can run PTY tests
+- [x] Initial spec and testing docs
+
+### Milestone 1 (In Progress/Complete)
+- [x] Implement history buffer with rustyline
+- [x] Integrate line editor (up/down history navigation)
+- [x] Add Ctrl+C interrupt handling (return to prompt, don't exit)
+- [x] Add Ctrl+D EOF handling (graceful exit)
+- [x] Add test mode flag (`RUNMAT_REPL_TEST=1`) for deterministic output
+- [x] Write 7 PTY integration tests covering:
+  - Prompt detection
+  - Assignment display
+  - Semicolon suppression
+  - `ans` persistence
+  - Exit command
+  - Help command
+  - Ctrl+D EOF exit
+- [x] All tests pass `cargo fmt` and `cargo clippy`
+- [x] All existing tests still pass
 
 ---
 

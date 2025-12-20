@@ -2,7 +2,8 @@ use anyhow::Result;
 use log::info;
 use runmat_gc::gc_test_context;
 use runmat_repl::ReplEngine;
-use std::io::{self, Write};
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 
 fn main() -> Result<()> {
     // Initialize logging
@@ -14,9 +15,11 @@ fn main() -> Result<()> {
     // Initialize the REPL engine with GC test context for safety
     let mut engine = gc_test_context(ReplEngine::new)?;
 
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let mut line = String::new();
+    // Check if running in test mode (for stable output in CI/tests)
+    let test_mode = std::env::var("RUNMAT_REPL_TEST").is_ok();
+
+    // Initialize rustyline for interactive line editing with history
+    let mut rl = DefaultEditor::new()?;
 
     // Welcome message
     println!("RunMat REPL v{}", env!("CARGO_PKG_VERSION"));
@@ -25,89 +28,108 @@ fn main() -> Result<()> {
     println!();
 
     loop {
-        line.clear();
-        print!("runmat> ");
-        if stdout.flush().is_err() {
-            break;
+        // In test mode, print prompt explicitly for reproducibility
+        if test_mode {
+            print!("runmat> ");
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
         }
 
-        if stdin.read_line(&mut line).unwrap_or(0) == 0 {
-            println!(); // EOF - add newline before exit
-            break;
-        }
+        let readline = rl.readline(if test_mode { "" } else { "runmat> " });
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
 
-        let input = line.trim();
+                // Add non-empty lines to history
+                if !input.is_empty() {
+                    let _ = rl.add_history_entry(input);
+                }
 
-        // Handle special commands
-        match input {
-            "exit" | "quit" => {
-                println!("Goodbye!");
+                // Handle special commands
+                match input {
+                    "exit" | "quit" => {
+                        println!("Goodbye!");
+                        break;
+                    }
+                    "help" => {
+                        show_help();
+                        continue;
+                    }
+                    ".info" => {
+                        engine.show_system_info();
+                        continue;
+                    }
+                    ".stats" => {
+                        let stats = engine.stats();
+                        println!("Execution Statistics:");
+                        println!(
+                            "  Total: {}, JIT: {}, Interpreter: {}",
+                            stats.total_executions, stats.jit_compiled, stats.interpreter_fallback
+                        );
+                        println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
+                        continue;
+                    }
+                    ".gc-info" => {
+                        let gc_stats = engine.gc_stats();
+                        println!("Garbage Collector Statistics:");
+                        println!("{}", gc_stats.summary_report());
+                        continue;
+                    }
+                    ".gc-collect" => {
+                        match runmat_gc::gc_collect_major() {
+                            Ok(collected) => println!("Collected {collected} objects"),
+                            Err(e) => println!("GC collection failed: {e}"),
+                        }
+                        continue;
+                    }
+                    ".reset-stats" => {
+                        engine.reset_stats();
+                        println!("Statistics reset");
+                        continue;
+                    }
+                    "" => continue, // Empty line
+                    _ => {}
+                }
+
+                // Execute the input
+                match engine.execute(input) {
+                    Ok(result) => {
+                        if let Some(error) = result.error {
+                            eprintln!("Error: {error}");
+                        } else if let Some(value) = result.value {
+                            println!("ans = {value}");
+                            if result.execution_time_ms > 100 {
+                                println!(
+                                    "  (executed in {}ms{})",
+                                    result.execution_time_ms,
+                                    if result.used_jit {
+                                        " via JIT"
+                                    } else {
+                                        " via interpreter"
+                                    }
+                                );
+                            }
+                        } else if let Some(type_info) = result.type_info {
+                            println!("({})", type_info);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Execution error: {e}");
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                // Ctrl+C: return to prompt, don't exit
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                // Ctrl+D: graceful exit
+                println!();
                 break;
             }
-            "help" => {
-                show_help();
-                continue;
-            }
-            ".info" => {
-                engine.show_system_info();
-                continue;
-            }
-            ".stats" => {
-                let stats = engine.stats();
-                println!("Execution Statistics:");
-                println!(
-                    "  Total: {}, JIT: {}, Interpreter: {}",
-                    stats.total_executions, stats.jit_compiled, stats.interpreter_fallback
-                );
-                println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
-                continue;
-            }
-            ".gc-info" => {
-                let gc_stats = engine.gc_stats();
-                println!("Garbage Collector Statistics:");
-                println!("{}", gc_stats.summary_report());
-                continue;
-            }
-            ".gc-collect" => {
-                match runmat_gc::gc_collect_major() {
-                    Ok(collected) => println!("Collected {collected} objects"),
-                    Err(e) => println!("GC collection failed: {e}"),
-                }
-                continue;
-            }
-            ".reset-stats" => {
-                engine.reset_stats();
-                println!("Statistics reset");
-                continue;
-            }
-            "" => continue, // Empty line
-            _ => {}
-        }
-
-        // Execute the input
-        match engine.execute(input) {
-            Ok(result) => {
-                if let Some(error) = result.error {
-                    eprintln!("Error: {error}");
-                } else if let Some(value) = result.value {
-                    println!("ans = {value}");
-                    if result.execution_time_ms > 100 {
-                        println!(
-                            "  (executed in {}ms{})",
-                            result.execution_time_ms,
-                            if result.used_jit {
-                                " via JIT"
-                            } else {
-                                " via interpreter"
-                            }
-                        );
-                    }
-                } else {
-                    // No output (e.g., assignment statements)
-                }
-            }
-            Err(e) => {
-                eprintln!("Execution error: {e}");
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                break;
             }
         }
     }

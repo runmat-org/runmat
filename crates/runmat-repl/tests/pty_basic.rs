@@ -4,31 +4,28 @@
 
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 /// Test that the REPL binary can be spawned and shows the expected banner and prompt.
-/// This is a sanity check for PTY test infrastructure.
+/// Uses RUNMAT_REPL_TEST=1 for stable output in non-PTY environments.
 #[test]
-#[ignore] // Disabled until PTY harness is fully set up
 fn pty_spawn_and_detect_prompt() -> Result<(), Box<dyn std::error::Error>> {
-    // Spawn the REPL binary
+    // Spawn the REPL binary with test mode enabled
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Send a simple expression and close stdin
+    // Send a simple expression and exit
     let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
     stdin.write_all(b"1 + 1\n")?;
     stdin.write_all(b"exit\n")?;
     drop(stdin);
 
-    // Wait for completion with timeout
+    // Wait for completion
     let output = child.wait_with_output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
 
     // Verify the process exited successfully
     assert!(output.status.success(), "REPL exited with non-zero status");
@@ -52,19 +49,14 @@ fn pty_spawn_and_detect_prompt() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     println!("✓ PTY spawn and prompt detection passed");
-    println!("Stdout:\n{stdout}");
-    if !stderr.is_empty() {
-        println!("Stderr:\n{stderr}");
-    }
-
     Ok(())
 }
 
 /// Test basic assignment (without semicolon) displays the value.
 #[test]
-#[ignore] // Disabled until PTY harness is fully set up
 fn pty_assignment_displays_value() -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -91,9 +83,9 @@ fn pty_assignment_displays_value() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Test semicolon suppression (output should not display).
 #[test]
-#[ignore] // Disabled until PTY harness is fully set up
 fn pty_semicolon_suppresses_output() -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -111,10 +103,6 @@ fn pty_semicolon_suppresses_output() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output.status.success());
     // The suppressed assignment (y = 99;) should NOT produce "ans = 99"
     // But the explicit "y" should show its value
-    let lines: Vec<&str> = stdout.lines().collect();
-
-    // Find the line count or pattern:
-    // We expect at least one "ans = 99" from the "y" lookup, but not from the semicolon line
     let ans_99_count = stdout.matches("ans = 99").count();
     assert!(
         ans_99_count >= 1,
@@ -125,10 +113,44 @@ fn pty_semicolon_suppresses_output() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Test that ans persists across statements (history and previous computation).
+#[test]
+fn pty_ans_persistence() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+    stdin.write_all(b"2 + 3\n")?; // ans = 5
+    stdin.write_all(b"ans + 10\n")?; // ans should still be 5, result = 15
+    stdin.write_all(b"exit\n")?;
+    drop(stdin);
+
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("ans = 5"),
+        "Expected first 'ans = 5', got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("ans = 15"),
+        "Expected second 'ans = 15' (from ans + 10), got:\n{stdout}"
+    );
+
+    println!("✓ PTY ans persistence passed");
+    Ok(())
+}
+
 /// Test the 'exit' command cleanly terminates the REPL.
 #[test]
 fn pty_exit_command() -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -155,6 +177,7 @@ fn pty_exit_command() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn pty_help_command() -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -175,5 +198,34 @@ fn pty_help_command() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     println!("✓ PTY help command passed");
+    Ok(())
+}
+
+/// Test Ctrl+D (EOF) gracefully exits the REPL.
+#[test]
+fn pty_ctrl_d_exit() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
+        .env("RUNMAT_REPL_TEST", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+    stdin.write_all(b"1 + 1\n")?;
+    // Close stdin without explicit exit to signal EOF (Ctrl+D behavior)
+    drop(stdin);
+
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "REPL should exit cleanly on EOF");
+    // On EOF, rustyline returns ReadlineError::Eof which we handle gracefully
+    assert!(
+        stdout.contains("ans = 2"),
+        "Expected evaluation result before EOF, got:\n{stdout}"
+    );
+
+    println!("✓ PTY Ctrl+D exit passed");
     Ok(())
 }
