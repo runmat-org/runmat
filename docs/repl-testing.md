@@ -40,14 +40,22 @@ cargo test -p runmat-repl pty_spawn_and_detect_prompt -- --test-threads=1
 ### 1.3 PTY Interactive Tests (End-to-End)
 These send escape sequences (arrow keys, Ctrl sequences) and validate screen output.
 
-**Status:** Not yet implemented. Requires:
-- Rust PTY library (e.g., `ptyprocess` or `vte` crate)
-- Or: Python helper script using `pexpect`
+**Status:** Not yet implemented. Current `pty_basic.rs` tests use **piped stdin** (non-TTY), so they do **NOT** test interactive features like:
+- Arrow keys (up/down history, left/right movement)
+- Real Ctrl+C interrupt
+- Line editing (backspace, delete, insert)
 
-Example (future):
+To properly test these, we need:
+- Rust PTY library (e.g., `ptyprocess`, `vte`, or `expect` crate)
+- Or: Python helper script using `pexpect`
+- Or: Shell script with `expect` tool
+
+Example (future, requires PTY library):
 ```bash
 cargo test -p runmat-repl pty_history_up_arrow -- --test-threads=1 --nocapture
 ```
+
+**Current workaround:** `RUNMAT_REPL_TEST=1` flag allows tests to run without PTY, but only validates basic I/O.
 
 ---
 

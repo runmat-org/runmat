@@ -210,22 +210,24 @@ Add support for `RUNMAT_REPL_TEST=1` or `--repl-test`:
 - [x] Verify CI can run PTY tests
 - [x] Initial spec and testing docs
 
-### Milestone 1 (In Progress/Complete)
-- [x] Implement history buffer with rustyline
-- [x] Integrate line editor (up/down history navigation)
-- [x] Add Ctrl+C interrupt handling (return to prompt, don't exit)
-- [x] Add Ctrl+D EOF handling (graceful exit)
+### Milestone 1 (Code Complete, Tests Limited)
+- [x] Implement history buffer with rustyline (code added, not fully tested)
+- [x] Integrate line editor (up/down history navigation) (code added, not fully tested)
+- [x] Add Ctrl+C interrupt handling (return to prompt, don't exit) (code added, not tested)
+- [x] Add Ctrl+D EOF handling (graceful exit) (code added and tested)
 - [x] Add test mode flag (`RUNMAT_REPL_TEST=1`) for deterministic output
-- [x] Write 7 PTY integration tests covering:
-  - Prompt detection
+- [x] Write 7 piped I/O tests (basic execution, not interactive features):
+  - Prompt detection (in test mode)
   - Assignment display
   - Semicolon suppression
   - `ans` persistence
   - Exit command
   - Help command
-  - Ctrl+D EOF exit
+  - Ctrl+D EOF exit (piped stdin close)
 - [x] All tests pass `cargo fmt` and `cargo clippy`
 - [x] All existing tests still pass
+
+**KNOWN LIMITATION:** Tests use piped stdin (non-TTY), so interactive features (arrow keys, real Ctrl+C, line editing) are NOT tested. Need real PTY infrastructure for full validation. See Milestone 3.
 
 ---
 
