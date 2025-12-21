@@ -18,8 +18,7 @@ RunMat’s acceleration layer recognises multiple flavours of fusible graphs and
 
 1. **Looking for coverage:** Start with the link that matches your math. Each page lists the exact instruction patterns the fusion planner looks for and the operations that stay on device.
 2. **Investigating surprises:** If a workload is not fusing, cross-check the prerequisites section for that category (e.g. single-consumer chains for elementwise groups or constant epsilon for power steps).
-3. **Extending RunMat:** Combine these docs with `docs/HOW_RUNMAT_FUSION_WORKS.md` to see where to add new detection logic or builtin metadata.
-4. **Telemetry correlation:** Provider telemetry reports `fusion_kind` labels. Match those labels to the filenames above to understand what the GPU executed.
+3. **Telemetry correlation:** Provider telemetry reports `fusion_kind` labels. Match those labels to the filenames above to understand what the GPU executed.
 
 ## Why These Fusion Groups Exist
 

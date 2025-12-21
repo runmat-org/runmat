@@ -140,10 +140,6 @@ export default function FusionGuidePage() {
                   section (e.g. single-consumer chains for elementwise groups or constant epsilon for power steps).
                 </li>
                 <li className="text-muted-foreground">
-                  <strong>Extending RunMat:</strong> Combine these docs with <code>docs/HOW_RUNMAT_FUSION_WORKS.md</code> to see
-                  where to add new detection logic or builtin metadata.
-                </li>
-                <li className="text-muted-foreground">
                   <strong>Telemetry correlation:</strong> Provider telemetry reports <code>fusion_kind</code> labels. Match those
                   labels to the filenames above to understand what the GPU executed.
                 </li>

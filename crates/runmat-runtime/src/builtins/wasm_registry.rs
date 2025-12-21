@@ -23,6 +23,7 @@ pub fn register_all() {
             "runmat-runtime: registered {} wasm builtins",
             runmat_builtins::builtin_functions().len()
         );
+        runmat_builtins::wasm_registry::mark_registered();
     });
 }
 

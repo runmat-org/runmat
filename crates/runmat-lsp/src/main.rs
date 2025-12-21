@@ -1,6 +1,10 @@
+#![cfg(feature = "native")]
+
+mod core;
+mod native;
 mod backend;
 
-use backend::RunMatLanguageServer;
+use native::RunMatLanguageServer;
 use log::LevelFilter;
 use tokio::io::{stdin, stdout};
 use tower_lsp::{LspService, Server};

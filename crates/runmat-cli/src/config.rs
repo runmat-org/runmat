@@ -29,6 +29,9 @@ pub struct RunMatConfig {
     /// Acceleration configuration
     #[serde(default)]
     pub accelerate: AccelerateConfig,
+    /// Language compatibility configuration
+    #[serde(default)]
+    pub language: LanguageConfig,
     /// Telemetry configuration
     #[serde(default)]
     pub telemetry: TelemetryConfig,
@@ -58,6 +61,29 @@ pub struct RuntimeConfig {
     pub verbose: bool,
     /// Snapshot file to preload
     pub snapshot_path: Option<PathBuf>,
+}
+
+/// Language compatibility / syntax configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatMode {
+    Matlab,
+    Strict,
+}
+
+impl Default for CompatMode {
+    fn default() -> Self {
+        CompatMode::Matlab
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LanguageConfig {
+    /// Compatibility mode for MATLAB command syntax and legacy behaviors.
+    /// Default: "matlab" (accept command syntax like `hold on`).
+    /// "strict" disables command syntax; require `hold(\"on\")` style.
+    #[serde(default)]
+    pub compat: CompatMode,
 }
 
 /// Acceleration (GPU) configuration
@@ -1198,6 +1224,7 @@ mod tests {
         assert!(config.jit.enabled);
         assert_eq!(config.jit.threshold, 10);
         assert_eq!(config.plotting.mode, PlotMode::Auto);
+        assert!(matches!(config.language.compat, CompatMode::Matlab));
     }
 
     #[test]

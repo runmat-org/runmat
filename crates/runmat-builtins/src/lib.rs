@@ -16,6 +16,7 @@ pub mod wasm_registry {
         Lazy::new(|| Mutex::new(Vec::new()));
     static CONSTANTS: Lazy<Mutex<Vec<&'static Constant>>> = Lazy::new(|| Mutex::new(Vec::new()));
     static DOCS: Lazy<Mutex<Vec<&'static BuiltinDoc>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static REGISTERED: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
 
     fn leak<T>(value: T) -> &'static T {
         Box::leak(Box::new(value))
@@ -46,6 +47,14 @@ pub mod wasm_registry {
 
     pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
         DOCS.lock().unwrap().clone()
+    }
+
+    pub fn mark_registered() {
+        *REGISTERED.lock().unwrap() = true;
+    }
+
+    pub fn is_registered() -> bool {
+        *REGISTERED.lock().unwrap()
     }
 }
 

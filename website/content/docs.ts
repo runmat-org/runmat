@@ -92,7 +92,6 @@ export const docsTree: DocsNode[] = [
     title: "Accelerate (GPU)",
     children: [
       { title: "Introduction to RunMat Fusion", slug: ["accelerate", "fusion-intro"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
-      { title: "Accelerate Architecture", slug: ["accelerate", "how-it-works"], file: "docs/HOW_RUNMAT_ACCELERATE_WORKS.md", seo: { description: "How RunMat Accelerate works: GPU acceleration architecture, planner, and execution.", keywords: ["GPU", "accelerate", "how it works", "planner", "execution"] } },
       {
         title: "Fusion Guide",
         externalHref: "/docs/fusion-guide",

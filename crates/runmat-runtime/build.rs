@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, fs, path::PathBuf};
 
 fn split_list(value: &str) -> Vec<String> {
     value
@@ -9,6 +9,8 @@ fn split_list(value: &str) -> Vec<String> {
 }
 
 fn main() {
+    ensure_wasm_registry_stub();
+
     // Only act when BLAS/LAPACK feature is enabled
     if env::var("CARGO_FEATURE_BLAS_LAPACK").is_err() {
         return;
@@ -76,4 +78,21 @@ fn main() {
         // Fallback for typical setups
         println!("cargo:rustc-link-lib=openblas");
     }
+}
+
+/// Ensure the generated wasm registry file exists so include! does not fail in wasm builds.
+/// The proc-macro will overwrite/extend this file when generating the registry; this stub
+/// keeps the compile happy when the generator hasn’t run yet.
+fn ensure_wasm_registry_stub() {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../../target/runmat_wasm_registry.rs");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if !path.exists() {
+        let _ = fs::write(&path, "pub fn register_all() {}\n");
+    }
+    // Re-run if the path changes or the env var forces regeneration
+    println!("cargo:rerun-if-changed={}", path.display());
+    println!("cargo:rerun-if-env-changed=RUNMAT_GENERATE_WASM_REGISTRY");
 }

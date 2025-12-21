@@ -6134,17 +6134,22 @@ version = "0.2.7"
 dependencies = [
  "anyhow",
  "env_logger 0.11.8",
+ "js-sys",
  "log",
+ "lsp-types",
  "once_cell",
  "runmat-builtins",
  "runmat-core",
  "runmat-hir",
  "runmat-lexer",
  "runmat-parser",
+ "runmat-runtime",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "tokio",
  "tower-lsp",
+ "wasm-bindgen",
 ]
 
 [[package]]
