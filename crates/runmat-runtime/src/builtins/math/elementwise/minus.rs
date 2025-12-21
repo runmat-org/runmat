@@ -262,6 +262,19 @@ register_builtin_doc_text!("minus", DOC_MD);
     accel = "elementwise"
 )]
 fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Handle symbolic operations first
+    if matches!(&lhs, Value::Symbolic(_)) || matches!(&rhs, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_a = value_to_sym(&lhs)
+            .ok_or_else(|| format!("minus: cannot convert {:?} to symbolic", lhs))?;
+        let sym_b = value_to_sym(&rhs)
+            .ok_or_else(|| format!("minus: cannot convert {:?} to symbolic", rhs))?;
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::add(vec![
+            sym_a,
+            runmat_symbolic::SymExpr::neg(sym_b),
+        ])));
+    }
+
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => minus_gpu_pair(la, lb),
@@ -395,7 +408,8 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
+        | Value::MException(_)
+        | Value::Symbolic(_) => {
             Err("minus: unsupported prototype conversion to GPU output".to_string())
         }
     }

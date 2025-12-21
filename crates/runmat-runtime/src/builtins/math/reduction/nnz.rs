@@ -532,6 +532,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::FunctionHandle(_) | Value::Closure(_) => "function handle".to_string(),
         Value::ClassRef(_) => "class reference".to_string(),
         Value::MException(_) => "exception".to_string(),
+        Value::Symbolic(_) => "symbolic expression".to_string(),
     }
 }
 

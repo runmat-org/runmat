@@ -227,6 +227,9 @@ impl MarkSweepCollector {
                 // Contains only strings; no GC references
             }
             Value::CharArray(_ca) => {}
+            Value::Symbolic(_) => {
+                // Symbolic expressions are immutable trees with no GC references
+            }
         }
 
         Ok(())

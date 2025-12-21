@@ -236,6 +236,11 @@ register_builtin_doc_text!("log", DOC_MD);
     accel = "unary"
 )]
 fn log_builtin(value: Value) -> Result<Value, String> {
+    // Handle symbolic input
+    if let Value::Symbolic(expr) = value {
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::log(expr)));
+    }
+
     match value {
         Value::GpuTensor(handle) => log_gpu(handle),
         Value::Complex(re, im) => {

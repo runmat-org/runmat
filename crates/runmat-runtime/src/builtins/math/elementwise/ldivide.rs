@@ -395,7 +395,8 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
+        | Value::MException(_)
+        | Value::Symbolic(_) => {
             Err("ldivide: unsupported prototype conversion to GPU output".to_string())
         }
     }
@@ -592,6 +593,16 @@ fn ldivide_gpu_host_right(divisor: Value, numerator: GpuTensorHandle) -> Result<
 }
 
 fn ldivide_host(divisor: Value, numerator: Value) -> Result<Value, String> {
+    // Handle symbolic operations first (ldivide: A \ B = B / A)
+    if matches!(&divisor, Value::Symbolic(_)) || matches!(&numerator, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_div = value_to_sym(&divisor)
+            .ok_or_else(|| format!("ldivide: cannot convert {:?} to symbolic", divisor))?;
+        let sym_num = value_to_sym(&numerator)
+            .ok_or_else(|| format!("ldivide: cannot convert {:?} to symbolic", numerator))?;
+        return Ok(Value::Symbolic(sym_num / sym_div));
+    }
+
     match (classify_operand(divisor)?, classify_operand(numerator)?) {
         (LdivideOperand::Real(div), LdivideOperand::Real(num)) => ldivide_real_real(&div, &num),
         (LdivideOperand::Complex(div), LdivideOperand::Complex(num)) => {

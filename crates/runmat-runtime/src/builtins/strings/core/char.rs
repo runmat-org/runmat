@@ -282,7 +282,8 @@ fn value_to_char_rows(value: &Value) -> Result<Vec<Vec<char>>, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("char: unsupported input type {:?}", value)),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err(format!("char: unsupported input type {:?}", value)),
     }
 }
 

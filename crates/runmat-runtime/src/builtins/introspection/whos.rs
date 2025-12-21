@@ -635,6 +635,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                 acc.saturating_add(frame.len().saturating_mul(2))
             })
         }
+        Value::Symbolic(_) => std::mem::size_of::<runmat_symbolic::SymExpr>(),
     }
 }
 

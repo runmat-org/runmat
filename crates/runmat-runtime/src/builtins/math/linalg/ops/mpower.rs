@@ -204,6 +204,15 @@ register_builtin_doc_text!("mpower", DOC_MD);
     accel = "matmul"
 )]
 fn mpower_builtin(base: Value, exponent: Value) -> Result<Value, String> {
+    // Handle symbolic operations first
+    if matches!(&base, Value::Symbolic(_)) || matches!(&exponent, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_a = value_to_sym(&base)
+            .ok_or_else(|| format!("mpower: cannot convert {:?} to symbolic", base))?;
+        let sym_b = value_to_sym(&exponent)
+            .ok_or_else(|| format!("mpower: cannot convert {:?} to symbolic", exponent))?;
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::pow(sym_a, sym_b)));
+    }
     mpower_eval(&base, &exponent)
 }
 

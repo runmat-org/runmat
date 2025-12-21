@@ -227,6 +227,11 @@ register_builtin_doc_text!("exp", DOC_MD);
     accel = "unary"
 )]
 fn exp_builtin(value: Value) -> Result<Value, String> {
+    // Handle symbolic input
+    if let Value::Symbolic(expr) = value {
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::exp(expr)));
+    }
+
     match value {
         Value::GpuTensor(handle) => exp_gpu(handle),
         Value::Complex(re, im) => Ok(Value::Complex(

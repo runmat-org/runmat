@@ -5511,6 +5511,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-gc-api",
  "runmat-macros",
+ "runmat-symbolic",
  "serde",
  "trybuild",
 ]
@@ -5726,6 +5727,7 @@ dependencies = [
  "runmat-gc-api",
  "runmat-macros",
  "runmat-plot",
+ "runmat-symbolic",
  "rustfft",
  "serde",
  "serde_json",
@@ -5776,6 +5778,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "zstd",
+]
+
+[[package]]
+name = "runmat-symbolic"
+version = "0.2.7"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

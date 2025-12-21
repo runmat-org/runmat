@@ -367,6 +367,18 @@ fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
 fn mtimes_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
     use Value::*;
 
+    // Handle symbolic operations first
+    if matches!(&lhs, Value::Symbolic(_)) || matches!(&rhs, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_a = value_to_sym(&lhs)
+            .ok_or_else(|| format!("mtimes: cannot convert {:?} to symbolic", lhs))?;
+        let sym_b = value_to_sym(&rhs)
+            .ok_or_else(|| format!("mtimes: cannot convert {:?} to symbolic", rhs))?;
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::mul(vec![
+            sym_a, sym_b,
+        ])));
+    }
+
     let lhs = crate::dispatcher::gather_if_needed(&lhs)?;
     let rhs = crate::dispatcher::gather_if_needed(&rhs)?;
 

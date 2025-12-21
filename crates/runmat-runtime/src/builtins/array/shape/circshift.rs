@@ -293,7 +293,8 @@ fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Val
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("circshift: unsupported input type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("circshift: unsupported input type".to_string()),
     }
 }
 
@@ -390,7 +391,8 @@ fn value_to_shift_vector(value: &Value) -> Result<Vec<isize>, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("circshift: unsupported shift argument type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("circshift: unsupported shift argument type".to_string()),
     }
 }
 
@@ -476,7 +478,8 @@ fn value_to_dims_vector(value: &Value) -> Result<Vec<usize>, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("circshift: unsupported dimension argument type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("circshift: unsupported dimension argument type".to_string()),
     }
 }
 

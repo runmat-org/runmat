@@ -9,6 +9,9 @@ fn main() -> Result<()> {
     // Initialize logging
     env_logger::init();
 
+    // Ensure all runtime builtins are linked (prevents dead-code elimination of inventory registrations)
+    runmat_runtime::ensure_builtins_linked();
+
     // Initialize acceleration provider (prefer WGPU when available)
     runmat_accelerate::initialize_acceleration_provider();
 
@@ -117,6 +120,7 @@ fn main() -> Result<()> {
                         if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
+                            // Display result (format style can be changed with 'format' command)
                             println!("ans = {value}");
                             if result.execution_time_ms > 100 {
                                 println!(
@@ -172,6 +176,7 @@ fn show_help() {
     println!("  .gc-info          Show garbage collector statistics");
     println!("  .gc-collect       Force garbage collection");
     println!("  .reset-stats      Reset execution statistics");
+    println!("  format [compact|loose]  Set or show output format");
     println!();
     println!("MATLAB/Octave compatible syntax is supported:");
     println!("  x = 1 + 2                         # Assignment");
@@ -181,6 +186,7 @@ fn show_help() {
     println!("  for i = 1:5; disp(i); end        # Loops");
     println!();
     println!("Features:");
+    println!("  • First-class symbolic mathematics (sym, diff, int, solve)");
     println!("  • JIT compilation with Cranelift");
     println!("  • Generational garbage collection");
     println!("  • High-performance BLAS/LAPACK operations");

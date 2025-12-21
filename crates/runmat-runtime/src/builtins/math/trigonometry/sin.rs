@@ -210,6 +210,11 @@ register_builtin_doc_text!("sin", DOC_MD);
     accel = "unary"
 )]
 fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Handle symbolic input
+    if let Value::Symbolic(expr) = value {
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::sin(expr)));
+    }
+
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => sin_gpu(handle)?,

@@ -294,7 +294,8 @@ fn fliplr_builtin(value: Value) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("fliplr: unsupported input type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("fliplr: unsupported input type".to_string()),
     }
 }
 

@@ -254,6 +254,11 @@ register_builtin_doc_text!("tan", DOC_MD);
     accel = "unary"
 )]
 fn tan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Handle symbolic input
+    if let Value::Symbolic(expr) = value {
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::tan(expr)));
+    }
+
     let template = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => tan_gpu(handle)?,

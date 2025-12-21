@@ -40,6 +40,8 @@ pub enum Value {
     Closure(Closure),
     ClassRef(String),
     MException(MException),
+    /// Symbolic expression for symbolic mathematics
+    Symbolic(runmat_symbolic::SymExpr),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntValue {
@@ -927,6 +929,7 @@ impl Type {
                     length: Some(ca.rows * ca.cols),
                 }
             }
+            Value::Symbolic(_) => Type::Unknown,
         }
     }
 }
@@ -1262,6 +1265,7 @@ impl fmt::Display for Value {
                 "MException(identifier='{}', message='{}')",
                 e.identifier, e.message
             ),
+            Value::Symbolic(expr) => write!(f, "{expr}"),
         }
     }
 }

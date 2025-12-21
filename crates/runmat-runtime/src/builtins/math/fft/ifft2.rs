@@ -390,7 +390,8 @@ fn parse_ifft2_single(value: &Value) -> Result<(Option<usize>, Option<usize>), S
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("ifft2: transform lengths must be numeric".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("ifft2: transform lengths must be numeric".to_string()),
     }
 }
 

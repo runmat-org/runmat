@@ -694,7 +694,8 @@ fn materialize_for_max(name: &str, value: Value) -> Result<InputData, String> {
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("{name}: unsupported input type")),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err(format!("{name}: unsupported input type")),
     }
 }
 

@@ -34,6 +34,17 @@ pub struct ReplEngine {
     function_definitions: HashMap<String, runmat_hir::HirStmt>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
+    /// Format compact mode (reduces blank lines in output)
+    format_compact: bool,
+}
+
+/// Output format settings for MATLAB-compatible display
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatStyle {
+    /// Default: blank lines around ans =
+    Default,
+    /// Compact: no extra blank lines
+    Compact,
 }
 
 #[derive(Debug, Default)]
@@ -108,6 +119,15 @@ fn format_type_info(value: &Value) -> String {
                 format!("Tensor{:?} (gpu)", h.shape)
             }
         }
+        Value::Symbolic(expr) => {
+            let vars = expr.free_vars();
+            if vars.is_empty() {
+                "sym (constant)".to_string()
+            } else {
+                let var_list: Vec<_> = vars.iter().map(|s| s.name.as_str()).collect();
+                format!("sym [{}]", var_list.join(", "))
+            }
+        }
         _ => "value".to_string(),
     }
 }
@@ -178,7 +198,18 @@ impl ReplEngine {
             workspace_values: HashMap::new(),
             function_definitions: HashMap::new(),
             snapshot,
+            format_compact: false,
         })
+    }
+
+    /// Set output format style
+    pub fn set_format_compact(&mut self, compact: bool) {
+        self.format_compact = compact;
+    }
+
+    /// Get current format style
+    pub fn is_format_compact(&self) -> bool {
+        self.format_compact
     }
 
     /// Load a snapshot from disk

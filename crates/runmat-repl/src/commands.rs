@@ -49,6 +49,7 @@ pub fn parse_and_execute(input: &str, engine: &mut ReplEngine) -> CommandResult 
         }
         "who" => cmd_who(engine),
         "whos" => cmd_whos(engine),
+        "format" => cmd_format(&rest, engine),
         _ => CommandResult::NotCommand,
     }
 }
@@ -146,6 +147,35 @@ fn cmd_whos(engine: &ReplEngine) -> CommandResult {
     }
 
     CommandResult::Handled(output)
+}
+
+/// `format` — set output format options
+fn cmd_format(args: &str, engine: &mut ReplEngine) -> CommandResult {
+    let arg = args.trim().to_lowercase();
+
+    match arg.as_str() {
+        "" => {
+            // Show current format settings
+            let compact_status = if engine.is_format_compact() {
+                "compact"
+            } else {
+                "loose (default)"
+            };
+            CommandResult::Handled(format!("Current format: {}", compact_status))
+        }
+        "compact" => {
+            engine.set_format_compact(true);
+            CommandResult::Handled("Format set to compact.".to_string())
+        }
+        "loose" => {
+            engine.set_format_compact(false);
+            CommandResult::Handled("Format set to loose (default).".to_string())
+        }
+        _ => CommandResult::Handled(format!(
+            "Unknown format option '{}'. Use 'compact' or 'loose'.",
+            args.trim()
+        )),
+    }
 }
 
 #[cfg(test)]

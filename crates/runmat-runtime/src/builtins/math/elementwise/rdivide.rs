@@ -417,7 +417,8 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
+        | Value::MException(_)
+        | Value::Symbolic(_) => {
             Err("rdivide: unsupported prototype conversion to GPU output".to_string())
         }
     }
@@ -608,6 +609,16 @@ fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> Result<Value, Str
 }
 
 fn rdivide_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+    // Handle symbolic operations first
+    if matches!(&lhs, Value::Symbolic(_)) || matches!(&rhs, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_a = value_to_sym(&lhs)
+            .ok_or_else(|| format!("rdivide: cannot convert {:?} to symbolic", lhs))?;
+        let sym_b = value_to_sym(&rhs)
+            .ok_or_else(|| format!("rdivide: cannot convert {:?} to symbolic", rhs))?;
+        return Ok(Value::Symbolic(sym_a / sym_b));
+    }
+
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (RdivideOperand::Real(a), RdivideOperand::Real(b)) => rdivide_real_real(&a, &b),
         (RdivideOperand::Complex(a), RdivideOperand::Complex(b)) => rdivide_complex_complex(&a, &b),

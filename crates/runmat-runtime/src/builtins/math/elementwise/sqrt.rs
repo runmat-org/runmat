@@ -240,6 +240,11 @@ register_builtin_doc_text!("sqrt", DOC_MD);
     accel = "unary"
 )]
 fn sqrt_builtin(value: Value) -> Result<Value, String> {
+    // Handle symbolic input
+    if let Value::Symbolic(expr) = value {
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::sqrt(expr)));
+    }
+
     match value {
         Value::GpuTensor(handle) => sqrt_gpu(handle),
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),

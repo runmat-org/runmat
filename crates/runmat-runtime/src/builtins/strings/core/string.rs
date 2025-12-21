@@ -693,7 +693,8 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
         | Value::HandleObject(_)
         | Value::Object(_)
         | Value::Listener(_)
-        | Value::Struct(_) => Err("string: unsupported format argument type".to_string()),
+        | Value::Struct(_)
+        | Value::Symbolic(_) => Err("string: unsupported format argument type".to_string()),
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) => {
             Err("string: unsupported format argument type".to_string())
         }
@@ -724,7 +725,8 @@ fn convert_to_string_array(value: Value, encoding: StringEncoding) -> Result<Str
                 .to_string(),
         ),
         Value::Struct(_) => Err("string: structs are not supported for automatic conversion".to_string()),
-        Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) => Err(
+        Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_)
+        | Value::Symbolic(_) => Err(
             "string: unsupported conversion for function or exception handles".to_string(),
         ),
     }

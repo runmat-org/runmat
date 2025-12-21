@@ -995,6 +995,9 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Result
                 .map_err(|e| format!("{context}: {e}"))?;
             flatten_value(gathered, output, context)?;
         }
+        Value::Symbolic(sym) => {
+            output.push(Value::String(sym.to_string()));
+        }
         Value::MException(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

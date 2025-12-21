@@ -18,6 +18,7 @@ members = [
     "crates/runmat-gc",
     "crates/runmat-snapshot",
     "crates/runmat-lsp",
+    "crates/runmat-symbolic",
     "runmat",
     "tools/runmatfunc",
 ]
@@ -67,6 +68,7 @@ runmat-snapshot = { version = "=0.2.7", path = "crates/runmat-snapshot" }
 runmat-accelerate = { version = "=0.2.7", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.7", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.2.7", path = "crates/runmat-gc-api" }
+runmat-symbolic = { version = "=0.2.7", path = "crates/runmat-symbolic" }
 
 [patch.crates-io]
 # Ensure no accidental cycle via crates.io variants

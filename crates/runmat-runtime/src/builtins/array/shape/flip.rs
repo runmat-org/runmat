@@ -301,7 +301,8 @@ fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("flip: unsupported input type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("flip: unsupported input type".to_string()),
     }
 }
 

@@ -268,7 +268,8 @@ fn fftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("fftshift: unsupported input type".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("fftshift: unsupported input type".to_string()),
     }
 }
 

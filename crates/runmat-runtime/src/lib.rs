@@ -30,6 +30,21 @@ extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
 
+/// Forces linkage of all builtin modules so that `inventory` registrations are not
+/// optimized out by the linker. Call this function once at startup in any binary
+/// that needs access to all builtins (e.g., the REPL).
+///
+/// This is a no-op at runtime but prevents dead-code elimination of the
+/// `#[runtime_builtin]` macro expansions.
+#[inline(never)]
+pub fn ensure_builtins_linked() {
+    // Touch each module to prevent dead-code elimination.
+    // The actual functions aren't called; we just need the linker to see references.
+    let _ = std::hint::black_box(
+        &builtins::symbolic::matlabfunction::eval_compiled_function as *const _,
+    );
+}
+
 // Transitional public shim for tests using matrix_transpose
 pub use crate::matrix::matrix_transpose;
 
@@ -988,6 +1003,34 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
             let mut args = c.captures.clone();
             args.extend(rest);
             crate::call_builtin(&c.function_name, &args)
+        }
+        // Compiled symbolic function handles (from matlabFunction)
+        Value::FunctionHandle(name) => {
+            if name.starts_with("__sym_fn_") {
+                // Convert arguments to f64 values
+                let args: Result<Vec<f64>, String> = rest
+                    .iter()
+                    .map(|v| match v {
+                        Value::Num(n) => Ok(*n),
+                        Value::Int(i) => Ok(i.to_f64()),
+                        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+                        _ => Err(format!(
+                            "feval: compiled symbolic function expects numeric arguments, got {:?}",
+                            v
+                        )),
+                    })
+                    .collect();
+                let args = args?;
+
+                // Evaluate using compiled bytecode
+                let result = crate::builtins::symbolic::matlabfunction::eval_compiled_function(
+                    &name, &args,
+                )?;
+                Ok(Value::Num(result))
+            } else {
+                // Regular function handle - try as builtin
+                crate::call_builtin(&name, &rest)
+            }
         }
         // Future: support Value::Function variants
         other => Err(format!("feval: unsupported function value {other:?}")),

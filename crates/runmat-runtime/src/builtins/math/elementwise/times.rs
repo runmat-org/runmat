@@ -278,6 +278,18 @@ register_builtin_doc_text!("times", DOC_MD);
     accel = "elementwise"
 )]
 fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Handle symbolic operations first
+    if matches!(&lhs, Value::Symbolic(_)) || matches!(&rhs, Value::Symbolic(_)) {
+        use crate::builtins::symbolic::value_to_sym;
+        let sym_a = value_to_sym(&lhs)
+            .ok_or_else(|| format!("times: cannot convert {:?} to symbolic", lhs))?;
+        let sym_b = value_to_sym(&rhs)
+            .ok_or_else(|| format!("times: cannot convert {:?} to symbolic", rhs))?;
+        return Ok(Value::Symbolic(runmat_symbolic::SymExpr::mul(vec![
+            sym_a, sym_b,
+        ])));
+    }
+
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb),
@@ -412,7 +424,8 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
+        | Value::MException(_)
+        | Value::Symbolic(_) => {
             Err("times: unsupported prototype conversion to GPU output".to_string())
         }
     }

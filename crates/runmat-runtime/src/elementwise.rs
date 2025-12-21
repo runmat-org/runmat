@@ -493,6 +493,16 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
             Ok(Value::ComplexTensor(result))
         }
 
+        // Symbolic power cases
+        (Value::Symbolic(_), _) | (_, Value::Symbolic(_)) => {
+            use crate::builtins::symbolic::value_to_sym;
+            let sym_a = value_to_sym(a)
+                .ok_or_else(|| format!("power: cannot convert {:?} to symbolic", a))?;
+            let sym_b = value_to_sym(b)
+                .ok_or_else(|| format!("power: cannot convert {:?} to symbolic", b))?;
+            Ok(Value::Symbolic(runmat_symbolic::SymExpr::pow(sym_a, sym_b)))
+        }
+
         // Other cases not supported for regular matrix power
         _ => Err(format!(
             "Power operation not supported for types: {a:?} ^ {b:?}"

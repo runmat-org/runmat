@@ -253,6 +253,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::FunctionHandle(_) | Value::Closure(_) => "function handle",
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",
+        Value::Symbolic(_) => "symbolic expression",
     }
 }
 

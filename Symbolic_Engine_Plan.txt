@@ -1,0 +1,28 @@
+Your colleage had a deep dive to understand the tricks of the trade in the Symbolica repo. 
+C:\GitHub\symbolica
+
+Then he thought of refactorings profiting from runmat
+data structures, and IR/JIT structure.
+
+He created the following docs:
+
+DEEP_DIVE_ANALYSIS.md
+REFACTORING_IMPLEMENTATION_GUIDE.md
+PHASE_1_COMPLETION.md
+
+Your task is to implement the symbolic engine for runmat (here).
+- use only runmat idiom and naming rules, avoid Symbolica naming.
+-> avoid what might be considered as copyright infringement.
+That means we have to carefully review if Symbolica has a USC, never seen before -> then do not use it and instead use more known-in-the-art stuff.
+Exception: runmat has a similar pipeline which directly leads to such use, without knowing Symbolica.
+Ask if in doubt.
+
+We are on Windows, so adapt curl and other calls.
+We compile using MinGW, so use
+set PATH=C:\msys64\ucrt64\bin;C:\msys64\usr\bin;%PATH%
+set CPATH=C:\msys64\ucrt64\include
+set LIBRARY_PATH=C:\msys64\ucrt64\lib
+cargo build ...
+
+
+

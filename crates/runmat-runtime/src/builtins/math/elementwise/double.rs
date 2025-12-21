@@ -266,6 +266,7 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::FunctionHandle(_) | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
+        Value::Symbolic(_) => Err(conversion_error("sym")),
     }?;
     apply_output_template(converted, &template)
 }

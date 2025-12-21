@@ -1,0 +1,11 @@
+[package]
+name = "runmat-symbolic"
+version = "0.2.7"
+edition = "2021"
+description = "Symbolic mathematics engine for RunMat"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

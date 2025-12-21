@@ -1,0 +1,23 @@
+feat: First-class symbolic mathematics engine
+
+Symbolic expressions are now native Value types in RunMat, enabling seamless
+mixing of symbolic and numeric computation.
+
+Highlights:
+- sym, syms: Create symbolic variables with optional assumptions
+- diff: Symbolic differentiation (higher-order supported)
+- int: Symbolic integration (polynomials, transcendentals)
+- solve: Linear and quadratic equation solving
+- factor, collect, expand, simplify: Polynomial manipulation
+- subs: Symbolic substitution
+- matlabFunction: Compile expressions to callable function handles
+
+Extended type support:
+- Value::Symbolic variant integrated across 100+ builtins
+- Proper error handling for symbolic inputs to numeric-only operations
+- class(x) returns "sym" for symbolic values
+- whos displays symbolic variable info
+
+REPL improvements:
+- Fixed cross-crate builtin registration (inventory linkage)
+- Added format command infrastructure for output styling
