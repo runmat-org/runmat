@@ -1,6 +1,4 @@
-use once_cell::sync::OnceCell;
-use runmat_core::RunMatSession;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Once;
@@ -13,8 +11,6 @@ use crate::core::analysis::{
     document_symbols as core_document_symbols, formatting_edits, hover_at, semantic_tokens_full,
     signature_help_at, CompatMode, DocumentAnalysis,
 };
-use crate::core::fusion::fusion_plan_public_from_snapshot;
-use crate::core::types::FusionPlanPublic;
 use crate::core::workspace::workspace_symbols;
 
 #[derive(Default)]
@@ -32,28 +28,11 @@ thread_local! {
     static COMPAT_MODE: std::cell::Cell<CompatMode> = std::cell::Cell::new(CompatMode::Matlab);
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct FusionPlanResult {
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub plan: Option<FusionPlanPublic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-
 thread_local! {
     static DOCS: RefCell<DocStore> = RefCell::new(DocStore::default());
 }
 
-static SESSION: OnceCell<RunMatSession> = OnceCell::new();
 static BUILTIN_REGISTRY: Once = Once::new();
-
-fn session() -> Result<&'static RunMatSession, JsValue> {
-    ensure_builtins_registered();
-    SESSION.get_or_try_init(|| RunMatSession::new().map_err(|e| JsValue::from_str(&format!("{e}"))))
-}
 
 fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(value).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -103,48 +82,6 @@ pub fn close_document(uri: String) {
     DOCS.with(|d| {
         d.borrow_mut().docs.remove(&uri);
     });
-}
-
-#[wasm_bindgen]
-pub fn fusion_plan(uri: String) -> Result<JsValue, JsValue> {
-    ensure_builtins_registered();
-    let doc = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
-    let Some(doc) = doc else {
-        return to_js(&FusionPlanResult {
-            status: "unavailable".into(),
-            plan: None,
-            reason: Some("no document".into()),
-            message: None,
-        });
-    };
-
-    let sess = session()?;
-    match sess.compile_fusion_plan(&doc.text) {
-        Ok(Some(plan)) => {
-            let public = fusion_plan_public_from_snapshot(
-                plan,
-                Some("Fusion snapshot (compile-only)".into()),
-            );
-            to_js(&FusionPlanResult {
-                status: "ok".into(),
-                plan: Some(public),
-                reason: None,
-                message: None,
-            })
-        }
-        Ok(None) => to_js(&FusionPlanResult {
-            status: "unavailable".into(),
-            plan: None,
-            reason: Some("no plan".into()),
-            message: None,
-        }),
-        Err(err) => to_js(&FusionPlanResult {
-            status: "error".into(),
-            plan: None,
-            reason: None,
-            message: Some(err.to_string()),
-        }),
-    }
 }
 
 #[wasm_bindgen]

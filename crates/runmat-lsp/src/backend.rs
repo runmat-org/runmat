@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use log::{debug, info, warn};
+use log::{debug, info};
 use crate::core::analysis::{
     analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
     document_symbols, formatting_edits, hover_at, semantic_tokens_full, semantic_tokens_legend,
@@ -11,26 +11,23 @@ use crate::core::analysis::{
 };
 use crate::core::workspace::workspace_symbols;
 use crate::core::position::position_to_offset;
-use crate::core::fusion::fusion_plan_public_from_snapshot;
-use runmat_core::{FusionPlanEdge, FusionPlanNode, FusionPlanSnapshot, RunMatSession};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse,
-    ExecuteCommandOptions, ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, Location, MessageType, OneOf, PositionEncodingKind, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
-    WorkspaceSymbolParams,
-    Url, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, DocumentFormattingParams,
+    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
+    MessageType, OneOf, PositionEncodingKind, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
-use serde_json::{json, Value};
+use serde_json::json;
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -50,7 +47,6 @@ struct DocumentState {
 
 struct AnalyzerState {
     documents: HashMap<Url, DocumentState>,
-    fusion_session: Option<runmat_core::RunMatSession>,
     compat_mode: CompatMode,
 }
 
@@ -65,7 +61,6 @@ impl RunMatLanguageServer {
             client,
             state: Arc::new(RwLock::new(AnalyzerState {
                 documents: HashMap::new(),
-                fusion_session: None,
                 compat_mode: CompatMode::Matlab,
             })),
         }
@@ -97,7 +92,7 @@ impl RunMatLanguageServer {
             }
         };
 
-        let status_payload = serde_json::json!({
+        let status_payload = json!({
             "message": analysis.status_message(),
         });
         let _ = self
@@ -201,10 +196,6 @@ impl LanguageServer for RunMatLanguageServer {
                 }),
                 file_operations: None,
             }),
-            execute_command_provider: Some(ExecuteCommandOptions {
-                commands: vec!["runmat/fusionPlan".to_string()],
-                work_done_progress_options: Default::default(),
-            }),
             ..Default::default()
         };
 
@@ -259,85 +250,6 @@ impl LanguageServer for RunMatLanguageServer {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.reanalyze(&params.text_document.uri).await;
-    }
-
-    async fn execute_command(&self, params: ExecuteCommandParams) -> RpcResult<Option<Value>> {
-        if params.command != "runmat/fusionPlan" {
-            return Ok(None);
-        }
-
-        let Some(uri) = extract_uri_from_args(&params.arguments) else {
-            return Ok(Some(json!({
-                "status": "unavailable",
-                "reason": "missing uri"
-            })));
-        };
-
-        let (analysis, fusion_plan_result) = {
-            let mut state = self.state.write().await;
-            let Some(doc) = state.documents.get(&uri).cloned() else {
-                return Ok(Some(json!({
-                    "status": "unavailable",
-                    "reason": "no document available"
-                })));
-            };
-            if state.fusion_session.is_none() {
-                state.fusion_session = RunMatSession::new().ok();
-            }
-            let session = match state.fusion_session.as_mut() {
-                Some(session) => session,
-                None => {
-                    return Ok(Some(json!({
-                        "status": "unavailable",
-                        "reason": "fusion session init failed"
-                    })));
-                }
-            };
-            let plan = session.compile_fusion_plan(&doc.text);
-            (doc.analysis, plan)
-        };
-
-        match fusion_plan_result {
-            Ok(Some(plan)) => {
-                let public = fusion_plan_public_from_snapshot(
-                    plan,
-                    Some("Fusion snapshot from runtime compile (no execution)".into()),
-                );
-                return Ok(Some(json!({
-                    "status": "ok",
-                    "plan": public
-                })));
-            }
-            Ok(None) => {
-                // Fall through to static analysis fallback below.
-            }
-            Err(err) => {
-                warn!("Failed to compile fusion plan via runtime pipeline: {err}");
-            }
-        }
-
-        let Some(analysis) = analysis else {
-            return Ok(Some(json!({
-                "status": "unavailable",
-                "reason": "no analysis available"
-            })));
-        };
-
-        let plan = fusion_plan_from_analysis(&analysis);
-        let public = fusion_plan_public_from_snapshot(
-            FusionPlanSnapshot {
-                nodes: plan.nodes,
-                edges: plan.edges,
-                shaders: Vec::new(),
-                decisions: Vec::new(),
-            },
-            Some("Static fusion preview from semantic analysis".into()),
-        );
-
-        Ok(Some(json!({
-            "status": "ok",
-            "plan": public
-        })))
     }
 
     async fn hover(&self, params: HoverParams) -> RpcResult<Option<Hover>> {
@@ -533,68 +445,6 @@ impl LanguageServer for RunMatLanguageServer {
         self.client
             .log_message(MessageType::INFO, "RunMat configuration updated")
             .await;
-    }
-}
-
-fn extract_uri_from_args(list: &[Value]) -> Option<Url> {
-    for val in list {
-        if let Some(s) = val.as_str() {
-            if let Ok(uri) = Url::parse(s) {
-                return Some(uri);
-            }
-        }
-        if let Some(obj) = val.as_object() {
-            if let Some(s) = obj.get("uri").and_then(|v| v.as_str()) {
-                if let Ok(uri) = Url::parse(s) {
-                    return Some(uri);
-                }
-            }
-            if let Some(s) = obj
-                .get("textDocument")
-                .and_then(|td| td.get("uri"))
-                .and_then(|v| v.as_str())
-            {
-                if let Ok(uri) = Url::parse(s) {
-                    return Some(uri);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn fusion_plan_from_analysis(analysis: &DocumentAnalysis) -> FusionPlanSnapshot {
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-
-    if let Some(semantic) = &analysis.semantic {
-        for func in &semantic.functions {
-            nodes.push(FusionPlanNode {
-                id: func.name.clone(),
-                kind: "function".to_string(),
-                label: func.signature.display(),
-                shape: Vec::new(),
-                residency: None,
-            });
-        }
-
-        // Simple heuristic: connect functions in declaration order
-        for win in semantic.functions.windows(2) {
-            if let [a, b] = win {
-                edges.push(FusionPlanEdge {
-                    from: a.name.clone(),
-                    to: b.name.clone(),
-                    reason: Some("static order".to_string()),
-                });
-            }
-        }
-    }
-
-    FusionPlanSnapshot {
-        nodes,
-        edges,
-        shaders: Vec::new(),
-        decisions: Vec::new(),
     }
 }
 

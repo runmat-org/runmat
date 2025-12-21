@@ -77,7 +77,7 @@ enabled = true
 
 [[packages.registries]]
 name = "runmat"
-url = "https://packages.runmat.dev"
+url = "https://packages.runmat.org"
 
 [packages.dependencies]
 # Resolve from registry
