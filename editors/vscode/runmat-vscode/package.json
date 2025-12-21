@@ -4,7 +4,8 @@
   "description": "Language support for the RunMat language and runtime.",
   "version": "0.1.0",
   "publisher": "runmat",
-  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/runmat-org/runmat"
@@ -25,9 +26,22 @@
     "languages": [
       {
         "id": "runmat",
-        "aliases": ["RunMat", "runmat"],
-        "extensions": [".m", ".runmat"],
+        "aliases": [
+          "RunMat",
+          "runmat"
+        ],
+        "extensions": [
+          ".m",
+          ".runmat"
+        ],
         "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "runmat",
+        "scopeName": "source.runmat",
+        "path": "./syntaxes/runmat.tmLanguage.json"
       }
     ],
     "configuration": {
@@ -48,6 +62,12 @@
           "default": [],
           "description": "Additional command line arguments passed to the language server.",
           "scope": "resource"
+        },
+        "runmat.executable.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the RunMat executable. Leave empty to search in workspace or system PATH.",
+          "scope": "resource"
         }
       }
     },
@@ -59,6 +79,83 @@
       {
         "command": "runmat.showLogs",
         "title": "RunMat: Show Language Server Logs"
+      },
+      {
+        "command": "runmat.runFile",
+        "title": "RunMat: Run File",
+        "when": "resourceLangId == runmat",
+        "icon": "$(play)"
+      },
+      {
+        "command": "runmat.runSelection",
+        "title": "RunMat: Run Selection",
+        "when": "editorLangId == runmat && editorHasSelection"
+      },
+      {
+        "command": "runmat.clearTerminal",
+        "title": "RunMat: Clear Terminal"
+      },
+      {
+        "command": "runmat.autoIndent",
+        "title": "RunMat: Auto-Indent",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.commentLines",
+        "title": "RunMat: Comment Lines",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.uncommentLines",
+        "title": "RunMat: Uncomment Lines",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.duplicateLines",
+        "title": "RunMat: Duplicate Lines",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.changeCaseUpper",
+        "title": "RunMat: Change to Uppercase",
+        "when": "editorLangId == runmat && editorHasSelection"
+      },
+      {
+        "command": "runmat.changeCaseLower",
+        "title": "RunMat: Change to Lowercase",
+        "when": "editorLangId == runmat && editorHasSelection"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "runmat.runFile",
+        "key": "ctrl+shift+enter",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.runSelection",
+        "key": "ctrl+enter",
+        "when": "editorLangId == runmat && editorHasSelection"
+      },
+      {
+        "command": "runmat.autoIndent",
+        "key": "ctrl+alt+i",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.commentLines",
+        "key": "ctrl+r",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.uncommentLines",
+        "key": "ctrl+shift+r",
+        "when": "editorLangId == runmat"
+      },
+      {
+        "command": "runmat.duplicateLines",
+        "key": "ctrl+shift+c",
+        "when": "editorLangId == runmat"
       }
     ]
   },
@@ -72,6 +169,7 @@
   "devDependencies": {
     "@types/node": "^18.19.50",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.7.1",
     "typescript": "^5.6.3"
   },
   "dependencies": {

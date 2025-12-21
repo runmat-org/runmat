@@ -10,6 +10,7 @@ use runmat_hir::{
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 use runmat_parser::parse;
+use runmat_runtime;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
@@ -19,10 +20,10 @@ use tower_lsp::lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation, Hover,
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, Position,
-    PositionEncodingKind, Range, ServerCapabilities, ServerInfo, SymbolKind,
-    TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, Position, Range,
+    ServerCapabilities, ServerInfo, SymbolKind, TextDocumentContentChangeEvent,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 
@@ -374,7 +375,11 @@ impl RunMatLanguageServer {
 #[async_trait]
 impl LanguageServer for RunMatLanguageServer {
     async fn initialize(&self, _: InitializeParams) -> RpcResult<InitializeResult> {
+        // Force linkage of all builtin modules to prevent dead-code elimination
+        runmat_runtime::ensure_builtins_linked();
+
         info!("Initializing RunMat language server v{}", SERVER_VERSION);
+        info!("Loaded {} builtin functions", BUILTIN_INDEX.functions.len());
         let server_info = Some(ServerInfo {
             name: "RunMat Language Server".to_string(),
             version: Some(SERVER_VERSION.to_string()),
@@ -393,7 +398,6 @@ impl LanguageServer for RunMatLanguageServer {
                 work_done_progress_options: Default::default(),
             }),
             document_symbol_provider: Some(OneOf::Left(true)),
-            position_encoding: Some(PositionEncodingKind::UTF8),
             workspace: Some(WorkspaceServerCapabilities {
                 workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                     supported: Some(true),
@@ -900,27 +904,6 @@ fn collect_unknown_type_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    for symbol in semantic.globals.values() {
-        if matches!(symbol.ty, Type::Unknown) {
-            if let Some(range) = find_symbol_range(tokens, &symbol.name, None) {
-                diagnostics.push(Diagnostic {
-                    range: range.to_lsp_range(text),
-                    severity: Some(DiagnosticSeverity::HINT),
-                    code: None,
-                    code_description: None,
-                    source: Some("runmat-typing".into()),
-                    message: format!(
-                        "Type of global '{}' could not be inferred (falls back to 'unknown').",
-                        symbol.name
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
-            }
-        }
-    }
-
     for func in &semantic.functions {
         let scope = Some(func.range);
         for symbol in func.variables.values() {
@@ -1076,15 +1059,31 @@ fn offset_to_position(text: &str, mut offset: usize) -> Position {
 
 fn format_variable_hover(name: &str, symbol: &VariableSymbol) -> String {
     let mut buf = String::new();
-    let _ = writeln!(
-        buf,
-        "```runmat\n{kind} {name}: {ty}\n```",
-        kind = symbol.kind.as_label(),
-        ty = format_type(&symbol.ty)
-    );
-    if matches!(symbol.kind, VariableKind::Global) {
-        let _ = writeln!(buf, "Global variable available across the workspace.");
+    let _ = writeln!(buf, "```runmat\n{} {}", symbol.kind.as_label(), name);
+
+    // Only show type if it's not unknown
+    if !matches!(symbol.ty, Type::Unknown) {
+        let _ = write!(buf, ": {}", format_type(&symbol.ty));
     }
+
+    let _ = writeln!(buf, "\n```");
+
+    // Add context
+    match symbol.kind {
+        VariableKind::Global => {
+            let _ = writeln!(buf, "Global variable accessible across the workspace.");
+        }
+        VariableKind::Parameter => {
+            let _ = writeln!(buf, "Function parameter.");
+        }
+        VariableKind::Output => {
+            let _ = writeln!(buf, "Function output variable.");
+        }
+        VariableKind::Local => {
+            let _ = writeln!(buf, "Local variable within current function/scope.");
+        }
+    }
+
     buf
 }
 
