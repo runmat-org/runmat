@@ -1,0 +1,29 @@
+# cbindgen configuration for runmat-embed
+
+language = "C"
+include_guard = "RUNMAT_H"
+pragma_once = true
+cpp_compat = true
+documentation = true
+documentation_style = "c99"
+
+[defines]
+"feature = default" = ""
+
+[export]
+include = ["RmStatus", "RmError", "RmArrayF64", "RmArrayF32", "RmArrayI32", "RmArrayI64", "RmBaseType", "RmContext", "RmValue", "RUNMAT_ABI_VERSION"]
+exclude = ["RmContextOpaque", "RmValueOpaque", "ContextInner", "ValueHandle"]
+
+[export.rename]
+"RmStatus" = "rm_status"
+
+[fn]
+prefix = ""
+postfix = ""
+
+[struct]
+rename_fields = "None"
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+prefix_with_name = true
