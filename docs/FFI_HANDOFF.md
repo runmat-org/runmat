@@ -1,8 +1,8 @@
 # FFI & Embedding Handoff Document
 
 **Date:** 2024-12-22  
-**Previous Shift:** Completed Milestones 0–3 of RFC-0001  
-**Next Shift:** Milestone 4 (MEX-lite)
+**Previous Shift:** Completed Milestones 0–4 of RFC-0001  
+**Status:** All planned milestones complete
 
 ---
 
@@ -96,38 +96,43 @@ scale_array: (ptr<f64>, usize, usize, ptr_mut<f64>, ptr_mut<usize>, ptr_mut<usiz
 
 ---
 
-## Next Steps (Per RFC)
+---
 
-### Milestone 4: MEX-lite Compatibility Layer
+## Milestone 4: MEX-lite Compatibility Layer — COMPLETED
 
-**Goal:** `rm_mex.h` header providing MATLAB MEX-like API for C extensions.
+**Implemented on `ffi-embed` branch:**
+- `rm_mex.h` header with MATLAB MEX-like API
+- `MxArray` struct wrapping RunMat Tensor directly
+- Matrix creation: `mxCreateDoubleMatrix`, `mxCreateDoubleScalar`
+- Matrix info: `mxGetM`, `mxGetN`, `mxGetNumberOfElements`, `mxIsEmpty`, `mxIsScalar`, `mxIsDouble`
+- Data access: `mxGetPr`, `mxGetScalar`
+- Memory: `mxDestroyArray`, `mxDuplicateArray`
+- Helpers: `mexErrMsgTxt`, `mexWarnMsgTxt`, `mexPrintf`
 
-**What to implement:**
-1. Create `crates/runmat-embed/include/rm_mex.h` with:
-   ```c
-   // MEX-like array helpers
-   mxArray* mxCreateDoubleMatrix(size_t m, size_t n, int complexity);
-   double* mxGetPr(const mxArray* pa);
-   size_t mxGetM(const mxArray* pa);
-   size_t mxGetN(const mxArray* pa);
-   void mxDestroyArray(mxArray* pa);
-   
-   // MEX entry point signature
-   void mexFunction(int nlhs, mxArray* plhs[],
-                    int nrhs, const mxArray* prhs[]);
-   ```
+**Files added/modified:**
+- `crates/runmat-embed/include/rm_mex.h` — NEW: MEX compatibility header
+- `crates/runmat-embed/src/mex.rs` — NEW: MEX function implementations
+- `crates/runmat-embed/src/lib.rs` — Added mex module
+- `crates/runmat-embed/examples/mex_double.c` — NEW: Example MEX function
 
-2. Implement `mxArray` as a wrapper around `RmValue`:
-   ```c
-   typedef struct mxArray {
-       RmValue* value;
-       RmContext* ctx;  // for memory management
-   } mxArray;
-   ```
+**Example MEX function usage:**
+```c
+#include "rm_mex.h"
 
-3. Write conversion functions between `mxArray` and `RmArrayF64`.
+void mexFunction(int nlhs, mxArray* plhs[],
+                 int nrhs, const mxArray* prhs[]) {
+    size_t m = mxGetM(prhs[0]);
+    size_t n = mxGetN(prhs[0]);
+    double* input = mxGetPr(prhs[0]);
 
-4. Create example MEX function to validate the API.
+    plhs[0] = mxCreateDoubleMatrix(m, n, mxREAL);
+    double* output = mxGetPr(plhs[0]);
+
+    for (size_t i = 0; i < m * n; i++) {
+        output[i] = input[i] * 2.0;
+    }
+}
+```
 
 ---
 
