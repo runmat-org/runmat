@@ -1,0 +1,22 @@
+[package]
+name = "runmat-embed"
+version = "0.2.7"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "C ABI for embedding RunMat in C/C++ applications"
+repository = "https://github.com/runmat-org/runmat"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+runmat-abi = { version = "=0.2.7", path = "../runmat-abi" }
+runmat-repl = { version = "=0.2.7", path = "../runmat-repl" }
+runmat-builtins = { workspace = true }
+log = { workspace = true }
+
+# Header is maintained manually in include/runmat.h
+
+[features]
+default = []
