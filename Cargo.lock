@@ -5516,6 +5516,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-ffi"
+version = "0.2.7"
+dependencies = [
+ "cc",
+ "inventory",
+ "libloading 0.8.8",
+ "log",
+ "once_cell",
+ "runmat-builtins",
+ "runmat-macros",
+]
+
+[[package]]
 name = "runmat-gc"
 version = "0.2.7"
 dependencies = [
