@@ -420,6 +420,9 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::MException(_) => {
             Err("rdivide: unsupported prototype conversion to GPU output".to_string())
         }
+        Value::Symbolic(_) => {
+            Err("rdivide: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

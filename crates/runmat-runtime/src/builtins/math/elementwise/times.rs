@@ -415,6 +415,9 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::MException(_) => {
             Err("times: unsupported prototype conversion to GPU output".to_string())
         }
+        Value::Symbolic(_) => {
+            Err("times: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

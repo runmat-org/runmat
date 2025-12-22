@@ -307,6 +307,9 @@ fn parse_fft2_single(value: &Value) -> Result<(Option<usize>, Option<usize>), St
         | Value::Object(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("fft2: transform lengths must be numeric".to_string()),
+        Value::Symbolic(_) => {
+            Err("fft2: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

@@ -512,7 +512,8 @@ fn analyse_like_prototype(proto: &Value) -> Result<PrototypeSpec, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("meshgrid: prototypes must be numeric arrays".to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err("meshgrid: prototypes must be numeric arrays".to_string()),
     }
 }
 

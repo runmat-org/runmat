@@ -296,7 +296,8 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ERR_INVALID_ARG.to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err(ERR_INVALID_ARG.to_string()),
     }
 }
 

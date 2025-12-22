@@ -507,7 +507,8 @@ fn flatten_numeric(value: &Value) -> Result<Vec<f64>, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(runtime_error(
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err(runtime_error(
             MESSAGE_ID_INVALID_DATA,
             "write: unsupported input type",
         )),

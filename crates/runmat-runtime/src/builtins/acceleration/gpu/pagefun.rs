@@ -968,6 +968,7 @@ impl TypeName for Value {
             Value::Closure(_) => "closure",
             Value::ClassRef(_) => "class reference",
             Value::MException(_) => "MException",
+            Value::Symbolic(_) => "sym",
         }
     }
 }

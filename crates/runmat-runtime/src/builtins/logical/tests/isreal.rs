@@ -258,6 +258,7 @@ fn isreal_host(value: Value) -> Result<Value, String> {
         Value::Closure(_) => false,
         Value::ClassRef(_) => false,
         Value::MException(_) => false,
+        Value::Symbolic(_) => false,
         Value::GpuTensor(_) => {
             return Err("isreal: internal error, GPU value reached host path".to_string());
         }

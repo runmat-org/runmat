@@ -283,6 +283,9 @@ fn value_to_char_rows(value: &Value) -> Result<Vec<Vec<char>>, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err(format!("char: unsupported input type {:?}", value)),
+        Value::Symbolic(_) => {
+            Err("char: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

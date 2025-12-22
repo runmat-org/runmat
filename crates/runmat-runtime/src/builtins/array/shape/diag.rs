@@ -616,6 +616,9 @@ fn offset_from_value(value: &Value) -> Result<isize, String> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("diag: offset must be numeric".to_string()),
+        Value::Symbolic(_) => {
+            Err("diag: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 
