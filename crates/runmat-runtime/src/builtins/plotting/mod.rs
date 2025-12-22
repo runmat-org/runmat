@@ -25,6 +25,8 @@ pub(crate) mod bar;
 pub(crate) mod clf;
 #[path = "ops/close.rs"]
 pub(crate) mod close;
+#[path = "ops/compat_cmds.rs"]
+pub(crate) mod compat_cmds;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
 #[path = "ops/contourf.rs"]
@@ -59,8 +61,6 @@ pub(crate) mod subplot;
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
 pub(crate) mod surfc;
-#[path = "ops/compat_cmds.rs"]
-pub(crate) mod compat_cmds;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{

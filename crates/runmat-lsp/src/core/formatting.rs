@@ -39,12 +39,7 @@ fn format_document(text: &str) -> String {
 fn full_range(text: &str) -> Range {
     let start = Position::new(0, 0);
     let line_count = text.lines().count() as u32;
-    let last_line_len = text
-        .lines()
-        .last()
-        .map(|l| l.len() as u32)
-        .unwrap_or(0);
+    let last_line_len = text.lines().last().map(|l| l.len() as u32).unwrap_or(0);
     let end = Position::new(line_count, last_line_len);
     Range { start, end }
 }
-

@@ -91,7 +91,7 @@ pub(crate) mod native {
     }
 
     fn detect_mode() -> PlottingMode {
-        if let Ok(mode) = env::var("RUSTMAT_PLOT_MODE") {
+        if let Ok(mode) = env::var("RUNMAT_PLOT_MODE") {
             match mode.to_lowercase().as_str() {
                 "gui" => PlottingMode::Interactive,
                 "headless" | "static" => PlottingMode::Static,

@@ -408,9 +408,9 @@ fn test_help_shows_environment_variables() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Environment Variables"));
-    assert!(stdout.contains("RUSTMAT_DEBUG"));
-    assert!(stdout.contains("RUSTMAT_GC_PRESET"));
-    assert!(stdout.contains("RUSTMAT_JIT_ENABLE"));
+    assert!(stdout.contains("RUNMAT_DEBUG"));
+    assert!(stdout.contains("RUNMAT_GC_PRESET"));
+    assert!(stdout.contains("RUNMAT_JIT_ENABLE"));
 }
 
 #[test]

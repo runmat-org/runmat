@@ -27,4 +27,3 @@ pub fn offset_to_position(text: &str, offset: usize) -> Position {
     }
     Position::new(text.lines().count() as u32, 0)
 }
-

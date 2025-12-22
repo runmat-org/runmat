@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 /// Snapshot file format magic number
-pub const SNAPSHOT_MAGIC: &[u8; 8] = b"RUSTMAT\x01";
+pub const SNAPSHOT_MAGIC: &[u8; 8] = b"RUNMAT\x01";
 
 /// Current snapshot format version
 pub const SNAPSHOT_VERSION: u32 = 1;

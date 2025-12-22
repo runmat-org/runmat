@@ -1,7 +1,7 @@
 use anyhow::Result;
-use tracing::{debug, info, info_span, warn};
 use runmat_builtins::{Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
+use tracing::{debug, info, info_span, warn};
 
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
@@ -1261,7 +1261,11 @@ impl RunMatSession {
             if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
             {
                 if debug_trace {
-                    debug!(?mutated_names, ?assigned, "[repl] mutated names and assigned return values");
+                    debug!(
+                        ?mutated_names,
+                        ?assigned,
+                        "[repl] mutated names and assigned return values"
+                    );
                 }
                 self.variable_names = mutated_names.clone();
                 let mut new_assigned: HashSet<String> = assigned
@@ -1737,9 +1741,7 @@ impl RunMatSession {
         if debug_trace {
             debug!(
                 bytecode_var_count = bytecode.var_count,
-                required_len,
-                max_var_id,
-                "[repl] prepare variable array"
+                required_len, max_var_id, "[repl] prepare variable array"
             );
         }
 

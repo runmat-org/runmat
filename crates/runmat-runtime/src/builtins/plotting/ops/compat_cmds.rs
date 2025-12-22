@@ -158,4 +158,3 @@ pub fn cla_builtin(_args: Vec<Value>) -> Result<String, String> {
 pub fn close_builtin(_args: Vec<Value>) -> Result<String, String> {
     Ok("figure closed".into())
 }
-

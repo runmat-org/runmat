@@ -149,7 +149,11 @@ impl<S> Layer<S> for LogBridgeLayer
 where
     S: Subscriber,
 {
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
 
@@ -157,7 +161,9 @@ where
             ts: now_rfc3339(),
             level: event.metadata().level().to_string(),
             target: event.metadata().target().to_string(),
-            message: visitor.message.unwrap_or_else(|| event.metadata().name().to_string()),
+            message: visitor
+                .message
+                .unwrap_or_else(|| event.metadata().name().to_string()),
             trace_id: current_trace_id(),
             span_id: current_span_id(),
             fields: visitor
@@ -176,7 +182,11 @@ impl<S> Layer<S> for TraceBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         // Only emit trace events if a hook is set
         let hook = match TRACE_HOOK.get() {
             Some(h) => h,
@@ -192,19 +202,24 @@ where
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
 
-        let args = visitor.fields.as_ref().and_then(|v| v.as_object()).cloned().map(JsonValue::Object);
+        let args = visitor
+            .fields
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .cloned()
+            .map(JsonValue::Object);
 
         let ev = TraceEvent {
-          name: visitor.message.unwrap_or_else(|| meta.name().to_string()),
-          cat: meta.target().to_string(),
-          ph: "i".to_string(), // instant event
-          ts,
-          dur: None,
-          pid: Some(self.pid),
-          tid: None,
-          trace_id,
-          span_id,
-          args,
+            name: visitor.message.unwrap_or_else(|| meta.name().to_string()),
+            cat: meta.target().to_string(),
+            ph: "i".to_string(), // instant event
+            ts,
+            dur: None,
+            pid: Some(self.pid),
+            tid: None,
+            trace_id,
+            span_id,
+            args,
         };
 
         hook(&[ev]);
@@ -274,10 +289,15 @@ fn current_trace_span_ids() -> (Option<String>, Option<String>) {
         let ctx = span.context();
         let sc = ctx.span().span_context();
         if sc.is_valid() {
-            return (Some(sc.trace_id().to_string()), Some(sc.span_id().to_string()));
+            return (
+                Some(sc.trace_id().to_string()),
+                Some(sc.span_id().to_string()),
+            );
         }
     }
-    let span_id = tracing::Span::current().id().map(|id| id.into_u64().to_string());
+    let span_id = tracing::Span::current()
+        .id()
+        .map(|id| id.into_u64().to_string());
     let trace_id = Some(fallback_trace_id());
     (trace_id, span_id)
 }
@@ -316,7 +336,9 @@ impl tracing::field::Visit for JsonVisitor {
         if field.name() == "message" {
             self.message = Some(entry.as_str().unwrap_or_default().to_string());
         } else {
-            let obj = self.fields.get_or_insert_with(|| JsonValue::Object(Default::default()));
+            let obj = self
+                .fields
+                .get_or_insert_with(|| JsonValue::Object(Default::default()));
             if let JsonValue::Object(map) = obj {
                 map.insert(field.name().to_string(), entry);
             }
@@ -328,7 +350,9 @@ impl tracing::field::Visit for JsonVisitor {
         if field.name() == "message" {
             self.message = Some(value.to_string());
         } else {
-            let obj = self.fields.get_or_insert_with(|| JsonValue::Object(Default::default()));
+            let obj = self
+                .fields
+                .get_or_insert_with(|| JsonValue::Object(Default::default()));
             if let JsonValue::Object(map) = obj {
                 map.insert(field.name().to_string(), entry);
             }
@@ -350,10 +374,8 @@ fn otel_layer() -> impl Layer<tracing_subscriber::Registry> {
         .tracing()
         .with_exporter(otel_exporter)
         .with_trace_config(
-            opentelemetry::sdk::trace::config().with_resource(Resource::new(vec![KeyValue::new(
-                "service.name",
-                "runmat",
-            )])),
+            opentelemetry::sdk::trace::config()
+                .with_resource(Resource::new(vec![KeyValue::new("service.name", "runmat")])),
         )
         .install_batch(opentelemetry::runtime::Tokio)
         .expect("failed to install OTEL pipeline");
@@ -412,9 +434,10 @@ mod tests {
 
         let items = captured.lock().unwrap();
         assert!(!items.is_empty());
-        assert!(items
-            .iter()
-            .any(|e| e.name == "test_span" || e.message().unwrap_or_else(|| "".to_string()).contains("inside span")));
+        assert!(items.iter().any(|e| e.name == "test_span"
+            || e.message()
+                .unwrap_or_else(|| "".to_string())
+                .contains("inside span")));
     }
 
     // helper to get message from TraceEvent args if present
@@ -431,4 +454,3 @@ mod tests {
         }
     }
 }
-

@@ -66,8 +66,7 @@ fn command_syntax_with_numbers_and_strings() {
 
 #[test]
 fn hold_on_rewrites_to_string_arg() {
-    let program =
-        parse_with_options("hold on", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    let program = parse_with_options("hold on", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
         Stmt::ExprStmt(Expr::FuncCall(name, args), false) => {
             assert_eq!(name, "hold");
@@ -80,8 +79,7 @@ fn hold_on_rewrites_to_string_arg() {
 
 #[test]
 fn colorbar_without_arg_allowed() {
-    let program =
-        parse_with_options("colorbar", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    let program = parse_with_options("colorbar", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
         Stmt::ExprStmt(Expr::FuncCall(name, args), false) => {
             assert_eq!(name, "colorbar");

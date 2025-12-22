@@ -1,10 +1,13 @@
+use lsp_types::{
+    CompletionList, Diagnostic, DocumentSymbol, Location, Position, SemanticTokens,
+    SymbolInformation, TextEdit, Url,
+};
 use serde::Serialize;
+use serde_wasm_bindgen;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Once;
 use wasm_bindgen::prelude::*;
-use serde_wasm_bindgen;
-use lsp_types::{CompletionList, Diagnostic, Location, DocumentSymbol, Position, Url, SemanticTokens, TextEdit, SymbolInformation};
 
 use crate::core::analysis::{
     analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
@@ -88,10 +91,15 @@ pub fn close_document(uri: String) {
 pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let position = Position::new(_line, _character);
     let items = completion_at(&doc.text, &doc.analysis, &position);
-    let list = CompletionList { is_incomplete: false, items };
+    let list = CompletionList {
+        is_incomplete: false,
+        items,
+    };
     to_js(&list)
 }
 
@@ -99,7 +107,9 @@ pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
 pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let position = Position::new(_line, _character);
     let result = hover_at(&doc.text, &doc.analysis, &position);
     match result {
@@ -112,7 +122,9 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
 pub fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let position = Position::new(_line, _character);
     let ranges = definition_at(&doc.text, &doc.analysis, &position);
     let locations: Vec<Location> = ranges
@@ -136,7 +148,9 @@ pub fn references(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
 pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let position = Position::new(_line, _character);
     let result = signature_help_at(&doc.text, &doc.analysis, &position);
     match result {
@@ -149,7 +163,9 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
 pub fn semantic_tokens(_uri: String) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let tokens: Option<SemanticTokens> = semantic_tokens_full(&doc.text, &doc.analysis);
     match tokens {
         Some(t) => to_js(&t),
@@ -161,7 +177,9 @@ pub fn semantic_tokens(_uri: String) -> Result<JsValue, JsValue> {
 pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let symbols: Vec<DocumentSymbol> = core_document_symbols(&doc.text, &doc.analysis);
     to_js(&symbols)
 }
@@ -190,7 +208,9 @@ pub fn workspace_symbols_all() -> Result<JsValue, JsValue> {
 pub fn formatting(_uri: String) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let edits: Vec<TextEdit> = formatting_edits(&doc.text, &doc.analysis);
     to_js(&edits)
 }
@@ -199,7 +219,9 @@ pub fn formatting(_uri: String) -> Result<JsValue, JsValue> {
 pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
-    let Some(doc) = entry else { return Ok(JsValue::NULL); };
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
     let diags: Vec<Diagnostic> = diagnostics_for_document(&doc.text, &doc.analysis);
     to_js(&diags)
 }
@@ -213,4 +235,3 @@ pub fn set_compat_mode(mode: String) {
     };
     COMPAT_MODE.with(|c| c.set(parsed));
 }
-

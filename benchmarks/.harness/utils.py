@@ -66,5 +66,5 @@ def default_env() -> Dict[str, str]:
     env = os.environ.copy()
     # Favor headless/quiet modes where relevant
     env.setdefault("NO_GUI", "1")
-    env.setdefault("RUSTMAT_PLOT_MODE", "headless")
+    env.setdefault("RUNMAT_PLOT_MODE", "headless")
     return env

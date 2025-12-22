@@ -82,11 +82,11 @@ logging:
   # file: "/path/to/runmat.log"
 
 # Environment variable overrides:
-# RUSTMAT_CONFIG=path/to/config.yaml  - Override config file location
-# RUSTMAT_PLOT_MODE=headless          - Override plotting mode
-# RUSTMAT_JIT_ENABLE=false            - Disable JIT compilation
-# RUSTMAT_GC_PRESET=debug             - Override GC preset
-# RUSTMAT_DEBUG=true                  - Enable debug logging
+# RUNMAT_CONFIG=path/to/config.yaml  - Override config file location
+# RUNMAT_PLOT_MODE=headless          - Override plotting mode
+# RUNMAT_JIT_ENABLE=false            - Disable JIT compilation
+# RUNMAT_GC_PRESET=debug             - Override GC preset
+# RUNMAT_DEBUG=true                  - Enable debug logging
 # 
 # See 'runmat config paths' for all possible config file locations
 # See 'runmat --help' for all available CLI options and environment variables

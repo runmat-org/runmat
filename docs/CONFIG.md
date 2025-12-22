@@ -11,7 +11,7 @@ This document is the definitive reference for all configuration options.
 
 Configuration sources (highest to lowest precedence):
 1. Command-line flags
-2. Environment variables (`RUSTMAT_*`)
+2. Environment variables (`RUNMAT_*`)
 3. Configuration files (`.runmat`, `.runmat.yaml`, `runmat.config.json`, …)
 4. Built-in defaults
 
@@ -25,7 +25,7 @@ Loading follows `runmat::config::ConfigLoader::load()` which:
 
 Checked in order; first existing file is loaded:
 
-1. Explicit path via `RUSTMAT_CONFIG`
+1. Explicit path via `RUNMAT_CONFIG`
 2. Current directory candidates:
    - `.runmat` (preferred; TOML syntax)
    - `.runmat.yaml`, `.runmat.yml`, `.runmat.json`, `.runmat.toml`
@@ -343,14 +343,14 @@ Package schema (tagged union by `source`):
 
 ## Environment variables (overrides)
 
-All `RUSTMAT_*` variables map onto the above fields. Notable ones:
+All `RUNMAT_*` variables map onto the above fields. Notable ones:
 
-- Runtime: `RUSTMAT_TIMEOUT`, `RUSTMAT_VERBOSE`, `RUSTMAT_SNAPSHOT_PATH`
-- JIT: `RUSTMAT_JIT_ENABLE`, `RUSTMAT_JIT_DISABLE`, `RUSTMAT_JIT_THRESHOLD`, `RUSTMAT_JIT_OPT_LEVEL`
-- GC: `RUSTMAT_GC_PRESET`, `RUSTMAT_GC_YOUNG_SIZE`, `RUSTMAT_GC_THREADS`, `RUSTMAT_GC_STATS`
-- Plotting: `RUSTMAT_PLOT_MODE`, `RUSTMAT_PLOT_HEADLESS`, `RUSTMAT_PLOT_BACKEND`
-- Logging: `RUSTMAT_DEBUG`, `RUSTMAT_LOG_LEVEL`
-- Kernel: `RUSTMAT_KERNEL_IP`, `RUSTMAT_KERNEL_KEY`
+- Runtime: `RUNMAT_TIMEOUT`, `RUNMAT_VERBOSE`, `RUNMAT_SNAPSHOT_PATH`
+- JIT: `RUNMAT_JIT_ENABLE`, `RUNMAT_JIT_DISABLE`, `RUNMAT_JIT_THRESHOLD`, `RUNMAT_JIT_OPT_LEVEL`
+- GC: `RUNMAT_GC_PRESET`, `RUNMAT_GC_YOUNG_SIZE`, `RUNMAT_GC_THREADS`, `RUNMAT_GC_STATS`
+- Plotting: `RUNMAT_PLOT_MODE`, `RUNMAT_PLOT_HEADLESS`, `RUNMAT_PLOT_BACKEND`
+- Logging: `RUNMAT_DEBUG`, `RUNMAT_LOG_LEVEL`
+- Kernel: `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`
 
 Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
 
@@ -442,7 +442,7 @@ logging:
 ```
 
 ```sh
-RUSTMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
+RUNMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
 ```
 
 ### 3) Teaching lab machines

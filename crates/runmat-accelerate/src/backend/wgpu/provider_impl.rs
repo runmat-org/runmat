@@ -1,7 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::{debug, info, warn};
-use tracing::info_span;
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
 #[cfg(not(target_arch = "wasm32"))]
@@ -61,6 +60,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
+use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -3924,7 +3924,10 @@ impl WgpuProvider {
             );
             log::debug!(
                 "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
-                reduce_len, num_slices, workgroup_size, groups
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                groups
             );
         }
         let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
@@ -7322,7 +7325,13 @@ impl WgpuProvider {
             );
             log::debug!(
                 "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
-                m, n, k, view_a.lda, view_b.lda, view_a.transpose, view_b.transpose
+                m,
+                n,
+                k,
+                view_a.lda,
+                view_b.lda,
+                view_a.transpose,
+                view_b.transpose
             );
             if debug_matmul_dump {
                 if let Ok(lhs_host) = self.download(a) {
@@ -7373,7 +7382,10 @@ impl WgpuProvider {
         if debug_matmul {
             log::debug!(
                 "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
-                can_vec4, use_vec4, enable_chunk, out_usage
+                can_vec4,
+                use_vec4,
+                enable_chunk,
+                out_usage
             );
         }
 
@@ -7607,7 +7619,10 @@ impl WgpuProvider {
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
                     let sample_len = out_host.data.len().min(8);
                     log::debug!("[matmul_debug] out max_abs={:.6e}", max_out);
-                    log::debug!("[matmul_debug] out sample {:?}", &out_host.data[0..sample_len]);
+                    log::debug!(
+                        "[matmul_debug] out sample {:?}",
+                        &out_host.data[0..sample_len]
+                    );
                 }
             }
         }

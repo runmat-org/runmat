@@ -9,11 +9,6 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
-use runmat_accelerate::{
-    AccelPowerPreference, AccelerateInitOptions, AccelerateProviderPreference, AutoOffloadLogLevel,
-    AutoOffloadOptions,
-};
-use runmat_parser::CompatMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -21,6 +16,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const MIN_QUEUE_SIZE: usize = 8;
+const CONFIG_FILENAMES: &[&str] = &[
+    ".runmat",
+    ".runmat.toml",
+    ".runmat.yaml",
+    ".runmat.yml",
+    ".runmat.json",
+    "runmat.config.toml",
+    "runmat.config.yaml",
+    "runmat.config.yml",
+    "runmat.config.json",
+];
 
 /// Main RunMat configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -70,7 +76,20 @@ pub struct LanguageConfig {
     /// Default: "matlab" (accept command syntax like `hold on`).
     /// "strict" disables command syntax; require `hold(\"on\")` style.
     #[serde(default)]
-    pub compat: CompatMode,
+    pub compat: LanguageCompatMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum LanguageCompatMode {
+    Matlab,
+    Strict,
+}
+
+impl Default for LanguageCompatMode {
+    fn default() -> Self {
+        Self::Matlab
+    }
 }
 
 /// Acceleration (GPU) configuration
@@ -94,6 +113,43 @@ pub struct AccelerateConfig {
     /// Auto-offload planner configuration
     #[serde(default)]
     pub auto_offload: AutoOffloadConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelerateProviderPreference {
+    Auto,
+    Wgpu,
+    InProcess,
+}
+
+impl Default for AccelerateProviderPreference {
+    fn default() -> Self {
+        Self::Wgpu
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelPowerPreference {
+    Auto,
+    HighPerformance,
+    LowPower,
+}
+
+impl Default for AccelPowerPreference {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoOffloadLogLevel {
+    Off,
+    Info,
+    #[default]
+    Trace,
 }
 
 /// Telemetry configuration
@@ -147,19 +203,6 @@ fn default_telemetry_queue() -> usize {
     256
 }
 
-impl AccelerateConfig {
-    pub fn to_init_options(&self) -> AccelerateInitOptions {
-        AccelerateInitOptions {
-            enabled: self.enabled,
-            provider: self.provider,
-            allow_inprocess_fallback: self.allow_inprocess_fallback,
-            wgpu_power_preference: self.wgpu_power_preference,
-            wgpu_force_fallback_adapter: self.wgpu_force_fallback_adapter,
-            auto_offload: self.auto_offload.to_options(),
-        }
-    }
-}
-
 /// Auto-offload planner configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoOffloadConfig {
@@ -179,17 +222,6 @@ impl Default for AutoOffloadConfig {
             calibrate: true,
             profile_path: None,
             log_level: AutoOffloadLogLevel::Trace,
-        }
-    }
-}
-
-impl AutoOffloadConfig {
-    fn to_options(&self) -> AutoOffloadOptions {
-        AutoOffloadOptions {
-            enabled: self.enabled,
-            calibrate: self.calibrate,
-            profile_path: self.profile_path.clone(),
-            log_level: self.log_level,
         }
     }
 }
@@ -798,35 +830,22 @@ impl ConfigLoader {
         let mut paths = Vec::new();
 
         // 1. Environment variable override
-        if let Ok(config_path) = env::var("RUSTMAT_CONFIG") {
+        if let Some(config_path) = env_value("RUNMAT_CONFIG", &[]) {
             paths.push(PathBuf::from(config_path));
         }
 
         // 2. Current directory
-        let current_dir_configs = [
-            ".runmat", // preferred single-file format
-            ".runmat.yaml",
-            ".runmat.yml",
-            ".runmat.json",
-            ".runmat.toml",
-            "runmat.config.yaml",
-            "runmat.config.yml",
-            "runmat.config.json",
-            "runmat.config.toml",
-        ];
-
-        for name in &current_dir_configs {
-            if let Ok(current_dir) = env::current_dir() {
+        if let Ok(current_dir) = env::current_dir() {
+            for name in CONFIG_FILENAMES {
                 paths.push(current_dir.join(name));
             }
         }
 
         // 3. Home directory
         if let Some(home_dir) = dirs::home_dir() {
-            paths.push(home_dir.join(".runmat"));
-            paths.push(home_dir.join(".runmat.yaml"));
-            paths.push(home_dir.join(".runmat.yml"));
-            paths.push(home_dir.join(".runmat.json"));
+            for name in CONFIG_FILENAMES {
+                paths.push(home_dir.join(name));
+            }
             paths.push(home_dir.join(".config/runmat/config.yaml"));
             paths.push(home_dir.join(".config/runmat/config.yml"));
             paths.push(home_dir.join(".config/runmat/config.json"));
@@ -841,6 +860,27 @@ impl ConfigLoader {
         }
 
         paths
+    }
+
+    /// Walk up from the provided directory looking for the first config file.
+    pub fn discover_config_path_from(start: &Path) -> Option<PathBuf> {
+        let mut current = if start.is_dir() {
+            start.to_path_buf()
+        } else {
+            start.parent().map(Path::to_path_buf)?
+        };
+        loop {
+            for name in CONFIG_FILENAMES {
+                let candidate = current.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+        None
     }
 
     /// Load configuration from a specific file
@@ -887,41 +927,36 @@ impl ConfigLoader {
     /// Apply environment variable overrides
     fn apply_environment_variables(config: &mut RunMatConfig) -> Result<()> {
         // Runtime settings
-        if let Ok(timeout) = env::var("RUSTMAT_TIMEOUT") {
+        if let Some(timeout) = env_value("RUNMAT_TIMEOUT", &[]) {
             if let Ok(timeout) = timeout.parse() {
                 config.runtime.timeout = timeout;
             }
         }
 
-        if let Ok(verbose) = env::var("RUSTMAT_VERBOSE") {
-            config.runtime.verbose = parse_bool(&verbose).unwrap_or(false);
+        if let Some(verbose) = env_bool("RUNMAT_VERBOSE", &[]) {
+            config.runtime.verbose = verbose;
         }
 
-        if let Ok(snapshot) = env::var("RUSTMAT_SNAPSHOT_PATH") {
+        if let Some(snapshot) = env_value("RUNMAT_SNAPSHOT_PATH", &[]) {
             config.runtime.snapshot_path = Some(PathBuf::from(snapshot));
         }
 
         // Telemetry settings
-        if let Some(flag) = env::var("RUNMAT_TELEMETRY")
-            .ok()
-            .and_then(|v| parse_bool(&v))
-        {
+        if let Some(flag) = env_bool("RUNMAT_TELEMETRY", &[]) {
             config.telemetry.enabled = flag;
         }
-        if let Some(flag) = env::var("RUNMAT_NO_TELEMETRY")
-            .ok()
-            .and_then(|v| parse_bool(&v))
-        {
+        if let Some(flag) = env_bool("RUNMAT_NO_TELEMETRY", &[]) {
             if flag {
                 config.telemetry.enabled = false;
             }
         }
-        if let Ok(show) = env::var("RUNMAT_TELEMETRY_SHOW") {
-            config.telemetry.show_payloads = parse_bool(&show).unwrap_or(false);
+        if let Some(show) = env_bool("RUNMAT_TELEMETRY_SHOW", &[]) {
+            config.telemetry.show_payloads = show;
         }
-        if let Ok(endpoint) = env::var("RUNMAT_TELEMETRY_ENDPOINT")
-            .or_else(|_| env::var("RUNMAT_TELEMETRY_HTTP_ENDPOINT"))
-        {
+        if let Some(endpoint) = env_value(
+            "RUNMAT_TELEMETRY_ENDPOINT",
+            &["RUNMAT_TELEMETRY_HTTP_ENDPOINT"],
+        ) {
             let trimmed = endpoint.trim();
             if trimmed.is_empty() {
                 config.telemetry.http_endpoint = None;
@@ -929,7 +964,7 @@ impl ConfigLoader {
                 config.telemetry.http_endpoint = Some(trimmed.to_string());
             }
         }
-        if let Ok(udp) = env::var("RUNMAT_TELEMETRY_UDP_ENDPOINT") {
+        if let Some(udp) = env_value("RUNMAT_TELEMETRY_UDP_ENDPOINT", &[]) {
             let trimmed = udp.trim();
             if trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("off") {
                 config.telemetry.udp_endpoint = None;
@@ -937,107 +972,89 @@ impl ConfigLoader {
                 config.telemetry.udp_endpoint = Some(trimmed.to_string());
             }
         }
-        if let Ok(queue) = env::var("RUNMAT_TELEMETRY_QUEUE_SIZE") {
+        if let Some(queue) = env_value("RUNMAT_TELEMETRY_QUEUE_SIZE", &[]) {
             if let Ok(parsed) = queue.parse::<usize>() {
                 config.telemetry.queue_size = parsed.max(MIN_QUEUE_SIZE);
             }
         }
 
         // Acceleration settings
-        if let Ok(accel) =
-            env::var("RUSTMAT_ACCEL_ENABLE").or_else(|_| env::var("RUNMAT_ACCEL_ENABLE"))
-        {
+        if let Some(accel) = env_value("RUNMAT_ACCEL_ENABLE", &[]) {
             if let Some(flag) = parse_bool(&accel) {
                 config.accelerate.enabled = flag;
             }
         }
 
-        if let Ok(provider) =
-            env::var("RUSTMAT_ACCEL_PROVIDER").or_else(|_| env::var("RUNMAT_ACCEL_PROVIDER"))
-        {
+        if let Some(provider) = env_value("RUNMAT_ACCEL_PROVIDER", &[]) {
             if let Some(pref) = parse_provider_preference(&provider) {
                 config.accelerate.provider = pref;
             }
         }
 
-        if let Ok(force_inprocess) = env::var("RUNMAT_ACCEL_FORCE_INPROCESS") {
-            if parse_bool(&force_inprocess).unwrap_or(false) {
+        if let Some(force_inprocess) = env_bool("RUNMAT_ACCEL_FORCE_INPROCESS", &[]) {
+            if force_inprocess {
                 config.accelerate.provider = AccelerateProviderPreference::InProcess;
             }
         }
 
-        if let Ok(wgpu_toggle) = env::var("RUNMAT_ACCEL_WGPU") {
-            if let Some(enabled) = parse_bool(&wgpu_toggle) {
-                config.accelerate.provider = if enabled {
-                    AccelerateProviderPreference::Wgpu
-                } else {
-                    AccelerateProviderPreference::InProcess
-                };
-            }
+        if let Some(wgpu_toggle) = env_bool("RUNMAT_ACCEL_WGPU", &[]) {
+            config.accelerate.provider = if wgpu_toggle {
+                AccelerateProviderPreference::Wgpu
+            } else {
+                AccelerateProviderPreference::InProcess
+            };
         }
 
-        if let Ok(fallback) = env::var("RUSTMAT_ACCEL_DISABLE_FALLBACK") {
-            if let Some(disable) = parse_bool(&fallback) {
-                config.accelerate.allow_inprocess_fallback = !disable;
-            }
+        if let Some(fallback) = env_bool("RUNMAT_ACCEL_DISABLE_FALLBACK", &[]) {
+            config.accelerate.allow_inprocess_fallback = !fallback;
         }
 
-        if let Ok(force_fallback) = env::var("RUSTMAT_ACCEL_WGPU_FORCE_FALLBACK")
-            .or_else(|_| env::var("RUNMAT_ACCEL_WGPU_FORCE_FALLBACK"))
-        {
-            if let Some(flag) = parse_bool(&force_fallback) {
-                config.accelerate.wgpu_force_fallback_adapter = flag;
-            }
+        if let Some(force_fallback) = env_bool("RUNMAT_ACCEL_WGPU_FORCE_FALLBACK", &[]) {
+            config.accelerate.wgpu_force_fallback_adapter = force_fallback;
         }
 
-        if let Ok(power) =
-            env::var("RUSTMAT_ACCEL_WGPU_POWER").or_else(|_| env::var("RUNMAT_ACCEL_WGPU_POWER"))
-        {
+        if let Some(power) = env_value("RUNMAT_ACCEL_WGPU_POWER", &[]) {
             if let Some(pref) = parse_power_preference(&power) {
                 config.accelerate.wgpu_power_preference = pref;
             }
         }
 
-        if let Ok(auto_enabled) = env::var("RUNMAT_ACCEL_AUTO_OFFLOAD") {
-            if let Some(flag) = parse_bool(&auto_enabled) {
-                config.accelerate.auto_offload.enabled = flag;
-            }
+        if let Some(auto_enabled) = env_bool("RUNMAT_ACCEL_AUTO_OFFLOAD", &[]) {
+            config.accelerate.auto_offload.enabled = auto_enabled;
         }
 
-        if let Ok(auto_calibrate) = env::var("RUNMAT_ACCEL_CALIBRATE") {
-            if let Some(flag) = parse_bool(&auto_calibrate) {
-                config.accelerate.auto_offload.calibrate = flag;
-            }
+        if let Some(auto_calibrate) = env_bool("RUNMAT_ACCEL_CALIBRATE", &[]) {
+            config.accelerate.auto_offload.calibrate = auto_calibrate;
         }
 
-        if let Ok(profile_path) = env::var("RUNMAT_ACCEL_PROFILE") {
+        if let Some(profile_path) = env_value("RUNMAT_ACCEL_PROFILE", &[]) {
             config.accelerate.auto_offload.profile_path = Some(PathBuf::from(profile_path));
         }
 
-        if let Ok(auto_log) = env::var("RUNMAT_ACCEL_AUTO_LOG") {
+        if let Some(auto_log) = env_value("RUNMAT_ACCEL_AUTO_LOG", &[]) {
             if let Some(level) = parse_auto_offload_log_level(&auto_log) {
                 config.accelerate.auto_offload.log_level = level;
             }
         }
 
         // JIT settings
-        if let Ok(jit_enabled) = env::var("RUSTMAT_JIT_ENABLE") {
-            config.jit.enabled = parse_bool(&jit_enabled).unwrap_or(true);
+        if let Some(jit_enabled) = env_bool("RUNMAT_JIT_ENABLE", &[]) {
+            config.jit.enabled = jit_enabled;
         }
 
-        if let Ok(jit_disabled) = env::var("RUSTMAT_JIT_DISABLE") {
-            if parse_bool(&jit_disabled).unwrap_or(false) {
+        if let Some(jit_disabled) = env_bool("RUNMAT_JIT_DISABLE", &[]) {
+            if jit_disabled {
                 config.jit.enabled = false;
             }
         }
 
-        if let Ok(threshold) = env::var("RUSTMAT_JIT_THRESHOLD") {
+        if let Some(threshold) = env_value("RUNMAT_JIT_THRESHOLD", &[]) {
             if let Ok(threshold) = threshold.parse() {
                 config.jit.threshold = threshold;
             }
         }
 
-        if let Ok(opt_level) = env::var("RUSTMAT_JIT_OPT_LEVEL") {
+        if let Some(opt_level) = env_value("RUNMAT_JIT_OPT_LEVEL", &[]) {
             config.jit.optimization_level = match opt_level.to_lowercase().as_str() {
                 "none" => JitOptLevel::None,
                 "size" => JitOptLevel::Size,
@@ -1048,7 +1065,7 @@ impl ConfigLoader {
         }
 
         // GC settings
-        if let Ok(preset) = env::var("RUSTMAT_GC_PRESET") {
+        if let Some(preset) = env_value("RUNMAT_GC_PRESET", &[]) {
             config.gc.preset = match preset.to_lowercase().as_str() {
                 "low-latency" => Some(GcPreset::LowLatency),
                 "high-throughput" => Some(GcPreset::HighThroughput),
@@ -1058,24 +1075,24 @@ impl ConfigLoader {
             };
         }
 
-        if let Ok(young_size) = env::var("RUSTMAT_GC_YOUNG_SIZE") {
+        if let Some(young_size) = env_value("RUNMAT_GC_YOUNG_SIZE", &[]) {
             if let Ok(young_size) = young_size.parse() {
                 config.gc.young_size_mb = Some(young_size);
             }
         }
 
-        if let Ok(threads) = env::var("RUSTMAT_GC_THREADS") {
+        if let Some(threads) = env_value("RUNMAT_GC_THREADS", &[]) {
             if let Ok(threads) = threads.parse() {
                 config.gc.threads = Some(threads);
             }
         }
 
-        if let Ok(stats) = env::var("RUSTMAT_GC_STATS") {
-            config.gc.collect_stats = parse_bool(&stats).unwrap_or(false);
+        if let Some(stats) = env_bool("RUNMAT_GC_STATS", &[]) {
+            config.gc.collect_stats = stats;
         }
 
         // Plotting settings
-        if let Ok(plot_mode) = env::var("RUSTMAT_PLOT_MODE") {
+        if let Some(plot_mode) = env_value("RUNMAT_PLOT_MODE", &[]) {
             config.plotting.mode = match plot_mode.to_lowercase().as_str() {
                 "auto" => PlotMode::Auto,
                 "gui" => PlotMode::Gui,
@@ -1085,11 +1102,11 @@ impl ConfigLoader {
             };
         }
 
-        if let Ok(headless) = env::var("RUSTMAT_PLOT_HEADLESS") {
-            config.plotting.force_headless = parse_bool(&headless).unwrap_or(false);
+        if let Some(headless) = env_bool("RUNMAT_PLOT_HEADLESS", &[]) {
+            config.plotting.force_headless = headless;
         }
 
-        if let Ok(backend) = env::var("RUSTMAT_PLOT_BACKEND") {
+        if let Some(backend) = env_value("RUNMAT_PLOT_BACKEND", &[]) {
             config.plotting.backend = match backend.to_lowercase().as_str() {
                 "auto" => PlotBackend::Auto,
                 "wgpu" => PlotBackend::Wgpu,
@@ -1100,11 +1117,11 @@ impl ConfigLoader {
         }
 
         // Logging settings
-        if let Ok(debug) = env::var("RUSTMAT_DEBUG") {
-            config.logging.debug = parse_bool(&debug).unwrap_or(false);
+        if let Some(debug) = env_bool("RUNMAT_DEBUG", &[]) {
+            config.logging.debug = debug;
         }
 
-        if let Ok(log_level) = env::var("RUSTMAT_LOG_LEVEL") {
+        if let Some(log_level) = env_value("RUNMAT_LOG_LEVEL", &[]) {
             config.logging.level = match log_level.to_lowercase().as_str() {
                 "error" => LogLevel::Error,
                 "warn" => LogLevel::Warn,
@@ -1116,11 +1133,11 @@ impl ConfigLoader {
         }
 
         // Kernel settings
-        if let Ok(ip) = env::var("RUSTMAT_KERNEL_IP") {
+        if let Some(ip) = env_value("RUNMAT_KERNEL_IP", &[]) {
             config.kernel.ip = ip;
         }
 
-        if let Ok(key) = env::var("RUSTMAT_KERNEL_KEY") {
+        if let Some(key) = env_value("RUNMAT_KERNEL_KEY", &[]) {
             config.kernel.key = Some(key);
         }
 
@@ -1195,6 +1212,83 @@ fn parse_power_preference(value: &str) -> Option<AccelPowerPreference> {
     }
 }
 
+fn env_value(primary: &str, aliases: &[&str]) -> Option<String> {
+    env::var(primary)
+        .ok()
+        .or_else(|| aliases.iter().find_map(|alias| env::var(alias).ok()))
+}
+
+fn env_bool(primary: &str, aliases: &[&str]) -> Option<bool> {
+    env_value(primary, aliases).and_then(|value| parse_bool(&value))
+}
+
+#[cfg(feature = "accelerate")]
+mod accelerate_bridge {
+    use super::{
+        AccelPowerPreference, AccelerateConfig, AccelerateProviderPreference, AutoOffloadConfig,
+        AutoOffloadLogLevel,
+    };
+    use runmat_accelerate::{
+        AccelPowerPreference as RuntimePowerPreference, AccelerateInitOptions,
+        AccelerateProviderPreference as RuntimeProviderPreference,
+        AutoOffloadLogLevel as RuntimeAutoLogLevel, AutoOffloadOptions,
+    };
+
+    impl From<AccelPowerPreference> for RuntimePowerPreference {
+        fn from(pref: AccelPowerPreference) -> Self {
+            match pref {
+                AccelPowerPreference::Auto => RuntimePowerPreference::Auto,
+                AccelPowerPreference::HighPerformance => RuntimePowerPreference::HighPerformance,
+                AccelPowerPreference::LowPower => RuntimePowerPreference::LowPower,
+            }
+        }
+    }
+
+    impl From<AccelerateProviderPreference> for RuntimeProviderPreference {
+        fn from(pref: AccelerateProviderPreference) -> Self {
+            match pref {
+                AccelerateProviderPreference::Auto => RuntimeProviderPreference::Auto,
+                AccelerateProviderPreference::Wgpu => RuntimeProviderPreference::Wgpu,
+                AccelerateProviderPreference::InProcess => RuntimeProviderPreference::InProcess,
+            }
+        }
+    }
+
+    impl From<AutoOffloadLogLevel> for RuntimeAutoLogLevel {
+        fn from(level: AutoOffloadLogLevel) -> Self {
+            match level {
+                AutoOffloadLogLevel::Off => RuntimeAutoLogLevel::Off,
+                AutoOffloadLogLevel::Info => RuntimeAutoLogLevel::Info,
+                AutoOffloadLogLevel::Trace => RuntimeAutoLogLevel::Trace,
+            }
+        }
+    }
+
+    impl From<&AutoOffloadConfig> for AutoOffloadOptions {
+        fn from(cfg: &AutoOffloadConfig) -> Self {
+            AutoOffloadOptions {
+                enabled: cfg.enabled,
+                calibrate: cfg.calibrate,
+                profile_path: cfg.profile_path.clone(),
+                log_level: cfg.log_level.into(),
+            }
+        }
+    }
+
+    impl From<&AccelerateConfig> for AccelerateInitOptions {
+        fn from(cfg: &AccelerateConfig) -> Self {
+            AccelerateInitOptions {
+                enabled: cfg.enabled,
+                provider: cfg.provider.into(),
+                allow_inprocess_fallback: cfg.allow_inprocess_fallback,
+                wgpu_power_preference: cfg.wgpu_power_preference.into(),
+                wgpu_force_fallback_adapter: cfg.wgpu_force_fallback_adapter,
+                auto_offload: AutoOffloadOptions::from(&cfg.auto_offload),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1211,7 +1305,7 @@ mod tests {
         assert!(config.jit.enabled);
         assert_eq!(config.jit.threshold, 10);
         assert_eq!(config.plotting.mode, PlotMode::Auto);
-        assert!(matches!(config.language.compat, CompatMode::Matlab));
+        assert!(matches!(config.language.compat, LanguageCompatMode::Matlab));
     }
 
     #[test]
@@ -1251,14 +1345,6 @@ mod tests {
             Some(AutoOffloadLogLevel::Trace)
         );
         assert_eq!(parse_auto_offload_log_level("unknown"), None);
-    }
-
-    #[test]
-    fn accelerate_to_options() {
-        let accel = AccelerateConfig::default();
-        let opts = accel.to_init_options();
-        assert!(opts.enabled);
-        assert_eq!(opts.provider, AccelerateProviderPreference::Wgpu);
     }
 
     #[test]

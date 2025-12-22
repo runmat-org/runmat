@@ -1082,8 +1082,8 @@ fn implicit_axis(len: usize) -> Vec<f64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::NumericDType;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::NumericDType;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

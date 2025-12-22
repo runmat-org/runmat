@@ -1,19 +1,19 @@
 #![cfg(feature = "native")]
 
 use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use log::{debug, info};
 use crate::core::analysis::{
     analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
     document_symbols, formatting_edits, hover_at, semantic_tokens_full, semantic_tokens_legend,
     signature_help_at, CompatMode, DocumentAnalysis,
 };
-use crate::core::workspace::workspace_symbols;
 use crate::core::position::position_to_offset;
-use serde::Deserialize;
+use crate::core::workspace::workspace_symbols;
+use log::{debug, info};
+use runmat_config::{ConfigLoader, LanguageCompatMode};
+use serde_json::json;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
@@ -30,7 +30,6 @@ use tower_lsp::lsp_types::{
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
-use serde_json::json;
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -51,6 +50,13 @@ struct DocumentState {
 struct AnalyzerState {
     documents: HashMap<Url, DocumentState>,
     compat_mode: CompatMode,
+}
+
+fn parser_compat(mode: LanguageCompatMode) -> CompatMode {
+    match mode {
+        LanguageCompatMode::Matlab => CompatMode::Matlab,
+        LanguageCompatMode::Strict => CompatMode::Strict,
+    }
 }
 
 pub struct RunMatLanguageServer {
@@ -166,7 +172,8 @@ impl LanguageServer for RunMatLanguageServer {
             resolved_compat = compat_mode_from_workspace(&params);
         }
 
-        if let Some(compat) = resolved_compat {
+        if let Some(mode) = resolved_compat {
+            let compat = parser_compat(mode);
             let mut state = self.state.write().await;
             state.compat_mode = compat;
         }
@@ -178,14 +185,14 @@ impl LanguageServer for RunMatLanguageServer {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             definition_provider: Some(OneOf::Left(true)),
             signature_help_provider: Some(SignatureHelpOptions::default()),
-            semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-                SemanticTokensOptions {
+            semantic_tokens_provider: Some(
+                SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                     legend: semantic_tokens_legend(),
                     range: None,
                     full: Some(tower_lsp::lsp_types::SemanticTokensFullOptions::Bool(true)),
                     work_done_progress_options: Default::default(),
-                },
-            )),
+                }),
+            ),
             document_formatting_provider: Some(OneOf::Left(true)),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
@@ -296,9 +303,7 @@ impl LanguageServer for RunMatLanguageServer {
         };
 
         Ok(Some(CompletionResponse::Array(completion_at(
-            &text,
-            &analysis,
-            &position,
+            &text, &analysis, &position,
         ))))
     }
 
@@ -437,13 +442,13 @@ impl LanguageServer for RunMatLanguageServer {
             let state = self.state.read().await;
             state
                 .documents
-        .iter()
+                .iter()
                 .filter_map(|(uri, doc)| {
                     doc.analysis
-                .as_ref()
+                        .as_ref()
                         .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
-        })
-        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
         };
         Ok(Some(workspace_symbols(&docs)))
     }
@@ -456,26 +461,28 @@ impl LanguageServer for RunMatLanguageServer {
     }
 }
 
-fn parse_compat_mode(opts: &serde_json::Value) -> Option<CompatMode> {
+fn parse_compat_mode(opts: &serde_json::Value) -> Option<LanguageCompatMode> {
     let lang = opts.get("language")?;
-    let compat = lang.get("compat")?;
-    parse_compat_str(compat.as_str()?)
-}
-
-fn parse_compat_str(value: &str) -> Option<CompatMode> {
-    if value.eq_ignore_ascii_case("matlab") {
-        Some(CompatMode::Matlab)
-    } else if value.eq_ignore_ascii_case("strict") {
-        Some(CompatMode::Strict)
-    } else {
-        None
+    let compat = lang.get("compat")?.as_str()?;
+    match compat.trim().to_ascii_lowercase().as_str() {
+        "matlab" => Some(LanguageCompatMode::Matlab),
+        "strict" => Some(LanguageCompatMode::Strict),
+        _ => None,
     }
 }
 
-fn compat_mode_from_workspace(params: &InitializeParams) -> Option<CompatMode> {
+fn compat_mode_from_workspace(params: &InitializeParams) -> Option<LanguageCompatMode> {
     for root in workspace_roots(params) {
-        if let Some(mode) = find_configured_compat(&root) {
-            return Some(mode);
+        if let Some(path) = ConfigLoader::discover_config_path_from(&root) {
+            if let Ok(cfg) = ConfigLoader::load_from_file(&path) {
+                let compat = cfg.language.compat;
+                info!(
+                    "Language compatibility set to '{}' via {}",
+                    compat_label(parser_compat(compat)),
+                    path.display()
+                );
+                return Some(compat);
+            }
         }
     }
     None
@@ -500,87 +507,9 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     roots
 }
 
-fn find_configured_compat(start: &Path) -> Option<CompatMode> {
-    let mut current = start.to_path_buf();
-    loop {
-        if let Some((mode, path)) = read_compat_in_dir(&current) {
-            info!(
-                "Language compatibility set to '{}' via {}",
-                compat_label(mode),
-                path.display()
-            );
-            return Some(mode);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
 fn compat_label(mode: CompatMode) -> &'static str {
     match mode {
         CompatMode::Matlab => "matlab",
         CompatMode::Strict => "strict",
     }
-}
-
-const CONFIG_CANDIDATES: &[( &str, ConfigFormat)] = &[
-    (".runmat", ConfigFormat::Toml),
-    (".runmat.toml", ConfigFormat::Toml),
-    (".runmat.yaml", ConfigFormat::Yaml),
-    (".runmat.yml", ConfigFormat::Yaml),
-    (".runmat.json", ConfigFormat::Json),
-    ("runmat.config.toml", ConfigFormat::Toml),
-    ("runmat.config.yaml", ConfigFormat::Yaml),
-    ("runmat.config.yml", ConfigFormat::Yaml),
-    ("runmat.config.json", ConfigFormat::Json),
-];
-
-fn read_compat_in_dir(dir: &Path) -> Option<(CompatMode, PathBuf)> {
-    for (name, format) in CONFIG_CANDIDATES {
-        let path = dir.join(name);
-        if let Some(mode) = read_config_file(&path, *format) {
-            return Some((mode, path));
-        }
-    }
-    None
-}
-
-fn read_config_file(path: &Path, format: ConfigFormat) -> Option<CompatMode> {
-    if !path.is_file() {
-        return None;
-    }
-    let contents = fs::read_to_string(path).ok()?;
-    parse_config_contents(&contents, format)
-}
-
-fn parse_config_contents(contents: &str, format: ConfigFormat) -> Option<CompatMode> {
-    let cfg: PartialLanguageConfig = match format {
-        ConfigFormat::Toml => toml::from_str(contents).ok()?,
-        ConfigFormat::Yaml => serde_yaml::from_str(contents).ok()?,
-        ConfigFormat::Json => serde_json::from_str(contents).ok()?,
-    };
-    let language = cfg.language?;
-    language
-        .compat
-        .as_deref()
-        .and_then(parse_compat_str)
-}
-
-#[derive(Clone, Copy)]
-enum ConfigFormat {
-    Toml,
-    Yaml,
-    Json,
-}
-
-#[derive(Deserialize)]
-struct PartialLanguageConfig {
-    language: Option<LanguageSection>,
-}
-
-#[derive(Deserialize)]
-struct LanguageSection {
-    compat: Option<String>,
 }

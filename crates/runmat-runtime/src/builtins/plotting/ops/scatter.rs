@@ -627,8 +627,8 @@ pub(crate) mod tests {
         ParsedLineStyle,
     };
     use super::*;
-    use runmat_builtins::Value;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

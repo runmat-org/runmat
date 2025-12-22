@@ -24,17 +24,17 @@ use runmat_core::{
     MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
 };
+use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
 use runmat_parser::CompatMode;
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
 };
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use std::backtrace::Backtrace;
 use serde_wasm_bindgen;
+use std::backtrace::Backtrace;
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
@@ -159,8 +159,9 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 #[cfg(target_arch = "wasm32")]
-static RUNTIME_LOG_FORWARDER: OnceLock<Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>> =
-    OnceLock::new();
+static RUNTIME_LOG_FORWARDER: OnceLock<
+    Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
+> = OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[cfg(target_arch = "wasm32")]
@@ -169,8 +170,9 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 #[cfg(target_arch = "wasm32")]
-static TRACE_FORWARDER: OnceLock<Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>> =
-    OnceLock::new();
+static TRACE_FORWARDER: OnceLock<
+    Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
+> = OnceLock::new();
 static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone)]
@@ -1697,7 +1699,11 @@ fn init_logging_once() {
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = init_logging(LoggingOptions { enable_otlp: false, enable_traces: false, pid: 1 });
+            let _ = init_logging(LoggingOptions {
+                enable_otlp: false,
+                enable_traces: false,
+                pid: 1,
+            });
             ensure_runtime_log_forwarder_installed();
             ensure_trace_forwarder_installed();
         }

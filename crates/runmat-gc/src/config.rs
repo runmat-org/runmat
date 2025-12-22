@@ -227,35 +227,35 @@ impl GcConfigBuilder {
     pub fn from_env() -> Self {
         let mut builder = Self::new();
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_YOUNG_SIZE") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_YOUNG_SIZE") {
             if let Ok(size) = val.parse::<usize>() {
                 builder.config.young_generation_size = size;
             }
         }
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_MINOR_THRESHOLD") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_MINOR_THRESHOLD") {
             if let Ok(threshold) = val.parse::<f64>() {
                 builder.config.minor_gc_threshold = threshold;
             }
         }
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_MAJOR_THRESHOLD") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_MAJOR_THRESHOLD") {
             if let Ok(threshold) = val.parse::<f64>() {
                 builder.config.major_gc_threshold = threshold;
             }
         }
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_MAX_HEAP") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_MAX_HEAP") {
             if let Ok(size) = val.parse::<usize>() {
                 builder.config.max_heap_size = size;
             }
         }
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_VERBOSE") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_VERBOSE") {
             builder.config.verbose_logging = val == "1" || val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = std::env::var("RUSTMAT_GC_PARALLEL") {
+        if let Ok(val) = std::env::var("RUNMAT_GC_PARALLEL") {
             builder.config.parallel_collection = val == "1" || val.to_lowercase() == "true";
         }
 

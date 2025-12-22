@@ -106,7 +106,7 @@ pub fn show_plot_unified(
                 #[cfg(target_os = "macos")]
                 {
                     if !is_main_thread() {
-                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUSTMAT_PLOT_MODE=headless for exports.".to_string());
+                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUNMAT_PLOT_MODE=headless for exports.".to_string());
                     }
                 }
                 show_plot_sequential(figure)
@@ -317,7 +317,7 @@ pub fn render_interactive_with_handle(
         #[cfg(target_os = "macos")]
         {
             if !is_main_thread() {
-                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUSTMAT_PLOT_MODE=headless for exports.".to_string());
+                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUNMAT_PLOT_MODE=headless for exports.".to_string());
             }
         }
         if handle == 0 {

@@ -25,7 +25,6 @@ use runmat_runtime::{
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use runmat_time::Instant;
-use tracing::{debug, info_span};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -35,6 +34,7 @@ use std::sync::Arc;
 use std::sync::Once;
 #[cfg(feature = "native-accel")]
 use std::sync::OnceLock;
+use tracing::{debug, info_span};
 
 thread_local! {
     static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
@@ -1275,7 +1275,10 @@ fn run_interpreter(
     state: InterpreterState,
     initial_vars: &mut [Value],
 ) -> Result<InterpreterOutcome, String> {
-    let run_span = info_span!("interpreter.run", function = state.current_function_name.as_str());
+    let run_span = info_span!(
+        "interpreter.run",
+        function = state.current_function_name.as_str()
+    );
     let _run_guard = run_span.enter();
     ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]

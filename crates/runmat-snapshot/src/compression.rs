@@ -619,7 +619,10 @@ mod tests {
         let data = b"Hello, World! This is a longer test string for LZ4 compression.".repeat(50);
         let result = engine.compress(&data).unwrap();
 
-        assert!(result.data.len() <= data.len(), "Compression did not reduce size");
+        assert!(
+            result.data.len() <= data.len(),
+            "Compression did not reduce size"
+        );
 
         // Check that compression was attempted (either compressed or fell back to None if not effective)
         assert!(matches!(

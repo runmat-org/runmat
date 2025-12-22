@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
+use crate::core::docs;
 use crate::core::position::{offset_to_position, position_to_offset};
-use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
-pub use runmat_parser::CompatMode;
-use runmat_parser::{parse_with_options, ParserOptions};
 use lsp_types::{
     CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Position, Range,
     SignatureHelp,
 };
-use crate::core::docs;
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{HirStmt, LoweringResult};
+use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
+pub use runmat_parser::CompatMode;
+use runmat_parser::{parse_with_options, ParserOptions};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -70,17 +70,18 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering = match runmat_hir::lower_with_full_context(&ast, &HashMap::new(), &HashMap::new()) {
-                Ok(result) => result,
-                Err(err) => {
-                    return DocumentAnalysis {
-                        tokens,
-                        parse_error: None,
-                        lowering_error: Some(err),
-                        semantic: None,
-                    };
-                }
-            };
+            let lowering =
+                match runmat_hir::lower_with_full_context(&ast, &HashMap::new(), &HashMap::new()) {
+                    Ok(result) => result,
+                    Err(err) => {
+                        return DocumentAnalysis {
+                            tokens,
+                            parse_error: None,
+                            lowering_error: Some(err),
+                            semantic: None,
+                        };
+                    }
+                };
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
@@ -128,7 +129,11 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
         }];
     }
     if let Some(lowering_err) = &analysis.lowering_error {
-        return vec![diagnostic_for_lowering_error(lowering_err, &analysis.tokens, text)];
+        return vec![diagnostic_for_lowering_error(
+            lowering_err,
+            &analysis.tokens,
+            text,
+        )];
     }
     if let Some(semantic) = &analysis.semantic {
         if !semantic.status_message.is_empty() {
@@ -151,7 +156,11 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
     Vec::new()
 }
 
-pub fn completion_at(_text: &str, _analysis: &DocumentAnalysis, _position: &Position) -> Vec<CompletionItem> {
+pub fn completion_at(
+    _text: &str,
+    _analysis: &DocumentAnalysis,
+    _position: &Position,
+) -> Vec<CompletionItem> {
     if let Some(semantic) = &_analysis.semantic {
         completion_from_semantic(semantic)
     } else {
@@ -172,11 +181,13 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
                         kind: lsp_types::MarkupKind::Markdown,
                         value: format_variable_hover(&ident, var),
                     }),
-                    range: Some(TextRange {
-                        start: token.start,
-                        end: token.end,
-                    }
-                    .to_lsp_range(text)),
+                    range: Some(
+                        TextRange {
+                            start: token.start,
+                            end: token.end,
+                        }
+                        .to_lsp_range(text),
+                    ),
                 });
             }
         }
@@ -187,11 +198,13 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
                     kind: lsp_types::MarkupKind::Markdown,
                     value: format_variable_hover(&ident, glob),
                 }),
-                range: Some(TextRange {
-                    start: token.start,
-                    end: token.end,
-                }
-                .to_lsp_range(text)),
+                range: Some(
+                    TextRange {
+                        start: token.start,
+                        end: token.end,
+                    }
+                    .to_lsp_range(text),
+                ),
             });
         }
     }
@@ -206,11 +219,13 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
                 kind: lsp_types::MarkupKind::Markdown,
                 value: docs::build_builtin_hover(func),
             }),
-            range: Some(TextRange {
-                start: token.start,
-                end: token.end,
-            }
-            .to_lsp_range(text)),
+            range: Some(
+                TextRange {
+                    start: token.start,
+                    end: token.end,
+                }
+                .to_lsp_range(text),
+            ),
         });
     }
 
@@ -227,24 +242,32 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
                 kind: lsp_types::MarkupKind::Markdown,
                 value: buf,
             }),
-            range: Some(TextRange {
-                start: token.start,
-                end: token.end,
-            }
-            .to_lsp_range(text)),
+            range: Some(
+                TextRange {
+                    start: token.start,
+                    end: token.end,
+                }
+                .to_lsp_range(text),
+            ),
         });
     }
 
     None
 }
 
-pub fn definition_at(_text: &str, _analysis: &DocumentAnalysis, _position: &Position) -> Vec<Range> {
+pub fn definition_at(
+    _text: &str,
+    _analysis: &DocumentAnalysis,
+    _position: &Position,
+) -> Vec<Range> {
     let semantic = match &_analysis.semantic {
         Some(s) => s,
         None => return vec![],
     };
     let offset = position_to_offset(_text, _position);
-    let Some(tok) = token_at_offset(&_analysis.tokens, offset) else { return vec![]; };
+    let Some(tok) = token_at_offset(&_analysis.tokens, offset) else {
+        return vec![];
+    };
     let mut ranges = Vec::new();
 
     if let Some(funcs) = semantic.function_lookup.get(&tok.lexeme) {
@@ -562,7 +585,11 @@ fn function_completion(func: &FunctionSemantic) -> CompletionItem {
 fn builtin_completion(func: &BuiltinFunction) -> CompletionItem {
     let detail = if !func.param_types.is_empty() {
         let params: Vec<String> = func.param_types.iter().map(format_type).collect();
-        format!("({}) -> {}", params.join(", "), format_type(&func.return_type))
+        format!(
+            "({}) -> {}",
+            params.join(", "),
+            format_type(&func.return_type)
+        )
     } else {
         format!("builtin: {}", func.name)
     };
@@ -619,7 +646,10 @@ mod tests {
         let text = "plot(1, 2);";
         let analysis = analyze_document(text);
         if let Some(err) = &analysis.parse_error {
-            panic!("unexpected parse error at {}: {}", err.position, err.message);
+            panic!(
+                "unexpected parse error at {}: {}",
+                err.position, err.message
+            );
         }
         if let Some(err) = &analysis.lowering_error {
             panic!("unexpected lowering error: {err}");
@@ -633,7 +663,9 @@ mod tests {
             .map(|f| f.name)
             .collect();
         assert!(
-            builtin_names.iter().any(|name| name.eq_ignore_ascii_case("plot")),
+            builtin_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("plot")),
             "plot builtin should be registered for hover tests (registered: {:?})",
             builtin_names
         );
@@ -647,7 +679,11 @@ mod tests {
     }
 }
 
-fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text: &str) -> SemanticModel {
+fn build_semantic_model(
+    lowering: LoweringResult,
+    tokens: &[SpannedToken],
+    text: &str,
+) -> SemanticModel {
     let mut functions = Vec::new();
     let mut function_lookup: HashMap<String, Vec<usize>> = HashMap::new();
     let mut globals = HashMap::new();
@@ -676,13 +712,18 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
             body: _,
             has_varargin: _,
             has_varargout: _,
-        } = stmt.clone() else {
+        } = stmt.clone()
+        else {
             continue;
         };
 
         let mut variables = HashMap::new();
         for param in &params {
-            let ty = lowering.var_types.get(param.0).cloned().unwrap_or(Type::Unknown);
+            let ty = lowering
+                .var_types
+                .get(param.0)
+                .cloned()
+                .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
                 .get(&param)
@@ -698,7 +739,11 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
             );
         }
         for out in &outputs {
-            let ty = lowering.var_types.get(out.0).cloned().unwrap_or(Type::Unknown);
+            let ty = lowering
+                .var_types
+                .get(out.0)
+                .cloned()
+                .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
                 .get(&out)
@@ -714,10 +759,8 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
             );
         }
 
-        let name_range = find_symbol_range(tokens, &func_name, None).unwrap_or(TextRange {
-            start: 0,
-            end: 0,
-        });
+        let name_range =
+            find_symbol_range(tokens, &func_name, None).unwrap_or(TextRange { start: 0, end: 0 });
         let body_range = TextRange {
             start: name_range.start,
             end: text.len(),
@@ -753,7 +796,10 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
     }
 
     for (idx, func) in functions.iter().enumerate() {
-        function_lookup.entry(func.name.clone()).or_default().push(idx);
+        function_lookup
+            .entry(func.name.clone())
+            .or_default()
+            .push(idx);
     }
 
     SemanticModel {
@@ -763,4 +809,3 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
         status_message: String::new(),
     }
 }
-

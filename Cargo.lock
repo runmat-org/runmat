@@ -5902,6 +5902,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-config",
  "runmat-gc",
  "runmat-hir",
  "runmat-ignition",
@@ -5975,6 +5976,24 @@ dependencies = [
  "runmat-macros",
  "serde",
  "trybuild",
+]
+
+[[package]]
+name = "runmat-config"
+version = "0.2.7"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs 5.0.1",
+ "log",
+ "once_cell",
+ "runmat-accelerate",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -6139,6 +6158,7 @@ dependencies = [
  "lsp-types",
  "once_cell",
  "runmat-builtins",
+ "runmat-config",
  "runmat-core",
  "runmat-hir",
  "runmat-lexer",
@@ -6147,9 +6167,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml",
  "tokio",
- "toml 0.8.23",
  "tower-lsp",
  "wasm-bindgen",
 ]

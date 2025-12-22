@@ -1107,7 +1107,9 @@ pub(crate) mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            tracing::warn!("skipping any_wgpu_default_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!(
+                "skipping any_wgpu_default_matches_cpu: wgpu provider panicked during init"
+            );
             return;
         };
         if reg_result.is_err() {
@@ -1159,7 +1161,9 @@ pub(crate) mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            tracing::warn!("skipping any_wgpu_omitnan_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!(
+                "skipping any_wgpu_omitnan_matches_cpu: wgpu provider panicked during init"
+            );
             return;
         };
         if reg_result.is_err() {
