@@ -198,7 +198,7 @@ Yes. The output is a logical array whose shape reflects the MATLAB-style implici
 contains exactly one element, the builtin returns a logical scalar.
 
 ## See Also
-[`contains`](./contains), [`endsWith`](./endsWith), [`regexp`](../regex/regexp), [`regexpi`](../regex/regexpi)
+[`contains`](./contains), [`endsWith`](./endsWith), [`regexp`](./regexp), [`regexpi`](./regexpi)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/search/startswith.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/startswith.rs)

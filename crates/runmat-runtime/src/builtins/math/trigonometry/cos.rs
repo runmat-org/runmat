@@ -164,7 +164,7 @@ Yes. Scalar and singleton dimensions implicitly expand just as they do in MATLAB
 Yes. Character arrays are converted to their Unicode code points before cosine is evaluated, and the result is returned as a dense double array of the same size.
 
 ## See Also
-[sin](./sin), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `cos` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs)

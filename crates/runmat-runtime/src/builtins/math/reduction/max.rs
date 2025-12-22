@@ -164,7 +164,7 @@ Not yet. Those requests fall back to the host implementation, which still honors
 Yes. Logical arrays are promoted to double precision, and integer inputs are converted to double before comparison, matching MATLAB's numeric tower.
 
 ## See Also
-[min](./min), [sum](./sum), [mean](./mean), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[min](./min), [sum](./sum), [mean](./mean), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `max` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/max.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/max.rs)

@@ -139,7 +139,7 @@ Yes. The options can be specified in any order and RunMat mirrors MATLAB’s res
 Only when the active provider offers a native prefix-product kernel with missing-value support. Otherwise the runtime gathers to the host to preserve MATLAB semantics.
 
 ## See Also
-[prod](./prod), [cumsum](./cumsum), [sum](./sum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[prod](./prod), [cumsum](./cumsum), [sum](./sum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/reduction/cumprod.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumprod.rs)

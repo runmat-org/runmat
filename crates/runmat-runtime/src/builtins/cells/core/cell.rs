@@ -216,7 +216,7 @@ No. The builtin only allocates empty cells. Populate the elements afterwards wit
 `C{1,2} = magic(3);`.
 
 ## See Also
-[num2cell](../../array/shape/num2cell), [cellfun](../../array/shape/cellfun), [struct](../../structs/core/struct), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[num2cell](./num2cell), [cellfun](./cellfun), [struct](./struct), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `cell` function is available at: [`crates/runmat-runtime/src/builtins/cells/core/cell.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cell.rs)

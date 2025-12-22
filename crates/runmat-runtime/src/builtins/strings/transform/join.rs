@@ -186,7 +186,7 @@ No. When the input is a cell array, the output is a cell array of character vect
 MATLAB.
 
 ## See Also
-[strjoin](../../core/strjoin), [split](./split), [compose](../core/compose), [string](../core/string)
+[strjoin](./strjoin), [split](./split), [compose](./compose), [string](./string)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/join.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/join.rs)

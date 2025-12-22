@@ -201,7 +201,7 @@ By default, RunMat promotes inputs to double precision. Use the optional outtype
 Yes. When you pass `'like', prototype`, RunMat mirrors both the class and residency of `prototype`. Providing a GPU tensor keeps the result on the device even when the reduction itself had to fall back to the host (for example with `'omitnan'`).
 
 ## See Also
-[sum](./sum), [median](./median), [cumsum](./cumsum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [median](./median), [cumsum](./cumsum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `mean` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/mean.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/mean.rs)

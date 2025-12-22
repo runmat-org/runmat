@@ -149,7 +149,7 @@ No. Field names must be provided as string scalars, character vectors, or single
 arrays. Passing other types raises an error.
 
 ## See Also
-[load](../../io/mat/load), [whos](../../introspection/whos), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[load](./load), [whos](./whos), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::r#struct")]

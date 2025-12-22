@@ -200,7 +200,7 @@ RunMat currently supports at most one option string (`'matrix'` or `'vector'`). 
 Yes. The combined matrix returned by `lu(A)` stores `L` in the strictly lower-triangular part (with an implicit unit diagonal) and `U` in the upper-triangular part, just like MATLAB. You can use forward/back substitution routines that understand this layout.
 
 ## See Also
-[det](../../det), [inv](../../inv), [chol](./chol), [qr](./qr), [solve](../../solve/backslash), [gpuArray](../../../acceleration/gpu/gpuArray)
+[det](./det), [inv](./inv), [chol](./chol), [qr](./qr), [solve](./backslash), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/factor/lu.rs`

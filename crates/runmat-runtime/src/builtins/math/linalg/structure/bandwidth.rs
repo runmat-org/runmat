@@ -194,7 +194,7 @@ Logical values are promoted to doubles (0 or 1) internally. `true` entries count
 and contribute to the bandwidth calculation.
 
 ## See Also
-[diag](../ops/diag), [tril](../ops/tril), [triu](../ops/triu), [spdiags](../ops/spdiags), [issymmetric](./issymmetric), [find](../../../array/indexing/find), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[diag](./diag), [tril](./tril), [triu](./triu), [spdiags](./spdiags), [issymmetric](./issymmetric), [find](./find), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - View the source: [`crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs)

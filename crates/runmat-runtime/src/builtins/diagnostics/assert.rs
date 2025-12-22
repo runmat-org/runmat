@@ -138,7 +138,7 @@ If the dimensions disagree, the assertion stops execution before any costly matr
 10. **How do I distinguish assertion failures from other errors?** Provide a custom identifier (for example `runmat:module:assertFailed`) and catch it in a `try`/`catch` block.
 
 ## See Also
-[error](./error), [warning](./warning), [isnan](../logical/tests/isnan), [sprintf](../strings/core/sprintf)
+[error](./error), [warning](./warning), [isnan](./isnan), [sprintf](./sprintf)
 
 ## Source & Feedback
 - Full source: [`crates/runmat-runtime/src/builtins/diagnostics/assert.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/assert.rs)

@@ -203,7 +203,7 @@ Yes. String scalars pass `"string"` while character arrays pass `"char"`. They a
 Yes. Meta-class references created with `classref` return `true` for `"meta.class"`.
 
 ## See Also
-[`class`](./class), [`isnumeric`](../logical/tests/isnumeric), [`islogical`](../logical/tests/islogical), `isaUnderlying`, [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
+[`class`](./class), [`isnumeric`](./isnumeric), [`islogical`](./islogical), `isaUnderlying`, [`gpuArray`](./gpuarray), [`gather`](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]

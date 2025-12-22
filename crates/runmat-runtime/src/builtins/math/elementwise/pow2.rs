@@ -183,7 +183,7 @@ Yes. `pow2(F, E)` mirrors `ldexp`, scaling mantissas by powers of two. Integer m
 reproduce MATLAB's bit-shift style scaling in floating point.
 
 ## See Also
-[exp](./exp), [log2](./log2), [log](./log), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[exp](./exp), [log2](./log2), [log](./log), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs)

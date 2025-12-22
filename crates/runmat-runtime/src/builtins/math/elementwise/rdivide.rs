@@ -221,7 +221,7 @@ Absolutely. The result is complex, with broadcasting rules identical to MATLAB.
 String arrays are not numeric and therefore raise an error when passed to `rdivide`.
 
 ## See Also
-[times](./times), [ldivide](./ldivide), [mrdivide](../linalg/ops/mrdivide), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[times](./times), [ldivide](./ldivide), [mrdivide](./mrdivide), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/elementwise/rdivide.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/rdivide.rs)

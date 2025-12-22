@@ -153,7 +153,7 @@ Yes. For real tensors the result is exactly zero; for complex tensors the CPU pa
 Yes. The fusion planner can fold `imag` into neighbouring elementwise kernels, letting providers keep tensors on the GPU whenever possible.
 
 ## See Also
-[real](./real), [abs](./abs), [sign](./sign), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[real](./real), [abs](./abs), [sign](./sign), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `imag` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/imag.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/imag.rs)

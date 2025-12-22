@@ -126,7 +126,7 @@ t = timeit(makeMatrix);
 10. **Is there a limit on runs?** — Yes. `timeit` caps the inner loop at about one million iterations to avoid runaway measurements.
 
 ## See Also
-[tic](./tic), [toc](./toc), [feval](../introspection/feval)
+[tic](./tic), [toc](./toc), [feval](./feval)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/timing/timeit.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timeit.rs)

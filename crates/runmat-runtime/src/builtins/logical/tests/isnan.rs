@@ -164,7 +164,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 It returns an empty logical array with the same size metadata as the input, matching MATLAB behavior.
 
 ## See Also
-[isfinite](./isfinite), [isinf](./isinf), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isfinite](./isfinite), [isinf](./isinf), [isreal](./isreal), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isnan")]

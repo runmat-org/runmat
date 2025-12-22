@@ -181,7 +181,7 @@ Providers with dedicated identity allocation avoid host involvement entirely. Pr
 hook fall back to a single host upload, which is still efficient for typical sizes.
 
 ## See Also
-[zeros](./zeros), [ones](./ones), [diag](./diag), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[zeros](./zeros), [ones](./ones), [diag](./diag), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `eye` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/eye.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs)

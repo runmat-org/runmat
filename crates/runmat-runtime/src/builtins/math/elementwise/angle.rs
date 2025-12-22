@@ -175,7 +175,7 @@ Complex runtime tensors currently live on the host. RunMat gathers them automati
 Yes for double-precision providers. Single-precision backends may exhibit minor rounding differences, but they remain within typical IEEE tolerance.
 
 ## See Also
-[abs](./abs), [imag](./imag), [real](./real), [sign](./sign), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[abs](./abs), [imag](./imag), [real](./real), [sign](./sign), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `angle` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/angle.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/angle.rs)

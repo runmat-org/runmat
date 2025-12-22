@@ -179,7 +179,7 @@ Yes. `ones` always produces a dense array. For sparse matrices of ones, use `spa
 Absolutely. Preallocating with `ones` (or `zeros`) and then filling in values is a recommended practice for efficiency and code clarity when the final values are known to overwrite the initial ones.
 
 ## See Also
-[zeros](./zeros), [eye](./eye), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[zeros](./zeros), [eye](./eye), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `ones` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/ones.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ones.rs)

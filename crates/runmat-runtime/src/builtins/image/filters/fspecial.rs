@@ -31,7 +31,7 @@ gpu_support:
   reduction: false
   precisions: ["f32", "f64"]
   broadcasting: "none"
-  notes: "Providers implement the optional 'fspecial' hook. When it is missing or a kernel is not yet accelerated (disk/log/motion), RunMat falls back to the host implementation transparently."
+  notes: "Providers implement the optional 'fspecial' hook. When it is missing or a kernel is not yet accelerated (./motion), RunMat falls back to the host implementation transparently."
 fusion:
   elementwise: false
   reduction: false
@@ -134,7 +134,7 @@ Yes. Each kernel matches MATLAB (R2023b) outputs within floating-point precision
 and disk filters that rely on geometric integration.
 
 ## See Also
-[imfilter](../imfilter), [conv2](../../math/convolution/conv2), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[imfilter](./imfilter), [conv2](./conv2), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]

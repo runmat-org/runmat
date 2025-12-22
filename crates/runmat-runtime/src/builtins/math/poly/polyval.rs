@@ -210,7 +210,7 @@ Not yet. Dense inputs (including gpuArray tensors) are supported today. Sparse s
 once RunMat's sparse infrastructure stabilises.
 
 ## See Also
-[polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [poly](./poly), [polyder](./polyder), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[polyfit](./polyfit), [conv](./conv), [deconv](./deconv), [poly](./poly), [polyder](./polyder), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: `crates/runmat-runtime/src/builtins/math/poly/polyval.rs`

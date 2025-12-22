@@ -157,7 +157,7 @@ No. They share the same element-wise semantics. The functional form is convenien
 No. It returns a new logical value. When operating on gpuArrays, the provider writes into a fresh buffer so the original data remains unchanged.
 
 ## See Also
-[and](./and), [or](./or), [xor](./xor), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[and](./and), [or](./or), [xor](./xor), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::not")]

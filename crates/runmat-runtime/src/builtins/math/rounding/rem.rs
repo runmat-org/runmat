@@ -23,7 +23,7 @@ pub const DOC_MD: &str = r#"---
 title: "rem"
 category: "math/rounding"
 keywords: ["rem", "remainder", "truncate", "rounding", "gpu"]
-summary: "Compute the MATLAB remainder a - b .* fix(a./b) for scalars, matrices, N-D tensors, and complex values."
+summary: "Compute the MATLAB remainder a - b .* fix(./b) for scalars, matrices, N-D tensors, and complex values."
 references: ["https://www.mathworks.com/help/matlab/ref/rem.html"]
 gpu_support:
   elementwise: true
@@ -167,7 +167,7 @@ Internally, inputs promote to double precision before the remainder is computed.
 It stays on-device when the provider implements `elem_div`, `unary_fix`, `elem_mul`, and `elem_sub`; fusion-aware planners can keep intermediates resident for downstream kernels. Otherwise the runtime gathers the operands, executes the CPU fallback, and returns a host tensor so correctness is unaffected.
 
 ## See Also
-[mod](./mod), [fix](./fix), [floor](./floor), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[mod](./mod), [fix](./fix), [floor](./floor), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/rounding/rem.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/rem.rs)

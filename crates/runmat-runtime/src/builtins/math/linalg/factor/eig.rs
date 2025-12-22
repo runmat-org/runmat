@@ -216,7 +216,7 @@ fails, requesting the third output raises an error, matching MATLAB’s failure
 behaviour.
 
 ## See Also
-[svd](./svd), [qr](./qr), [lu](./lu), [chol](./chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[svd](./svd), [qr](./qr), [lu](./lu), [chol](./chol), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs`

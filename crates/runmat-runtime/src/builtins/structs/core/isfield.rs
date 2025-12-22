@@ -159,7 +159,7 @@ Yes. Field names are compared using exact, case-sensitive matches, just like MAT
 No. The builtin only inspects field metadata and leaves GPU-resident tensors untouched.
 
 ## See Also
-[fieldnames](./fieldnames), [struct](./struct), [isprop](../../introspection/isprop), [getfield](./getfield), [setfield](./setfield)
+[fieldnames](./fieldnames), [struct](./struct), [isprop](./isprop), [getfield](./getfield), [setfield](./setfield)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::isfield")]

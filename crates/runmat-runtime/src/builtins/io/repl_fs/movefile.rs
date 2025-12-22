@@ -170,7 +170,7 @@ status =
 - **Can I move directories across volumes?** When the underlying operating system reports an error (for example, moving across volumes without rename support), `movefile` returns `status = 0` along with the system error text so you can handle it programmatically.
 
 ## See Also
-[copyfile](../copyfile), [mkdir](./mkdir), [rmdir](./rmdir), [dir](./dir), [pwd](./pwd)
+[copyfile](./copyfile), [mkdir](./mkdir), [rmdir](./rmdir), [dir](./dir), [pwd](./pwd)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/movefile.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/movefile.rs)

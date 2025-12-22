@@ -197,7 +197,7 @@ No. It returns a sorted copy of the input. GPU inputs are gathered to host memor
 String arrays are not yet supported. Convert them to character matrices or use tables before sorting.
 
 ## See Also
-[sort](./sort), [unique](./unique), [max](../../math/reduction/max), [min](../../math/reduction/min), [permute](../../array/shape/permute)
+[sort](./sort), [unique](./unique), [max](./max), [min](./min), [permute](./permute)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/array/sorting_sets/sortrows.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/sortrows.rs)

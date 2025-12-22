@@ -157,7 +157,7 @@ Set the environment variable `RUNMAT_SAVE_DEFAULT_PATH` before launching RunMat.
 No. Parent folders must already exist; otherwise the builtin raises an error from the host filesystem.
 
 ## See Also
-[gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather), [fileread](../../io/filetext/fileread), [fopen](../../io/filetext/fopen)
+[gpuArray](./gpuarray), [gather](./gather), [fileread](./fileread), [fopen](./fopen)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/io/mat/save.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save.rs)

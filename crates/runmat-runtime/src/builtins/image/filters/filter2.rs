@@ -180,7 +180,7 @@ Apply successive 1-D `filter2` calls with thin kernels or use `imfilter` for mor
 and dimensionality.
 
 ## See Also
-[imfilter](./imfilter), [fspecial](./fspecial), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[imfilter](./imfilter), [fspecial](./fspecial), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/image/filters/filter2.rs`

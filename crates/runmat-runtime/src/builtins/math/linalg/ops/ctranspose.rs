@@ -180,7 +180,7 @@ performs a gather/transpose/upload round-trip automatically.
    MATLAB's strict type checks.
 
 ## See Also
-[transpose](./transpose), [conj](../../../math/elementwise/conj), [mtimes](../mtimes), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[transpose](./transpose), [conj](./conj), [mtimes](./mtimes), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs)

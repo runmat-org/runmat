@@ -160,10 +160,10 @@ ans = logical 1
 - [`ipermute`](./ipermute)
 - [`reshape`](./reshape)
 - [`squeeze`](./squeeze)
-- [`size`](../introspection/size)
-- [`ndims`](../introspection/ndims)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`size`](./size)
+- [`ndims`](./ndims)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - The full source for the `permute` implementation lives at [`crates/runmat-runtime/src/builtins/array/shape/permute.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/permute.rs)

@@ -154,7 +154,7 @@ They are gathered to the CPU automatically before comparison. Providers do not n
 A logical scalar is returned (`true` or `false`). For non-scalar shapes, a logical array that mirrors the broadcast dimensions is produced.
 
 ## See Also
-[strcmp](./strcmp), [contains](../../search/contains), [startswith](../../search/startswith), [endswith](../../search/endswith), [strip](../../transform/strip)
+[strcmp](./strcmp), [contains](./contains), [startswith](./startswith), [endswith](./endswith), [strip](./strip)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs)

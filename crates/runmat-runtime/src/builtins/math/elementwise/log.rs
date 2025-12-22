@@ -184,7 +184,7 @@ Yes. Complex scalars and tensors follow the MATLAB definition using magnitude an
 (`log(|z|) + i·angle(z)`).
 
 ## See Also
-[exp](./exp), [expm1](./expm1), [abs](./abs), [angle](./angle), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[exp](./exp), [expm1](./expm1), [abs](./abs), [angle](./angle), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `log` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/log.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log.rs)

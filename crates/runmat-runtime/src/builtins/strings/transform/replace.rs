@@ -191,11 +191,11 @@ RunMat gathers GPU-resident inputs to host memory before performing replacements
 returned on the host. Providers do not need to implement a GPU kernel for this builtin.
 
 ## See Also
-[regexprep](../../regex/regexprep),
-[string](../core/string),
-[char](../core/char),
-[strtrim](../transform/strtrim),
-[strip](../transform/strip)
+[regexprep](./regexprep),
+[string](./string),
+[char](./char),
+[strtrim](./strtrim),
+[strip](./strip)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/replace.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/replace.rs)

@@ -185,7 +185,7 @@ NaNs propagate, and infinities map to the appropriate asymptotic limits (`atan(Â
 matching MATLAB's IEEE behavior.
 
 ## See Also
-[atan2](./atan2), [tan](./tan), [asin](./asin), [acos](./acos), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[atan2](./atan2), [tan](./tan), [asin](./asin), [acos](./acos), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `atan` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/atan.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan.rs)

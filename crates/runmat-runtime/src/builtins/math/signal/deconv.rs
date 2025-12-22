@@ -197,7 +197,7 @@ Yes. `[q, r] = deconv(b, a)` returns both quotient and remainder; requesting onl
 the quotient.
 
 ## See Also
-[conv](./conv), [conv2](./conv2), [fft](../fft/fft), [ifft](../fft/ifft), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[conv](./conv), [conv2](./conv2), [fft](./fft), [ifft](./ifft), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/signal/deconv.rs`

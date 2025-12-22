@@ -154,7 +154,7 @@ Yes. `sinh`, `cosh`, and `tanh` will share the same residency rules. Fused expre
 Providers may warm up pipelines during initialization. If `unary_sinh` is unavailable, the CPU fallback ensures correctness without warmup.
 
 ## See Also
-[sin](./sin), [cos](./cos), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [cos](./cos), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sinh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sinh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sinh.rs)

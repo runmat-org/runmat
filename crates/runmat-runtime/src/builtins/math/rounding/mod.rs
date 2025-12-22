@@ -29,7 +29,7 @@ pub const DOC_MD: &str = r#"---
 title: "mod"
 category: "math/rounding"
 keywords: ["mod", "modulus", "remainder", "rounding", "gpu"]
-summary: "Compute the MATLAB-style modulus a - b .* floor(a./b) for scalars, matrices, N-D tensors, and complex values."
+summary: "Compute the MATLAB-style modulus a - b .* floor(./b) for scalars, matrices, N-D tensors, and complex values."
 references: ["https://www.mathworks.com/help/matlab/ref/mod.html"]
 gpu_support:
   elementwise: true
@@ -49,7 +49,7 @@ tested:
 ---
 
 # What does the `mod` function do in MATLAB / RunMat?
-`C = mod(A, B)` returns the modulus after division such that `C` has the same sign as `B` and satisfies `A = B.*Q + C` with `Q = floor(A./B)`.
+`C = mod(A, B)` returns the modulus after division such that `C` has the same sign as `B` and satisfies `A = B.*Q + C` with `Q = floor(./B)`.
 The definition holds for scalars, vectors, matrices, higher-dimensional tensors, and complex numbers.
 
 ## How does the `mod` function behave in MATLAB / RunMat?
@@ -174,7 +174,7 @@ Explicit `gpuArray` / `gather` calls remain available for scripts that mirror Ma
 6. **Will `mod` ever change integer classes?** Inputs promote to double precision internally; results are reported as double scalars or tensors, mirroring MATLAB's default numeric type.
 
 ## See Also
-[rem](./rem), [floor](./floor), [fix](./fix), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[rem](./rem), [floor](./floor), [fix](./fix), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/rounding/mod.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/mod.rs)

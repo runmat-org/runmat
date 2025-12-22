@@ -183,7 +183,7 @@ Yes. The implementation promotes to 64-bit doubles throughout and clamps tiny im
 zero, mirroring MATLAB's behavior for well-conditioned inputs.
 
 ## See Also
-[log](./log), [log10](./log10), [log1p](./log1p), [exp](./exp), [sqrt](./sqrt), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[log](./log), [log10](./log10), [log1p](./log1p), [exp](./exp), [sqrt](./sqrt), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `log2` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/log2.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log2.rs)

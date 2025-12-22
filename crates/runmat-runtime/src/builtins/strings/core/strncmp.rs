@@ -150,7 +150,7 @@ Any comparison that involves a missing string returns `false`, except when `N` i
 Yes. Scalar comparisons yield logical scalars; array inputs produce logical arrays that follow MATLAB’s column-major ordering.
 
 ## See Also
-[strcmp](./strcmp), [strcmpi](./strcmpi), [contains](../../search/contains), [startswith](../../search/startswith), [strlength](./strlength)
+[strcmp](./strcmp), [strcmpi](./strcmpi), [contains](./contains), [startswith](./startswith), [strlength](./strlength)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strncmp.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strncmp.rs)

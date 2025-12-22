@@ -225,8 +225,8 @@ dimension.
 - [`reshape`](./reshape)
 - [`permute`](./permute)
 - [`squeeze`](./squeeze)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Full implementation: `crates/runmat-runtime/src/builtins/array/shape/cat.rs`

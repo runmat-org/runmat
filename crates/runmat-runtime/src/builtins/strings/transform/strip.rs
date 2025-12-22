@@ -177,7 +177,7 @@ Not currently. RunMat gathers GPU-resident inputs automatically and performs tri
 maintain MATLAB compatibility.
 
 ## See Also
-[lower](./lower), [upper](./upper), [string](../core/string), [char](../core/char), [compose](../core/compose)
+[lower](./lower), [upper](./upper), [string](./string), [char](./char), [compose](./compose)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/strip.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strip.rs)

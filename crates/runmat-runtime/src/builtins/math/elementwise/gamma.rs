@@ -204,7 +204,7 @@ Yes. Provide `'like', T` to control residency and numeric class. Complex prototy
 the host; GPU prototypes must be real.
 
 ## See Also
-[log](./log), [exp](./exp), [sqrt](./sqrt), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[log](./log), [exp](./exp), [sqrt](./sqrt), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `gamma` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs)

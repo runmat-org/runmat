@@ -178,7 +178,7 @@ results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks ope
     Yes. Inputs wrapped in `gpuArray` are gathered before assembling the query string.
 
 ## See Also
-[webwrite](./webwrite), [weboptions](./weboptions), [jsondecode](../json/jsondecode), [websave](../filetext/filewrite)
+[webwrite](./webwrite), [weboptions](./weboptions), [jsondecode](./jsondecode), [websave](./filewrite)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webread")]

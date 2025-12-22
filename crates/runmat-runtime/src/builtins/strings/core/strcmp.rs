@@ -155,7 +155,7 @@ Yes. Character arrays compare row-by-row, returning a column vector whose entrie
 It returns logical results. Scalars become logical scalars (`Value::Bool`), while arrays are returned as logical arrays.
 
 ## See Also
-[string](./string), [char](./char), [contains](../../search/contains), [startswith](../../search/startswith), [strlength](./strlength)
+[string](./string), [char](./char), [contains](./contains), [startswith](./startswith), [strlength](./strlength)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/core/strcmp.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmp.rs)

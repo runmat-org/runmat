@@ -212,7 +212,7 @@ within normal floating-point error tolerances. For values near the domain bounda
 rounding differences may appear but stay within MATLAB compatibility requirements.
 
 ## See Also
-[sin](./sin), [acos](./acos), [atan](./atan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [acos](./acos), [atan](./atan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `asin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/asin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/asin.rs)

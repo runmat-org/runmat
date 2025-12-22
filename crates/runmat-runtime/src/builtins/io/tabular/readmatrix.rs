@@ -196,7 +196,7 @@ Specify `'ThousandsSeparator'` to strip that character before parsing, e.g. `'.'
 No. Relative paths are resolved against the current working directory, exactly like MATLAB.
 
 ## See Also
-[fileread](../../filetext/fileread), [load](../../mat/load), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fileread](./fileread), [load](./load), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `readmatrix` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs)

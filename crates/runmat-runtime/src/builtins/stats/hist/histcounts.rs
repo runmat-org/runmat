@@ -179,7 +179,7 @@ returns host-resident outputs. Use `gather` only for clarity; the values are
 already in host memory.
 
 ## See Also
-[linspace](../../array/creation/linspace), [sum](../../math/reduction/sum), [mean](../../math/reduction/mean), [rand](../../array/creation/rand)
+[linspace](./linspace), [sum](./sum), [mean](./mean), [rand](./rand)
 
 ## Source & Feedback
 - The full source code lives at `crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs`.

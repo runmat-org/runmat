@@ -185,7 +185,7 @@ Assignments require host-side mutation. Providers can re-upload the updated tens
 subsequent GPU-aware operations; `setfield` itself never launches kernels.
 
 ## See Also
-[getfield](./getfield), [fieldnames](./fieldnames), [struct](./struct), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[getfield](./getfield), [fieldnames](./fieldnames), [struct](./struct), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::setfield")]

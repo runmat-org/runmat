@@ -209,7 +209,7 @@ use the same flattened stream.
 Ignore it, just as in MATLAB. Omitting the output argument does not change the write behaviour.
 
 ## See Also
-[sprintf](../../strings/core/sprintf), [compose](../../strings/core/compose),
+[sprintf](./sprintf), [compose](./compose),
 [fopen](./fopen), [fclose](./fclose), [fwrite](./fwrite), [fileread](./fileread)
 
 ## Source & Feedback

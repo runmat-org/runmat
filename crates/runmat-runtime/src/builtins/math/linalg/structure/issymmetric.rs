@@ -198,7 +198,7 @@ No. You receive the same logical answer regardless of whether a GPU provider is 
 Only the execution strategy changes (device-side predicate vs. host fallback).
 
 ## See Also
-[bandwidth](./bandwidth), [chol](../factor/chol), [eig](../factor/eig), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[bandwidth](./bandwidth), [chol](./chol), [eig](./eig), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - View the source: [`crates/runmat-runtime/src/builtins/math/linalg/structure/issymmetric.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/issymmetric.rs)

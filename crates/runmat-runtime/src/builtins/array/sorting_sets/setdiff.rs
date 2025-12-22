@@ -184,7 +184,7 @@ RunMat follows MATLAB's rules: both inputs must share the same class (numeric/lo
 No. RunMat implements the modern semantics only. Passing `'legacy'` or `'R2012a'` results in an error.
 
 ## See Also
-[unique](./unique), [union](./union), [intersect](./intersect), [ismember](./ismember), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[unique](./unique), [union](./union), [intersect](./intersect), [ismember](./ismember), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/array/sorting_sets/setdiff.rs`

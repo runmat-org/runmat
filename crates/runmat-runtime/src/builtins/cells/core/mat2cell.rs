@@ -180,7 +180,7 @@ Yes. Each cell receives its own copy of the underlying block so that you can mod
 without affecting other cells or the original array.
 
 ## See Also
-[cell](./cell), [cell2mat](./cell2mat), [num2cell](../../array/shape/num2cell), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[cell](./cell), [cell2mat](./cell2mat), [num2cell](./num2cell), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `mat2cell` function is available at: [`crates/runmat-runtime/src/builtins/cells/core/mat2cell.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/mat2cell.rs)

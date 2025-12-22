@@ -148,7 +148,7 @@ You receive a `0×1` cell array. You can call `isempty` on it to check for an em
 Yes. The builtin reads just enough metadata to enumerate variable names; it does not load the data into the workspace.
 
 ## See Also
-[whos](./whos), [which](./which), [class](./class), [size](../array/introspection/size), [load](../io/mat/load), [save](../io/mat/save), [gpuArray](../acceleration/gpu/gpuArray), [gather](../acceleration/gpu/gather)
+[whos](./whos), [which](./which), [class](./class), [size](./size), [load](./load), [save](./save), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/introspection/who.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/who.rs)

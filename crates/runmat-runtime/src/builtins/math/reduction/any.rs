@@ -194,7 +194,7 @@ Empty reductions follow MATLAB semantics: dimensions of length zero produce logi
 Providers may expose specialised OR-reduction kernels (`reduce_any_dim`, `reduce_any`) or use `fused_reduction` to remain on the device. When such hooks are absent, RunMat downloads the small output and computes on the host.
 
 ## See Also
-[sum](./sum), [prod](./prod), [mean](./mean), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sum](./sum), [prod](./prod), [mean](./mean), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `any` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/any.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/any.rs)
