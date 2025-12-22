@@ -1996,7 +1996,17 @@ pub fn interpret_with_vars(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
-                let result = runmat_runtime::transpose(promoted)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("transpose", &args)?;
+                stack.push(result);
+            }
+            Instr::ConjugateTranspose => {
+                let value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("ctranspose", &args)?;
                 stack.push(result);
             }
             Instr::ElemMul => {

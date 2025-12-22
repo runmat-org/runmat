@@ -116,7 +116,7 @@ impl<'a> GraphBuilder<'a> {
             Instr::NotEqual => self.handle_binary_primitive(pc, PrimitiveOp::NotEqual),
             Instr::Neg => self.handle_unary_primitive(pc, PrimitiveOp::Neg),
             Instr::UPlus => self.handle_unary_primitive(pc, PrimitiveOp::UPlus),
-            Instr::Transpose => self.handle_transpose(pc),
+            Instr::Transpose | Instr::ConjugateTranspose => self.handle_transpose(pc),
             Instr::CallBuiltin(name, argc) => self.handle_call_builtin(pc, name, *argc),
             Instr::Pop => {
                 let _ = self.pop_value();

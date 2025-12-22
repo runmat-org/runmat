@@ -2530,18 +2530,17 @@ fn explained_variance_matches_cpu() {
             "explained variance requires non-empty Q"
         );
 
-        // Recreate the interpreter's bug-compatible transpose by reinterpreting
-        // the column-major Q buffer with swapped dimensions (no data shuffle).
-        let mut tmp_bug = vec![0.0; cols * rows];
+        // Compute tmp = Q.' * G with correct column-major transpose semantics.
+        let mut tmp = vec![0.0; cols * rows];
         for j in 0..rows {
             for i in 0..cols {
                 let mut acc = 0.0;
                 for k in 0..rows {
-                    let a_idx = i + cols * k;
-                    let b_idx = k + rows * j;
-                    acc += q_tensor.data[a_idx] * g_tensor.data[b_idx];
+                    let q_ki = q_tensor.data[k + i * rows];
+                    let g_kj = g_tensor.data[k + j * rows];
+                    acc += q_ki * g_kj;
                 }
-                tmp_bug[i + cols * j] = acc;
+                tmp[i + cols * j] = acc;
             }
         }
 
@@ -2549,7 +2548,7 @@ fn explained_variance_matches_cpu() {
         for i in 0..cols {
             let mut acc = 0.0;
             for j in 0..rows {
-                let tmp_ij = tmp_bug[i + cols * j];
+                let tmp_ij = tmp[i + cols * j];
                 let q_ji = q_tensor.data[j + rows * i];
                 acc += tmp_ij * q_ji;
             }
@@ -2558,7 +2557,7 @@ fn explained_variance_matches_cpu() {
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             println!("tmp runtime shape {:?}", vec![cols, rows]);
-            println!("tmp runtime data {:?}", tmp_bug);
+            println!("tmp expected data {:?}", tmp);
             println!("expected diag {:?}", expected_diag);
             println!("cpu diag {:?}", cpu_tensor.data);
             let tmp_idx = 4;
@@ -2635,7 +2634,9 @@ fn explained_variance_matches_cpu() {
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             let q_tensor_value = Value::Tensor(q_tensor.clone());
             let g_tensor_value = Value::Tensor(g_tensor.clone());
-            let q_t_value = runmat_runtime::transpose(q_tensor_value.clone()).expect("transpose");
+            let q_t_value =
+                runmat_runtime::call_builtin("transpose", std::slice::from_ref(&q_tensor_value))
+                    .expect("transpose");
             if let Value::Tensor(ref q_t_tensor) = q_t_value {
                 println!("q_t tensor data {:?}", q_t_tensor.data);
             }

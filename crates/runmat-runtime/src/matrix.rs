@@ -3,7 +3,7 @@
 //! Implements element-wise and matrix operations following MATLAB semantics.
 
 use crate::builtins::common::linalg;
-use runmat_builtins::Tensor;
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 /// Matrix addition: C = A + B
@@ -67,18 +67,6 @@ fn complex_matrix_mul(
 /// Scalar multiplication: C = A * s
 pub fn matrix_scalar_mul(a: &Tensor, scalar: f64) -> Tensor {
     linalg::scalar_mul_real(a, scalar)
-}
-
-/// Matrix transpose: C = A'
-pub fn matrix_transpose(a: &Tensor) -> Tensor {
-    let mut data = vec![0.0; a.rows() * a.cols()];
-    for i in 0..a.rows() {
-        for j in 0..a.cols() {
-            // dst(j,i) = src(i,j)
-            data[j * a.rows() + i] = a.data[i + j * a.rows()];
-        }
-    }
-    Tensor::new_2d(data, a.cols(), a.rows()).unwrap() // Always valid
 }
 
 /// Matrix power: C = A^n (for positive integer n)
@@ -201,5 +189,10 @@ fn matrix_eye_builtin(n: i32) -> Result<Tensor, String> {
 
 #[runtime_builtin(name = "matrix_transpose")]
 fn matrix_transpose_builtin(a: Tensor) -> Result<Tensor, String> {
-    Ok(matrix_transpose(&a))
+    let args = [Value::Tensor(a)];
+    let result = crate::call_builtin("transpose", &args)?;
+    match result {
+        Value::Tensor(tensor) => Ok(tensor),
+        other => Err(format!("matrix_transpose: expected tensor, got {other:?}")),
+    }
 }
