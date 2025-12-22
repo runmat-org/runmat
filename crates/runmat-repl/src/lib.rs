@@ -6,7 +6,7 @@ use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
-use runmat_turbine::TurbineEngine;
+use runmat_turbine::{SsaOptLevel, TurbineEngine};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -143,11 +143,32 @@ impl ReplEngine {
         Self::with_snapshot(enable_jit, verbose, None::<&str>)
     }
 
-    /// Create a new REPL engine with snapshot loading
+    /// Create a new REPL engine with snapshot loading (uses default SSA opt level)
     pub fn with_snapshot<P: AsRef<Path>>(
         enable_jit: bool,
         verbose: bool,
         snapshot_path: Option<P>,
+    ) -> Result<Self> {
+        Self::with_snapshot_and_ssa_opt(enable_jit, verbose, snapshot_path, SsaOptLevel::Speed)
+    }
+
+    /// Create a new REPL engine with snapshot loading and explicit SSA opt level
+    pub fn with_snapshot_and_ssa_opt<P: AsRef<Path>>(
+        enable_jit: bool,
+        verbose: bool,
+        snapshot_path: Option<P>,
+        ssa_opt_level: SsaOptLevel,
+    ) -> Result<Self> {
+        Self::with_full_config(enable_jit, verbose, snapshot_path, ssa_opt_level, 10)
+    }
+
+    /// Create a new REPL engine with full configuration including JIT threshold
+    pub fn with_full_config<P: AsRef<Path>>(
+        enable_jit: bool,
+        verbose: bool,
+        snapshot_path: Option<P>,
+        ssa_opt_level: SsaOptLevel,
+        jit_threshold: u32,
     ) -> Result<Self> {
         // Load snapshot if provided
         let snapshot = if let Some(path) = snapshot_path {
@@ -173,7 +194,7 @@ impl ReplEngine {
         };
 
         let jit_engine = if enable_jit {
-            match TurbineEngine::new() {
+            match TurbineEngine::with_ssa_opt_level_and_threshold(ssa_opt_level, jit_threshold) {
                 Ok(engine) => {
                     info!("JIT compiler initialized successfully");
                     Some(engine)

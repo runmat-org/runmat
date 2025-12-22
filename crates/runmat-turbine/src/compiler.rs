@@ -1619,7 +1619,7 @@ impl Default for BytecodeCompiler {
     }
 }
 
-/// Optimization level for JIT compilation
+/// Optimization level for JIT compilation (Cranelift backend)
 #[derive(Debug, Clone, Copy, Default)]
 pub enum OptimizationLevel {
     None,
@@ -1628,24 +1628,47 @@ pub enum OptimizationLevel {
     Aggressive,
 }
 
+/// SSA optimization level (RunMat SSA IR passes)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SsaOptLevel {
+    /// No SSA optimization (direct bytecode→Cranelift)
+    None,
+    /// Minimal: simplify + DCE
+    Size,
+    /// Standard: simplify + DCE + CSE (default)
+    #[default]
+    Speed,
+    /// Full: all passes including LICM
+    Aggressive,
+}
+
 /// Configuration for JIT compilation
 #[derive(Debug, Clone)]
 pub struct CompilerConfig {
     pub optimization_level: OptimizationLevel,
+    /// SSA IR optimization level
+    pub ssa_opt_level: SsaOptLevel,
     pub enable_profiling: bool,
     pub max_inline_depth: u32,
     pub enable_bounds_checking: bool,
     pub enable_overflow_checks: bool,
+    /// Dump SSA IR to stderr for debugging
+    pub dump_ssa: bool,
+    /// Hotspot threshold - how many executions before JIT compilation triggers
+    pub hot_threshold: u32,
 }
 
 impl Default for CompilerConfig {
     fn default() -> Self {
         Self {
             optimization_level: OptimizationLevel::Fast,
+            ssa_opt_level: SsaOptLevel::Speed,
             enable_profiling: true,
             max_inline_depth: 3,
             enable_bounds_checking: true,
             enable_overflow_checks: true,
+            dump_ssa: false,
+            hot_threshold: 10,
         }
     }
 }

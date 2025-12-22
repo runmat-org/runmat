@@ -30,13 +30,23 @@ fn accel_prepare_args(_name: &str, args: &[Value]) -> std::result::Result<Vec<Va
 
 pub mod cache;
 pub mod compiler;
+pub mod dominators;
 pub mod jit_memory;
+pub mod loop_analysis;
 pub mod profiler;
+pub mod ssa;
+pub mod ssa_builder;
+pub mod ssa_lower;
+pub mod ssa_opt;
 
 pub use cache::*;
 pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::*;
+pub use ssa::*;
+pub use ssa_builder::bytecode_to_ssa;
+pub use ssa_lower::lower_ssa_to_cranelift;
+pub use ssa_opt::{optimize, OptLevel};
 
 // Runtime interface functions for JIT compiled code
 // These functions are called from JIT compiled code to interact with the Rust runtime
@@ -716,6 +726,8 @@ pub struct TurbineEngine {
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
     runmat_call_user_function_id: FuncId,
+    /// Compiler configuration including SSA opt level
+    config: CompilerConfig,
 }
 
 /// A compiled function ready for execution
@@ -760,6 +772,26 @@ impl TurbineEngine {
     /// Create a new Turbine JIT engine with proper cross-platform support
     pub fn new() -> Result<Self> {
         Self::with_config(CompilerConfig::default())
+    }
+
+    /// Create a new Turbine JIT engine with the given SSA optimization level
+    pub fn with_ssa_opt_level(ssa_opt_level: SsaOptLevel) -> Result<Self> {
+        Self::with_config(CompilerConfig {
+            ssa_opt_level,
+            ..Default::default()
+        })
+    }
+
+    /// Create a new Turbine JIT engine with the given SSA optimization level and hotspot threshold
+    pub fn with_ssa_opt_level_and_threshold(
+        ssa_opt_level: SsaOptLevel,
+        hot_threshold: u32,
+    ) -> Result<Self> {
+        Self::with_config(CompilerConfig {
+            ssa_opt_level,
+            hot_threshold,
+            ..Default::default()
+        })
     }
 
     /// Create a new Turbine JIT engine with custom configuration
@@ -842,13 +874,17 @@ impl TurbineEngine {
             module,
             ctx,
             cache: FunctionCache::with_capacity(1000),
-            profiler: HotspotProfiler::new(),
+            profiler: HotspotProfiler::with_threshold(config.hot_threshold),
             target_isa,
             compiler: BytecodeCompiler::new(),
             runmat_call_user_function_id,
+            config: config.clone(),
         };
 
-        info!("Turbine JIT engine initialized successfully for {target_triple}");
+        info!(
+            "Turbine JIT engine initialized successfully for {target_triple} (SSA opt: {:?})",
+            config.ssa_opt_level
+        );
         Ok(engine)
     }
 
@@ -909,14 +945,34 @@ impl TurbineEngine {
             sig.clone(),
         );
 
-        self.compiler.compile_instructions(
-            &bytecode.instructions,
-            &mut func,
-            bytecode.var_count,
-            &bytecode.functions,
-            &mut self.module,
-            self.runmat_call_user_function_id,
-        )?;
+        // Choose compilation path based on SSA opt level
+        let compile_result = if self.config.ssa_opt_level != SsaOptLevel::None {
+            // SSA path: build SSA, optimize, lower to Cranelift
+            self.compile_via_ssa(bytecode, &func_name, &mut func)
+        } else {
+            // Legacy path: direct bytecode to Cranelift
+            Ok(())
+        };
+
+        // If SSA path fails or was skipped, use legacy path
+        if compile_result.is_err() || self.config.ssa_opt_level == SsaOptLevel::None {
+            if let Err(e) = &compile_result {
+                debug!("SSA compilation failed, falling back to legacy: {}", e);
+            }
+            // Reset function for legacy compilation
+            func = codegen::ir::Function::with_name_signature(
+                codegen::ir::UserFuncName::user(0, func_id.as_u32()),
+                sig.clone(),
+            );
+            self.compiler.compile_instructions(
+                &bytecode.instructions,
+                &mut func,
+                bytecode.var_count,
+                &bytecode.functions,
+                &mut self.module,
+                self.runmat_call_user_function_id,
+            )?;
+        }
 
         // Compile to machine code
         self.ctx.func = func;
@@ -941,6 +997,69 @@ impl TurbineEngine {
 
         info!("Successfully compiled function {hash}");
         Ok(hash)
+    }
+
+    /// Compile via SSA optimization pipeline
+    fn compile_via_ssa(
+        &self,
+        bytecode: &Bytecode,
+        func_name: &str,
+        func: &mut codegen::ir::Function,
+    ) -> Result<()> {
+        use crate::ssa_builder::{bytecode_to_ssa, is_ssa_safe};
+        use crate::ssa_lower::lower_ssa_to_cranelift;
+        use crate::ssa_opt::{optimize, OptLevel};
+
+        // Check if bytecode is safe for SSA compilation
+        // (no stack values crossing block boundaries)
+        if !is_ssa_safe(&bytecode.instructions) {
+            return Err(TurbineError::ExecutionError(
+                "Bytecode has stack values crossing block boundaries; falling back to legacy compiler".to_string(),
+            ));
+        }
+
+        // Convert SSA opt level
+        let opt_level = match self.config.ssa_opt_level {
+            SsaOptLevel::None => return Ok(()), // Should not happen, but handle gracefully
+            SsaOptLevel::Size => OptLevel::Size,
+            SsaOptLevel::Speed => OptLevel::Speed,
+            SsaOptLevel::Aggressive => OptLevel::Aggressive,
+        };
+
+        // Build SSA from bytecode
+        let mut ssa_func = bytecode_to_ssa(
+            &bytecode.instructions,
+            bytecode.var_count,
+            func_name.to_string(),
+        );
+
+        // Dump SSA before optimization if requested
+        if self.config.dump_ssa {
+            eprintln!("=== SSA IR (before optimization) ===");
+            eprintln!("{}", ssa_func.dump());
+        }
+
+        // Run optimization passes
+        optimize(&mut ssa_func, opt_level);
+
+        // Dump SSA after optimization if requested
+        if self.config.dump_ssa {
+            eprintln!("=== SSA IR (after {:?} optimization) ===", opt_level);
+            eprintln!("{}", ssa_func.dump());
+        }
+
+        debug!(
+            "SSA optimization complete: {} blocks, {:?} level",
+            ssa_func.blocks.len(),
+            opt_level
+        );
+
+        // Lower optimized SSA to Cranelift IR
+        let mut fb_ctx = FunctionBuilderContext::new();
+        lower_ssa_to_cranelift(&ssa_func, func, &mut fb_ctx)?;
+
+        info!("SSA compilation successful for {}", func_name);
+        Ok(())
     }
 
     /// Execute compiled function
@@ -1034,6 +1153,7 @@ impl TurbineEngine {
 
         // Check if we should compile this function
         if self.should_compile(hash) {
+            debug!("Bytecode hash {} is hot, attempting JIT compilation", hash);
             match self.compile_bytecode(bytecode) {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
@@ -1046,6 +1166,12 @@ impl TurbineEngine {
                     // Fall through to interpreter execution
                 }
             }
+        } else {
+            debug!(
+                "Bytecode hash {} not hot yet (count: {})",
+                hash,
+                self.profiler.get_hotness(hash)
+            );
         }
 
         // Record execution for profiling
