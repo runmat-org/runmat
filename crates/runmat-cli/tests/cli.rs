@@ -54,10 +54,9 @@ fn test_version_detailed_command() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("RunMat"));
-    assert!(stdout.contains("Components:"));
-    assert!(stdout.contains("runmat-lexer"));
-    assert!(stdout.contains("runmat-turbine"));
-    assert!(stdout.contains("runmat-gc"));
+    assert!(stdout.contains("Built with Rust"));
+    assert!(stdout.contains("Target:"));
+    assert!(stdout.contains("Profile:"));
 }
 
 #[test]
