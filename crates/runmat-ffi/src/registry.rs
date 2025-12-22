@@ -1,17 +1,28 @@
 //! Registry for loaded native libraries.
 
 use crate::library::NativeLibrary;
+use crate::parser::SignatureFile;
+use crate::types::FfiSignature;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 /// Global registry of loaded libraries.
 static LIBRARY_REGISTRY: Lazy<Mutex<LibraryRegistry>> =
     Lazy::new(|| Mutex::new(LibraryRegistry::new()));
 
+/// Entry for a loaded library with optional signatures.
+pub struct LibraryEntry {
+    /// The native library handle
+    pub library: NativeLibrary,
+    /// Function signatures (if loaded from .ffi file)
+    pub signatures: Option<SignatureFile>,
+}
+
 /// Registry for managing loaded native libraries.
 pub struct LibraryRegistry {
-    libraries: HashMap<String, NativeLibrary>,
+    libraries: HashMap<String, LibraryEntry>,
 }
 
 impl LibraryRegistry {
@@ -29,13 +40,61 @@ impl LibraryRegistry {
         }
 
         let library = NativeLibrary::load_by_name(name)?;
-        self.libraries.insert(name.to_string(), library);
+        self.libraries.insert(
+            name.to_string(),
+            LibraryEntry {
+                library,
+                signatures: None,
+            },
+        );
+        Ok(())
+    }
+
+    /// Load a library with a signature file.
+    pub fn load_with_signatures(
+        &mut self,
+        name: &str,
+        sig_path: impl AsRef<Path>,
+    ) -> Result<(), String> {
+        // Parse signature file first
+        let signatures = SignatureFile::parse_file(sig_path.as_ref())
+            .map_err(|e| format!("Failed to parse signature file: {}", e))?;
+
+        // Load library if not already loaded
+        let library = if self.libraries.contains_key(name) {
+            // Library already loaded, just update signatures
+            self.libraries.get_mut(name).unwrap().signatures = Some(signatures);
+            return Ok(());
+        } else {
+            NativeLibrary::load_by_name(name)?
+        };
+
+        self.libraries.insert(
+            name.to_string(),
+            LibraryEntry {
+                library,
+                signatures: Some(signatures),
+            },
+        );
         Ok(())
     }
 
     /// Get a reference to a loaded library.
     pub fn get(&self, name: &str) -> Option<&NativeLibrary> {
+        self.libraries.get(name).map(|e| &e.library)
+    }
+
+    /// Get a reference to a library entry (includes signatures).
+    pub fn get_entry(&self, name: &str) -> Option<&LibraryEntry> {
         self.libraries.get(name)
+    }
+
+    /// Get a function signature if available.
+    pub fn get_signature(&self, lib_name: &str, func_name: &str) -> Option<&FfiSignature> {
+        self.libraries
+            .get(lib_name)
+            .and_then(|e| e.signatures.as_ref())
+            .and_then(|s| s.get(func_name))
     }
 
     /// Check if a library is loaded.
@@ -71,6 +130,22 @@ pub fn load_library(name: &str) -> Result<(), String> {
         .lock()
         .map_err(|_| "Failed to acquire library registry lock")?;
     registry.load(name)
+}
+
+/// Load a library with signatures into the global registry.
+pub fn load_library_with_signatures(name: &str, sig_path: impl AsRef<Path>) -> Result<(), String> {
+    let mut registry = LIBRARY_REGISTRY
+        .lock()
+        .map_err(|_| "Failed to acquire library registry lock")?;
+    registry.load_with_signatures(name, sig_path)
+}
+
+/// Get a function signature from the global registry.
+pub fn get_function_signature(lib_name: &str, func_name: &str) -> Result<Option<FfiSignature>, String> {
+    let registry = LIBRARY_REGISTRY
+        .lock()
+        .map_err(|_| "Failed to acquire library registry lock")?;
+    Ok(registry.get_signature(lib_name, func_name).cloned())
 }
 
 /// Check if a library is loaded in the global registry.

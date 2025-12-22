@@ -3,13 +3,14 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::registry::{global_registry, load_library};
+use crate::registry::{get_function_signature, global_registry, load_library};
+use crate::types::FfiSignature;
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "ffi_call"
 category: "ffi"
-keywords: ["ffi", "call", "native", "c", "library", "function"]
+keywords: ["ffi", "call", "native", "c", "library", "function", "signature"]
 summary: "Call a function in a native shared library."
 ---
 
@@ -27,13 +28,22 @@ result = ffi_call("libname", "funcname", arg1, arg2, ...)
 
 `ffi_call` invokes a C function from a previously loaded native library.
 
+### Type-Safe Calls
+
+When a library is loaded with a signature file (`ffi_load("lib", "lib.ffi")`),
+function calls are validated against the declared signatures. This provides:
+
+- Argument count validation
+- Type checking (where possible)
+- Better error messages
+
 ### Supported Function Signatures
 
 Currently supports these native function types:
 
 1. **Scalar functions**: `double func(double, double, ...)`
 2. **Unary functions**: `double func(double)`
-3. **Array functions**: (coming soon)
+3. **Array functions**: Functions with pointer arguments
 
 ## Examples
 
@@ -48,7 +58,7 @@ y = ffi_call("mymath", "square", 4.0);  % Returns 16.0
 ## Notes
 
 - Libraries are automatically loaded on first use if not already loaded.
-- Function signatures are inferred from argument types.
+- If no signature file is loaded, types are inferred from argument types.
 - Arrays are passed as pointers with row/column counts.
 "#;
 
@@ -59,17 +69,20 @@ y = ffi_call("mymath", "square", 4.0);  % Returns 16.0
     name = "ffi_call",
     category = "ffi",
     summary = "Call a function in a native shared library.",
-    keywords = "ffi,call,native,c,library"
+    keywords = "ffi,call,native,c,library,signature"
 )]
 pub fn ffi_call_builtin(lib_name: Value, func_name: Value, rest: Vec<Value>) -> Result<Value, String> {
     // Extract library name
-    let lib_name = extract_string(&lib_name, "library name")?;
+    let lib_name_str = extract_string(&lib_name, "library name")?;
 
     // Extract function name
-    let func_name = extract_string(&func_name, "function name")?;
+    let func_name_str = extract_string(&func_name, "function name")?;
 
     // Ensure library is loaded
-    load_library(&lib_name)?;
+    load_library(&lib_name_str)?;
+
+    // Check if we have an explicit signature for this function
+    let signature = get_function_signature(&lib_name_str, &func_name_str)?;
 
     // Get the library from registry
     let registry = global_registry()
@@ -77,16 +90,114 @@ pub fn ffi_call_builtin(lib_name: Value, func_name: Value, rest: Vec<Value>) -> 
         .map_err(|_| "Failed to acquire library registry lock")?;
 
     let library = registry
-        .get(&lib_name)
-        .ok_or_else(|| format!("Library '{}' not found in registry", lib_name))?;
+        .get(&lib_name_str)
+        .ok_or_else(|| format!("Library '{}' not found in registry", lib_name_str))?;
 
-    // Dispatch based on argument types
-    match rest.len() {
-        0 => call_nullary(library, &func_name),
-        1 => call_unary(library, &func_name, &rest[0]),
-        2 => call_binary(library, &func_name, &rest[0], &rest[1]),
-        n => call_variadic(library, &func_name, &rest, n),
+    // If we have a signature, validate and use it
+    if let Some(ref sig) = signature {
+        return call_with_signature(library, sig, &rest);
     }
+
+    // Otherwise, infer from argument count/types (legacy behavior)
+    match rest.len() {
+        0 => call_nullary(library, &func_name_str),
+        1 => call_unary(library, &func_name_str, &rest[0]),
+        2 => call_binary(library, &func_name_str, &rest[0], &rest[1]),
+        n => call_variadic(library, &func_name_str, &rest, n),
+    }
+}
+
+/// Call a function using an explicit signature.
+fn call_with_signature(
+    library: &crate::library::NativeLibrary,
+    sig: &FfiSignature,
+    args: &[Value],
+) -> Result<Value, String> {
+    // Validate argument count
+    let expected_scalar_args = sig.args.iter().filter(|t| !t.is_pointer()).count();
+
+    // For all-scalar signatures, validate exact count
+    if sig.is_all_f64_scalar() {
+        if args.len() != sig.args.len() {
+            return Err(format!(
+                "ffi_call: function '{}' expects {} arguments, got {}",
+                sig.name,
+                sig.args.len(),
+                args.len()
+            ));
+        }
+        // Use existing scalar dispatch
+        return match args.len() {
+            0 => call_nullary(library, &sig.name),
+            1 => call_scalar_unary(library, &sig.name, &args[0]),
+            2 => call_binary(library, &sig.name, &args[0], &args[1]),
+            _ => call_variadic(library, &sig.name, args, args.len()),
+        };
+    }
+
+    // For signatures with pointers, we need more sophisticated dispatch
+    // Check if this looks like an array function pattern
+    if has_array_pattern(sig) {
+        return call_array_with_signature(library, sig, args);
+    }
+
+    // Fall back to scalar dispatch if we can extract all f64
+    if args.len() == expected_scalar_args {
+        return match args.len() {
+            0 => call_nullary(library, &sig.name),
+            1 => call_scalar_unary(library, &sig.name, &args[0]),
+            2 => call_binary(library, &sig.name, &args[0], &args[1]),
+            _ => call_variadic(library, &sig.name, args, args.len()),
+        };
+    }
+
+    Err(format!(
+        "ffi_call: cannot dispatch function '{}' with signature {} and {} arguments",
+        sig.name, sig, args.len()
+    ))
+}
+
+/// Check if signature matches common array function patterns.
+fn has_array_pattern(sig: &FfiSignature) -> bool {
+    sig.args.iter().any(|t| t.is_pointer())
+}
+
+/// Call an array function using an explicit signature.
+fn call_array_with_signature(
+    library: &crate::library::NativeLibrary,
+    sig: &FfiSignature,
+    args: &[Value],
+) -> Result<Value, String> {
+    // Common pattern: (ptr<f64>, usize, usize, ..., ptr_mut<f64>) -> i32
+    // For now, support unary array: one input matrix, optional scalars, one output
+
+    if args.len() != 1 {
+        return Err(format!(
+            "ffi_call: array function '{}' currently only supports single matrix argument",
+            sig.name
+        ));
+    }
+
+    let input = match &args[0] {
+        Value::Tensor(t) => t,
+        _ => return Err(format!("ffi_call: expected matrix argument for '{}'", sig.name)),
+    };
+
+    // Use the existing array call logic
+    call_unary_array(library, &sig.name, input)
+}
+
+/// Call a unary scalar function (ensures scalar dispatch even for tensors).
+fn call_scalar_unary(
+    library: &crate::library::NativeLibrary,
+    func_name: &str,
+    arg: &Value,
+) -> Result<Value, String> {
+    type UnaryFn = unsafe extern "C" fn(f64) -> f64;
+    let x = extract_f64(arg)?;
+    let func: libloading::Symbol<UnaryFn> = unsafe { library.get_function(func_name)? };
+    let result = unsafe { func(x) };
+    Ok(Value::Num(result))
 }
 
 /// Extract a string from a Value.

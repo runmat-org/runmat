@@ -1,0 +1,24 @@
+# Signature file for mymath test library
+# Format: name: (arg_types) -> return_type
+
+# Binary arithmetic functions
+add: (f64, f64) -> f64
+subtract: (f64, f64) -> f64
+multiply: (f64, f64) -> f64
+divide: (f64, f64) -> f64
+
+# Unary functions
+square: (f64) -> f64
+cube: (f64) -> f64
+negate: (f64) -> f64
+
+# Nullary function
+get_pi: () -> f64
+
+# Multi-argument functions
+sum3: (f64, f64, f64) -> f64
+sum4: (f64, f64, f64, f64) -> f64
+sum5: (f64, f64, f64, f64, f64) -> f64
+
+# Array function
+# scale_array: (ptr<f64>, usize, usize, ptr_mut<f64>, ptr_mut<usize>, ptr_mut<usize>, f64) -> i32

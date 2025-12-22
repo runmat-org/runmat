@@ -10,6 +10,19 @@
 //! result = ffi_call("mylib", "add_vectors", x, y);
 //! ```
 //!
+//! # Signature Files
+//!
+//! Type-safe FFI calls can be made using `.ffi` signature files:
+//!
+//! ```text
+//! # mymath.ffi
+//! add: (f64, f64) -> f64
+//! square: (f64) -> f64
+//! scale_array: (ptr<f64>, usize, usize, f64, ptr_mut<f64>) -> i32
+//! ```
+//!
+//! Load with: `ffi_load("mymath", "mymath.ffi")`
+//!
 //! # Supported Function Signatures
 //!
 //! Native functions must follow a specific ABI:
@@ -27,11 +40,13 @@
 //! ```
 
 mod library;
+mod parser;
 mod registry;
 mod types;
 
 pub mod builtins;
 
 pub use library::NativeLibrary;
+pub use parser::{ParseError, SignatureFile};
 pub use registry::LibraryRegistry;
 pub use types::{FfiSignature, FfiType};
