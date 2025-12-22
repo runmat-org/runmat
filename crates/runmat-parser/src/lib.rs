@@ -755,12 +755,9 @@ impl Parser {
                 let prev = &self.tokens[self.pos - 1];
                 let curr = &self.tokens[self.pos];
                 let is_adjacent = self.tokens_adjacent(self.pos - 1, self.pos);
-                let is_imag = curr.lexeme.eq_ignore_ascii_case("i")
-                    || curr.lexeme.eq_ignore_ascii_case("j");
-                if is_adjacent
-                    && is_imag
-                    && matches!(prev.token, Token::Integer | Token::Float)
-                {
+                let is_imag =
+                    curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
+                if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
                     let ident = self.next().unwrap().lexeme;
                     let rhs = Expr::Ident(ident);
                     node = Expr::Binary(Box::new(node), BinOp::Mul, Box::new(rhs));

@@ -2271,9 +2271,10 @@ impl Compiler {
                         }
                     }
                 }
-                let has_non_literals = matrix_data
-                    .iter()
-                    .any(|row| row.iter().any(|expr| !matches!(expr.kind, HirExprKind::Number(_))));
+                let has_non_literals = matrix_data.iter().any(|row| {
+                    row.iter()
+                        .any(|expr| !matches!(expr.kind, HirExprKind::Number(_)))
+                });
                 if has_non_literals {
                     for row in matrix_data {
                         for element in row {
