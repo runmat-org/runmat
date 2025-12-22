@@ -10,6 +10,7 @@ Notation:
 ## Data/Stack and Locals
 
 - LoadConst(c): [] → [Num(c)]
+- LoadComplex(re, im): [] → [Complex(re, im)]
 - LoadBool(b): [] → [Bool(b)]
 - LoadString(s): [] → [String(s)]
 - LoadCharRow(s): [] → [CharArray(1×len(s))]
