@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="RUST_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-accelerate-api/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-accelerate/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-accelerate/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-builtins/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-builtins/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-gc-api/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-gc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-gc/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-hir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-hir/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-ignition/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-ignition/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-kernel/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-kernel/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-lexer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-lexer/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-lsp/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-macros/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-macros/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-parser/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-parser/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-plot/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-plot/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-plot/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-repl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-repl/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-runtime-integration-tests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-runtime-integration-tests/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-runtime/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-snapshot/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-snapshot/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-snapshot/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-turbine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runmat-turbine/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/runmat/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/runmat/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/runmatfunc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/runmatfunc/tests" isTestSource="true" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+      <excludeFolder url="file://$MODULE_DIR$/tools/runmatfunc/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

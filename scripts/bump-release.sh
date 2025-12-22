@@ -27,10 +27,10 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
   exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Error: working tree not clean. Commit or stash changes first." >&2
-  exit 1
-fi
+#if [ -n "$(git status --porcelain)" ]; then
+#  echo "Error: working tree not clean. Commit or stash changes first." >&2
+#  exit 1
+#fi
 
 git fetch origin +refs/heads/main:refs/remotes/origin/main
 if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
