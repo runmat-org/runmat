@@ -1,6 +1,7 @@
 use runmat_accelerate::ShapeInfo;
+use runmat_builtins::Value;
 use runmat_hir::lower;
-use runmat_ignition::execute;
+use runmat_ignition::{compile, execute, Instr};
 use runmat_parser::parse;
 use std::convert::TryInto;
 
@@ -64,5 +65,42 @@ fn array_construct_like_and_size_vector_inference() {
             assert_eq!(dims, &vec![Some(5), Some(6)]);
         }
         other => panic!("unexpected shape: {:?}", other),
+    }
+}
+
+#[test]
+fn complex_literal_matrix_uses_dynamic_path() {
+    let input = "A = [1+2i 3-4j];";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let bytecode = compile(&hir).unwrap();
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadComplex(_, _))),
+        "expected complex constant to compile into LoadComplex"
+    );
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CreateMatrixDynamic(_))),
+        "expected complex literal matrix to use dynamic construction"
+    );
+}
+
+#[test]
+fn complex_literal_matrix_executes() {
+    let input = "A = [1+2i 3-4j];";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[0] {
+        Value::ComplexTensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+        }
+        other => panic!("expected complex tensor, got {other:?}"),
     }
 }

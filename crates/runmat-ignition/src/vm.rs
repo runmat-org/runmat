@@ -1522,6 +1522,17 @@ pub fn interpret_with_vars(
                     eprintln!("  -> LoadConst pushed {}, new_len={}", c, stack.len());
                 }
             }
+            Instr::LoadComplex(re, im) => {
+                stack.push(Value::Complex(re, im));
+                if debug_stack {
+                    eprintln!(
+                        "  -> LoadComplex pushed ({}, {}), new_len={}",
+                        re,
+                        im,
+                        stack.len()
+                    );
+                }
+            }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {

@@ -1109,6 +1109,11 @@ impl TurbineEngine {
                     "LoadConst".hash(&mut hasher);
                     val.to_bits().hash(&mut hasher);
                 }
+                Instr::LoadComplex(re, im) => {
+                    "LoadComplex".hash(&mut hasher);
+                    re.to_bits().hash(&mut hasher);
+                    im.to_bits().hash(&mut hasher);
+                }
                 Instr::LoadString(s) => {
                     "LoadString".hash(&mut hasher);
                     s.hash(&mut hasher);

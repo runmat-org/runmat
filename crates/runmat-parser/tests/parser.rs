@@ -118,6 +118,36 @@ fn trailing_semicolon_is_allowed() {
 }
 
 #[test]
+fn parse_imaginary_unit_adjacent_number_in_matrix() {
+    let program = parse("A = [1+2i 3-4j];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows), _) = &program.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 2);
+
+    let Expr::Binary(lhs, BinOp::Add, rhs) = &rows[0][0] else {
+        panic!("expected 1+2i");
+    };
+    assert!(matches!(**lhs, Expr::Number(ref n) if n == "1"));
+    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r) = &**rhs else {
+        panic!("expected 2*i");
+    };
+    assert!(matches!(**rhs_l, Expr::Number(ref n) if n == "2"));
+    assert!(matches!(**rhs_r, Expr::Ident(ref n) if n == "i"));
+
+    let Expr::Binary(lhs, BinOp::Sub, rhs) = &rows[0][1] else {
+        panic!("expected 3-4j");
+    };
+    assert!(matches!(**lhs, Expr::Number(ref n) if n == "3"));
+    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r) = &**rhs else {
+        panic!("expected 4*j");
+    };
+    assert!(matches!(**rhs_l, Expr::Number(ref n) if n == "4"));
+    assert!(matches!(**rhs_r, Expr::Ident(ref n) if n == "j"));
+}
+
+#[test]
 fn final_semicolon_not_required() {
     let program = parse("1 + 2").unwrap();
     assert_eq!(program.body.len(), 1);
