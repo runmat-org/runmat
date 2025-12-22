@@ -24,6 +24,7 @@ use runmat_core::{
     MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
 };
+use runmat_parser::CompatMode;
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
@@ -127,6 +128,8 @@ struct InitOptions {
     telemetry_id: Option<String>,
     #[serde(default)]
     emit_fusion_plan: Option<bool>,
+    #[serde(default)]
+    language_compat: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -181,6 +184,7 @@ struct SessionConfig {
     wgpu_force_fallback_adapter: bool,
     auto_offload: AutoOffloadOptions,
     emit_fusion_plan: bool,
+    language_compat: CompatMode,
 }
 
 impl SessionConfig {
@@ -195,6 +199,7 @@ impl SessionConfig {
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
+            language_compat: parse_language_compat(opts.language_compat.as_deref()),
         }
     }
 
@@ -261,6 +266,7 @@ impl RunMatWasm {
             session.set_telemetry_client_id(None);
         }
         session.set_emit_fusion_plan(config.emit_fusion_plan);
+        session.set_compat_mode(config.language_compat);
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -269,6 +275,22 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
         self.session.borrow().cancel_execution();
+    }
+
+    #[wasm_bindgen(js_name = "setLanguageCompat")]
+    pub fn set_language_compat(&self, mode: String) {
+        if self.disposed.get() {
+            return;
+        }
+        if let Some(parsed) = parse_language_compat_from_str(&mode) {
+            {
+                let mut config = self.config.borrow_mut();
+                config.language_compat = parsed;
+            }
+            self.session.borrow_mut().set_compat_mode(parsed);
+        } else {
+            warn!("RunMat wasm: ignoring unknown language compat mode '{mode}'");
+        }
     }
 
     #[wasm_bindgen(js_name = setInputHandler)]
@@ -1028,6 +1050,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_client_id(Some(cid));
     }
     session.set_emit_fusion_plan(config.emit_fusion_plan);
+    session.set_compat_mode(config.language_compat);
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -1083,6 +1106,22 @@ fn apply_plotting_overrides(opts: &InitOptions) {
     }
     if let Some(budget) = opts.surface_vertex_budget {
         set_surface_vertex_budget(budget);
+    }
+}
+
+fn parse_language_compat(input: Option<&str>) -> CompatMode {
+    input
+        .and_then(parse_language_compat_from_str)
+        .unwrap_or(CompatMode::Matlab)
+}
+
+fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
+    if value.eq_ignore_ascii_case("strict") {
+        Some(CompatMode::Strict)
+    } else if value.eq_ignore_ascii_case("matlab") {
+        Some(CompatMode::Matlab)
+    } else {
+        None
     }
 }
 

@@ -37,6 +37,8 @@ export type {
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
 
+export type LanguageCompatMode = "matlab" | "strict";
+
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface RunMatSnapshotSource {
@@ -76,6 +78,9 @@ export interface RunMatInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  language?: {
+    compat?: LanguageCompatMode;
+  };
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -332,6 +337,7 @@ export interface RunMatSessionHandle {
     options?: MaterializeVariableOptions
   ): Promise<MaterializedVariable>;
   setFusionPlanEnabled(enabled: boolean): void;
+  setLanguageCompat(mode: LanguageCompatMode): void;
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
 }
 
@@ -349,6 +355,7 @@ interface NativeInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  languageCompat?: LanguageCompatMode;
 }
 
 interface RunMatNativeSession {
@@ -370,7 +377,8 @@ interface RunMatNativeSession {
     options?: MaterializeVariableOptionsWire
   ) => MaterializedVariable;
   setFusionPlanEnabled?: (enabled: boolean) => void;
-   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
+  setLanguageCompat?: (mode: LanguageCompatMode) => void;
+  fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
 }
 
 interface ResumeInputWireValue {
@@ -477,7 +485,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
     surfaceVertexBudget: options.surfaceVertexBudget,
-    emitFusionPlan: options.emitFusionPlan ?? false
+    emitFusionPlan: options.emitFusionPlan ?? false,
+    languageCompat: options.language?.compat
   });
   return new WebRunMatSession(session);
 }
@@ -751,6 +760,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "setFusionPlanEnabled");
     this.native.setFusionPlanEnabled(enabled);
+  }
+
+  setLanguageCompat(mode: LanguageCompatMode): void {
+    this.ensureActive();
+    requireNativeFunction(this.native, "setLanguageCompat");
+    this.native.setLanguageCompat(mode);
   }
 
   async fusionPlanForSource(source: string): Promise<FusionPlanSnapshot | null> {

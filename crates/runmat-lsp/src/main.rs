@@ -1,5 +1,8 @@
 #![cfg(feature = "native")]
 
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_runtime as _;
+
 mod core;
 mod native;
 mod backend;

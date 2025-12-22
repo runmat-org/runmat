@@ -26,6 +26,7 @@ runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
 runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
+runmat-runtime = { version = "=0.2.7", path = "../runmat-runtime", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, optional = true }
@@ -33,6 +34,8 @@ tower-lsp = { workspace = true, optional = true }
 once_cell = { workspace = true }
 wasm-bindgen = { version = "0.2", optional = true, features = ["serde-serialize"] }
 lsp-types = "0.94"
+toml = "0.8"
+serde_yaml = "0.9"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }

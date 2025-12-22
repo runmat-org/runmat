@@ -49,5 +49,12 @@ We support command-style invocation for the verbs below when `compat = "matlab"`
 **Fusion/analysis treatment**
 - These verbs are treated as side-effect-only; they must not break compilation or fusion planning. Internally they are normalized to explicit calls for consistent typing and tooling.
 
+### Implementation notes
+
+- Compatibility is decided up front by the parser (`runmat_parser::parse_with_options`). Under `matlab` mode, the parser accepts the whitelisted command verbs; under `strict` the same tokens produce targeted parse errors.
+- The setting is read from `[language] compat` in `.runmat` (see `docs/CONFIG.md`). CLI builds, the native runtime, and the WASM runtime all forward this value into `RunMatSession`.
+- Hosts can override at runtime: the wasm bindings expose `session.setLanguageCompat("strict")` / `"matlab"`, and the LSP accepts `initializationOptions.language.compat`. When no explicit override is provided, the LSP will auto-discover the closest `.runmat*` file under the workspace root and mirror that value.
+- Because the parser itself understands the compat mode, downstream passes (HIR lowering, fusion planning, Monaco semantic tokens, etc.) all see the same explicit AST without needing ad-hoc rewrites.
+
 ### Future compatibility surfaces
 - New divergences or compat shims (e.g., potential Julia-inspired interop/syntax in the future) will be documented here as they are added.

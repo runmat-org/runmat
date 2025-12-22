@@ -99,6 +99,7 @@ if (gpu.adapter) {
 | `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
 | `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
 | `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
+| `language.compat` | `"matlab" \| "strict"` | Matches `[language] compat` in `.runmat`. See docs/LANGUAGE.md for more information. |
 
 ## Telemetry consent
 
@@ -215,3 +216,7 @@ Each helper forwards directly to the new wasm exports, so the zero-copy renderer
 When a lifecycle call fails (bad handle, invalid subplot index, etc.) the Promise rejects with a structured error object `{ code, message, ... }`. The wrapper converts that into a real `Error` (with `.code`, `.handle`, `.rows`, `.cols`, `.index` where applicable) so host UIs can surface meaningful messages without parsing MATLAB text.
 
 If the shared WebGPU device is unavailable (adapter blocked, user disables GPU, etc.), `renderFigureImage` rejects with `code: "RenderFailure"` and a `.details` string describing the cause. Hosts should surface that warning and fall back to a placeholder thumbnail rather than attempting to draw the PNG bytes locally.
+
+### Language compatibility mode
+
+At runtime you can flip language compatibility mode without reinitializing via `session.setLanguageCompat("strict")` or `"matlab"`.

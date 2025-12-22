@@ -88,6 +88,21 @@ url = "https://packages.runmat.org"
 "my-local-ext" = { source = "path", path = "../my-local-ext" }
 ```
 
+## Language configuration
+
+Language-specific toggles live under the `[language]` table. Today it exposes the compatibility mode that controls whether MATLAB command syntax (`hold on`, `grid on`, etc.) is accepted:
+
+```toml
+[language]
+compat = "matlab" # default
+# compat = "strict"
+```
+
+- `matlab`: allows the curated set of command-style verbs documented in `docs/LANGUAGE.md`, rewriting them into explicit calls before parsing.
+- `strict`: disables command syntax entirely; scripts must call functions explicitly (e.g., `hold("on")`). Recommended for new codebases.
+
+The CLI (`runmat`), native runtime, WASM runtime, and both LSP implementations read this setting automatically. Hosts can still override it via environment variables or LSP initialization options, but `.runmat` is treated as the source of truth.
+
 ### YAML (.runmat.yaml)
 ```yaml
 runtime:

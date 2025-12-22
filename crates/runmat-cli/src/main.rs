@@ -941,6 +941,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     )
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(config.language.compat);
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1222,6 +1223,7 @@ async fn execute_script_with_args(
     )
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(config.language.compat);
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1498,6 +1500,7 @@ async fn execute_benchmark(
     let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(config.language.compat);
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }

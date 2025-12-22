@@ -13,6 +13,7 @@ use runmat_accelerate::{
     AccelPowerPreference, AccelerateInitOptions, AccelerateProviderPreference, AutoOffloadLogLevel,
     AutoOffloadOptions,
 };
+use runmat_parser::CompatMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -61,20 +62,6 @@ pub struct RuntimeConfig {
     pub verbose: bool,
     /// Snapshot file to preload
     pub snapshot_path: Option<PathBuf>,
-}
-
-/// Language compatibility / syntax configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CompatMode {
-    Matlab,
-    Strict,
-}
-
-impl Default for CompatMode {
-    fn default() -> Self {
-        CompatMode::Matlab
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

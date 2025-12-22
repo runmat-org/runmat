@@ -1,6 +1,8 @@
 #![cfg(feature = "native")]
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use log::{debug, info};
@@ -11,6 +13,7 @@ use crate::core::analysis::{
 };
 use crate::core::workspace::workspace_symbols;
 use crate::core::position::position_to_offset;
+use serde::Deserialize;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
@@ -154,11 +157,16 @@ impl LanguageServer for RunMatLanguageServer {
             version: Some(SERVER_VERSION.to_string()),
         });
 
-        if let Some(compat) = params
+        let mut resolved_compat = params
             .initialization_options
             .as_ref()
-            .and_then(parse_compat_mode)
-        {
+            .and_then(parse_compat_mode);
+
+        if resolved_compat.is_none() {
+            resolved_compat = compat_mode_from_workspace(&params);
+        }
+
+        if let Some(compat) = resolved_compat {
             let mut state = self.state.write().await;
             state.compat_mode = compat;
         }
@@ -429,13 +437,13 @@ impl LanguageServer for RunMatLanguageServer {
             let state = self.state.read().await;
             state
                 .documents
-                .iter()
+        .iter()
                 .filter_map(|(uri, doc)| {
                     doc.analysis
-                        .as_ref()
+                .as_ref()
                         .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
-                })
-                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
         };
         Ok(Some(workspace_symbols(&docs)))
     }
@@ -451,10 +459,128 @@ impl LanguageServer for RunMatLanguageServer {
 fn parse_compat_mode(opts: &serde_json::Value) -> Option<CompatMode> {
     let lang = opts.get("language")?;
     let compat = lang.get("compat")?;
-    let s = compat.as_str()?;
-    match s {
-        "matlab" | "MATLAB" => Some(CompatMode::Matlab),
-        "strict" | "STRICT" => Some(CompatMode::Strict),
-        _ => None,
+    parse_compat_str(compat.as_str()?)
+}
+
+fn parse_compat_str(value: &str) -> Option<CompatMode> {
+    if value.eq_ignore_ascii_case("matlab") {
+        Some(CompatMode::Matlab)
+    } else if value.eq_ignore_ascii_case("strict") {
+        Some(CompatMode::Strict)
+    } else {
+        None
     }
+}
+
+fn compat_mode_from_workspace(params: &InitializeParams) -> Option<CompatMode> {
+    for root in workspace_roots(params) {
+        if let Some(mode) = find_configured_compat(&root) {
+            return Some(mode);
+        }
+    }
+    None
+}
+
+fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root_uri) = &params.root_uri {
+        if let Ok(path) = root_uri.to_file_path() {
+            roots.push(path);
+        }
+    }
+    if let Some(folders) = &params.workspace_folders {
+        for folder in folders {
+            if let Ok(path) = folder.uri.to_file_path() {
+                if !roots.contains(&path) {
+                    roots.push(path);
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn find_configured_compat(start: &Path) -> Option<CompatMode> {
+    let mut current = start.to_path_buf();
+    loop {
+        if let Some((mode, path)) = read_compat_in_dir(&current) {
+            info!(
+                "Language compatibility set to '{}' via {}",
+                compat_label(mode),
+                path.display()
+            );
+            return Some(mode);
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn compat_label(mode: CompatMode) -> &'static str {
+    match mode {
+        CompatMode::Matlab => "matlab",
+        CompatMode::Strict => "strict",
+    }
+}
+
+const CONFIG_CANDIDATES: &[( &str, ConfigFormat)] = &[
+    (".runmat", ConfigFormat::Toml),
+    (".runmat.toml", ConfigFormat::Toml),
+    (".runmat.yaml", ConfigFormat::Yaml),
+    (".runmat.yml", ConfigFormat::Yaml),
+    (".runmat.json", ConfigFormat::Json),
+    ("runmat.config.toml", ConfigFormat::Toml),
+    ("runmat.config.yaml", ConfigFormat::Yaml),
+    ("runmat.config.yml", ConfigFormat::Yaml),
+    ("runmat.config.json", ConfigFormat::Json),
+];
+
+fn read_compat_in_dir(dir: &Path) -> Option<(CompatMode, PathBuf)> {
+    for (name, format) in CONFIG_CANDIDATES {
+        let path = dir.join(name);
+        if let Some(mode) = read_config_file(&path, *format) {
+            return Some((mode, path));
+        }
+    }
+    None
+}
+
+fn read_config_file(path: &Path, format: ConfigFormat) -> Option<CompatMode> {
+    if !path.is_file() {
+        return None;
+    }
+    let contents = fs::read_to_string(path).ok()?;
+    parse_config_contents(&contents, format)
+}
+
+fn parse_config_contents(contents: &str, format: ConfigFormat) -> Option<CompatMode> {
+    let cfg: PartialLanguageConfig = match format {
+        ConfigFormat::Toml => toml::from_str(contents).ok()?,
+        ConfigFormat::Yaml => serde_yaml::from_str(contents).ok()?,
+        ConfigFormat::Json => serde_json::from_str(contents).ok()?,
+    };
+    let language = cfg.language?;
+    language
+        .compat
+        .as_deref()
+        .and_then(parse_compat_str)
+}
+
+#[derive(Clone, Copy)]
+enum ConfigFormat {
+    Toml,
+    Yaml,
+    Json,
+}
+
+#[derive(Deserialize)]
+struct PartialLanguageConfig {
+    language: Option<LanguageSection>,
+}
+
+#[derive(Deserialize)]
+struct LanguageSection {
+    compat: Option<String>,
 }

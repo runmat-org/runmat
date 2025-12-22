@@ -6,7 +6,7 @@ use runmat_gc::{gc_configure, gc_stats, GcConfig};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
-use runmat_parser::parse;
+use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 #[cfg(target_arch = "wasm32")]
@@ -69,6 +69,7 @@ pub struct RunMatSession {
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
     workspace_version: u64,
     emit_fusion_plan: bool,
+    compat_mode: CompatMode,
 }
 
 #[derive(Debug, Default)]
@@ -493,6 +494,7 @@ impl RunMatSession {
             workspace_preview_tokens: HashMap::new(),
             workspace_version: 0,
             emit_fusion_plan: false,
+            compat_mode: CompatMode::Matlab,
         };
 
         // Cache the shared plotting context (if a GPU provider is active) so the
@@ -785,7 +787,7 @@ impl RunMatSession {
         // Parse the input (reuses the same pipeline as full execution).
         let ast = {
             let _span = info_span!("runtime.parse").entered();
-            parse(input)
+            parse_with_options(input, ParserOptions::new(self.compat_mode))
                 .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
         };
 
@@ -854,7 +856,7 @@ impl RunMatSession {
         // Parse the input
         let ast = {
             let _span = info_span!("runtime.parse").entered();
-            parse(input)
+            parse_with_options(input, ParserOptions::new(self.compat_mode))
                 .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
         };
         if self.verbose {
@@ -1399,6 +1401,16 @@ impl RunMatSession {
     /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
     pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
         self.emit_fusion_plan = enabled;
+    }
+
+    /// Return the active language compatibility mode.
+    pub fn compat_mode(&self) -> CompatMode {
+        self.compat_mode
+    }
+
+    /// Set the language compatibility mode (`matlab` or `strict`).
+    pub fn set_compat_mode(&mut self, mode: CompatMode) {
+        self.compat_mode = mode;
     }
 
     /// Materialize a workspace variable for inspection (optionally identified by preview token).

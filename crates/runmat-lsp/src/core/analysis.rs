@@ -2,7 +2,8 @@
 
 use crate::core::position::{offset_to_position, position_to_offset};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
-use runmat_parser::parse;
+pub use runmat_parser::CompatMode;
+use runmat_parser::{parse_with_options, ParserOptions};
 use lsp_types::{
     CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Position, Range,
     SignatureHelp,
@@ -11,7 +12,7 @@ use crate::core::docs;
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{HirStmt, LoweringResult};
 use std::collections::HashMap;
-use std::fmt::Write as FmtWrite;
+use std::fmt::Write;
 
 #[derive(Clone)]
 pub struct DocumentAnalysis {
@@ -33,19 +34,6 @@ impl DocumentAnalysis {
             return sem.status_message.clone();
         }
         "ok".to_string()
-    }
-}
-
-/// Compatibility mode for language syntax.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompatMode {
-    Matlab,
-    Strict,
-}
-
-impl Default for CompatMode {
-    fn default() -> Self {
-        CompatMode::Matlab
     }
 }
 
@@ -79,12 +67,8 @@ pub fn analyze_document(text: &str) -> DocumentAnalysis {
 }
 
 pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentAnalysis {
-    let preprocessed = match compat {
-        CompatMode::Matlab => rewrite_command_syntax(text),
-        CompatMode::Strict => text.to_string(),
-    };
     let tokens = tokenize_detailed(text);
-    match parse(&preprocessed) {
+    match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
             let lowering = match runmat_hir::lower_with_full_context(&ast, &HashMap::new(), &HashMap::new()) {
                 Ok(result) => result,
@@ -634,7 +618,31 @@ mod tests {
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
         let analysis = analyze_document(text);
-        let hover = hover_at(text, &analysis, &lsp_types::Position::new(0, 0));
+        if let Some(err) = &analysis.parse_error {
+            panic!("unexpected parse error at {}: {}", err.position, err.message);
+        }
+        if let Some(err) = &analysis.lowering_error {
+            panic!("unexpected lowering error: {err}");
+        }
+        assert!(
+            !analysis.tokens.is_empty(),
+            "expected tokenize_detailed to produce tokens"
+        );
+        let builtin_names: Vec<&str> = runmat_builtins::builtin_functions()
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        assert!(
+            builtin_names.iter().any(|name| name.eq_ignore_ascii_case("plot")),
+            "plot builtin should be registered for hover tests (registered: {:?})",
+            builtin_names
+        );
+        let position = lsp_types::Position::new(0, 0);
+        let offset = position_to_offset(text, &position);
+        let token = token_at_offset(&analysis.tokens, offset)
+            .unwrap_or_else(|| panic!("no token found at offset {offset}"));
+        assert_eq!(token.lexeme, "plot", "unexpected token at hover location");
+        let hover = hover_at(text, &analysis, &position);
         assert!(hover.is_some(), "expected hover for builtin function");
     }
 }
@@ -754,91 +762,5 @@ fn build_semantic_model(lowering: LoweringResult, tokens: &[SpannedToken], text:
         function_lookup,
         status_message: String::new(),
     }
-}
-
-/// Rewrite MATLAB command-style verbs into explicit calls for compatibility.
-/// This is a lightweight, line/segment-based transform aimed at the common plotting/layout verbs.
-fn rewrite_command_syntax(text: &str) -> String {
-    // Whitelist of verbs and single-word arguments we will rewrite.
-    // Anything outside this set is left unchanged.
-    #[derive(Clone)]
-    struct Verb {
-        name: &'static str,
-        allowed_args: &'static [&'static str],
-    }
-    const VERBS: &[Verb] = &[
-        Verb { name: "hold", allowed_args: &["on", "off", "all", "reset"] },
-        Verb { name: "grid", allowed_args: &["on", "off"] },
-        Verb { name: "box", allowed_args: &["on", "off"] },
-        Verb { name: "axis", allowed_args: &["auto", "manual", "tight", "equal", "ij", "xy"] },
-        Verb { name: "shading", allowed_args: &["flat", "interp", "faceted"] },
-        Verb { name: "colormap", allowed_args: &["parula", "jet", "hsv", "hot", "cool", "spring", "summer", "autumn", "winter", "gray", "bone", "copper", "pink"] },
-        Verb { name: "colorbar", allowed_args: &["on", "off"] },
-        Verb { name: "figure", allowed_args: &[] },
-        Verb { name: "subplot", allowed_args: &[] },
-        Verb { name: "clf", allowed_args: &[] },
-        Verb { name: "cla", allowed_args: &[] },
-        Verb { name: "close", allowed_args: &[] },
-    ];
-
-    fn rewrite_segment(seg: &str, verbs: &[Verb]) -> String {
-        let trimmed = seg.trim_start();
-        let leading_ws_len = seg.len() - trimmed.len();
-        let leading_ws = &seg[..leading_ws_len];
-        let mut parts = trimmed.split_whitespace();
-        let Some(verb) = parts.next() else {
-            return seg.to_string();
-        };
-        let arg = parts.next();
-        // Only rewrite when exactly verb + single arg (or no arg for zero-arg verbs) and nothing else.
-        let has_extra = parts.next().is_some();
-
-        let v = verbs.iter().find(|v| v.name == verb);
-        if let Some(v) = v {
-            if has_extra {
-                return seg.to_string();
-            }
-            match arg {
-                Some(a) => {
-                    if v.allowed_args.is_empty() {
-                        // verb with unexpected arg: leave unchanged
-                        return seg.to_string();
-                    }
-                    if v.allowed_args.iter().any(|&allowed| allowed == a) {
-                        return format!("{leading_ws}{verb}(\"{a}\")");
-                    }
-                    seg.to_string()
-                }
-                None => {
-                    if v.allowed_args.is_empty() {
-                        // Zero-arg verb: rewrite to explicit call with no args.
-                        return format!("{leading_ws}{verb}()");
-                    }
-                    seg.to_string()
-                }
-            }
-        } else {
-            seg.to_string()
-        }
-    }
-
-    // Split by semicolons/newlines but preserve delimiters.
-    let mut out = String::with_capacity(text.len() + 16);
-    let mut current = String::new();
-    for ch in text.chars() {
-        if ch == ';' || ch == '\n' {
-            let rewritten = rewrite_segment(&current, VERBS);
-            out.push_str(&rewritten);
-            out.push(ch);
-            current.clear();
-        } else {
-            current.push(ch);
-        }
-    }
-    if !current.is_empty() {
-        let rewritten = rewrite_segment(&current, VERBS);
-        out.push_str(&rewritten);
-    }
-    out
 }
 
