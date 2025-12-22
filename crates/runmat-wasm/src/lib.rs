@@ -18,14 +18,14 @@ use runmat_accelerate_api::ProviderPrecision;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
-    matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
-    ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
-    FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind, InputResponse,
-    MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
-    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
+    matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
+    ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
+    FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
+    InputResponse, MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind,
+    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceSnapshot,
 };
 use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
-use runmat_parser::CompatMode;
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,

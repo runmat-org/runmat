@@ -6,7 +6,8 @@ use tracing::{debug, info, info_span, warn};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
-use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
+pub use runmat_parser::CompatMode;
+use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
 #[cfg(target_arch = "wasm32")]
