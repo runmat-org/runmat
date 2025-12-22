@@ -4,6 +4,7 @@
 //! - Creating and managing RunMat execution contexts
 //! - Evaluating RunMat code from C/C++
 //! - Exchanging numeric arrays between C and RunMat
+//! - MEX-compatible array operations (see `mex` module)
 //!
 //! # Example (C)
 //!
@@ -27,6 +28,29 @@
 //!     return 0;
 //! }
 //! ```
+//!
+//! # MEX Compatibility
+//!
+//! The `mex` module provides MATLAB MEX-like API:
+//!
+//! ```c
+//! #include "rm_mex.h"
+//!
+//! void mexFunction(int nlhs, mxArray* plhs[],
+//!                  int nrhs, const mxArray* prhs[]) {
+//!     double* input = mxGetPr(prhs[0]);
+//!     size_t n = mxGetNumberOfElements(prhs[0]);
+//!
+//!     plhs[0] = mxCreateDoubleMatrix(mxGetM(prhs[0]), mxGetN(prhs[0]), mxREAL);
+//!     double* output = mxGetPr(plhs[0]);
+//!
+//!     for (size_t i = 0; i < n; i++) {
+//!         output[i] = input[i] * 2.0;
+//!     }
+//! }
+//! ```
+
+pub mod mex;
 
 use std::ffi::{c_char, CStr, CString};
 use std::panic::catch_unwind;
