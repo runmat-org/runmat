@@ -783,7 +783,7 @@ mod tests {
         let validator = SnapshotValidator::new();
         let metadata = SnapshotMetadata::current();
         let mut header = SnapshotHeader::new(metadata);
-        header.magic = [0; 8]; // Invalid magic
+        header.magic = [0; 7]; // Invalid magic
 
         let mut errors = Vec::new();
         let mut warnings = Vec::new();

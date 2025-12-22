@@ -2001,6 +2001,18 @@ fn show_version(detailed: bool) {
                 "release"
             }
         );
+        println!("Features: jupyter-kernel, plotting, repl, jit, gc");
+        println!();
+        println!("Components:");
+        println!("  • runmat-lexer: MATLAB/Octave tokenizer");
+        println!("  • runmat-parser: Syntax parser with error recovery");
+        println!("  • runmat-hir: High-level intermediate representation");
+        println!("  • runmat-ignition: Baseline interpreter");
+        println!("  • runmat-turbine: JIT compiler with Cranelift");
+        println!("  • runmat-gc: Generational garbage collector");
+        println!("  • runmat-runtime: BLAS/LAPACK runtime with builtins");
+        println!("  • runmat-kernel: Jupyter kernel protocol");
+        println!("  • runmat-plot: Headless plotting backend");
     }
 }
 

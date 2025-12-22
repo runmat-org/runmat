@@ -64,7 +64,7 @@ fn test_invalid_header_validation() {
     let mut header = SnapshotHeader::new(metadata);
 
     // Invalid magic
-    header.magic = [0; 8];
+    header.magic = [0; 7];
     assert!(header.validate().is_err());
 
     // Reset magic, test invalid version
@@ -293,8 +293,8 @@ fn test_serialization_roundtrip() {
 
 #[test]
 fn test_format_constants() {
-    assert_eq!(SNAPSHOT_MAGIC.len(), 8);
-    assert_eq!(SNAPSHOT_MAGIC, b"RUNMAT\x01");
+    assert_eq!(SNAPSHOT_MAGIC.len(), 7);
+    assert_eq!(SNAPSHOT_MAGIC, b"RUNMAT\0");
     // Ensure SNAPSHOT_VERSION is positive (constant assertion)
     const _: () = assert!(SNAPSHOT_VERSION > 0);
 }
