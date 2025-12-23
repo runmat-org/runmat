@@ -20,6 +20,7 @@ RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB
 | **Advanced Data Types** | Cell arrays `{ … }` | ✅ | ✅ | `{}` indexing, expansion, assignment; expansion into slice targets. |
 | | Structs `s.field` | ✅ | ✅ | Dot access, nested assignment, field scatter over cells. |
 | | Function handles `@(x)x^2`, closures | ✅ | ✅ | Anonymous functions, free-var capture, `feval`, nested functions. |
+| | Symbolic expressions | ✅ | ❌ | First-class `sym` type with arithmetic, calculus (differentiation, integration), algebraic manipulation (expand, factor, collect), and numeric compilation. See [SYMBOLIC.md](SYMBOLIC.md) for details; Octave's symbolic support requires the Symbolic package. |
 | **Operators** | Arithmetic `+ - * / \ ^` | ✅ | ✅ | Left division and element-wise left division supported. |
 | | Element-wise `.* ./ .\ .^` | ✅ | ✅ | Broadcasting via slice rules; BLAS/LAPACK in runtime where applicable. |
 | | Relational `== ~= < <= > >=` | ✅ | ✅ | Element-wise on arrays; scalar fallbacks. |

@@ -123,6 +123,16 @@ fn get_square_base(expr: &SymExpr) -> Option<SymExpr> {
             }
             None
         }
+        SymExprKind::Num(c) => {
+            let val = c.to_f64();
+            if val >= 0.0 {
+                let sqrt_val = val.sqrt();
+                if (sqrt_val * sqrt_val - val).abs() < 1e-10 && sqrt_val == sqrt_val.floor() {
+                    return Some(SymExpr::int(sqrt_val as i64));
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
