@@ -26,6 +26,7 @@ use runmat_core::{
     WorkspaceSnapshot,
 };
 use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
+use tracing::{info, info_span};
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
@@ -234,10 +235,27 @@ pub struct RunMatWasm {
 impl RunMatWasm {
     #[wasm_bindgen(js_name = execute)]
     pub fn execute(&self, source: String) -> Result<JsValue, JsValue> {
+        init_logging_once();
+        let exec_span = info_span!(
+            "runmat.execute",
+            source_len = source.len() as u64,
+            disposed = self.disposed.get()
+        );
+        let _enter = exec_span.enter();
+        info!(target = "runmat.runtime", "Execution started");
         let mut session = self.session.borrow_mut();
         let result = session
             .execute(&source)
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
+        info!(
+            target = "runmat.runtime",
+            workspace_entries = result.workspace.values.len(),
+            stdout_entries = result.streams.len(),
+            figures_touched = result.figures_touched.len(),
+            used_jit = result.used_jit,
+            error = result.error.as_deref().unwrap_or(""),
+            "Execution finished"
+        );
         let payload = ExecutionPayload::from(result);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
@@ -1701,7 +1719,7 @@ fn init_logging_once() {
             }));
             let _ = init_logging(LoggingOptions {
                 enable_otlp: false,
-                enable_traces: false,
+                enable_traces: true,
                 pid: 1,
             });
             ensure_runtime_log_forwarder_installed();

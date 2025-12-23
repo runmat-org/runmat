@@ -1358,7 +1358,26 @@ impl RunMatSession {
                 timestamp_ms: entry.timestamp_ms,
             })
             .collect();
-        let workspace_snapshot = self.build_workspace_snapshot(workspace_updates, false);
+        let (workspace_entries, snapshot_full) = if workspace_updates.is_empty() {
+            let source_map = if self.workspace_values.is_empty() {
+                &self.variables
+            } else {
+                &self.workspace_values
+            };
+            if source_map.is_empty() {
+                (workspace_updates, false)
+            } else {
+                let mut entries: Vec<WorkspaceEntry> = source_map
+                    .iter()
+                    .map(|(name, value)| workspace_entry(name, value))
+                    .collect();
+                entries.sort_by(|a, b| a.name.cmp(&b.name));
+                (entries, true)
+            }
+        } else {
+            (workspace_updates, false)
+        };
+        let workspace_snapshot = self.build_workspace_snapshot(workspace_entries, snapshot_full);
         let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
         let stdin_events = stdin_events
             .lock()
@@ -2053,4 +2072,20 @@ fn gather_profiling(execution_time_ms: u64) -> Option<ExecutionProfiling> {
         total_ms: execution_time_ms,
         ..ExecutionProfiling::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captures_basic_workspace_assignments() {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let result = session.execute("x = 42;").expect("exec succeeds");
+        assert!(
+            result.workspace.values.iter().any(|entry| entry.name == "x"),
+            "workspace snapshot should include assigned variable"
+        );
+    }
 }

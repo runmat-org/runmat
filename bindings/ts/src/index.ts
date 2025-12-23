@@ -119,6 +119,33 @@ export interface StdoutEntry {
 
 export type StdoutListener = (entry: StdoutEntry) => void;
 
+export interface RuntimeLogEntry {
+  ts: string;
+  level: string;
+  target: string;
+  message: string;
+  traceId?: string;
+  spanId?: string;
+  fields?: Record<string, unknown>;
+}
+
+export type RuntimeLogListener = (entry: RuntimeLogEntry) => void;
+
+export interface TraceEvent {
+  name: string;
+  cat: string;
+  ph: string;
+  ts: number;
+  dur?: number;
+  pid?: number;
+  tid?: number;
+  traceId?: string;
+  spanId?: string;
+  args?: Record<string, unknown>;
+}
+
+export type TraceEventListener = (entries: TraceEvent[]) => void;
+
 export type InputRequest =
   | { kind: "line"; prompt: string; echo: boolean }
   | { kind: "keyPress"; prompt: string; echo: boolean };
@@ -420,6 +447,10 @@ interface RunMatNativeModule {
   renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
+  subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
+  unsubscribeRuntimeLog?: (id: number) => void;
+  subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
+  unsubscribeTraceEvents?: (id: number) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
 }
@@ -545,6 +576,30 @@ export async function unsubscribeStdout(id: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "unsubscribeStdout");
   native.unsubscribeStdout(id);
+}
+
+export async function subscribeRuntimeLog(listener: RuntimeLogListener): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "subscribeRuntimeLog");
+  return native.subscribeRuntimeLog((entry: RuntimeLogEntry) => listener(entry));
+}
+
+export async function unsubscribeRuntimeLog(id: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "unsubscribeRuntimeLog");
+  native.unsubscribeRuntimeLog(id);
+}
+
+export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "subscribeTraceEvents");
+  return native.subscribeTraceEvents((entries: TraceEvent[]) => listener(entries));
+}
+
+export async function unsubscribeTraceEvents(id: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "unsubscribeTraceEvents");
+  native.unsubscribeTraceEvents(id);
 }
 
 export async function figure(handle?: number): Promise<number> {
