@@ -2,8 +2,8 @@ use cranelift::prelude::isa::CallConv;
 use runmat_builtins::{Type, Value};
 use runmat_ignition::{Bytecode, Instr};
 use runmat_turbine::{
-    CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
-    TurbineEngine,
+    CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, SsaOptLevel,
+    ThreadSafeFunctionCache, TurbineEngine,
 };
 use std::collections::HashMap;
 use std::thread;
@@ -44,6 +44,9 @@ fn test_turbine_engine_with_config() {
         max_inline_depth: 5,
         enable_bounds_checking: true,
         enable_overflow_checks: true,
+        ssa_opt_level: SsaOptLevel::Speed,
+        dump_ssa: false,
+        hot_threshold: 10,
     };
 
     let engine = TurbineEngine::with_config(config);
@@ -652,6 +655,9 @@ fn test_optimization_levels() {
             max_inline_depth: 3,
             enable_bounds_checking: true,
             enable_overflow_checks: true,
+            ssa_opt_level: SsaOptLevel::Speed,
+            dump_ssa: false,
+            hot_threshold: 10,
         };
 
         let engine = TurbineEngine::with_config(config);

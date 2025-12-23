@@ -19,6 +19,7 @@ use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use runmat_repl::ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
+use runmat_turbine::SsaOptLevel;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -894,11 +895,21 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         if enable_jit { "enabled" } else { "disabled" }
     );
 
+    // Map config JIT level -> SSA opt level
+    let ssa_opt_level = match config.jit.optimization_level {
+        config::JitOptLevel::None => SsaOptLevel::None,
+        config::JitOptLevel::Size => SsaOptLevel::Size,
+        config::JitOptLevel::Speed => SsaOptLevel::Speed,
+        config::JitOptLevel::Aggressive => SsaOptLevel::Aggressive,
+    };
+
     // Create enhanced REPL engine with optional snapshot loading
-    let mut engine = ReplEngine::with_snapshot(
+    let mut engine = ReplEngine::with_full_config(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
+        ssa_opt_level,
+        config.jit.threshold,
     )
     .context("Failed to create REPL engine")?;
 
@@ -1168,10 +1179,21 @@ async fn execute_script_with_args(
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     let enable_jit = config.jit.enabled;
-    let mut engine = ReplEngine::with_snapshot(
+
+    // Map config JIT level -> SSA opt level
+    let ssa_opt_level = match config.jit.optimization_level {
+        config::JitOptLevel::None => SsaOptLevel::None,
+        config::JitOptLevel::Size => SsaOptLevel::Size,
+        config::JitOptLevel::Speed => SsaOptLevel::Speed,
+        config::JitOptLevel::Aggressive => SsaOptLevel::Aggressive,
+    };
+
+    let mut engine = ReplEngine::with_full_config(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
+        ssa_opt_level,
+        config.jit.threshold,
     )
     .context("Failed to create execution engine")?;
 
@@ -1445,8 +1467,22 @@ async fn execute_benchmark(
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
-    let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
-        .context("Failed to create execution engine")?;
+    // Map config JIT level -> SSA opt level
+    let ssa_opt_level = match config.jit.optimization_level {
+        config::JitOptLevel::None => SsaOptLevel::None,
+        config::JitOptLevel::Size => SsaOptLevel::Size,
+        config::JitOptLevel::Speed => SsaOptLevel::Speed,
+        config::JitOptLevel::Aggressive => SsaOptLevel::Aggressive,
+    };
+
+    let mut engine = ReplEngine::with_full_config(
+        jit,
+        false,
+        _cli.snapshot.as_ref(),
+        ssa_opt_level,
+        config.jit.threshold,
+    )
+    .context("Failed to create execution engine")?;
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
