@@ -1,6 +1,4 @@
-use runmat_repl::format_tokens;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use runmat_core::format_tokens;
 
 #[test]
 fn tokenize_simple_input() {
@@ -51,21 +49,4 @@ fn multiple_statements() {
         result,
         "Ident Assign Integer Semicolon Ident Assign Integer Semicolon"
     );
-}
-
-#[test]
-fn repl_binary_processes_single_line() -> Result<(), Box<dyn std::error::Error>> {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_runmat-repl"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    child.stdin.as_mut().unwrap().write_all(b"x=1\n")?;
-    let output = child.wait_with_output()?;
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should contain REPL banner and show result of x=1 execution
-    assert!(stdout.contains("RunMat REPL"));
-    assert!(stdout.contains("runmat>"));
-    assert!(stdout.contains("ans = 1")); // Result of x=1
-    Ok(())
 }

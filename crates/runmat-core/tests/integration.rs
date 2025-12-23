@@ -1,5 +1,5 @@
 use runmat_gc::{gc_test_context, GcConfig};
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 use runmat_time::Instant;
 use std::thread;
 

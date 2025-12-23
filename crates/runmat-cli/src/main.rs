@@ -17,7 +17,7 @@ use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
@@ -1039,9 +1039,27 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                     println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
                     continue;
                 }
+                if line == ".gc-info" {
+                    let gc_stats = engine.gc_stats();
+                    println!("Garbage Collector Statistics:");
+                    println!("{}", gc_stats.summary_report());
+                    continue;
+                }
                 if line == ".gc" {
                     let gc_stats = engine.gc_stats();
                     println!("{}", gc_stats.summary_report());
+                    continue;
+                }
+                if line == ".gc-collect" {
+                    match gc_collect_major() {
+                        Ok(collected) => println!("Collected {collected} objects"),
+                        Err(e) => println!("GC collection failed: {e}"),
+                    }
+                    continue;
+                }
+                if line == ".reset-stats" {
+                    engine.reset_stats();
+                    println!("Statistics reset");
                     continue;
                 }
                 if line.is_empty() {
@@ -2331,6 +2349,9 @@ fn show_repl_help() {
     println!("  .info             Show detailed system information");
     println!("  .stats            Show execution statistics");
     println!("  .gc               Show garbage collector statistics");
+    println!("  .gc-info          Show garbage collector statistics with header");
+    println!("  .gc-collect       Force garbage collection");
+    println!("  .reset-stats      Reset execution statistics");
     println!();
     println!("MATLAB/Octave syntax is supported:");
     println!("  x = 1 + 2                         # Assignment");

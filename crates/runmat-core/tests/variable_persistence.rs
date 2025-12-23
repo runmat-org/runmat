@@ -1,6 +1,6 @@
 use runmat_builtins::Value;
 use runmat_gc::gc_test_context;
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 
 #[test]
 fn test_variable_persistence_basic() {

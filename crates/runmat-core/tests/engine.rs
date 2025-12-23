@@ -1,5 +1,5 @@
 use runmat_gc::{gc_test_context, GcConfig};
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 
 #[test]
 fn test_repl_engine_creation() {
@@ -296,7 +296,7 @@ fn test_execution_result_structure() {
 #[test]
 fn test_format_tokens_compatibility() {
     // Test the legacy format_tokens function for backward compatibility
-    let result = runmat_repl::format_tokens("x = 1 + 2");
+    let result = runmat_core::format_tokens("x = 1 + 2");
     assert!(!result.is_empty());
     assert!(result.contains("Ident"));
     assert!(result.contains("Assign"));
@@ -307,7 +307,7 @@ fn test_format_tokens_compatibility() {
 #[test]
 fn test_execute_and_format_function() {
     gc_test_context(|| {
-        let result = runmat_repl::execute_and_format("x = 1 + 2");
+        let result = runmat_core::execute_and_format("x = 1 + 2");
         // Should not be an error string
         assert!(!result.starts_with("Error:"));
         assert!(!result.starts_with("Engine Error:"));
@@ -317,7 +317,7 @@ fn test_execute_and_format_function() {
 #[test]
 fn test_execute_and_format_error_handling() {
     gc_test_context(|| {
-        let result = runmat_repl::execute_and_format("invalid syntax $");
+        let result = runmat_core::execute_and_format("invalid syntax $");
         // Should return an error string
         assert!(result.starts_with("Error:") || result.starts_with("Engine Error:"));
     });

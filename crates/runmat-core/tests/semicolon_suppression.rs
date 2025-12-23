@@ -1,5 +1,5 @@
 use runmat_gc::gc_test_context;
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 
 /// Test basic semicolon suppression behavior
 #[test]

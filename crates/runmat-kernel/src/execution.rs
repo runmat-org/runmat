@@ -5,7 +5,7 @@
 
 use crate::Result;
 use runmat_builtins::Value;
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession as ReplEngine;
 use runmat_time::Instant;
 use std::path::Path;
 use std::time::Duration;

@@ -38,7 +38,7 @@ openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
 runmat-kernel = { version = "=0.2.7", path = "../runmat-kernel" }
-runmat-repl = { version = "=0.2.7", path = "../runmat-repl", default-features = false }
+runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
 runmat-parser = { version = "=0.2.7", path = "../runmat-parser" }
 runmat-hir = { version = "=0.2.7", path = "../runmat-hir" }
 runmat-ignition = { version = "=0.2.7", path = "../runmat-ignition" }
@@ -59,7 +59,7 @@ wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
-jit = ["runmat-repl/jit"]
+jit = ["runmat-core/jit"]
 vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 
 [dev-dependencies]

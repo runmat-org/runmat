@@ -128,9 +128,7 @@ To make the CLI, tests, and upcoming WebAssembly host share the same interpreter
 -   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, Ignition interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
 -   **Feature gating**: The crate exposes a `jit` feature (on by default). Desktop builds keep Turbine enabled, while wasm targets or lightweight embeds can disable it and run interpreter-only without dragging in Cranelift.
 -   **Embedding surface**: `RunMatSession` provides ergonomic helpers (`execute`, `reset_stats`, `show_system_info`, etc.) so consumers can drive the runtime without depending on CLI plumbing or OS-specific services (filesystems, sockets, threads).
--   **Reuse across binaries**: The `runmat` CLI, the standalone REPL binary, integration tests, and future browser bindings all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
-
-The previous `runmat-repl` crate re-exports the session from `runmat-core`, keeping the public `ReplEngine` alias for compatibility while delegating all heavy lifting to the shared core.
+-   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the Jupyter kernel, integration tests, and future browser bindings all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
 
 ---
 

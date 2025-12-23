@@ -22,7 +22,7 @@ runmat-ignition = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
-runmat-repl = { workspace = true }
+runmat-core = { workspace = true }
 runmat-snapshot = { workspace = true, default-features = false, features = ["compression-native", "validation"] }
 runmat-plot = { workspace = true }
 runmat-time = { workspace = true }
