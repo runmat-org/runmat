@@ -13,11 +13,11 @@ mod telemetry;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
+use runmat_core::RunMatSession as ReplEngine;
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
-use runmat_core::RunMatSession as ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
