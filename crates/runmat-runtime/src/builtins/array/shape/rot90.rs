@@ -272,6 +272,9 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("rot90: unsupported input type".to_string()),
+        Value::Symbolic(_) => {
+            Err("rot90: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

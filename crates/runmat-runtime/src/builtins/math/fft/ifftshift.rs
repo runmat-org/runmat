@@ -269,6 +269,9 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("ifftshift: unsupported input type".to_string()),
+        Value::Symbolic(_) => {
+            Err("ifftshift: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

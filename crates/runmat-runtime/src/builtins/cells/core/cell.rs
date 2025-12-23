@@ -477,7 +477,8 @@ fn empty_value_like(proto: Option<&Value>) -> Result<Value, String> {
             | Value::FunctionHandle(_)
             | Value::Closure(_)
             | Value::ClassRef(_)
-            | Value::MException(_) => default_empty_double(),
+            | Value::MException(_)
+            | Value::Symbolic(_) => default_empty_double(),
         },
         None => default_empty_double(),
     }

@@ -275,6 +275,9 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("triu: unsupported input type".to_string()),
+        Value::Symbolic(_) => {
+            Err("triu: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

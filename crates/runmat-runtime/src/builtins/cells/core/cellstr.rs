@@ -264,7 +264,8 @@ fn cellstr_builtin(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ERR_INPUT_NOT_TEXT.to_string()),
+        | Value::MException(_)
+        | Value::Symbolic(_) => Err(ERR_INPUT_NOT_TEXT.to_string()),
         Value::GpuTensor(_) => {
             Err("cellstr: input must be gathered to the host before conversion".to_string())
         }

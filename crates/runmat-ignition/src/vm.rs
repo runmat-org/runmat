@@ -10218,6 +10218,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
+        Value::Symbolic(_) => "Symbolic",
     }
 }
 #[cfg(feature = "native-accel")]

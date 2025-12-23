@@ -205,6 +205,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Object(obj) => obj.class_name.clone(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
+        Value::Symbolic(_) => "sym".to_string(),
     }
 }
 

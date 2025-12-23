@@ -695,6 +695,9 @@ fn materialize_for_max(name: &str, value: Value) -> Result<InputData, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err(format!("{name}: unsupported input type")),
+        Value::Symbolic(_) => Err(format!(
+            "{name}: symbolic input not supported, use numeric values"
+        )),
     }
 }
 

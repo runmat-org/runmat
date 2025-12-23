@@ -697,6 +697,9 @@ fn extract_argument_data(value: Value) -> Result<ArgumentData, String> {
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) => {
             Err("string: unsupported format argument type".to_string())
         }
+        Value::Symbolic(_) => {
+            Err("string: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 
@@ -727,6 +730,7 @@ fn convert_to_string_array(value: Value, encoding: StringEncoding) -> Result<Str
         Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) => Err(
             "string: unsupported conversion for function or exception handles".to_string(),
         ),
+        Value::Symbolic(_) => Err("string: symbolic input not supported, use numeric values".to_string()),
     }
 }
 

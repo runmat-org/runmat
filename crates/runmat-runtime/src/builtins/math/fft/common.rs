@@ -54,6 +54,9 @@ pub fn parse_length(value: &Value, builtin: &str) -> Result<Option<usize>, Strin
         | Value::Object(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err(format!("{builtin}: length must be numeric")),
+        Value::Symbolic(_) => Err(format!(
+            "{builtin}: symbolic input not supported, use numeric values"
+        )),
     }
 }
 
@@ -393,6 +396,9 @@ fn dims_from_value(value: &Value, builtin: &str) -> Result<Vec<usize>, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err(format!("{builtin}: dimension indices must be numeric")),
+        Value::Symbolic(_) => Err(format!(
+            "{builtin}: symbolic input not supported, use numeric values"
+        )),
     }
 }
 

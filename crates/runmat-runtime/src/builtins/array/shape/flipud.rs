@@ -284,6 +284,9 @@ fn flipud_builtin(value: Value) -> Result<Value, String> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_) => Err("flipud: unsupported input type".to_string()),
+        Value::Symbolic(_) => {
+            Err("flipud: symbolic input not supported, use numeric values".to_string())
+        }
     }
 }
 

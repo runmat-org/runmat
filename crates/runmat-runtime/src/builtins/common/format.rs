@@ -1002,7 +1002,8 @@ fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> Result
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::Closure(_)
-        | Value::ClassRef(_) => {
+        | Value::ClassRef(_)
+        | Value::Symbolic(_) => {
             return Err(format!("{context}: unsupported argument type"));
         }
     }

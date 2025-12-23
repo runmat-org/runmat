@@ -303,7 +303,8 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => {
+        | Value::MException(_)
+        | Value::Symbolic(_) => {
             vec![value.to_string()]
         }
         Value::GpuTensor(_) => vec!["gpuArray".to_string()],
@@ -676,7 +677,8 @@ fn summarize_for_cell(value: &Value) -> String {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => value.to_string(),
+        | Value::MException(_)
+        | Value::Symbolic(_) => value.to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
     }
 }
