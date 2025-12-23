@@ -2084,7 +2084,11 @@ mod tests {
             RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
         let result = session.execute("x = 42;").expect("exec succeeds");
         assert!(
-            result.workspace.values.iter().any(|entry| entry.name == "x"),
+            result
+                .workspace
+                .values
+                .iter()
+                .any(|entry| entry.name == "x"),
             "workspace snapshot should include assigned variable"
         );
     }

@@ -859,32 +859,33 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fill_wgpu_like_matches_cpu() {
-        let provider = match std::panic::catch_unwind(|| {
-            register_wgpu_provider(WgpuProviderOptions::default())
-        }) {
-            Ok(Ok(_)) => {
-                if let Some(p) = runmat_accelerate_api::provider() {
-                    p
-                } else {
-                    tracing::warn!(
+        let provider =
+            match std::panic::catch_unwind(
+                || register_wgpu_provider(WgpuProviderOptions::default()),
+            ) {
+                Ok(Ok(_)) => {
+                    if let Some(p) = runmat_accelerate_api::provider() {
+                        p
+                    } else {
+                        tracing::warn!(
                         "skipping fill_wgpu_like_matches_cpu: provider not registered after init"
+                    );
+                        return;
+                    }
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(
+                        "skipping fill_wgpu_like_matches_cpu: wgpu provider unavailable ({err})"
                     );
                     return;
                 }
-            }
-            Ok(Err(err)) => {
-                tracing::warn!(
-                    "skipping fill_wgpu_like_matches_cpu: wgpu provider unavailable ({err})"
-                );
-                return;
-            }
-            Err(_) => {
-                tracing::warn!(
+                Err(_) => {
+                    tracing::warn!(
                     "skipping fill_wgpu_like_matches_cpu: wgpu provider initialisation panicked"
                 );
-                return;
-            }
-        };
+                    return;
+                }
+            };
         let prototype = provider.fill(&[1, 1], 0.0).expect("prototype allocation");
         let args = vec![
             Value::Num(2.0),

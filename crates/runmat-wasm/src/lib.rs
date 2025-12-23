@@ -26,7 +26,6 @@ use runmat_core::{
     WorkspaceSnapshot,
 };
 use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
-use tracing::{info, info_span};
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
@@ -36,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
+use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
