@@ -1,10 +1,10 @@
-use runmat_core::RunMatSession as ReplEngine;
+use runmat_core::RunMatSession;
 use runmat_gc::{gc_test_context, GcConfig};
 
 #[test]
 fn test_repl_engine_creation() {
     gc_test_context(|| {
-        let engine = ReplEngine::new();
+        let engine = RunMatSession::new();
         assert!(engine.is_ok());
     });
 }
@@ -12,7 +12,7 @@ fn test_repl_engine_creation() {
 #[test]
 fn test_repl_engine_with_jit_enabled() {
     gc_test_context(|| {
-        let engine = ReplEngine::with_options(true, false);
+        let engine = RunMatSession::with_options(true, false);
         assert!(engine.is_ok());
         let engine = engine.unwrap();
         let stats = engine.stats();
@@ -25,7 +25,7 @@ fn test_repl_engine_with_jit_enabled() {
 #[test]
 fn test_repl_engine_with_jit_disabled() {
     gc_test_context(|| {
-        let engine = ReplEngine::with_options(false, false);
+        let engine = RunMatSession::with_options(false, false);
         assert!(engine.is_ok());
         let engine = engine.unwrap();
         let stats = engine.stats();
@@ -36,7 +36,7 @@ fn test_repl_engine_with_jit_disabled() {
 #[test]
 fn test_simple_arithmetic_execution() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("x = 1 + 2");
         assert!(result.is_ok());
 
@@ -52,7 +52,7 @@ fn test_simple_arithmetic_execution() {
 #[test]
 fn test_matrix_operations() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Test vector creation
         let result = engine.execute("y = [1, 2, 3]");
@@ -72,7 +72,7 @@ fn test_matrix_operations() {
 #[test]
 fn test_execution_statistics_tracking() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Execute multiple statements (testing individual execution)
         let inputs = ["x = 1", "y = 2", "z = 3"];
@@ -91,7 +91,7 @@ fn test_execution_statistics_tracking() {
 #[test]
 fn test_verbose_mode() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, true).unwrap();
+        let mut engine = RunMatSession::with_options(true, true).unwrap();
         let result = engine.execute("x = 42");
         assert!(result.is_ok());
 
@@ -103,7 +103,7 @@ fn test_verbose_mode() {
 #[test]
 fn test_parse_error_handling() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("x = [1, 2,"); // Incomplete matrix
         assert!(result.is_err()); // Should fail at parse stage
     });
@@ -112,7 +112,7 @@ fn test_parse_error_handling() {
 #[test]
 fn test_invalid_syntax_handling() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("x = $invalid$");
         assert!(result.is_err()); // Should fail due to invalid tokens
     });
@@ -121,7 +121,7 @@ fn test_invalid_syntax_handling() {
 #[test]
 fn test_execution_with_control_flow() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Test if statement - control flow may not be fully implemented yet
         let result = engine.execute("if 1 > 0; x = 5; end");
@@ -146,7 +146,7 @@ fn test_execution_with_control_flow() {
 #[test]
 fn test_gc_configuration() {
     gc_test_context(|| {
-        let engine = ReplEngine::new().unwrap();
+        let engine = RunMatSession::new().unwrap();
         let config = GcConfig::low_latency();
         let result = engine.configure_gc(config);
         assert!(result.is_ok());
@@ -156,7 +156,7 @@ fn test_gc_configuration() {
 #[test]
 fn test_gc_stats_retrieval() {
     gc_test_context(|| {
-        let engine = ReplEngine::new().unwrap();
+        let engine = RunMatSession::new().unwrap();
         let stats = engine.gc_stats();
         // Should be able to get stats without error
         let _allocations = stats
@@ -168,7 +168,7 @@ fn test_gc_stats_retrieval() {
 #[test]
 fn test_system_info_display() {
     gc_test_context(|| {
-        let engine = ReplEngine::new().unwrap();
+        let engine = RunMatSession::new().unwrap();
         // This should not panic
         engine.show_system_info();
     });
@@ -177,7 +177,7 @@ fn test_system_info_display() {
 #[test]
 fn test_stats_reset() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Execute something to generate stats
         let _ = engine.execute("x = 1");
@@ -194,7 +194,7 @@ fn test_stats_reset() {
 #[test]
 fn test_multiple_executions_performance_tracking() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Execute the same operation multiple times to potentially trigger JIT
         for i in 1..=20 {
@@ -213,7 +213,7 @@ fn test_multiple_executions_performance_tracking() {
 #[test]
 fn test_empty_input_handling() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("");
         // Empty input behavior may vary - just ensure it doesn't crash
         // Some parsers accept empty input, others don't
@@ -227,7 +227,7 @@ fn test_empty_input_handling() {
 #[test]
 fn test_whitespace_only_input() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("   \t\n  ");
         // Whitespace-only input behavior may vary - just ensure it doesn't crash
         if let Err(e) = result {
@@ -240,7 +240,7 @@ fn test_whitespace_only_input() {
 #[test]
 fn test_complex_expression_execution() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("result = (1 + 2) * 3 - 4 / 2");
         assert!(result.is_ok());
 
@@ -256,7 +256,7 @@ fn test_concurrent_safety() {
     use std::thread;
 
     gc_test_context(|| {
-        let engine = Arc::new(std::sync::Mutex::new(ReplEngine::new().unwrap()));
+        let engine = Arc::new(std::sync::Mutex::new(RunMatSession::new().unwrap()));
         let mut handles = vec![];
 
         // Spawn multiple threads executing different operations
@@ -281,7 +281,7 @@ fn test_concurrent_safety() {
 #[test]
 fn test_execution_result_structure() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
         let result = engine.execute("x = 42").unwrap();
 
         // Check ExecutionResult structure

@@ -1,10 +1,10 @@
-use runmat_core::RunMatSession as ReplEngine;
+use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
 
 /// Test basic semicolon suppression behavior
 #[test]
 fn test_semicolon_suppresses_output() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Expression without semicolon should return a value
     let result = engine.execute("2 + 3").unwrap();
@@ -19,7 +19,7 @@ fn test_semicolon_suppresses_output() {
 /// Test semicolon suppression with assignments
 #[test]
 fn test_assignment_with_semicolon() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Assignment without semicolon should return the assigned value
     let result = engine.execute("x = 42").unwrap();
@@ -39,7 +39,7 @@ fn test_assignment_with_semicolon() {
 /// Test mixed expressions with and without semicolons
 #[test]
 fn test_mixed_semicolon_behavior() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Set up some variables
     engine.execute("a = 10;").unwrap(); // No output
@@ -65,7 +65,7 @@ fn test_mixed_semicolon_behavior() {
 /// Test semicolon suppression with function calls
 #[test]
 fn test_function_call_semicolon_suppression() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Function call without semicolon should return result
     let result = engine.execute("sin(0)").unwrap();
@@ -80,7 +80,7 @@ fn test_function_call_semicolon_suppression() {
 /// Test semicolon suppression with matrix operations
 #[test]
 fn test_matrix_semicolon_suppression() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Matrix creation without semicolon should show result
     let result = engine.execute("[1, 2, 3]").unwrap();
@@ -95,7 +95,7 @@ fn test_matrix_semicolon_suppression() {
 /// Test semicolon suppression with complex expressions
 #[test]
 fn test_complex_expression_semicolon_suppression() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Complex expression without semicolon
     let result = engine.execute("(2 + 3) * (4 - 1)").unwrap();
@@ -110,7 +110,7 @@ fn test_complex_expression_semicolon_suppression() {
 /// Test that errors are always shown regardless of semicolons
 #[test]
 fn test_errors_always_shown() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Error without semicolon
     let result = engine.execute("undefined_var");
@@ -124,7 +124,7 @@ fn test_errors_always_shown() {
 /// Test that type information is shown for semicolon-suppressed assignments
 #[test]
 fn test_type_info_display() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Test scalar assignment with semicolon
     let result = engine.execute("x = 42;").unwrap();
@@ -156,7 +156,7 @@ fn test_type_info_display() {
 /// Test that statement-only constructs (like if/while) are not affected by semicolons
 #[test]
 fn test_control_flow_not_affected() {
-    let mut engine = gc_test_context(ReplEngine::new).unwrap();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     // Set up a variable
     engine.execute("x = 5;").unwrap();

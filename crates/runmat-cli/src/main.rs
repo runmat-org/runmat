@@ -13,7 +13,7 @@ mod telemetry;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::RunMatSession as ReplEngine;
+use runmat_core::RunMatSession;
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
@@ -950,7 +950,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     );
 
     // Create enhanced REPL engine with optional snapshot loading
-    let mut engine = ReplEngine::with_snapshot(
+    let mut engine = RunMatSession::with_snapshot(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
@@ -1250,7 +1250,7 @@ async fn execute_script_with_args(
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     let enable_jit = config.jit.enabled;
-    let mut engine = ReplEngine::with_snapshot(
+    let mut engine = RunMatSession::with_snapshot(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
@@ -1531,7 +1531,7 @@ async fn execute_benchmark(
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
-    let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
+    let mut engine = RunMatSession::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
