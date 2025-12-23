@@ -1,11 +1,11 @@
 use runmat_builtins::Value;
+use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
-use runmat_repl::ReplEngine;
 
 #[test]
 fn test_variable_persistence_basic() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Define a variable
         let result1 = engine.execute("a = 10").unwrap();
@@ -39,7 +39,7 @@ fn test_variable_persistence_basic() {
 #[test]
 fn test_variable_persistence_multiple_variables() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Define multiple variables
         let result1 = engine.execute("x = 5").unwrap();
@@ -73,7 +73,7 @@ fn test_variable_persistence_multiple_variables() {
 #[test]
 fn test_variable_persistence_reassignment() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Initial assignment
         let result1 = engine.execute("value = 100").unwrap();
@@ -98,7 +98,7 @@ fn test_variable_persistence_reassignment() {
 #[test]
 fn test_expression_result_printing() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Constants should show results
         let result1 = engine.execute("42").unwrap();
@@ -132,7 +132,7 @@ fn test_expression_result_printing() {
 #[test]
 fn test_mixed_assignments_and_expressions() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Set up variables
         let result1 = engine.execute("a = 7").unwrap();
@@ -182,7 +182,7 @@ fn test_mixed_assignments_and_expressions() {
 #[test]
 fn test_variable_persistence_with_interpreter_only() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(false, false).unwrap(); // JIT disabled
+        let mut engine = RunMatSession::with_options(false, false).unwrap(); // JIT disabled
 
         // Define a variable
         let result1 = engine.execute("test_var = 123").unwrap();
@@ -200,7 +200,7 @@ fn test_variable_persistence_with_interpreter_only() {
 #[test]
 fn test_variable_persistence_with_jit_hybrid() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap(); // JIT enabled
+        let mut engine = RunMatSession::with_options(true, false).unwrap(); // JIT enabled
 
         // Assignment (should use JIT for assignments)
         let result1 = engine.execute("jit_var = 456").unwrap();
@@ -225,7 +225,7 @@ fn test_variable_persistence_with_jit_hybrid() {
 #[test]
 fn test_large_number_of_variables() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Create many variables
         for i in 1..=10 {
@@ -249,7 +249,7 @@ fn test_large_number_of_variables() {
 #[test]
 fn test_zero_values_persistence() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Set a variable to zero
         let result1 = engine.execute("zero_var = 0").unwrap();
@@ -269,7 +269,7 @@ fn test_zero_values_persistence() {
 #[test]
 fn test_negative_values_persistence() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Set negative values
         let result1 = engine.execute("neg = -15").unwrap();

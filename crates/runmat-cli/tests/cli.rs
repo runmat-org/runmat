@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 // Helper function to get the binary path
@@ -338,6 +339,27 @@ fn test_repl_command() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("verbose"));
+}
+
+#[test]
+fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new(get_binary_path())
+        .args(["repl"])
+        .env("RUNMAT_ACCEL_ENABLE", "0")
+        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(b"1+1\n")?;
+    }
+    drop(child.stdin.take());
+    let output = child.wait_with_output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("RunMat v"));
+    assert!(stdout.contains("ans = 2"));
+    Ok(())
 }
 
 #[test]

@@ -5903,13 +5903,13 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-config",
+ "runmat-core",
  "runmat-gc",
  "runmat-hir",
  "runmat-ignition",
  "runmat-kernel",
  "runmat-parser",
  "runmat-plot",
- "runmat-repl",
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-time",
@@ -6105,11 +6105,11 @@ dependencies = [
  "hmac",
  "log",
  "runmat-builtins",
+ "runmat-core",
  "runmat-hir",
  "runmat-ignition",
  "runmat-parser",
  "runmat-plot",
- "runmat-repl",
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-time",
@@ -6233,20 +6233,6 @@ dependencies = [
  "webbrowser",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "runmat-repl"
-version = "0.2.7"
-dependencies = [
- "anyhow",
- "env_logger 0.11.8",
- "log",
- "runmat-accelerate",
- "runmat-builtins",
- "runmat-core",
- "runmat-gc",
- "runmat-time",
 ]
 
 [[package]]

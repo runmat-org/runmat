@@ -1,5 +1,5 @@
+use runmat_core::RunMatSession;
 use runmat_gc::{gc_test_context, GcConfig};
-use runmat_repl::ReplEngine;
 use runmat_time::Instant;
 use std::thread;
 
@@ -7,11 +7,11 @@ use std::thread;
 fn test_jit_vs_interpreter_execution() {
     gc_test_context(|| {
         // Test with JIT enabled
-        let mut jit_engine = ReplEngine::with_options(true, false).unwrap();
+        let mut jit_engine = RunMatSession::with_options(true, false).unwrap();
         let jit_result = jit_engine.execute("x = 5 + 3").unwrap();
 
         // Test with JIT disabled
-        let mut interp_engine = ReplEngine::with_options(false, false).unwrap();
+        let mut interp_engine = RunMatSession::with_options(false, false).unwrap();
         let interp_result = interp_engine.execute("x = 5 + 3").unwrap();
 
         // Both should succeed
@@ -26,7 +26,7 @@ fn test_jit_vs_interpreter_execution() {
 #[test]
 fn test_hotspot_compilation_simulation() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::with_options(true, false).unwrap();
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
 
         // Execute the same code multiple times to trigger potential JIT compilation
         let code = "result = 10 * 5 + 2";
@@ -60,7 +60,7 @@ fn test_hotspot_compilation_simulation() {
 #[test]
 fn test_gc_integration_during_execution() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Configure GC for low latency
         let config = GcConfig::low_latency();
@@ -85,7 +85,7 @@ fn test_gc_integration_during_execution() {
 #[test]
 fn test_error_recovery_and_continued_execution() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Execute valid code
         let result1 = engine.execute("x = 1");
@@ -113,7 +113,7 @@ fn test_error_recovery_and_continued_execution() {
 #[test]
 fn test_complex_mathematical_operations() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         let complex_operations = [
             "a = 1 + 2 * 3",
@@ -136,7 +136,7 @@ fn test_complex_mathematical_operations() {
 #[test]
 fn test_control_flow_execution() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         let control_flow_tests = [
             "if 1 > 0; x = 10; end",
@@ -161,7 +161,7 @@ fn test_control_flow_execution() {
 #[test]
 fn test_memory_usage_under_load() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Create many objects to test memory management
         for i in 0..50 {
@@ -188,7 +188,7 @@ fn test_memory_usage_under_load() {
 #[test]
 fn test_execution_timing_accuracy() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         let start = Instant::now();
         let result = engine.execute("x = 1 + 1");
@@ -208,8 +208,8 @@ fn test_execution_timing_accuracy() {
 fn test_verbose_mode_output() {
     gc_test_context(|| {
         // Verbose mode should not crash or cause errors
-        let mut verbose_engine = ReplEngine::with_options(true, true).unwrap();
-        let mut quiet_engine = ReplEngine::with_options(true, false).unwrap();
+        let mut verbose_engine = RunMatSession::with_options(true, true).unwrap();
+        let mut quiet_engine = RunMatSession::with_options(true, false).unwrap();
 
         let code = "test = 1 + 2";
 
@@ -230,7 +230,7 @@ fn test_verbose_mode_output() {
 #[test]
 fn test_statistics_accuracy() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         let num_executions = 7;
         for i in 0..num_executions {
@@ -253,8 +253,8 @@ fn test_statistics_accuracy() {
 #[test]
 fn test_engine_state_isolation() {
     gc_test_context(|| {
-        let mut engine1 = ReplEngine::new().unwrap();
-        let mut engine2 = ReplEngine::new().unwrap();
+        let mut engine1 = RunMatSession::new().unwrap();
+        let mut engine2 = RunMatSession::new().unwrap();
 
         // Execute different code in each engine
         engine1.execute("x = 10").unwrap();
@@ -286,7 +286,7 @@ fn test_concurrent_engine_usage() {
             let results_clone = Arc::clone(&results);
             let handle = thread::spawn(move || {
                 // Don't nest gc_test_context - create engine directly in thread
-                let mut engine = ReplEngine::new().unwrap();
+                let mut engine = RunMatSession::new().unwrap();
                 let code = format!("thread_var = {thread_id} + 1");
                 let result = engine.execute(&code);
 
@@ -314,7 +314,7 @@ fn test_concurrent_engine_usage() {
 #[test]
 fn test_matrix_operations_integration() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         let matrix_tests = [
             "A = [1, 2; 3, 4]",
@@ -340,7 +340,7 @@ fn test_matrix_operations_integration() {
 #[test]
 fn test_performance_degradation_detection() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Execute a bunch of operations and ensure performance doesn't degrade significantly
         let mut execution_times = Vec::new();
@@ -377,7 +377,7 @@ fn test_performance_degradation_detection() {
 #[test]
 fn test_repl_function_definition_and_call_same_statement() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Define and call function in the same statement (this should work)
         let result = engine.execute("function y = double(x); y = x * 2; end; result = double(21)");
@@ -400,7 +400,7 @@ fn test_repl_function_definition_and_call_same_statement() {
 #[test]
 fn test_repl_function_persistence() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // Define function in one command
         let result1 = engine.execute("function y = add(a, b); y = a + b; end");
@@ -421,7 +421,7 @@ fn test_repl_function_persistence() {
 #[test]
 fn test_debug_function_context() {
     gc_test_context(|| {
-        let mut engine = ReplEngine::new().unwrap();
+        let mut engine = RunMatSession::new().unwrap();
 
         // First, just define a function
         let result1 = engine.execute("function y = test_func(x); y = x + 1; end");
