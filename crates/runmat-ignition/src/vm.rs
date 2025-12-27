@@ -266,6 +266,64 @@ fn mex(id: &str, msg: &str) -> String {
     format!("{ident} (pc={pc}): {msg}")
 }
 
+/// Try to dynamically load a function from the search path.
+/// Returns the compiled UserFunction if found and successfully parsed.
+fn try_load_function_from_path(
+    name: &str,
+    existing_functions: &HashMap<String, UserFunction>,
+) -> Option<UserFunction> {
+    use runmat_runtime::dynamic_loader::load_and_parse_function;
+
+    match load_and_parse_function(name) {
+        Ok(Some((loaded, hir))) => {
+            // Compile the HIR to bytecode
+            match crate::compile_with_functions(&hir, existing_functions) {
+                Ok(bytecode) => {
+                    // Look for the function in the compiled bytecode
+                    if let Some(func) = bytecode.functions.get(name) {
+                        log::debug!(
+                            "Dynamically loaded function '{}' from {}",
+                            name,
+                            loaded.path.display()
+                        );
+                        return Some(func.clone());
+                    }
+                    // The file might be a script, not a function - check if there's
+                    // a function with the same name as the file
+                    let stem = loaded
+                        .path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    if let Some(func) = bytecode.functions.get(stem) {
+                        log::debug!(
+                            "Dynamically loaded function '{}' from {}",
+                            stem,
+                            loaded.path.display()
+                        );
+                        return Some(func.clone());
+                    }
+                    log::debug!(
+                        "File {} loaded but no function '{}' found in it",
+                        loaded.path.display(),
+                        name
+                    );
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Failed to compile {}: {}", loaded.path.display(), e);
+                    None
+                }
+            }
+        }
+        Ok(None) => None,
+        Err(e) => {
+            log::warn!("Error loading function '{}': {}", name, e);
+            None
+        }
+    }
+}
+
 #[derive(Clone)]
 enum SliceSelector {
     Colon,
@@ -1377,10 +1435,20 @@ pub fn interpret_with_vars(
                             .or_else(|| bytecode.functions.get(&name))
                         {
                             Some(f) => f.clone(),
-                            None => vm_bail!(mex(
-                                "UndefinedFunction",
-                                &format!("Undefined function: {name}")
-                            )),
+                            None => {
+                                // Try dynamic loading from search path
+                                match try_load_function_from_path(&name, &bytecode.functions) {
+                                    Some(f) => {
+                                        // Cache for future calls
+                                        context.functions.insert(name.clone(), f.clone());
+                                        f
+                                    }
+                                    None => vm_bail!(mex(
+                                        "UndefinedFunction",
+                                        &format!("Undefined function: {name}")
+                                    )),
+                                }
+                            }
                         };
                         let arg_count = call_args.len();
                         if !func.has_varargin {
@@ -2830,20 +2898,85 @@ pub fn interpret_with_vars(
                                             .to_string());
                                     }
                                 }
-                                if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                                    if let Some(var_idx) = catch_var {
-                                        if var_idx >= vars.len() {
-                                            vars.resize(var_idx + 1, Value::Num(0.0));
-                                            refresh_workspace_state(&vars);
+                                // Try dynamic loading from search path as last resort
+                                let mut dynamic_loaded = false;
+                                if e.contains("UndefinedFunction") {
+                                    if let Some(func) = try_load_function_from_path(&name, &bytecode.functions) {
+                                        context.functions.insert(name.clone(), func.clone());
+                                        log::debug!("Dynamic load: {} with {} args: {:?}",
+                                            name, args.len(),
+                                            args.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ")
+                                        );
+                                        // Execute the loaded function
+                                        // Use original 'args' not 'prepared_primary' - the latter is transformed for builtins
+                                        let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                                            &func.params,
+                                            &func.outputs,
+                                            &func.body,
+                                        );
+                                        let local_var_count = var_map.len();
+                                        let remapped_body =
+                                            runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                                        let func_vars_count = local_var_count.max(func.params.len());
+                                        let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                                        // Copy arguments to their remapped local variable indices
+                                        // Use original 'args' to preserve struct types
+                                        for (i, param_id) in func.params.iter().enumerate() {
+                                            if i < args.len() {
+                                                if let Some(local_id) = var_map.get(param_id) {
+                                                    if local_id.0 < func_vars.len() {
+                                                        func_vars[local_id.0] = args[i].clone();
+                                                    }
+                                                }
+                                            }
                                         }
-                                        let mex = parse_exception(&e);
-                                        last_exception = Some(mex.clone());
-                                        vars[var_idx] = Value::MException(mex);
+                                        let mut func_var_types = func.var_types.clone();
+                                        if func_var_types.len() < local_var_count {
+                                            func_var_types.resize(local_var_count, Type::Unknown);
+                                        }
+                                        let func_program = runmat_hir::HirProgram {
+                                            body: remapped_body,
+                                            var_types: func_var_types,
+                                        };
+                                        let func_bytecode =
+                                            crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                                        for (k, v) in func_bytecode.functions.iter() {
+                                            context.functions.insert(k.clone(), v.clone());
+                                        }
+                                        match interpret_function(&func_bytecode, func_vars) {
+                                            Ok(func_result_vars) => {
+                                                if let Some(output_var_id) = func.outputs.first() {
+                                                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                                                    if local_output_index < func_result_vars.len() {
+                                                        stack.push(func_result_vars[local_output_index].clone());
+                                                    } else {
+                                                        stack.push(Value::Num(0.0));
+                                                    }
+                                                } else {
+                                                    stack.push(Value::Num(0.0));
+                                                }
+                                                dynamic_loaded = true;
+                                            }
+                                            Err(func_err) => vm_bail!(func_err),
+                                        }
                                     }
-                                    pc = catch_pc;
-                                    continue;
-                                } else {
-                                    return Err(e);
+                                }
+                                if !dynamic_loaded {
+                                    if let Some((catch_pc, catch_var)) = try_stack.pop() {
+                                        if let Some(var_idx) = catch_var {
+                                            if var_idx >= vars.len() {
+                                                vars.resize(var_idx + 1, Value::Num(0.0));
+                                                refresh_workspace_state(&vars);
+                                            }
+                                            let mex = parse_exception(&e);
+                                            last_exception = Some(mex.clone());
+                                            vars[var_idx] = Value::MException(mex);
+                                        }
+                                        pc = catch_pc;
+                                        continue;
+                                    } else {
+                                        return Err(e);
+                                    }
                                 }
                             }
                         }
@@ -3408,12 +3541,26 @@ pub fn interpret_with_vars(
                 }
                 temp.reverse();
                 let args = temp;
-                let func: UserFunction = match bytecode.functions.get(&name) {
+                let func: UserFunction = match context
+                    .functions
+                    .get(&name)
+                    .or_else(|| bytecode.functions.get(&name))
+                {
                     Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
+                    None => {
+                        // Try dynamic loading from search path
+                        match try_load_function_from_path(&name, &bytecode.functions) {
+                            Some(f) => {
+                                // Cache for future calls
+                                context.functions.insert(name.clone(), f.clone());
+                                f
+                            }
+                            None => vm_bail!(mex(
+                                "UndefinedFunction",
+                                &format!("Undefined function: {name}")
+                            )),
+                        }
+                    }
                 };
                 let var_map = runmat_hir::remapping::create_complete_function_var_map(
                     &func.params,
@@ -3490,17 +3637,33 @@ pub fn interpret_with_vars(
                         pc += 1;
                         continue;
                     }
-                    // Put args back if not a builtin: we'll handle as user function below
-                    for v in prepared_primary.into_iter().rev() {
+                    // Put original args back if not a builtin: we'll handle as user function below
+                    // Use original 'args' not 'prepared_primary' to preserve struct types
+                    for v in args.into_iter().rev() {
                         stack.push(v);
                     }
                 }
-                let func: UserFunction = match bytecode.functions.get(&name) {
+                let func: UserFunction = match context
+                    .functions
+                    .get(&name)
+                    .or_else(|| bytecode.functions.get(&name))
+                {
                     Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
+                    None => {
+                        // Try dynamic loading from search path
+                        match try_load_function_from_path(&name, &bytecode.functions) {
+                            Some(f) => {
+                                log::debug!("CallFunction: dynamically loaded '{}'", name);
+                                // Cache for future calls
+                                context.functions.insert(name.clone(), f.clone());
+                                f
+                            }
+                            None => vm_bail!(mex(
+                                "UndefinedFunction",
+                                &format!("Undefined function: {name}")
+                            )),
+                        }
+                    }
                 };
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
