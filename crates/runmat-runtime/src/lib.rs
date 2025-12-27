@@ -3,6 +3,7 @@ use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
+pub mod dynamic_loader;
 
 pub mod arrays;
 pub mod builtins;

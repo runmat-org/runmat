@@ -18,6 +18,8 @@ runmat-plot = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-hir = { workspace = true }
 glam = "0.24"
 tokio = { workspace = true }
 once_cell = "1.19"
