@@ -206,6 +206,8 @@ fn value_to_scalar_f64(value: &Value) -> Result<f64, String> {
         }
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Struct(_) => Err("cannot use struct as scalar index".to_string()),
+        Value::Cell(_) => Err("cannot use cell as scalar index".to_string()),
         _ => value.try_into().map_err(|e: String| e),
     }
 }
@@ -2981,9 +2983,24 @@ pub fn interpret_with_vars(
                                     let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
                                     let func_vars_count = local_var_count.max(func.params.len());
                                     let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                                    for (i, _param_id) in func.params.iter().enumerate() {
-                                        if i < call_args.len() && i < func_vars.len() {
-                                            func_vars[i] = call_args[i].clone();
+                                    // Use var_map to find correct local slot for each parameter
+                                    eprintln!("[DEBUG] dynamic call '{}': {} params, {} args, var_map size={}, func_vars_count={}",
+                                        name, func.params.len(), call_args.len(), var_map.len(), func_vars_count);
+                                    eprintln!("[DEBUG] var_map contents:");
+                                    for (k, v) in &var_map {
+                                        eprintln!("[DEBUG]   VarId({}) -> VarId({})", k.0, v.0);
+                                    }
+                                    for (i, param_id) in func.params.iter().enumerate() {
+                                        eprintln!("[DEBUG]   param[{}] = VarId({})", i, param_id.0);
+                                        if let Some(local_id) = var_map.get(param_id) {
+                                            let local_idx = local_id.0;
+                                            eprintln!("[DEBUG]     -> local slot {}", local_idx);
+                                            if i < call_args.len() && local_idx < func_vars.len() {
+                                                eprintln!("[DEBUG]     assigning arg[{}] to func_vars[{}]", i, local_idx);
+                                                func_vars[local_idx] = call_args[i].clone();
+                                            }
+                                        } else {
+                                            eprintln!("[DEBUG]     -> NOT FOUND in var_map!");
                                         }
                                     }
                                     let mut func_var_types = func.var_types.clone();
@@ -2995,6 +3012,12 @@ pub fn interpret_with_vars(
                                         var_types: func_var_types,
                                     };
                                     let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                                    eprintln!("[DEBUG] func_bytecode.var_count = {}, func_vars.len() = {}", 
+                                        func_bytecode.var_count, func_vars.len());
+                                    eprintln!("[DEBUG] First 20 bytecode instructions:");
+                                    for (idx, instr) in func_bytecode.instructions.iter().take(20).enumerate() {
+                                        eprintln!("[DEBUG]   {}: {:?}", idx, instr);
+                                    }
                                     for (k, v) in func_bytecode.functions.iter() {
                                         context.functions.insert(k.clone(), v.clone());
                                     }
@@ -10204,6 +10227,43 @@ pub fn interpret_with_vars(
                     vm_bail!(format!(
                         "Unknown static method '{}' on class {}",
                         method, class_name
+                    ));
+                }
+            }
+            Instr::CallQualified(qualified_name, arg_count) => {
+                // Package-qualified function/constructor call
+                // qualified_name is like "Electrical.Resistor" - resolve to +Electrical/Resistor.m
+                let mut args = Vec::new();
+                for _ in 0..arg_count {
+                    args.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                args.reverse();
+                
+                // First try as builtin (handles registered classes/functions)
+                let prepared_args = accel_prepare_args(&qualified_name, &args)?;
+                if let Ok(result) = runmat_runtime::call_builtin(&qualified_name, &prepared_args) {
+                    stack.push(result);
+                    pc += 1;
+                    continue;
+                }
+                
+                // Try to load as user function from +pkg/ path
+                if let Some(func) = try_load_function_from_path(&qualified_name) {
+                    // Found the function - add it to the function table and retry via CallFunction
+                    // For now, we report that we found it but full execution requires more integration
+                    vm_bail!(format!(
+                        "MATLAB:NotYetImplemented: Package function '{}' found but dynamic execution not yet fully integrated. The function has {} params.",
+                        qualified_name,
+                        func.params.len()
+                    ));
+                } else {
+                    vm_bail!(format!(
+                        "MATLAB:UndefinedFunction: Undefined function or class '{}'",
+                        qualified_name
                     ));
                 }
             }

@@ -41,6 +41,14 @@ pub enum HirExprKind {
     FuncHandle(String),
     FuncCall(String, Vec<HirExpr>),
     MetaClass(String),
+    /// Package-qualified name for deferred resolution at runtime.
+    /// First element is the package path segments (e.g., ["Electrical"]),
+    /// second is the final class/function name (e.g., "Resistor").
+    /// Created when Member/MethodCall base is an unknown identifier that could be a package.
+    QualifiedName(Vec<String>, String),
+    /// Package-qualified constructor/function call. Similar to FuncCall but for qualified names.
+    /// First is package path, second is class/function name, third is arguments.
+    QualifiedCall(Vec<String>, String, Vec<HirExpr>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -379,6 +387,8 @@ pub fn infer_function_output_types(
             K::MetaClass(_) => Type::String,
             K::End => Type::Unknown,
             K::Colon => Type::tensor(),
+            K::QualifiedName(_, _) => Type::Unknown,
+            K::QualifiedCall(_, _, _) => Type::Unknown,
         }
     }
 
@@ -1160,6 +1170,8 @@ pub fn infer_function_variable_types(
             K::MetaClass(_) => Type::String,
             K::End => Type::Unknown,
             K::Colon => Type::tensor(),
+            K::QualifiedName(_, _) => Type::Unknown,
+            K::QualifiedCall(_, _, _) => Type::Unknown,
         }
     }
 
@@ -2156,6 +2168,14 @@ pub mod remapping {
                 name.clone(),
                 args.iter().map(|a| remap_expr(a, var_map)).collect(),
             ),
+            HirExprKind::QualifiedName(path, name) => {
+                HirExprKind::QualifiedName(path.clone(), name.clone())
+            }
+            HirExprKind::QualifiedCall(path, name, args) => HirExprKind::QualifiedCall(
+                path.clone(),
+                name.clone(),
+                args.iter().map(|a| remap_expr(a, var_map)).collect(),
+            ),
             HirExprKind::Number(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)
@@ -2349,6 +2369,12 @@ pub mod remapping {
             HirExprKind::AnonFunc { body, .. } => collect_expr_variables(body, vars),
             HirExprKind::FuncHandle(_) => {}
             HirExprKind::FuncCall(_, args) => {
+                for arg in args {
+                    collect_expr_variables(arg, vars);
+                }
+            }
+            HirExprKind::QualifiedName(_, _) => {}
+            HirExprKind::QualifiedCall(_, _, args) => {
                 for arg in args {
                     collect_expr_variables(arg, vars);
                 }
@@ -2952,11 +2978,37 @@ impl Ctx {
             Colon => (HirExprKind::Colon, Type::tensor()),
             EndKeyword => (HirExprKind::End, Type::Unknown),
             Member(base, name) => {
-                let b = self.lower_expr(base)?;
-                (
-                    HirExprKind::Member(Box::new(b), name.clone()),
-                    Type::Unknown,
-                )
+                // Check if base is an unresolved identifier that could be a package name
+                if let Ident(pkg_name) = &**base {
+                    // Try to lower normally first
+                    match self.lower_expr(base) {
+                        Ok(b) => (HirExprKind::Member(Box::new(b), name.clone()), Type::Unknown),
+                        Err(_) => {
+                            // Base is unknown - treat as package-qualified name
+                            // This will be resolved at compile/runtime to check for +pkg/name.m
+                            (
+                                HirExprKind::QualifiedName(vec![pkg_name.clone()], name.clone()),
+                                Type::Unknown,
+                            )
+                        }
+                    }
+                } else if let Member(inner_base, inner_name) = &**base {
+                    // Nested member access like pkg.sub.Class - try to build qualified path
+                    match self.try_build_qualified_path(inner_base, inner_name) {
+                        Some(mut path) => {
+                            path.push(name.clone());
+                            let class_name = path.pop().unwrap();
+                            (HirExprKind::QualifiedName(path, class_name), Type::Unknown)
+                        }
+                        None => {
+                            let b = self.lower_expr(base)?;
+                            (HirExprKind::Member(Box::new(b), name.clone()), Type::Unknown)
+                        }
+                    }
+                } else {
+                    let b = self.lower_expr(base)?;
+                    (HirExprKind::Member(Box::new(b), name.clone()), Type::Unknown)
+                }
             }
             MemberDynamic(base, name_expr) => {
                 let b = self.lower_expr(base)?;
@@ -2967,17 +3019,87 @@ impl Ctx {
                 )
             }
             MethodCall(base, name, args) => {
-                let b = self.lower_expr(base)?;
                 let lowered_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
-                (
-                    HirExprKind::MethodCall(Box::new(b), name.clone(), lowered_args?),
-                    Type::Unknown,
-                )
+                let lowered_args = lowered_args?;
+                
+                // Check if base is an unresolved identifier that could be a package name
+                if let Ident(pkg_name) = &**base {
+                    match self.lower_expr(base) {
+                        Ok(b) => (
+                            HirExprKind::MethodCall(Box::new(b), name.clone(), lowered_args),
+                            Type::Unknown,
+                        ),
+                        Err(_) => {
+                            // Base is unknown - treat as package-qualified call (constructor)
+                            // e.g., Electrical.Resistor('R1', 1000) -> QualifiedCall(["Electrical"], "Resistor", args)
+                            (
+                                HirExprKind::QualifiedCall(
+                                    vec![pkg_name.clone()],
+                                    name.clone(),
+                                    lowered_args,
+                                ),
+                                Type::Unknown,
+                            )
+                        }
+                    }
+                } else if let Member(inner_base, inner_name) = &**base {
+                    // Nested like pkg.sub.Class() - try to build qualified path
+                    match self.try_build_qualified_path(inner_base, inner_name) {
+                        Some(mut path) => {
+                            path.push(name.clone());
+                            let class_name = path.pop().unwrap();
+                            (
+                                HirExprKind::QualifiedCall(path, class_name, lowered_args),
+                                Type::Unknown,
+                            )
+                        }
+                        None => {
+                            let b = self.lower_expr(base)?;
+                            (
+                                HirExprKind::MethodCall(Box::new(b), name.clone(), lowered_args),
+                                Type::Unknown,
+                            )
+                        }
+                    }
+                } else {
+                    let b = self.lower_expr(base)?;
+                    (
+                        HirExprKind::MethodCall(Box::new(b), name.clone(), lowered_args),
+                        Type::Unknown,
+                    )
+                }
             }
             MetaClass(name) => (HirExprKind::MetaClass(name.clone()), Type::String),
         };
         Ok(HirExpr { kind, ty })
+    }
+
+    /// Try to build a qualified path from nested Member expressions.
+    /// Returns Some(path) if all components are unresolved identifiers (potential package path),
+    /// None if any component resolves to a known variable/function.
+    fn try_build_qualified_path(&self, base: &AstExpr, name: &str) -> Option<Vec<String>> {
+        use parser::Expr::*;
+        match base {
+            Ident(id) => {
+                // Check if this identifier is known (variable, constant, or function)
+                if self.lookup(id).is_some() || self.is_constant(id) || self.is_function(id) {
+                    None
+                } else {
+                    // Unknown identifier - could be package name
+                    Some(vec![id.clone(), name.to_string()])
+                }
+            }
+            Member(inner_base, inner_name) => {
+                // Recursively try to build the path
+                self.try_build_qualified_path(inner_base, inner_name)
+                    .map(|mut path| {
+                        path.push(name.to_string());
+                        path
+                    })
+            }
+            _ => None,
+        }
     }
 
     fn lower_lvalue(&mut self, lv: &parser::LValue) -> Result<HirLValue, String> {

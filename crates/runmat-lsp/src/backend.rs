@@ -1397,13 +1397,19 @@ fn collect_expr_var_ids(expr: &HirExpr, out: &mut HashSet<VarId>) {
                 collect_expr_var_ids(arg, out);
             }
         }
+        HirExprKind::QualifiedCall(_, _, args) => {
+            for arg in args {
+                collect_expr_var_ids(arg, out);
+            }
+        }
         HirExprKind::Number(_)
         | HirExprKind::String(_)
         | HirExprKind::Constant(_)
         | HirExprKind::Colon
         | HirExprKind::End
         | HirExprKind::FuncHandle(_)
-        | HirExprKind::MetaClass(_) => {}
+        | HirExprKind::MetaClass(_)
+        | HirExprKind::QualifiedName(_, _) => {}
     }
 }
 
