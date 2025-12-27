@@ -368,6 +368,11 @@ impl Compiler {
                         visit_expr(arg, max);
                     }
                 }
+                HirExprKind::QualifiedCall(_, _, args) => {
+                    for arg in args {
+                        visit_expr(arg, max);
+                    }
+                }
                 HirExprKind::Member(base, _) => visit_expr(base, max),
                 HirExprKind::MemberDynamic(base, name) => {
                     visit_expr(base, max);
@@ -380,7 +385,8 @@ impl Compiler {
                 | HirExprKind::Colon
                 | HirExprKind::End
                 | HirExprKind::FuncHandle(_)
-                | HirExprKind::MetaClass(_) => {}
+                | HirExprKind::MetaClass(_)
+                | HirExprKind::QualifiedName(_, _) => {}
             }
         }
 
@@ -2629,6 +2635,33 @@ impl Compiler {
                     self.compile_expr(index)?;
                 }
                 self.emit(Instr::IndexCell(indices.len()));
+            }
+            HirExprKind::QualifiedName(path, name) => {
+                // Package-qualified static property access: pkg.Class or pkg.sub.Class
+                // Construct the qualified class name and emit static property load
+                let qualified_class = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}.{}", path.join("."), name)
+                };
+                // For a bare qualified name (no call), we treat it as a class reference
+                // This could be used for metaclass operations or static access
+                self.emit(Instr::LoadString(qualified_class));
+            }
+            HirExprKind::QualifiedCall(path, name, args) => {
+                // Package-qualified constructor/function call: pkg.Class(...) or pkg.sub.func(...)
+                // This is resolved at runtime by looking for +pkg/Class.m or +pkg/+sub/func.m
+                let qualified_name = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}.{}", path.join("."), name)
+                };
+                // Compile arguments
+                for arg in args {
+                    self.compile_expr(arg)?;
+                }
+                // Emit a qualified call instruction - runtime will resolve to +pkg/Class.m
+                self.emit(Instr::CallQualified(qualified_name, args.len()));
             }
         }
         Ok(())

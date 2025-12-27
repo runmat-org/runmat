@@ -646,7 +646,8 @@ impl BytecodeCompiler {
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFeval(_)
-                    | Instr::CallFevalExpandMulti(_) => {
+                    | Instr::CallFevalExpandMulti(_)
+                    | Instr::CallQualified(_, _) => {
                         return Err(TurbineError::ExecutionError(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));

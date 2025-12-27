@@ -107,6 +107,8 @@ pub enum Instr {
     // Static class access
     LoadStaticProperty(String, String),      // class, property
     CallStaticMethod(String, String, usize), // class, method, argc
+    // Package-qualified function/constructor call (e.g., Electrical.Resistor(...))
+    CallQualified(String, usize), // qualified_name (e.g. "Electrical.Resistor"), argc
     // Class definition at runtime
     RegisterClass {
         name: String,
