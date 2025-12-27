@@ -173,6 +173,43 @@ fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, String>
     Ok(value.clone())
 }
 
+/// Convert a Value to f64, handling GPU tensors by gathering scalar values.
+/// This is needed because `TryFrom<&Value> for f64` in runmat-builtins doesn't
+/// have access to the accelerate provider to download GPU tensors.
+fn value_to_scalar_f64(value: &Value) -> Result<f64, String> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                Ok(t.data[0])
+            } else {
+                Err("value must be scalar".to_string())
+            }
+        }
+        Value::GpuTensor(h) => {
+            let total: usize = h.shape.iter().copied().product();
+            if total != 1 {
+                return Err("GPU tensor must be scalar".to_string());
+            }
+            let gathered = gather_if_needed(value)?;
+            match gathered {
+                Value::Tensor(t) => {
+                    if t.data.is_empty() {
+                        Err("gathered tensor is empty".to_string())
+                    } else {
+                        Ok(t.data[0])
+                    }
+                }
+                Value::Num(n) => Ok(n),
+                _ => Err(format!("unexpected gathered type: {:?}", gathered)),
+            }
+        }
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        _ => value.try_into().map_err(|e: String| e),
+    }
+}
+
 #[cfg(feature = "native-accel")]
 fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, String> {
     runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
@@ -9124,7 +9161,7 @@ pub fn interpret_with_vars(
                     } else {
                         for k in 0..num_indices {
                             let idx_pos = base_pos + k;
-                            match (&stack[idx_pos]).try_into() as Result<f64, _> {
+                            match value_to_scalar_f64(&stack[idx_pos]) {
                                 Ok(v) => indices.push(v as usize),
                                 Err(_) => {
                                     contiguous_ok = false;
@@ -9162,7 +9199,7 @@ pub fn interpret_with_vars(
                         if assignable(&stack[idx]) {
                             break;
                         }
-                        if let Ok(v) = (&stack[idx]).try_into() as Result<f64, _> {
+                        if let Ok(v) = value_to_scalar_f64(&stack[idx]) {
                             numeric_above.push((idx, v as usize));
                         }
                         kk -= 1;
