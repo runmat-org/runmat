@@ -276,9 +276,7 @@ fn run_histogram_pass(
     };
 
     let (bind_group_layout, bind_group) = match weights.mode {
-        WeightMode::Uniform => build_uniform_bind_group(
-            &bind_inputs,
-        ),
+        WeightMode::Uniform => build_uniform_bind_group(&bind_inputs),
         WeightMode::F32 | WeightMode::F64 => build_weighted_bind_group(
             &bind_inputs,
             weights.buffer.as_ref().expect("weights buffer missing"),
@@ -288,25 +286,25 @@ fn run_histogram_pass(
     let pipeline_layout = inputs
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("histogram-counts-pipeline-layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
-    });
+            label: Some("histogram-counts-pipeline-layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
 
     let pipeline = inputs
         .device
         .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("histogram-counts-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+            label: Some("histogram-counts-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let mut encoder = inputs
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("histogram-counts-encoder"),
-    });
+            label: Some("histogram-counts-encoder"),
+        });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("histogram-counts-pass"),
@@ -325,10 +323,8 @@ fn run_histogram_pass(
 fn build_uniform_bind_group(
     inputs: &HistogramBindGroupInputs<'_>,
 ) -> Result<(Arc<wgpu::BindGroupLayout>, Arc<wgpu::BindGroup>), String> {
-    let layout = Arc::new(
-        inputs
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    let layout = Arc::new(inputs.device.create_bind_group_layout(
+        &wgpu::BindGroupLayoutDescriptor {
             label: Some("hist-counts-layout-uniform"),
             entries: &[
                 storage_read_entry(0),
@@ -336,8 +332,8 @@ fn build_uniform_bind_group(
                 storage_read_write_entry(2),
                 uniform_entry(3),
             ],
-        }),
-    );
+        },
+    ));
 
     let uniforms = HistogramUniforms {
         min_value: inputs.params.min_value,
@@ -350,10 +346,10 @@ fn build_uniform_bind_group(
     let uniform_buffer = inputs
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("hist-counts-uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+            label: Some("hist-counts-uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let bind_group = Arc::new(inputs.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("hist-counts-bind-group-uniform"),
@@ -385,10 +381,8 @@ fn build_weighted_bind_group(
     inputs: &HistogramBindGroupInputs<'_>,
     weights_buffer: &Arc<wgpu::Buffer>,
 ) -> Result<(Arc<wgpu::BindGroupLayout>, Arc<wgpu::BindGroup>), String> {
-    let layout = Arc::new(
-        inputs
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    let layout = Arc::new(inputs.device.create_bind_group_layout(
+        &wgpu::BindGroupLayoutDescriptor {
             label: Some("hist-counts-layout-weighted"),
             entries: &[
                 storage_read_entry(0),
@@ -397,8 +391,8 @@ fn build_weighted_bind_group(
                 storage_read_write_entry(3),
                 uniform_entry(4),
             ],
-        }),
-    );
+        },
+    ));
 
     let uniforms = HistogramUniforms {
         min_value: inputs.params.min_value,
@@ -411,10 +405,10 @@ fn build_weighted_bind_group(
     let uniform_buffer = inputs
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("hist-counts-weighted-uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+            label: Some("hist-counts-weighted-uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let bind_group = Arc::new(inputs.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("hist-counts-bind-group-weighted"),

@@ -333,9 +333,8 @@ impl<'window> PlotWindow<'window> {
                             if text == "\u{11}" { /* ignore control chars */ }
                         }
                         // Handle Q with Command or Control modifier
-                        if let winit::keyboard::PhysicalKey::Code(
-                            winit::keyboard::KeyCode::KeyQ,
-                        ) = key_event.physical_key
+                        if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyQ) =
+                            key_event.physical_key
                         {
                             let mods = unsafe {
                                 MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty)

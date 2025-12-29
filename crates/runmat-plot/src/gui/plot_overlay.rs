@@ -841,8 +841,8 @@ impl PlotOverlay {
                 let x_tick_interval = plot_utils::calculate_tick_interval(x_range);
                 let mut x_val = (x_min / x_tick_interval).ceil() * x_tick_interval;
                 while x_val <= x_max {
-                    let x_screen = plot_rect.min.x
-                        + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                    let x_screen =
+                        plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
                     ui.painter().line_segment(
                         [
                             Pos2::new(x_screen, plot_rect.max.y),
@@ -890,8 +890,8 @@ impl PlotOverlay {
                 let y_tick_interval = plot_utils::calculate_tick_interval(y_range);
                 let mut y_val = (y_min / y_tick_interval).ceil() * y_tick_interval;
                 while y_val <= y_max {
-                    let y_screen = plot_rect.max.y
-                        - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    let y_screen =
+                        plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
                     ui.painter().line_segment(
                         [
                             Pos2::new(plot_rect.min.x - tick_length, y_screen),

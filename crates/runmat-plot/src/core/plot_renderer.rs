@@ -1266,11 +1266,7 @@ impl PlotRenderer {
                 } else {
                     let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
                     render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(
-                        0,
-                        self.wgpu_renderer.get_uniform_bind_group(),
-                        &[],
-                    );
+                    render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
                 }
 
                 if is_points && use_direct {

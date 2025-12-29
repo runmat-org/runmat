@@ -167,8 +167,22 @@ fn is_color_positional_candidate(value: &Value) -> bool {
 fn is_color_literal(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),
-        "r" | "red" | "g" | "green" | "b" | "blue" | "c" | "cyan" | "m" | "magenta" | "y"
-            | "yellow" | "k" | "black" | "w" | "white" | "auto"
+        "r" | "red"
+            | "g"
+            | "green"
+            | "b"
+            | "blue"
+            | "c"
+            | "cyan"
+            | "m"
+            | "magenta"
+            | "y"
+            | "yellow"
+            | "k"
+            | "black"
+            | "w"
+            | "white"
+            | "auto"
     )
 }
 

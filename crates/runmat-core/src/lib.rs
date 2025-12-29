@@ -1487,9 +1487,7 @@ impl RunMatSession {
             value.clone()
         };
 
-        let max_elements = options
-            .max_elements
-            .clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+        let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
         let preview = preview_numeric_values(&host_value, max_elements)
             .map(|(values, truncated)| WorkspacePreview { values, truncated });
         Ok(MaterializedVariable {

@@ -114,9 +114,7 @@ impl FigureState {
     }
 
     fn cycle_for_axes_mut(&mut self, axes_index: usize) -> &mut LineStyleCycle {
-        self.line_style_cycles
-            .entry(axes_index)
-            .or_default()
+        self.line_style_cycles.entry(axes_index).or_default()
     }
 
     fn reset_cycle(&mut self, axes_index: usize) {

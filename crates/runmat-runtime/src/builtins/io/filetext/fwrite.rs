@@ -301,8 +301,13 @@ pub fn evaluate(
     let machine_format = parse_machine_format(machine_arg, &info.machinefmt)?;
 
     let elements = flatten_elements(&data_host)?;
-    let count =
-        write_elements(&mut file, &elements, precision_spec, skip_bytes, machine_format)?;
+    let count = write_elements(
+        &mut file,
+        &elements,
+        precision_spec,
+        skip_bytes,
+        machine_format,
+    )?;
     Ok(FwriteEval::new(count))
 }
 
