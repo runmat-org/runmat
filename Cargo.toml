@@ -35,7 +35,6 @@ syn = { version = "1", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
 logos = "0.15"
-runmat-time = { path = "crates/runmat-time", version = "0.2.8" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -66,6 +65,7 @@ runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot", default-feature
 runmat-macros = { version = "=0.2.8", path = "crates/runmat-macros" }
 runmat-builtins = { version = "=0.2.8", path = "crates/runmat-builtins" }
 runmat-runtime = { version = "=0.2.8", path = "crates/runmat-runtime", default-features = false }
+runmat-time = { path = "crates/runmat-time", version = "0.2.8" }
 runmat-kernel = { version = "=0.2.8", path = "crates/runmat-kernel" }
 runmat-turbine = { version = "=0.2.8", path = "crates/runmat-turbine" }
 runmat-gc = { version = "=0.2.8", path = "crates/runmat-gc" }
