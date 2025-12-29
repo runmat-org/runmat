@@ -65,7 +65,7 @@ impl ContourPlot {
     }
 
     pub fn bounds(&self) -> BoundingBox {
-        self.bounds.unwrap_or_else(BoundingBox::default)
+        self.bounds.unwrap_or_default()
     }
 
     pub fn render_data(&mut self) -> RenderData {

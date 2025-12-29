@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { use } from 'react';
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -101,19 +101,25 @@ export async function generateStaticParams() {
   }
 }
 
-export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const post = getBlogPost(slug);
   
   if (!post) {
     notFound();
   }
 
+  // Format date as MM/DD/YYYY without timezone conversion
+  const formatDate = (dateString: string): string => {
+    const [year, month, day] = dateString.split('-');
+    return `${month}/${day}/${year}`;
+  };
+
   return (
     <BlogLayout
       title={post.frontmatter.title}
-      description={post.frontmatter.excerpt}
-      date={new Date(post.frontmatter.date).toLocaleDateString()}
+      description=""
+      date={formatDate(post.frontmatter.date)}
       readTime={post.frontmatter.readTime}
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}

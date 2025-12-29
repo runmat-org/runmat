@@ -837,29 +837,27 @@ impl PlotOverlay {
                         Color32::from_gray(200),
                     );
                 }
-            } else {
-                if !cat_x {
-                    let x_tick_interval = plot_utils::calculate_tick_interval(x_range);
-                    let mut x_val = (x_min / x_tick_interval).ceil() * x_tick_interval;
-                    while x_val <= x_max {
-                        let x_screen = plot_rect.min.x
-                            + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(x_screen, plot_rect.max.y),
-                                Pos2::new(x_screen, plot_rect.max.y + tick_length),
-                            ],
-                            Stroke::new(1.0, Color32::WHITE),
-                        );
-                        ui.painter().text(
-                            Pos2::new(x_screen, plot_rect.max.y + label_offset),
-                            Align2::CENTER_CENTER,
-                            plot_utils::format_tick_label(x_val),
-                            FontId::proportional(10.0),
-                            Color32::from_gray(200),
-                        );
-                        x_val += x_tick_interval;
-                    }
+            } else if !cat_x {
+                let x_tick_interval = plot_utils::calculate_tick_interval(x_range);
+                let mut x_val = (x_min / x_tick_interval).ceil() * x_tick_interval;
+                while x_val <= x_max {
+                    let x_screen =
+                        plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(x_screen, plot_rect.max.y),
+                            Pos2::new(x_screen, plot_rect.max.y + tick_length),
+                        ],
+                        Stroke::new(1.0, Color32::WHITE),
+                    );
+                    ui.painter().text(
+                        Pos2::new(x_screen, plot_rect.max.y + label_offset),
+                        Align2::CENTER_CENTER,
+                        plot_utils::format_tick_label(x_val),
+                        FontId::proportional(10.0),
+                        Color32::from_gray(200),
+                    );
+                    x_val += x_tick_interval;
                 }
             }
 
@@ -888,29 +886,27 @@ impl PlotOverlay {
                         Color32::from_gray(200),
                     );
                 }
-            } else {
-                if !cat_y {
-                    let y_tick_interval = plot_utils::calculate_tick_interval(y_range);
-                    let mut y_val = (y_min / y_tick_interval).ceil() * y_tick_interval;
-                    while y_val <= y_max {
-                        let y_screen = plot_rect.max.y
-                            - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(plot_rect.min.x - tick_length, y_screen),
-                                Pos2::new(plot_rect.min.x, y_screen),
-                            ],
-                            Stroke::new(1.0, Color32::WHITE),
-                        );
-                        ui.painter().text(
-                            Pos2::new(plot_rect.min.x - label_offset, y_screen),
-                            Align2::CENTER_CENTER,
-                            plot_utils::format_tick_label(y_val),
-                            FontId::proportional(10.0),
-                            Color32::from_gray(200),
-                        );
-                        y_val += y_tick_interval;
-                    }
+            } else if !cat_y {
+                let y_tick_interval = plot_utils::calculate_tick_interval(y_range);
+                let mut y_val = (y_min / y_tick_interval).ceil() * y_tick_interval;
+                while y_val <= y_max {
+                    let y_screen =
+                        plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(plot_rect.min.x - tick_length, y_screen),
+                            Pos2::new(plot_rect.min.x, y_screen),
+                        ],
+                        Stroke::new(1.0, Color32::WHITE),
+                    );
+                    ui.painter().text(
+                        Pos2::new(plot_rect.min.x - label_offset, y_screen),
+                        Align2::CENTER_CENTER,
+                        plot_utils::format_tick_label(y_val),
+                        FontId::proportional(10.0),
+                        Color32::from_gray(200),
+                    );
+                    y_val += y_tick_interval;
                 }
             }
         }

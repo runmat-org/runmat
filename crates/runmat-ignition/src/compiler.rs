@@ -1674,6 +1674,9 @@ impl Compiler {
                         runmat_builtins::Value::Num(val) => {
                             self.emit(Instr::LoadConst(*val));
                         }
+                        runmat_builtins::Value::Complex(re, im) => {
+                            self.emit(Instr::LoadComplex(*re, *im));
+                        }
                         runmat_builtins::Value::Bool(b) => {
                             self.emit(Instr::LoadBool(*b));
                         }
@@ -1728,7 +1731,7 @@ impl Compiler {
                         self.emit(Instr::Neg);
                     }
                     runmat_parser::UnOp::Transpose => {
-                        self.emit(Instr::Transpose);
+                        self.emit(Instr::ConjugateTranspose);
                     }
                     runmat_parser::UnOp::NonConjugateTranspose => {
                         self.emit(Instr::Transpose);
@@ -2268,21 +2271,10 @@ impl Compiler {
                         }
                     }
                 }
-                let has_strings = matrix_data.iter().any(|row| {
+                let has_non_literals = matrix_data.iter().any(|row| {
                     row.iter()
-                        .any(|expr| matches!(expr.kind, HirExprKind::String(_)))
+                        .any(|expr| !matches!(expr.kind, HirExprKind::Number(_)))
                 });
-                let has_non_literals = has_strings
-                    || matrix_data.iter().any(|row| {
-                        row.iter().any(|expr| {
-                            !matches!(
-                                expr.kind,
-                                HirExprKind::Number(_)
-                                    | HirExprKind::String(_)
-                                    | HirExprKind::Constant(_)
-                            )
-                        })
-                    });
                 if has_non_literals {
                     for row in matrix_data {
                         for element in row {

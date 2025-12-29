@@ -88,6 +88,9 @@ impl<'a> GraphBuilder<'a> {
     fn process_instr(&mut self, pc: usize, instr: &Instr) {
         match instr {
             Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
+            Instr::LoadComplex(re, im) => {
+                self.push_constant(Type::Num, Some(Value::Complex(*re, *im)))
+            }
             Instr::LoadBool(value) => self.push_constant(Type::Bool, Some(Value::Bool(*value))),
             Instr::LoadString(s) => {
                 self.push_constant(Type::String, Some(Value::String(s.clone())))
@@ -116,7 +119,7 @@ impl<'a> GraphBuilder<'a> {
             Instr::NotEqual => self.handle_binary_primitive(pc, PrimitiveOp::NotEqual),
             Instr::Neg => self.handle_unary_primitive(pc, PrimitiveOp::Neg),
             Instr::UPlus => self.handle_unary_primitive(pc, PrimitiveOp::UPlus),
-            Instr::Transpose => self.handle_transpose(pc),
+            Instr::Transpose | Instr::ConjugateTranspose => self.handle_transpose(pc),
             Instr::CallBuiltin(name, argc) => self.handle_call_builtin(pc, name, *argc),
             Instr::Pop => {
                 let _ = self.pop_value();

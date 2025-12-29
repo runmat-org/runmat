@@ -233,7 +233,7 @@ impl VectorExporter {
         let stroke = self.color_to_hex(
             &render_data
                 .vertices
-                .get(0)
+                .first()
                 .map(|v| v.color)
                 .unwrap_or([0.0, 0.0, 0.0, 1.0]),
         );
@@ -427,7 +427,7 @@ impl VectorExporter {
                 {
                     let encoder = image::codecs::png::PngEncoder::new(&mut png_buf);
                     encoder
-                        .write_image(&data, *width, *height, image::ColorType::Rgba8)
+                        .write_image(data, *width, *height, image::ColorType::Rgba8)
                         .map_err(|e| format!("PNG encode failed: {e}"))?;
                 }
                 let b64 = base64::engine::general_purpose::STANDARD.encode(&png_buf);

@@ -429,12 +429,10 @@ impl LinePlot {
 
         // If thick polyline was generated, we must render as triangles
         let pipeline = if using_gpu {
-            self.gpu_topology.unwrap_or_else(|| {
-                if self.line_width > 1.0 {
-                    PipelineType::Triangles
-                } else {
-                    PipelineType::Lines
-                }
+            self.gpu_topology.unwrap_or(if self.line_width > 1.0 {
+                PipelineType::Triangles
+            } else {
+                PipelineType::Lines
             })
         } else if self.line_width > 1.0 {
             PipelineType::Triangles

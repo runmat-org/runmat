@@ -1,15 +1,36 @@
 import type { Metadata } from 'next';
-import { loadBuiltins } from '@/lib/builtins';
+import builtinsData from '@/content/builtins.json';
+import type { Builtin } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
 
+const BUILTINS: Builtin[] = builtinsData as Builtin[];
+const BUILTIN_MAP: Map<string, Builtin> = new Map(BUILTINS.map(b => [b.slug, b]));
+const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
+
 export function builtinMetadataForSlug(slug: string): Metadata {
-    const builtin = loadBuiltins().find(x => x.slug === slug);
-    if (!builtin) return {};
+    const builtin = BUILTIN_MAP.get(slug);
+    if (!builtin) {
+        const title = `${slug} | MATLAB Language Function Reference`;
+        return {
+            title,
+            description: FALLBACK_DESCRIPTION,
+            openGraph: {
+                title: slug,
+                description: FALLBACK_DESCRIPTION,
+            },
+            twitter: {
+                card: 'summary_large_image',
+                title: slug,
+                description: FALLBACK_DESCRIPTION,
+            },
+            alternates: { canonical: `/docs/reference/builtins/${slug}` },
+        } satisfies Metadata;
+    }
 
     const description = (
         builtin.description ||
         builtin.summary ||
-        'RunMat / MATLAB Language Function documentation'
+        FALLBACK_DESCRIPTION
     ).trim();
 
     return {
@@ -30,5 +51,18 @@ export function builtinMetadataForSlug(slug: string): Metadata {
 
 export function builtinOgTitleSubtitle(slug: string): { title: string; subtitle: string } {
     const meta = builtinMetadataForSlug(slug);
-    return resolveOgFields(meta);
+    let result: { title: string; subtitle: string };
+    try {
+        result = resolveOgFields(meta);
+    } catch {
+        console.warn(
+            '[builtins-og] Falling back to slug-based OG metadata',
+            { slug, meta }
+        );
+        result = {
+            title: typeof meta.title === 'string' ? meta.title : slug,
+            subtitle: typeof meta.description === 'string' ? meta.description : FALLBACK_DESCRIPTION,
+        };
+    }
+    return result;
 }

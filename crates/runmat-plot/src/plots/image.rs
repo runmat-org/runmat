@@ -99,9 +99,8 @@ impl ImagePlot {
 
         if let Some(grid) = &self.surface.color_grid {
             // RGB[A] provided
-            for i in 0..x_len {
-                for j in 0..y_len {
-                    let c = grid[i][j];
+            for row in grid.iter().take(x_len) {
+                for c in row.iter().take(y_len).copied() {
                     rgba.push((c.x.clamp(0.0, 1.0) * 255.0) as u8);
                     rgba.push((c.y.clamp(0.0, 1.0) * 255.0) as u8);
                     rgba.push((c.z.clamp(0.0, 1.0) * 255.0) as u8);
@@ -127,9 +126,8 @@ impl ImagePlot {
                 (lo, hi)
             };
             let zr = (max_z - min_z).max(f64::MIN_POSITIVE);
-            for i in 0..x_len {
-                for j in 0..y_len {
-                    let z = z_rows[i][j];
+            for row in z_rows.iter().take(x_len) {
+                for z in row.iter().take(y_len).copied() {
                     let t = (((z - min_z) / zr) as f32).clamp(0.0, 1.0);
                     let rgb = self.surface.colormap.map_value(t);
                     rgba.push((rgb.x * 255.0) as u8);

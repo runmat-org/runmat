@@ -24,18 +24,13 @@ use super::surf::build_color_lut;
 
 const DEFAULT_LEVELS: usize = 10;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLevelSpec {
+    #[default]
     Auto,
     Count(usize),
     Values(Vec<f64>),
     Step(f32),
-}
-
-impl Default for ContourLevelSpec {
-    fn default() -> Self {
-        ContourLevelSpec::Auto
-    }
 }
 
 impl ContourLevelSpec {
@@ -91,17 +86,12 @@ impl ContourLevelSpec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLineColor {
+    #[default]
     Auto,
     Color(Vec4),
     None,
-}
-
-impl Default for ContourLineColor {
-    fn default() -> Self {
-        ContourLineColor::Auto
-    }
 }
 
 #[derive(Clone)]
@@ -463,7 +453,7 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
     if options.is_empty() {
         return Ok(());
     }
-    if options.len() % 2 != 0 {
+    if !options.len().is_multiple_of(2) {
         return Err(format!(
             "{}: name-value arguments must come in pairs",
             args.name
@@ -1079,6 +1069,50 @@ fn implicit_axis(len: usize) -> Vec<f64> {
     (0..len).map(|idx| (idx + 1) as f64).collect()
 }
 
+fn ensure_fill_levels(
+    level_spec: &ContourLevelSpec,
+    min_z: f32,
+    max_z: f32,
+) -> Result<Vec<f32>, String> {
+    let mut levels = level_spec.resolve(min_z, max_z)?;
+    if levels.len() < 2 {
+        let second = if (max_z - min_z).abs() < f32::EPSILON {
+            min_z + 1.0
+        } else {
+            max_z
+        };
+        levels = vec![min_z, second];
+    }
+    Ok(levels)
+}
+
+fn palette_size(levels: &[f32]) -> usize {
+    levels.len().saturating_sub(1).max(1)
+}
+
+fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
+    if palette.is_empty() {
+        return Vec4::new(1.0, 1.0, 1.0, 1.0);
+    }
+    let mut idx = 0usize;
+    while idx + 1 < levels.len() && value >= levels[idx + 1] {
+        idx += 1;
+    }
+    palette[idx.min(palette.len() - 1)]
+}
+
+fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
+    let normal = Vec3::new(0.0, 0.0, 1.0);
+    for i in 0..3 {
+        vertices.push(Vertex {
+            position: positions[i].to_array(),
+            color: colors[i].to_array(),
+            normal: normal.to_array(),
+            tex_coords: [0.0, 0.0],
+        });
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1244,49 +1278,5 @@ pub(crate) mod tests {
             ],
         );
         assert!(ok.is_ok());
-    }
-}
-
-fn ensure_fill_levels(
-    level_spec: &ContourLevelSpec,
-    min_z: f32,
-    max_z: f32,
-) -> Result<Vec<f32>, String> {
-    let mut levels = level_spec.resolve(min_z, max_z)?;
-    if levels.len() < 2 {
-        let second = if (max_z - min_z).abs() < f32::EPSILON {
-            min_z + 1.0
-        } else {
-            max_z
-        };
-        levels = vec![min_z, second];
-    }
-    Ok(levels)
-}
-
-fn palette_size(levels: &[f32]) -> usize {
-    levels.len().saturating_sub(1).max(1)
-}
-
-fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
-    if palette.is_empty() {
-        return Vec4::new(1.0, 1.0, 1.0, 1.0);
-    }
-    let mut idx = 0usize;
-    while idx + 1 < levels.len() && value >= levels[idx + 1] {
-        idx += 1;
-    }
-    palette[idx.min(palette.len() - 1)]
-}
-
-fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
-    let normal = Vec3::new(0.0, 0.0, 1.0);
-    for i in 0..3 {
-        vertices.push(Vertex {
-            position: positions[i].to_array(),
-            color: colors[i].to_array(),
-            normal: normal.to_array(),
-            tex_coords: [0.0, 0.0],
-        });
     }
 }

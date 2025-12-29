@@ -10,6 +10,7 @@ Notation:
 ## Data/Stack and Locals
 
 - LoadConst(c): [] → [Num(c)]
+- LoadComplex(re, im): [] → [Complex(re, im)]
 - LoadBool(b): [] → [Bool(b)]
 - LoadString(s): [] → [String(s)]
 - LoadCharRow(s): [] → [CharArray(1×len(s))]
@@ -26,7 +27,7 @@ Notation:
 
 - UPlus: [+x] → [x] (object overload `uplus` if available)
 - Neg: [x] → [-x] (object overload `uminus`, else numeric elementwise)
-- Transpose: [V] → [V'] (delegates to runtime transpose)
+- Transpose: [V] → [V'] (calls builtin transpose)
 - Add/Sub/Mul/Div/Pow: binary numeric; object overloads (`plus`, `minus`, `mtimes`, `mrdivide`, `power`) attempted first
 - ElemMul/ElemDiv/ElemLeftDiv/ElemPow: elementwise ops with object overloads (`times`, `rdivide`, `ldivide`, `power`)
 - Equal/NotEqual/Less/LessEqual/Greater/GreaterEqual: numeric and array comparisons; object overloads (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) with fallbacks; handle objects compare by identity via runtime

@@ -395,7 +395,7 @@ pub fn parse_line_style_args(
 
     let mut options = LineStyleOptions::default();
     let mut idx = 0usize;
-    if let Some(token) = rest.get(0).and_then(value_as_string) {
+    if let Some(token) = rest.first().and_then(value_as_string) {
         if is_style_token(&token) {
             options.merge(parse_style_string(opts, &token)?);
             idx = 1;
@@ -410,7 +410,7 @@ pub fn parse_line_style_args(
                 "per-series styles interleaved with data are not supported yet",
             ));
         }
-        if remaining.len() % 2 != 0 {
+        if !remaining.len().is_multiple_of(2) {
             return Err(ctx_err(opts, "name-value arguments must come in pairs"));
         }
         options.merge(parse_name_value_pairs(opts, remaining)?);
@@ -436,7 +436,7 @@ pub fn parse_surface_style_args(
     if rest.is_empty() {
         return Ok(style);
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(ctx_err(
             &opts,
             "name-value arguments must come in pairs for surface plots",
@@ -999,7 +999,7 @@ pub fn parse_bar_style_args(
     let rest = filtered.as_slice();
 
     let mut idx = 0usize;
-    if let Some(token) = rest.get(0).and_then(value_as_string) {
+    if let Some(token) = rest.first().and_then(value_as_string) {
         let trimmed = token.trim();
         if !trimmed.is_empty() && !is_bar_option_name(trimmed) {
             style.face_color = parse_bar_color_literal(&opts, trimmed)?;
@@ -1011,7 +1011,7 @@ pub fn parse_bar_style_args(
     if remaining.is_empty() {
         return Ok(style);
     }
-    if remaining.len() % 2 != 0 {
+    if !remaining.len().is_multiple_of(2) {
         return Err(bar_ctx_err(
             builtin,
             "name-value arguments must come in pairs",

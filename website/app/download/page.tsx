@@ -43,58 +43,6 @@ export default function DownloadPage() {
           </Card>
         </section>
 
-        {/* Next Steps */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Next Steps
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 border-green-200 dark:border-green-800">
-              <CardContent className="p-6">
-                <div className="flex items-center mb-4">
-                  <Code className="h-6 w-6 mr-3 text-green-600" />
-                  <h3 className="text-xl font-bold text-foreground">
-                    Start Coding
-                  </h3>
-                </div>
-                <p className="text-muted-foreground mb-4">
-                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>runmat</code> in your terminal.
-                </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
-                  runmat
-                </div>
-                <Button variant="outline" size="sm" asChild className="w-full">
-                  <Link href="/docs/getting-started">
-                    Getting Started Guide
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border-purple-200 dark:border-purple-800">
-              <CardContent className="p-6">
-                <div className="flex items-center mb-4">
-                  <Zap className="h-6 w-6 mr-3 text-purple-600" />
-                  <h3 className="text-xl font-bold text-foreground">
-                    Set up Jupyter Kernel
-                  </h3>
-                </div>
-                <p className="text-muted-foreground mb-4">
-                  Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
-                </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
-                  runmat --install-kernel
-                </div>
-                <Button variant="outline" size="sm" asChild className="w-full">
-                  <Link href="/docs/getting-started#jupyter-notebook-integration">
-                    Jupyter Setup Guide
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
         {/* Alternative Installation Methods */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
@@ -104,36 +52,28 @@ export default function DownloadPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
             {/* Package Managers */}
-            <Card className="opacity-60 relative">
+            <Card className="relative">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Package className="h-5 w-5 mr-2 text-gray-400" />
-                  Package Managers
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
-                    Coming Soon
-                  </span>
+                  <Package className="h-5 w-5 mr-2 text-primary" />
+                  Homebrew (macOS/Linux)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Homebrew (macOS/Linux)</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
+                    <h4 className="font-semibold text-foreground mb-2">One-liner install</h4>
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
+                      brew install runmat-org/tap/runmat
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-foreground">Tap then install</h4>
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
+                      brew tap runmat-org/tap
+                    </div>
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
                       brew install runmat
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Chocolatey (Windows)</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      choco install runmat
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Snap (Linux)</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      sudo snap install runmat
                     </div>
                   </div>
                 </div>
@@ -141,33 +81,30 @@ export default function DownloadPage() {
             </Card>
 
             {/* Cargo Installation */}
-            <Card className="opacity-60 relative">
+            <Card className="relative border-primary/40">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Cpu className="h-5 w-5 mr-2 text-gray-400" />
-                  Cargo (Source Build)
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
-                    Coming Soon
-                  </span>
+                  <Cpu className="h-5 w-5 mr-2 text-primary" />
+                  Cargo (Rust)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Install From crates.io</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
+                    <h4 className="font-semibold text-foreground mb-2">Install from crates.io</h4>
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
                       cargo install runmat
                     </div>
                   </div>
                   
                   <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">From Source (Latest)</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
+                    <h4 className="font-semibold text-foreground mb-2">From Source (Latest)</h4>
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
                       cargo install --git https://github.com/runmat-org/runmat
                     </div>
                   </div>
                   
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-muted-foreground">
                     Requires Rust 1.70+ with LLVM support
                   </p>
                 </div>
@@ -229,6 +166,58 @@ export default function DownloadPage() {
           </div>
         </section>
 
+        {/* Next Steps */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
+            Next Steps
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 border-green-200 dark:border-green-800">
+              <CardContent className="p-6">
+                <div className="flex items-center mb-4">
+                  <Code className="h-6 w-6 mr-3 text-green-600" />
+                  <h3 className="text-xl font-bold text-foreground">
+                    Start Coding
+                  </h3>
+                </div>
+                <p className="text-muted-foreground mb-4">
+                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>runmat</code> in your terminal.
+                </p>
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
+                  runmat
+                </div>
+                <Button variant="outline" size="sm" asChild className="w-full">
+                  <Link href="/docs/getting-started">
+                    Getting Started Guide
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+            <Card className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border-purple-200 dark:border-purple-800">
+              <CardContent className="p-6">
+                <div className="flex items-center mb-4">
+                  <Zap className="h-6 w-6 mr-3 text-purple-600" />
+                  <h3 className="text-xl font-bold text-foreground">
+                    Set up Jupyter Kernel
+                  </h3>
+                </div>
+                <p className="text-muted-foreground mb-4">
+                  Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
+                </p>
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
+                  runmat --install-kernel
+                </div>
+                <Button variant="outline" size="sm" asChild className="w-full">
+                  <Link href="/docs/getting-started#jupyter-notebook-integration">
+                    Jupyter Setup Guide
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
         {/* Source Code */}
         <section className="mb-12">
           <Card className="bg-muted border-border">
@@ -260,26 +249,6 @@ export default function DownloadPage() {
           </Card>
         </section>
 
-        {/* Dystr Integration */}
-        <section>
-          <Card className="bg-gradient-to-r from-orange-50 to-blue-50 dark:from-orange-900/20 dark:to-blue-900/20 border-orange-200 dark:border-orange-800">
-            <CardContent className="p-6 text-center">
-              <h3 className="text-lg font-semibold mb-3 text-foreground">
-                Looking for More?
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                RunMat is part of the Dystr platform for computational engineering. 
-                Get cloud computing, team collaboration, and enterprise features.
-              </p>
-              <Button asChild>
-                <Link href="https://dystr.com" target="_blank" rel="noopener noreferrer">
-                  Explore Dystr Platform
-                  <ExternalLink className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </section>
       </div>
     </div>
   );

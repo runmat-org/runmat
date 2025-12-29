@@ -513,7 +513,7 @@ fn scatter_lod_stride(point_count: u32) -> u32 {
     if point_count <= target {
         1
     } else {
-        (point_count + target - 1) / target
+        point_count.div_ceil(target)
     }
 }
 
@@ -765,13 +765,15 @@ pub(crate) mod tests {
     #[test]
     fn scatter_accepts_flat_marker_edge_color_when_colors_supplied() {
         setup_plot_tests();
-        let mut appearance = LineAppearance::default();
-        appearance.marker = Some(MarkerAppearance {
-            kind: MarkerKind::Circle,
-            size: None,
-            edge_color: MarkerColor::Flat,
-            face_color: MarkerColor::Auto,
-        });
+        let appearance = LineAppearance {
+            marker: Some(MarkerAppearance {
+                kind: MarkerKind::Circle,
+                size: None,
+                edge_color: MarkerColor::Flat,
+                face_color: MarkerColor::Auto,
+            }),
+            ..Default::default()
+        };
         let args = PointArgs {
             size: PointSizeArg::Default,
             color: PointColorArg::ScalarValues(Value::Tensor(tensor_from(&[0.1, 0.5]))),

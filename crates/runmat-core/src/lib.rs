@@ -325,6 +325,27 @@ struct ExecutionPlan {
     workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
 }
 
+struct ExecutionPlanInputs<'a> {
+    assigned_this_execution: &'a HashSet<String>,
+    id_to_name: &'a HashMap<usize, String>,
+    prev_assigned_snapshot: &'a HashSet<String>,
+    updated_functions: &'a HashMap<String, runmat_hir::HirStmt>,
+    execution_bytecode: &'a runmat_ignition::Bytecode,
+    single_assign_var: Option<usize>,
+    single_stmt_non_assign: bool,
+    is_expression_stmt: bool,
+    is_semicolon_suppressed: bool,
+    result_value: &'a Option<Value>,
+    suppressed_value: &'a Option<Value>,
+    error: &'a Option<String>,
+    workspace_updates: &'a [WorkspaceEntry],
+    fusion_snapshot: &'a Option<FusionPlanSnapshot>,
+    start_time: Instant,
+    used_jit: bool,
+    stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
+    workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
+}
+
 /// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
 fn format_type_info(value: &Value) -> String {
     match value {
@@ -634,7 +655,7 @@ impl RunMatSession {
             Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
                 let chunk = drain_console_streams();
                 frame.streams.extend(chunk.clone());
-                frame.pending = next_pending;
+                frame.pending = *next_pending;
                 let new_id = Uuid::new_v4();
                 let elapsed_ms = frame.plan.start_time.elapsed().as_millis() as u64;
                 let fusion_plan = frame.plan.fusion_snapshot.clone();
@@ -712,41 +733,36 @@ impl RunMatSession {
                 match &request.kind {
                     InputRequestKind::Line { echo } => InputHandlerAction::Respond(
                         runmat_runtime::interaction::default_read_line(&request.prompt, *echo)
-                            .map(InputResponse::Line)
-                            .map_err(|e| e),
+                            .map(InputResponse::Line),
                     ),
                     InputRequestKind::KeyPress => InputHandlerAction::Respond(
                         runmat_runtime::interaction::default_wait_for_key(&request.prompt)
-                            .map(|_| InputResponse::KeyPress)
-                            .map_err(|e| e),
+                            .map(|_| InputResponse::KeyPress),
                     ),
                 }
             };
             match action {
                 InputHandlerAction::Respond(result) => {
                     let mapped = result
-                        .map_err(|err| {
+                        .inspect_err(|err| {
                             event.error = Some(err.clone());
                             if let Ok(mut guard) = stdin_events.lock() {
                                 guard.push(event.clone());
                             }
-                            err
                         })
-                        .and_then(|resp| match resp {
+                        .map(|resp| match resp {
                             InputResponse::Line(value) => {
                                 event.value = Some(value.clone());
                                 if let Ok(mut guard) = stdin_events.lock() {
                                     guard.push(event);
                                 }
-                                Ok(runmat_runtime::interaction::InteractionResponse::Line(
-                                    value,
-                                ))
+                                runmat_runtime::interaction::InteractionResponse::Line(value)
                             }
                             InputResponse::KeyPress => {
                                 if let Ok(mut guard) = stdin_events.lock() {
                                     guard.push(event);
                                 }
-                                Ok(runmat_runtime::interaction::InteractionResponse::KeyPress)
+                                runmat_runtime::interaction::InteractionResponse::KeyPress
                             }
                         });
                     runmat_runtime::interaction::InteractionDecision::Respond(mapped)
@@ -959,6 +975,7 @@ impl RunMatSession {
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
         let mut error = None;
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
+        let mut ans_update: Option<(usize, Value)> = None;
 
         // Check if this is an expression statement (ends with Pop)
         let is_expression_stmt = bytecode
@@ -1189,6 +1206,9 @@ impl RunMatSession {
                         let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
                         if temp_var_id < self.variable_array.len() {
                             let expression_value = self.variable_array[temp_var_id].clone();
+                            // Capture for 'ans' update
+                            ans_update = Some((temp_var_id, expression_value.clone()));
+
                             if !is_semicolon_suppressed {
                                 result_value = Some(expression_value);
                                 if self.verbose {
@@ -1217,30 +1237,29 @@ impl RunMatSession {
                     );
                 }
                 Ok(runmat_ignition::InterpreterOutcome::Pending(pending_exec)) => {
-                    let plan = self.capture_execution_plan(
-                        &assigned_this_execution,
-                        &id_to_name,
-                        &prev_assigned_snapshot,
-                        &updated_functions,
-                        &execution_bytecode,
+                    let plan = self.capture_execution_plan(ExecutionPlanInputs {
+                        assigned_this_execution: &assigned_this_execution,
+                        id_to_name: &id_to_name,
+                        prev_assigned_snapshot: &prev_assigned_snapshot,
+                        updated_functions: &updated_functions,
+                        execution_bytecode: &execution_bytecode,
                         single_assign_var,
                         single_stmt_non_assign,
                         is_expression_stmt,
                         is_semicolon_suppressed,
-                        &result_value,
-                        &suppressed_value,
-                        &error,
-                        &workspace_updates,
-                        &fusion_snapshot,
+                        result_value: &result_value,
+                        suppressed_value: &suppressed_value,
+                        error: &error,
+                        workspace_updates: &workspace_updates,
+                        fusion_snapshot: &fusion_snapshot,
                         start_time,
                         used_jit,
-                        Arc::clone(&stdin_events),
-                        debug_trace,
-                        pending_workspace_guard.take(),
-                    );
+                        stdin_events: Arc::clone(&stdin_events),
+                        workspace_guard: pending_workspace_guard.take(),
+                    });
                     let console_streams = drain_console_streams();
                     let pending_result =
-                        self.defer_pending_execution(plan, pending_exec, console_streams)?;
+                        self.defer_pending_execution(plan, *pending_exec, console_streams)?;
                     return Ok(pending_result);
                 }
                 Err(e) => {
@@ -1325,6 +1344,14 @@ impl RunMatSession {
                 }
             }
             self.function_definitions = updated_functions;
+            // Apply 'ans' update if applicable (persisting expression result)
+            if let Some((var_id, value)) = ans_update {
+                self.variable_names.insert("ans".to_string(), var_id);
+                self.workspace_values.insert("ans".to_string(), value);
+                if debug_trace {
+                    println!("Updated 'ans' to var_id {}", var_id);
+                }
+            }
         }
 
         if self.verbose {
@@ -1472,14 +1499,14 @@ impl RunMatSession {
             value.clone()
         };
 
-        let max_elements = options.max_elements.max(1).min(MATERIALIZE_DEFAULT_LIMIT);
+        let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
         let preview = preview_numeric_values(&host_value, max_elements)
             .map(|(values, truncated)| WorkspacePreview { values, truncated });
         Ok(MaterializedVariable {
             name,
             class_name: matlab_class_name(&host_value),
             dtype: numeric_dtype_label(&host_value).map(|label| label.to_string()),
-            shape: value_shape(&host_value).unwrap_or_else(|| vec![]),
+            shape: value_shape(&host_value).unwrap_or_default(),
             is_gpu,
             residency,
             size_bytes: approximate_size_bytes(&host_value),
@@ -1501,47 +1528,26 @@ impl RunMatSession {
         runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
     }
 
-    fn capture_execution_plan(
-        &self,
-        assigned_this_execution: &HashSet<String>,
-        id_to_name: &HashMap<usize, String>,
-        prev_assigned_snapshot: &HashSet<String>,
-        updated_functions: &HashMap<String, runmat_hir::HirStmt>,
-        execution_bytecode: &runmat_ignition::Bytecode,
-        single_assign_var: Option<usize>,
-        single_stmt_non_assign: bool,
-        is_expression_stmt: bool,
-        is_semicolon_suppressed: bool,
-        result_value: &Option<Value>,
-        suppressed_value: &Option<Value>,
-        error: &Option<String>,
-        workspace_updates: &[WorkspaceEntry],
-        fusion_snapshot: &Option<FusionPlanSnapshot>,
-        start_time: Instant,
-        used_jit: bool,
-        stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
-        _debug_trace: bool,
-        workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
-    ) -> ExecutionPlan {
+    fn capture_execution_plan(&self, inputs: ExecutionPlanInputs<'_>) -> ExecutionPlan {
         ExecutionPlan {
-            assigned_this_execution: assigned_this_execution.clone(),
-            id_to_name: id_to_name.clone(),
-            prev_assigned_snapshot: prev_assigned_snapshot.clone(),
-            updated_functions: updated_functions.clone(),
-            execution_bytecode: execution_bytecode.clone(),
-            single_assign_var,
-            single_stmt_non_assign,
-            is_expression_stmt,
-            is_semicolon_suppressed,
-            result_value: result_value.clone(),
-            suppressed_value: suppressed_value.clone(),
-            error: error.clone(),
-            workspace_updates: workspace_updates.to_vec(),
-            fusion_snapshot: fusion_snapshot.clone(),
-            start_time,
-            used_jit,
-            stdin_events,
-            workspace_guard,
+            assigned_this_execution: inputs.assigned_this_execution.clone(),
+            id_to_name: inputs.id_to_name.clone(),
+            prev_assigned_snapshot: inputs.prev_assigned_snapshot.clone(),
+            updated_functions: inputs.updated_functions.clone(),
+            execution_bytecode: inputs.execution_bytecode.clone(),
+            single_assign_var: inputs.single_assign_var,
+            single_stmt_non_assign: inputs.single_stmt_non_assign,
+            is_expression_stmt: inputs.is_expression_stmt,
+            is_semicolon_suppressed: inputs.is_semicolon_suppressed,
+            result_value: inputs.result_value.clone(),
+            suppressed_value: inputs.suppressed_value.clone(),
+            error: inputs.error.clone(),
+            workspace_updates: inputs.workspace_updates.to_vec(),
+            fusion_snapshot: inputs.fusion_snapshot.clone(),
+            start_time: inputs.start_time,
+            used_jit: inputs.used_jit,
+            stdin_events: inputs.stdin_events,
+            workspace_guard: inputs.workspace_guard,
         }
     }
 
@@ -1925,7 +1931,7 @@ fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         name: name.to_string(),
         class_name: matlab_class_name(value),
         dtype,
-        shape: value_shape(value).unwrap_or_else(|| vec![]),
+        shape: value_shape(value).unwrap_or_default(),
         is_gpu: matches!(value, Value::GpuTensor(_)),
         size_bytes: approximate_size_bytes(value),
         preview,

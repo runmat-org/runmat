@@ -100,14 +100,15 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
             .with(trace_layer.clone())
     };
 
+    let subscriber = build_subscriber();
+
     #[cfg(feature = "otlp")]
-    let subscriber = if opts.enable_otlp {
-        subscriber.with(otel_layer())
-    } else {
-        subscriber
+    let subscriber = {
+        let otel_layer = opts.enable_otlp.then(otel_layer);
+        subscriber.with(otel_layer)
     };
 
-    let guard = match tracing::subscriber::set_global_default(build_subscriber()) {
+    let guard = match tracing::subscriber::set_global_default(subscriber) {
         Ok(()) => None,
         Err(_) => Some(tracing::subscriber::set_default(build_subscriber())),
     };
@@ -284,10 +285,12 @@ fn current_span_id() -> Option<String> {
 fn current_trace_span_ids() -> (Option<String>, Option<String>) {
     #[cfg(feature = "otlp")]
     {
+        use opentelemetry::trace::TraceContextExt;
         use tracing_opentelemetry::OpenTelemetrySpanExt;
         let span = tracing::Span::current();
         let ctx = span.context();
-        let sc = ctx.span().span_context();
+        let span = ctx.span();
+        let sc = span.span_context();
         if sc.is_valid() {
             return (
                 Some(sc.trace_id().to_string()),
@@ -361,10 +364,14 @@ impl tracing::field::Visit for JsonVisitor {
 }
 
 #[cfg(feature = "otlp")]
-fn otel_layer() -> impl Layer<tracing_subscriber::Registry> {
-    use opentelemetry::sdk::Resource;
+fn otel_layer<S>() -> tracing_opentelemetry::OpenTelemetryLayer<S, opentelemetry_sdk::trace::Tracer>
+where
+    S: tracing::Subscriber,
+    for<'span> S: tracing_subscriber::registry::LookupSpan<'span>,
+{
     use opentelemetry::KeyValue;
-    use tracing_opentelemetry::OpenTelemetryLayer;
+    use opentelemetry_otlp::WithExportConfig;
+    use opentelemetry_sdk::{runtime::Tokio, trace, Resource};
 
     let endpoint = std::env::var("RUNMAT_OTEL_ENDPOINT").unwrap_or_default();
     let otel_exporter = opentelemetry_otlp::new_exporter()
@@ -374,13 +381,13 @@ fn otel_layer() -> impl Layer<tracing_subscriber::Registry> {
         .tracing()
         .with_exporter(otel_exporter)
         .with_trace_config(
-            opentelemetry::sdk::trace::config()
+            trace::config()
                 .with_resource(Resource::new(vec![KeyValue::new("service.name", "runmat")])),
         )
-        .install_batch(opentelemetry::runtime::Tokio)
+        .install_batch(Tokio)
         .expect("failed to install OTEL pipeline");
 
-    OpenTelemetryLayer::new(otel_tracer)
+    tracing_opentelemetry::OpenTelemetryLayer::new(otel_tracer)
 }
 
 #[cfg(test)]

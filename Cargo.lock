@@ -1353,7 +1353,7 @@ dependencies = [
  "portable-pty",
  "rand 0.9.2",
  "regex-lite",
- "reqwest",
+ "reqwest 0.12.23",
  "seccompiler",
  "serde",
  "serde_json",
@@ -2340,6 +2340,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
+name = "endian-type"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
+
+[[package]]
 name = "enum-primitive-derive"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2544,6 +2550,17 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "fd-lock"
+version = "4.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
+dependencies = [
+ "cfg-if",
+ "rustix 1.0.8",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "fdeflate"
@@ -3395,7 +3412,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "socket2 0.6.0",
- "system-configuration",
+ "system-configuration 0.6.1",
  "tokio",
  "tower-service",
  "tracing",
@@ -4473,6 +4490,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nibble_vec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "nix"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4925,18 +4951,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry"
-version = "0.22.0"
+name = "opentelemetry-http"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900d57987be3f2aeb70d385fff9b27fb74c5723cc9a52d904d4f9c807a0667bf"
+checksum = "7f51189ce8be654f9b5f7e70e49967ed894e84a06fc35c6c042e64ac1fc5399e"
 dependencies = [
- "futures-core",
- "futures-sink",
- "js-sys",
- "once_cell",
- "pin-project-lite",
- "thiserror 1.0.69",
- "urlencoding",
+ "async-trait",
+ "bytes",
+ "http 0.2.12",
+ "opentelemetry",
+ "reqwest 0.11.27",
 ]
 
 [[package]]
@@ -4948,11 +4972,13 @@ dependencies = [
  "async-trait",
  "futures-core",
  "http 0.2.12",
- "opentelemetry 0.21.0",
+ "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions",
- "opentelemetry_sdk 0.21.2",
+ "opentelemetry_sdk",
  "prost",
+ "reqwest 0.11.27",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
@@ -4964,8 +4990,8 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2e155ce5cc812ea3d1dffbd1539aed653de4bf4882d60e6e04dcf0901d674e1"
 dependencies = [
- "opentelemetry 0.21.0",
- "opentelemetry_sdk 0.21.2",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "prost",
  "tonic",
 ]
@@ -4976,7 +5002,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5774f1ef1f982ef2a447f6ee04ec383981a3ab99c8e77a1a7b30182e65bbc84"
 dependencies = [
- "opentelemetry 0.21.0",
+ "opentelemetry",
 ]
 
 [[package]]
@@ -4990,32 +5016,15 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "once_cell",
- "opentelemetry 0.21.0",
- "ordered-float",
- "percent-encoding",
- "rand 0.8.5",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "opentelemetry_sdk"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e90c7113be649e31e9a0f8b5ee24ed7a16923b322c3c5ab6367469c049d6b7e"
-dependencies = [
- "async-trait",
- "crossbeam-channel",
- "futures-channel",
- "futures-executor",
- "futures-util",
  "glob",
  "once_cell",
- "opentelemetry 0.22.0",
+ "opentelemetry",
  "ordered-float",
  "percent-encoding",
  "rand 0.8.5",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -5316,7 +5325,7 @@ dependencies = [
  "shared_library",
  "shell-words",
  "winapi",
- "winreg",
+ "winreg 0.10.1",
 ]
 
 [[package]]
@@ -5542,6 +5551,16 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "radix_trie"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
+dependencies = [
+ "endian-type",
+ "nibble_vec",
+]
 
 [[package]]
 name = "rand"
@@ -5795,6 +5814,42 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "reqwest"
+version = "0.11.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd67538700a17451e7cba03ac727fb961abb7607553461627b97de0b89cf4a62"
+dependencies = [
+ "base64 0.21.7",
+ "bytes",
+ "encoding_rs",
+ "futures-core",
+ "futures-util",
+ "h2 0.3.27",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "hyper 0.14.32",
+ "ipnet",
+ "js-sys",
+ "log",
+ "mime",
+ "once_cell",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper 0.1.2",
+ "system-configuration 0.5.1",
+ "tokio",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "winreg 0.50.0",
+]
+
+[[package]]
+name = "reqwest"
 version = "0.12.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d429f34c8092b2d42c7c93cec323bb4adeb7c67698f70839adec842ec10c7ceb"
@@ -5887,7 +5942,7 @@ checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
 name = "runmat"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "atty",
@@ -5913,6 +5968,8 @@ dependencies = [
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-time",
+ "runmat-turbine",
+ "rustyline",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5926,7 +5983,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5956,7 +6013,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate-api"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -5966,7 +6023,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-builtins"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "indexmap 1.9.3",
  "inventory",
@@ -5980,7 +6037,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-config"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -5998,7 +6055,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "log",
@@ -6021,13 +6078,13 @@ dependencies = [
 
 [[package]]
 name = "runmat-filesystem"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "axum 0.7.9",
  "crossbeam-utils",
  "js-sys",
  "once_cell",
- "reqwest",
+ "reqwest 0.12.23",
  "serde",
  "serde_json",
  "tempfile",
@@ -6039,7 +6096,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "criterion",
  "log",
@@ -6062,11 +6119,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc-api"
-version = "0.2.7"
+version = "0.2.8"
 
 [[package]]
 name = "runmat-hir"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "runmat-builtins",
  "runmat-lexer",
@@ -6076,7 +6133,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-ignition"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "log",
@@ -6096,7 +6153,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-kernel"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "chrono",
  "env_logger 0.11.8",
@@ -6125,7 +6182,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lexer"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "logos",
 ]
@@ -6137,8 +6194,9 @@ dependencies = [
  "chrono",
  "js-sys",
  "once_cell",
- "opentelemetry 0.21.0",
+ "opentelemetry",
  "opentelemetry-otlp",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "tracing",
@@ -6149,7 +6207,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lsp"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "env_logger 0.11.8",
@@ -6174,7 +6232,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-macros"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "inventory",
  "proc-macro2",
@@ -6186,7 +6244,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-parser"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "logos",
  "runmat-lexer",
@@ -6195,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-plot"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "atty",
  "base64 0.22.1",
@@ -6237,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "accelerate-src",
  "axum 0.7.9",
@@ -6263,7 +6321,7 @@ dependencies = [
  "openblas-src",
  "pollster",
  "regex",
- "reqwest",
+ "reqwest 0.12.23",
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
@@ -6289,7 +6347,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime-integration-tests"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "inventory",
  "runmat-accelerate",
@@ -6301,7 +6359,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-snapshot"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "bincode",
@@ -6338,7 +6396,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-time"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "instant",
  "js-sys",
@@ -6346,7 +6404,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-turbine"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -6371,7 +6429,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-wasm"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -6400,7 +6458,7 @@ dependencies = [
 
 [[package]]
 name = "runmatfunc"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -6423,6 +6481,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-builtins",
  "runmat-runtime",
+ "runmat-time",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6566,6 +6625,28 @@ name = "rustversion"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+
+[[package]]
+name = "rustyline"
+version = "14.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7803e8936da37efd9b6d4478277f4b2b9bb5cdb37a113e8d63222e58da647e63"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "clipboard-win",
+ "fd-lock",
+ "home",
+ "libc",
+ "log",
+ "memchr",
+ "nix 0.28.0",
+ "radix_trie",
+ "unicode-segmentation",
+ "unicode-width 0.1.14",
+ "utf8parse",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "ruzstd"
@@ -7259,13 +7340,34 @@ dependencies = [
 
 [[package]]
 name = "system-configuration"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
+dependencies = [
+ "bitflags 1.3.2",
+ "core-foundation",
+ "system-configuration-sys 0.5.0",
+]
+
+[[package]]
+name = "system-configuration"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
 dependencies = [
  "bitflags 2.9.1",
  "core-foundation",
- "system-configuration-sys",
+ "system-configuration-sys 0.6.0",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]
@@ -7869,20 +7971,20 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.23.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9be14ba1bbe4ab79e9229f7f89fab8d120b865859f10527f31c033e599d2284"
+checksum = "c67ac25c5407e7b961fafc6f7e9aa5958fd297aada2d20fa2ae1737357e55596"
 dependencies = [
  "js-sys",
  "once_cell",
- "opentelemetry 0.22.0",
- "opentelemetry_sdk 0.22.1",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "smallvec",
  "tracing",
  "tracing-core",
  "tracing-log 0.2.0",
  "tracing-subscriber",
- "web-time 1.1.0",
+ "web-time 0.2.4",
 ]
 
 [[package]]
@@ -9271,6 +9373,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "winreg"
+version = "0.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

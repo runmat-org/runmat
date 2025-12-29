@@ -376,7 +376,7 @@ impl ImageExporter {
 
         // Read back the color texture to CPU via a staging buffer
         let bytes_per_pixel = 4u32;
-        let padded_bytes_per_row = ((self.settings.width * bytes_per_pixel + 255) / 256) * 256;
+        let padded_bytes_per_row = (self.settings.width * bytes_per_pixel).div_ceil(256) * 256;
         let output_buffer_size =
             (padded_bytes_per_row * self.settings.height) as wgpu::BufferAddress;
         let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {

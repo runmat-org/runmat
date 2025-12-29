@@ -354,7 +354,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> 
         .map_err(|_| "fgets: failed to lock file handle (poisoned mutex)".to_string())?;
 
     let limit = parse_nchar(rest)?;
-    let read = read_line(&mut *file, limit).map_err(|err| format!("fgets: {err}"))?;
+    let read = read_line(&mut file, limit).map_err(|err| format!("fgets: {err}"))?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }

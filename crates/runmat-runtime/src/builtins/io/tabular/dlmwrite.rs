@@ -629,7 +629,7 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
 
     let (existing_nonempty, ends_with_newline) = if options.append {
         match vfs::metadata(path) {
-            Ok(meta) if meta.len() > 0 => {
+            Ok(meta) if !meta.is_empty() => {
                 let ends = file_ends_with_newline(path).map_err(|e| {
                     format!(
                         "dlmwrite: failed to inspect existing file \"{}\" ({e})",
@@ -1065,17 +1065,17 @@ impl ParsedFormat {
                 if self.left_adjust {
                     let mut result = prefix;
                     result.push_str(&body);
-                    result.extend(std::iter::repeat(' ').take(pad));
+                    result.extend(std::iter::repeat_n(' ', pad));
                     return result;
                 } else if self.zero_pad {
                     let mut result = String::with_capacity(width);
                     result.push_str(&prefix);
-                    result.extend(std::iter::repeat('0').take(pad));
+                    result.extend(std::iter::repeat_n('0', pad));
                     result.push_str(&body);
                     return result;
                 } else {
                     let mut result = String::with_capacity(width);
-                    result.extend(std::iter::repeat(' ').take(pad));
+                    result.extend(std::iter::repeat_n(' ', pad));
                     result.push_str(&prefix);
                     result.push_str(&body);
                     return result;
@@ -1123,7 +1123,7 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     if abs_val == 0.0 {
         return if alternate {
             let mut s = "0.".to_string();
-            s.extend(std::iter::repeat('0').take(effective_precision - 1));
+            s.extend(std::iter::repeat_n('0', effective_precision - 1));
             s
         } else {
             "0".to_string()

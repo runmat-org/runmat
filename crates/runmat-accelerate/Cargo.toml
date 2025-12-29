@@ -1,6 +1,6 @@
 [package]
 name = "runmat-accelerate"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pluggable GPU acceleration layer for RunMat (CUDA, ROCm, Metal, Vulkan/Spir-V)"
@@ -19,7 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false }
+runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-time = { workspace = true }

@@ -193,7 +193,7 @@ impl BarChart {
         if self
             .values
             .as_ref()
-            .map_or(false, |v| offsets.len() == v.len())
+            .is_some_and(|v| offsets.len() == v.len())
             || offsets.len() == self.value_count
         {
             self.stack_offsets = Some(offsets);
@@ -291,11 +291,7 @@ impl BarChart {
                 }
             }
             None => {
-                if self.gpu_vertices.is_some() {
-                    self.outline_color = None;
-                } else {
-                    self.outline_color = None;
-                }
+                self.outline_color = None;
             }
         }
     }

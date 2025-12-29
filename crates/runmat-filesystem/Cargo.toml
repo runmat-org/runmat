@@ -1,6 +1,6 @@
 [package]
 name = "runmat-filesystem"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "Swappable filesystem abstraction for RunMat hosts (native, wasm, remote)."
 license-file = "../LICENSE.md"

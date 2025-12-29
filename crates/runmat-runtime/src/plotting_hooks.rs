@@ -13,10 +13,10 @@ pub fn reset_recent_figures() {
 pub fn take_recent_figures() -> Vec<u32> {
     #[cfg(feature = "plot-core")]
     {
-        return crate::builtins::plotting::take_recent_figures()
+        crate::builtins::plotting::take_recent_figures()
             .into_iter()
             .map(|handle| handle.as_u32())
-            .collect();
+            .collect()
     }
     #[cfg(not(feature = "plot-core"))]
     {

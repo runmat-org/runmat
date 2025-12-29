@@ -466,7 +466,7 @@ fn find_symbol_range(
             start: tok.start,
             end: tok.end,
         })
-        .find(|range| scope.map_or(true, |scope| scope.contains(range.start)))
+        .find(|range| scope.is_none_or(|scope| scope.contains(range.start)))
 }
 
 #[derive(Clone)]
@@ -546,7 +546,7 @@ impl SemanticModel {
 
 fn completion_from_semantic(semantic: &SemanticModel) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    for (_, var) in &semantic.globals {
+    for var in semantic.globals.values() {
         items.push(variable_completion(var));
     }
     for func in &semantic.functions {
@@ -637,48 +637,6 @@ fn format_variable_hover(name: &str, symbol: &VariableSymbol) -> String {
     buf
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hover_returns_builtin_docs() {
-        let text = "plot(1, 2);";
-        let analysis = analyze_document(text);
-        if let Some(err) = &analysis.parse_error {
-            panic!(
-                "unexpected parse error at {}: {}",
-                err.position, err.message
-            );
-        }
-        if let Some(err) = &analysis.lowering_error {
-            panic!("unexpected lowering error: {err}");
-        }
-        assert!(
-            !analysis.tokens.is_empty(),
-            "expected tokenize_detailed to produce tokens"
-        );
-        let builtin_names: Vec<&str> = runmat_builtins::builtin_functions()
-            .iter()
-            .map(|f| f.name)
-            .collect();
-        assert!(
-            builtin_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("plot")),
-            "plot builtin should be registered for hover tests (registered: {:?})",
-            builtin_names
-        );
-        let position = lsp_types::Position::new(0, 0);
-        let offset = position_to_offset(text, &position);
-        let token = token_at_offset(&analysis.tokens, offset)
-            .unwrap_or_else(|| panic!("no token found at offset {offset}"));
-        assert_eq!(token.lexeme, "plot", "unexpected token at hover location");
-        let hover = hover_at(text, &analysis, &position);
-        assert!(hover.is_some(), "expected hover for builtin function");
-    }
-}
-
 fn build_semantic_model(
     lowering: LoweringResult,
     tokens: &[SpannedToken],
@@ -704,7 +662,7 @@ fn build_semantic_model(
         );
     }
 
-    for (_name, stmt) in &lowering.functions {
+    for stmt in lowering.functions.values() {
         let HirStmt::Function {
             name: func_name,
             params,
@@ -726,7 +684,7 @@ fn build_semantic_model(
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
-                .get(&param)
+                .get(param)
                 .cloned()
                 .unwrap_or_else(|| format!("v{}", param.0));
             variables.insert(
@@ -746,7 +704,7 @@ fn build_semantic_model(
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
-                .get(&out)
+                .get(out)
                 .cloned()
                 .unwrap_or_else(|| format!("v{}", out.0));
             variables.insert(
@@ -807,5 +765,47 @@ fn build_semantic_model(
         functions,
         function_lookup,
         status_message: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hover_returns_builtin_docs() {
+        let text = "plot(1, 2);";
+        let analysis = analyze_document(text);
+        if let Some(err) = &analysis.parse_error {
+            panic!(
+                "unexpected parse error at {}: {}",
+                err.position, err.message
+            );
+        }
+        if let Some(err) = &analysis.lowering_error {
+            panic!("unexpected lowering error: {err}");
+        }
+        assert!(
+            !analysis.tokens.is_empty(),
+            "expected tokenize_detailed to produce tokens"
+        );
+        let builtin_names: Vec<&str> = runmat_builtins::builtin_functions()
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        assert!(
+            builtin_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("plot")),
+            "plot builtin should be registered for hover tests (registered: {:?})",
+            builtin_names
+        );
+        let position = lsp_types::Position::new(0, 0);
+        let offset = position_to_offset(text, &position);
+        let token = token_at_offset(&analysis.tokens, offset)
+            .unwrap_or_else(|| panic!("no token found at offset {offset}"));
+        assert_eq!(token.lexeme, "plot", "unexpected token at hover location");
+        let hover = hover_at(text, &analysis, &position);
+        assert!(hover.is_some(), "expected hover for builtin function");
     }
 }

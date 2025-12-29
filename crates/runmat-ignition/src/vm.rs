@@ -1160,7 +1160,7 @@ thread_local! {
 #[derive(Debug)]
 pub enum InterpreterOutcome {
     Completed(Vec<Value>),
-    Pending(PendingExecution),
+    Pending(Box<PendingExecution>),
 }
 
 pub struct PendingExecution {
@@ -1315,7 +1315,7 @@ fn run_interpreter(
                     )
                 })?;
             sync_initial_vars(initial_vars, &vars);
-            return Ok(InterpreterOutcome::Pending(PendingExecution {
+            return Ok(InterpreterOutcome::Pending(Box::new(PendingExecution {
                 state: InterpreterState {
                     bytecode,
                     stack,
@@ -1333,7 +1333,7 @@ fn run_interpreter(
                     fusion_plan,
                 },
                 interaction: pending,
-            }));
+            })));
         }};
     }
     let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
@@ -1672,6 +1672,17 @@ fn run_interpreter(
                 stack.push(Value::Num(c));
                 if debug_stack {
                     debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
+                }
+            }
+            Instr::LoadComplex(re, im) => {
+                stack.push(Value::Complex(re, im));
+                if debug_stack {
+                    eprintln!(
+                        "  -> LoadComplex pushed ({}, {}), new_len={}",
+                        re,
+                        im,
+                        stack.len()
+                    );
                 }
             }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
@@ -2142,7 +2153,17 @@ fn run_interpreter(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
-                let result = runmat_runtime::transpose(promoted)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("transpose", &args)?;
+                stack.push(result);
+            }
+            Instr::ConjugateTranspose => {
+                let value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("ctranspose", &args)?;
                 stack.push(result);
             }
             Instr::ElemMul => {
@@ -4124,7 +4145,6 @@ fn run_interpreter(
                                     }
                                     for vi in 0..need {
                                         stack.push((*ca.data[vi]).clone());
-                                        pushed += 1;
                                     }
                                 }
                             }

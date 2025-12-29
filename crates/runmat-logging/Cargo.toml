@@ -17,18 +17,28 @@ js-sys = "0.3"
 
 [features]
 default = []
-otlp = ["opentelemetry", "opentelemetry-otlp", "tracing-opentelemetry"]
+otlp = [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "tracing-opentelemetry",
+]
 
 [dependencies.opentelemetry]
 version = "0.21"
 optional = true
 features = ["trace"]
 
+[dependencies.opentelemetry_sdk]
+version = "0.21"
+optional = true
+features = ["rt-tokio"]
+
 [dependencies.opentelemetry-otlp]
 version = "0.14"
 optional = true
+features = ["http-proto", "reqwest-client"]
 
 [dependencies.tracing-opentelemetry]
-version = "0.23"
+version = "0.22"
 optional = true
-

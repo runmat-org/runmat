@@ -1,6 +1,6 @@
 [package]
 name = "runmat-lsp"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 
 [lib]
@@ -25,9 +25,9 @@ runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
-runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
-runmat-config = { version = "=0.2.7", path = "../runmat-config" }
-runmat-runtime = { version = "=0.2.7", path = "../runmat-runtime", default-features = false }
+runmat-core = { workspace = true }
+runmat-config = { workspace = true }
+runmat-runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, optional = true }
@@ -37,7 +37,7 @@ wasm-bindgen = { version = "0.2", optional = true, features = ["serde-serialize"
 lsp-types = "0.94"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
+runmat-core = { workspace = true }
 js-sys = "0.3"
 serde-wasm-bindgen = "0.6"
-runmat-runtime = { version = "=0.2.7", path = "../runmat-runtime", default-features = false, features = ["plot-web"] }
+runmat-runtime = { workspace = true, features = ["plot-web"] }

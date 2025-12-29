@@ -302,7 +302,7 @@ pub fn evaluate(
 
     let elements = flatten_elements(&data_host)?;
     let count = write_elements(
-        &mut *file,
+        &mut file,
         &elements,
         precision_spec,
         skip_bytes,

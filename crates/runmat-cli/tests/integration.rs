@@ -284,20 +284,12 @@ fn test_version_information() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let required_components = [
-        "runmat-lexer",
-        "runmat-parser",
-        "runmat-hir",
-        "runmat-ignition",
-        "runmat-turbine",
-        "runmat-gc",
-        "runmat-runtime",
-    ];
+    let required_fields = ["RunMat v", "Built with Rust", "Target:", "Profile:"];
 
-    for component in &required_components {
+    for field in &required_fields {
         assert!(
-            stdout.contains(component),
-            "Version info missing component: {component}"
+            stdout.contains(field),
+            "Version info missing field: {field}"
         );
     }
 }
