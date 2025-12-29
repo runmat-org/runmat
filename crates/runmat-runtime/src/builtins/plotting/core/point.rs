@@ -38,7 +38,7 @@ impl PointArgs {
     pub fn parse(rest: Vec<Value>, opts: LineStyleParseOptions) -> Result<Self, String> {
         let mut queue: VecDeque<Value> = VecDeque::from(rest);
         let mut size = PointSizeArg::Default;
-        if queue.front().map_or(false, is_numeric_candidate) {
+        if queue.front().is_some_and(is_numeric_candidate) {
             let value = queue.pop_front().expect("queue peeked");
             size = PointSizeArg::from_value(value, opts.builtin_name)?;
         }
@@ -165,11 +165,11 @@ fn is_color_positional_candidate(value: &Value) -> bool {
 }
 
 fn is_color_literal(token: &str) -> bool {
-    match token.trim().to_ascii_lowercase().as_str() {
+    matches!(
+        token.trim().to_ascii_lowercase().as_str(),
         "r" | "red" | "g" | "green" | "b" | "blue" | "c" | "cyan" | "m" | "magenta" | "y"
-        | "yellow" | "k" | "black" | "w" | "white" | "auto" => true,
-        _ => false,
-    }
+            | "yellow" | "k" | "black" | "w" | "white" | "auto"
+    )
 }
 
 fn is_filled_token(value: &Value) -> bool {
@@ -349,7 +349,7 @@ pub fn map_scalar_values_to_colors(values: &[f64], colormap: ColorMap) -> (Vec<V
         lo = 0.0;
         hi = 1.0;
     }
-    let denom = (hi - lo).max(std::f64::EPSILON);
+    let denom = (hi - lo).max(f64::EPSILON);
     let colors = values
         .iter()
         .map(|&value| {

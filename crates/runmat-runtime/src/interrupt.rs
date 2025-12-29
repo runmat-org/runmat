@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 thread_local! {
-    static INTERRUPT_HANDLE: RefCell<Option<Arc<AtomicBool>>> = RefCell::new(None);
+    static INTERRUPT_HANDLE: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 
 pub struct InterruptGuard {

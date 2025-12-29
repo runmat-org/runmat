@@ -238,7 +238,7 @@ pub fn pack_surface_vertices(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (vertex_count + workgroup_size - 1) / workgroup_size;
+        let workgroups = vertex_count.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));

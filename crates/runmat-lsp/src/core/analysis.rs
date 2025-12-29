@@ -466,7 +466,7 @@ fn find_symbol_range(
             start: tok.start,
             end: tok.end,
         })
-        .find(|range| scope.map_or(true, |scope| scope.contains(range.start)))
+        .find(|range| scope.is_none_or(|scope| scope.contains(range.start)))
 }
 
 #[derive(Clone)]
@@ -546,7 +546,7 @@ impl SemanticModel {
 
 fn completion_from_semantic(semantic: &SemanticModel) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    for (_, var) in &semantic.globals {
+    for var in semantic.globals.values() {
         items.push(variable_completion(var));
     }
     for func in &semantic.functions {
@@ -704,7 +704,7 @@ fn build_semantic_model(
         );
     }
 
-    for (_name, stmt) in &lowering.functions {
+    for stmt in lowering.functions.values() {
         let HirStmt::Function {
             name: func_name,
             params,
@@ -726,7 +726,7 @@ fn build_semantic_model(
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
-                .get(&param)
+                .get(param)
                 .cloned()
                 .unwrap_or_else(|| format!("v{}", param.0));
             variables.insert(
@@ -746,7 +746,7 @@ fn build_semantic_model(
                 .unwrap_or(Type::Unknown);
             let name = lowering
                 .var_names
-                .get(&out)
+                .get(out)
                 .cloned()
                 .unwrap_or_else(|| format!("v{}", out.0));
             variables.insert(

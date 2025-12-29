@@ -2,15 +2,13 @@ use lsp_types::Position;
 
 pub fn position_to_offset(text: &str, position: &Position) -> usize {
     let mut offset = 0usize;
-    let mut line = 0u32;
-    for l in text.split_inclusive('\n') {
-        if line == position.line {
+    for (line, l) in text.split_inclusive('\n').enumerate() {
+        if line as u32 == position.line {
             let col = position.character as usize;
             offset += col.min(l.len());
             return offset;
         }
         offset += l.len();
-        line += 1;
     }
     offset
 }

@@ -263,7 +263,7 @@ impl SnapshotHeader {
         // Estimate based on data size and compression
         let base_time = Duration::from_millis(10); // Base overhead
         let data_time = Duration::from_nanos(
-            (self.data_info.compressed_size as u64 * 10) / 1024, // ~10ns per KB
+            (self.data_info.compressed_size * 10) / 1024, // ~10ns per KB
         );
 
         match self.data_info.compression.algorithm {

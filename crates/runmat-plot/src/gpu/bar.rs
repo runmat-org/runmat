@@ -192,7 +192,7 @@ pub fn pack_vertices_from_values(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (inputs.row_count + workgroup_size - 1) / workgroup_size;
+        let workgroups = inputs.row_count.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));

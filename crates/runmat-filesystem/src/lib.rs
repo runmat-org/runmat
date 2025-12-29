@@ -147,6 +147,10 @@ impl FsMetadata {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn modified(&self) -> Option<SystemTime> {
         self.modified
     }
@@ -388,11 +392,11 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
 fn default_provider() -> Arc<dyn FsProvider> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        Arc::new(NativeFsProvider::default())
+        Arc::new(NativeFsProvider)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        Arc::new(PlaceholderFsProvider::default())
+        Arc::new(PlaceholderFsProvider)
     }
 }
 

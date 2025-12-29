@@ -155,7 +155,7 @@ fn ceil_div(len: u32, stride: u32) -> u32 {
     if stride == 0 {
         return len;
     }
-    (len + stride - 1) / stride
+    len.div_ceil(stride)
 }
 
 /// Compute the level-of-detail stride for scatter3 given the number of points
@@ -168,7 +168,7 @@ pub(crate) fn scatter3_lod_stride(point_count: u32, extent_hint: f32) -> u32 {
     if point_count <= adjusted {
         1
     } else {
-        (point_count + adjusted - 1) / adjusted
+        point_count.div_ceil(adjusted)
     }
 }
 

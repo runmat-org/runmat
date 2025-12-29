@@ -42,9 +42,9 @@ type InteractionHandler =
 
 static HANDLER: OnceCell<RwLock<Option<Arc<InteractionHandler>>>> = OnceCell::new();
 thread_local! {
-    static LAST_PENDING: RefCell<Option<PendingInteraction>> = RefCell::new(None);
+    static LAST_PENDING: RefCell<Option<PendingInteraction>> = const { RefCell::new(None) };
     static QUEUED_RESPONSE: RefCell<Option<Result<InteractionResponse, String>>> =
-        RefCell::new(None);
+        const { RefCell::new(None) };
 }
 
 #[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]

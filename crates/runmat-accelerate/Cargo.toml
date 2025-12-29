@@ -19,7 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-runtime = { workspace = true, default-features = false }
+runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-time = { workspace = true }

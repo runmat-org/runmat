@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 libm = "0.2"
 runmat-ignition = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-runtime = { workspace = true }
+runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-accelerate = { workspace = true, optional = true }

@@ -18,7 +18,7 @@ blas-lapack = ["runmat-runtime/blas-lapack"]
 
 [dependencies]
 runmat-builtins = { workspace = true }
-runmat-runtime = { workspace = true, default-features = false }
+runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-parser = { workspace = true }

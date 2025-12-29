@@ -312,7 +312,6 @@ impl RemoteFsProvider {
                 let error = error.clone();
                 let inner = inner.clone();
                 let path = path.clone();
-                let data = data;
                 scope.spawn(move |_| loop {
                     let task_opt = {
                         let mut guard = queue.lock().unwrap();
@@ -358,10 +357,7 @@ impl FsProvider for RemoteFsProvider {
         if flags.read {
             let meta = self.inner.fetch_metadata(&normalized)?;
             if meta.file_type != "file" {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    "remote path is not a file",
-                ));
+                return Err(io::Error::other("remote path is not a file"));
             }
             data = self.download_entire_file(&normalized, meta.len)?;
         }
@@ -386,10 +382,7 @@ impl FsProvider for RemoteFsProvider {
         let normalized = self.normalize(path);
         let meta = self.inner.fetch_metadata(&normalized)?;
         if meta.file_type != "file" {
-            return Err(io::Error::new(
-                ErrorKind::Other,
-                "remote path is not a file",
-            ));
+            return Err(io::Error::other("remote path is not a file"));
         }
         self.download_entire_file(&normalized, meta.len)
     }
@@ -651,7 +644,7 @@ struct CanonicalizeResponse {
 }
 
 fn map_http_err(err: reqwest::Error) -> io::Error {
-    io::Error::new(ErrorKind::Other, err)
+    io::Error::other(err)
 }
 
 fn map_url_err(err: url::ParseError) -> io::Error {

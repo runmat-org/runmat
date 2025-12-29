@@ -61,15 +61,15 @@ runmat-lexer = { version = "=0.2.8", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.2.8", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.2.8", path = "crates/runmat-hir" }
 runmat-ignition = { version = "=0.2.8", path = "crates/runmat-ignition" }
-runmat-core = { version = "=0.2.8", path = "crates/runmat-core" }
-runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot" }
+runmat-core = { version = "=0.2.8", path = "crates/runmat-core", default-features = false }
+runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.2.8", path = "crates/runmat-macros" }
 runmat-builtins = { version = "=0.2.8", path = "crates/runmat-builtins" }
-runmat-runtime = { version = "=0.2.8", path = "crates/runmat-runtime" }
+runmat-runtime = { version = "=0.2.8", path = "crates/runmat-runtime", default-features = false }
 runmat-kernel = { version = "=0.2.8", path = "crates/runmat-kernel" }
 runmat-turbine = { version = "=0.2.8", path = "crates/runmat-turbine" }
 runmat-gc = { version = "=0.2.8", path = "crates/runmat-gc" }
-runmat-snapshot = { version = "=0.2.8", path = "crates/runmat-snapshot" }
+runmat-snapshot = { version = "=0.2.8", path = "crates/runmat-snapshot", default-features = false }
 runmat-filesystem = { version = "=0.2.8", path = "crates/runmat-filesystem" }
 runmat-config = { version = "=0.2.8", path = "crates/runmat-config" }
 runmat-accelerate = { version = "=0.2.8", path = "crates/runmat-accelerate" }

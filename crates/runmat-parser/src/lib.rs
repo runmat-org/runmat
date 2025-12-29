@@ -1,17 +1,12 @@
 use runmat_lexer::Token;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatMode {
+    #[default]
     Matlab,
     Strict,
-}
-
-impl Default for CompatMode {
-    fn default() -> Self {
-        CompatMode::Matlab
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -559,7 +554,7 @@ impl Parser {
                         let name = self.next().unwrap().lexeme;
                         let mut args = self.parse_command_args();
                         if let Some(command) = self.lookup_command(&name) {
-                            self.normalize_command_args(command, &mut args)?;
+                            self.normalize_command_args(command, &mut args[..])?;
                         }
                         Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
                     } else {
@@ -723,7 +718,7 @@ impl Parser {
     fn normalize_command_args(
         &self,
         command: &CommandVerb,
-        args: &mut Vec<Expr>,
+        args: &mut [Expr],
     ) -> Result<(), ParseError> {
         match command.arg_kind {
             CommandArgKind::Keyword { allowed, optional } => {

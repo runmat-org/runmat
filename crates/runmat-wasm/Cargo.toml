@@ -17,7 +17,7 @@ jit = ["runmat-core/jit"]
 gpu = ["runmat-accelerate/wgpu"]
 
 [dependencies]
-runmat-core = { workspace = true, default-features = false }
+runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
@@ -40,5 +40,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-runmat-runtime = { workspace = true, default-features = false, features = ["plot-web"] }
-runmat-plot = { workspace = true, default-features = false, features = ["web"] }
+runmat-runtime = { workspace = true, features = ["plot-web"] }
+runmat-plot = { workspace = true, features = ["web"] }

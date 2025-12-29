@@ -24,18 +24,13 @@ use super::surf::build_color_lut;
 
 const DEFAULT_LEVELS: usize = 10;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLevelSpec {
+    #[default]
     Auto,
     Count(usize),
     Values(Vec<f64>),
     Step(f32),
-}
-
-impl Default for ContourLevelSpec {
-    fn default() -> Self {
-        ContourLevelSpec::Auto
-    }
 }
 
 impl ContourLevelSpec {
@@ -91,17 +86,12 @@ impl ContourLevelSpec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLineColor {
+    #[default]
     Auto,
     Color(Vec4),
     None,
-}
-
-impl Default for ContourLineColor {
-    fn default() -> Self {
-        ContourLineColor::Auto
-    }
 }
 
 #[derive(Clone)]
@@ -463,7 +453,7 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
     if options.is_empty() {
         return Ok(());
     }
-    if options.len() % 2 != 0 {
+    if !options.len().is_multiple_of(2) {
         return Err(format!(
             "{}: name-value arguments must come in pairs",
             args.name

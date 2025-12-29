@@ -116,7 +116,7 @@ impl FigureState {
     fn cycle_for_axes_mut(&mut self, axes_index: usize) -> &mut LineStyleCycle {
         self.line_style_cycles
             .entry(axes_index)
-            .or_insert_with(LineStyleCycle::default)
+            .or_default()
     }
 
     fn reset_cycle(&mut self, axes_index: usize) {
@@ -323,7 +323,7 @@ static FIGURE_OBSERVERS: OnceCell<FigureObserverRegistry> = OnceCell::new();
 
 thread_local! {
     static RECENT_FIGURES: RefCell<HashSet<FigureHandle>> = RefCell::new(HashSet::new());
-    static ACTIVE_AXES_CONTEXT: RefCell<Option<ActiveAxesContext>> = RefCell::new(None);
+    static ACTIVE_AXES_CONTEXT: RefCell<Option<ActiveAxesContext>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -376,7 +376,7 @@ fn registry() -> PlotRegistryGuard<'static> {
     })
 }
 
-fn get_state_mut<'a>(registry: &'a mut PlotRegistry, handle: FigureHandle) -> &'a mut FigureState {
+fn get_state_mut(registry: &mut PlotRegistry, handle: FigureHandle) -> &mut FigureState {
     registry
         .figures
         .entry(handle)

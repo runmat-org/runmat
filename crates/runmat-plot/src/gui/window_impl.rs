@@ -314,35 +314,34 @@ impl<'window> PlotWindow<'window> {
                 }
 
                 // Exit on Escape key for quick UX
-                winit::event::Event::WindowEvent { window_id, event }
-                    if window_id == window.id() =>
-                {
-                    if let winit::event::WindowEvent::KeyboardInput {
-                        event: key_event, ..
-                    } = event
-                    {
-                        if key_event.state == winit::event::ElementState::Pressed {
-                            if let winit::keyboard::PhysicalKey::Code(
-                                winit::keyboard::KeyCode::Escape,
-                            ) = key_event.physical_key
-                            {
+                winit::event::Event::WindowEvent {
+                    window_id,
+                    event:
+                        winit::event::WindowEvent::KeyboardInput {
+                            event: key_event, ..
+                        },
+                } if window_id == window.id() => {
+                    if key_event.state == winit::event::ElementState::Pressed {
+                        if let winit::keyboard::PhysicalKey::Code(
+                            winit::keyboard::KeyCode::Escape,
+                        ) = key_event.physical_key
+                        {
+                            target.exit();
+                        }
+                        // macOS-like Command+Q (and Ctrl+Q on other platforms) to quit
+                        if let Some(text) = key_event.text {
+                            if text == "\u{11}" { /* ignore control chars */ }
+                        }
+                        // Handle Q with Command or Control modifier
+                        if let winit::keyboard::PhysicalKey::Code(
+                            winit::keyboard::KeyCode::KeyQ,
+                        ) = key_event.physical_key
+                        {
+                            let mods = unsafe {
+                                MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty)
+                            };
+                            if mods.super_key() || mods.control_key() {
                                 target.exit();
-                            }
-                            // macOS-like Command+Q (and Ctrl+Q on other platforms) to quit
-                            if let Some(text) = key_event.text {
-                                if text == "\u{11}" { /* ignore control chars */ }
-                            }
-                            // Handle Q with Command or Control modifier
-                            if let winit::keyboard::PhysicalKey::Code(
-                                winit::keyboard::KeyCode::KeyQ,
-                            ) = key_event.physical_key
-                            {
-                                let mods = unsafe {
-                                    MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty)
-                                };
-                                if mods.super_key() || mods.control_key() {
-                                    target.exit();
-                                }
                             }
                         }
                     }
@@ -643,7 +642,7 @@ impl<'window> PlotWindow<'window> {
                                 .enable_all()
                                 .build();
                             if let Ok(rt) = rt {
-                                let _ = rt.block_on(async move {
+                                rt.block_on(async move {
                                     if let Ok(exporter) =
                                         crate::export::image::ImageExporter::new().await
                                     {
@@ -677,7 +676,7 @@ impl<'window> PlotWindow<'window> {
                             .enable_all()
                             .build();
                         if let Ok(rt) = rt {
-                            let _ = rt.block_on(async move {
+                            rt.block_on(async move {
                                 if let Ok(exporter) =
                                     crate::export::image::ImageExporter::new().await
                                 {

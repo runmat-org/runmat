@@ -335,18 +335,18 @@ impl ScatterPlot {
                     cmin = 0.0;
                     cmax = 1.0;
                 }
-                let denom = (cmax - cmin).max(std::f64::EPSILON);
-                for i in 0..n {
+                let denom = (cmax - cmin).max(f64::EPSILON);
+                for (i, vert) in verts.iter_mut().enumerate().take(n) {
                     let t = ((vals[i] - cmin) / denom) as f32;
                     let rgb = self.colormap.map_value(t);
-                    verts[i].color = [rgb.x, rgb.y, rgb.z, 1.0];
+                    vert.color = [rgb.x, rgb.y, rgb.z, 1.0];
                 }
             }
             // Store marker size in normal.z for direct point expansion
             if let Some(ref sizes) = self.per_point_sizes {
-                for i in 0..verts.len() {
+                for (i, vert) in verts.iter_mut().enumerate() {
                     let s = sizes.get(i).copied().unwrap_or(self.marker_size);
-                    verts[i].normal[2] = s.max(1.0);
+                    vert.normal[2] = s.max(1.0);
                 }
             } else {
                 for v in &mut verts {

@@ -229,17 +229,12 @@ enum HistBinMethod {
     Integers,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum HistNormalization {
+    #[default]
     Count,
     Probability,
     Pdf,
-}
-
-impl Default for HistNormalization {
-    fn default() -> Self {
-        HistNormalization::Count
-    }
 }
 
 #[derive(Clone)]
@@ -1128,7 +1123,7 @@ fn apply_normalization(
             let total = total_weight.max(f64::EPSILON);
             for (count, width) in counts.iter_mut().zip(widths.iter()) {
                 let w = width.max(f64::MIN_POSITIVE);
-                *count = *count / (total * w);
+                *count /= total * w;
             }
         }
     }

@@ -513,7 +513,7 @@ fn scatter_lod_stride(point_count: u32) -> u32 {
     if point_count <= target {
         1
     } else {
-        (point_count + target - 1) / target
+        point_count.div_ceil(target)
     }
 }
 

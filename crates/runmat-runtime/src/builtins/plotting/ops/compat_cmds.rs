@@ -27,7 +27,7 @@ fn accepts_arg(arg: Option<&Value>, allowed: &[&str]) -> bool {
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
-    if !accepts_arg(args.get(0), &["on", "off"]) {
+    if !accepts_arg(args.first(), &["on", "off"]) {
         return Err("grid: expected 'on' or 'off'".into());
     }
     Ok("grid toggled".into())
@@ -41,7 +41,7 @@ pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
-    if !accepts_arg(args.get(0), &["on", "off"]) {
+    if !accepts_arg(args.first(), &["on", "off"]) {
         return Err("box: expected 'on' or 'off'".into());
     }
     Ok("box toggled".into())
@@ -56,7 +56,7 @@ pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
 )]
 pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
     // Accept common command-style args; ignore for now.
-    let ok = args.get(0).map_or(true, |v| {
+    let ok = args.first().is_none_or(|v| {
         matches!(
             as_lower_str(v).as_deref(),
             Some("auto" | "manual" | "tight" | "equal" | "ij" | "xy")
@@ -76,7 +76,7 @@ pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> Result<String, String> {
-    if !accepts_arg(args.get(0), &["flat", "interp", "faceted"]) {
+    if !accepts_arg(args.first(), &["flat", "interp", "faceted"]) {
         return Err("shading: expected 'flat', 'interp', or 'faceted'".into());
     }
     Ok("shading set".into())

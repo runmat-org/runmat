@@ -464,7 +464,7 @@ impl PlotRenderer {
             [x_max as f32, y_max as f32],
             [ndc_left, ndc_bottom],
             [ndc_right, ndc_top],
-            [sw as f32, sh as f32],
+            [sw, sh],
         );
 
         // Continue with specific pipelines below (implementation omitted here)
@@ -1250,29 +1250,27 @@ impl PlotRenderer {
                     let uniform_bg = &self.wgpu_renderer.direct_uniform_bind_group;
                     render_pass.set_pipeline(pipeline_ref);
                     render_pass.set_bind_group(0, uniform_bg, &[]);
-                } else {
-                    if is_textured {
-                        let pipeline = self
-                            .wgpu_renderer
-                            .get_pipeline(crate::core::PipelineType::Textured);
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            &self.wgpu_renderer.direct_uniform_bind_group,
-                            &[],
-                        );
-                        if let Some(ref bg) = image_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
-                    } else {
-                        let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            self.wgpu_renderer.get_uniform_bind_group(),
-                            &[],
-                        );
+                } else if is_textured {
+                    let pipeline = self
+                        .wgpu_renderer
+                        .get_pipeline(crate::core::PipelineType::Textured);
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(
+                        0,
+                        &self.wgpu_renderer.direct_uniform_bind_group,
+                        &[],
+                    );
+                    if let Some(ref bg) = image_bind_groups[idx] {
+                        render_pass.set_bind_group(1, bg, &[]);
                     }
+                } else {
+                    let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(
+                        0,
+                        self.wgpu_renderer.get_uniform_bind_group(),
+                        &[],
+                    );
                 }
 
                 if is_points && use_direct {

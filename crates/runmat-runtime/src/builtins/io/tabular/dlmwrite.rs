@@ -629,7 +629,7 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
 
     let (existing_nonempty, ends_with_newline) = if options.append {
         match vfs::metadata(path) {
-            Ok(meta) if meta.len() > 0 => {
+            Ok(meta) if !meta.is_empty() => {
                 let ends = file_ends_with_newline(path).map_err(|e| {
                     format!(
                         "dlmwrite: failed to inspect existing file \"{}\" ({e})",

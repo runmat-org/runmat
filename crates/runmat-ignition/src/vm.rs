@@ -1160,7 +1160,7 @@ thread_local! {
 #[derive(Debug)]
 pub enum InterpreterOutcome {
     Completed(Vec<Value>),
-    Pending(PendingExecution),
+    Pending(Box<PendingExecution>),
 }
 
 pub struct PendingExecution {
@@ -1315,7 +1315,7 @@ fn run_interpreter(
                     )
                 })?;
             sync_initial_vars(initial_vars, &vars);
-            return Ok(InterpreterOutcome::Pending(PendingExecution {
+            return Ok(InterpreterOutcome::Pending(Box::new(PendingExecution {
                 state: InterpreterState {
                     bytecode,
                     stack,
@@ -1333,7 +1333,7 @@ fn run_interpreter(
                     fusion_plan,
                 },
                 interaction: pending,
-            }));
+            })));
         }};
     }
     let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
