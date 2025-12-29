@@ -19,7 +19,7 @@ fn js_duration_since_epoch() -> Duration {
 fn native_duration_since_epoch() -> Duration {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_else(|_| Duration::ZERO)
+        .unwrap_or(Duration::ZERO)
 }
 
 /// Returns a `SystemTime` representing "now" even on wasm targets where
