@@ -32,6 +32,7 @@ toml = "0.8"
 runmat-builtins = { path = "../../crates/runmat-builtins" }
 runmat-accelerate = { path = "../../crates/runmat-accelerate" }
 runmat-runtime = { path = "../../crates/runmat-runtime" }
+runmat-time = { path = "../../crates/runmat-time" }
 codex-core = { git = "https://github.com/openai/codex.git", package = "codex-core", optional = true }
 core_test_support = { git = "https://github.com/openai/codex.git", package = "core_test_support", optional = true }
 codex-protocol = { git = "https://github.com/openai/codex.git", package = "codex-protocol", optional = true }

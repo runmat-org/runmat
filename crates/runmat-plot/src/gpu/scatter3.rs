@@ -423,7 +423,7 @@ mod stress_tests {
         };
         let point_count = 1_200_000u32;
         let stride = 4u32;
-        let max_points = (point_count + stride - 1) / stride;
+        let max_points = point_count.div_ceil(stride);
 
         let x: Vec<f32> = (0..point_count).map(|i| i as f32 * 0.001).collect();
         let y: Vec<f32> = x.iter().map(|v| v.cos()).collect();

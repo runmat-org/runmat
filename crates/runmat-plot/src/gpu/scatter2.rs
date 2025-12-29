@@ -473,9 +473,9 @@ mod stress_tests {
         let stride = if point_count <= target {
             1
         } else {
-            (point_count + target - 1) / target
+            point_count.div_ceil(target)
         };
-        let expected_vertices = ((point_count + stride - 1) / stride) as usize;
+        let expected_vertices = point_count.div_ceil(stride) as usize;
 
         let inputs = Scatter2GpuInputs {
             x_buffer,

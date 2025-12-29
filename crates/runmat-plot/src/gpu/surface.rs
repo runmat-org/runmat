@@ -337,8 +337,8 @@ mod stress_tests {
             scalar: ScalarType::F32,
         };
         let stride = 8;
-        let lod_x_len = (x_len + stride - 1) / stride;
-        let lod_y_len = (y_len + stride - 1) / stride;
+        let lod_x_len = x_len.div_ceil(stride);
+        let lod_y_len = y_len.div_ceil(stride);
         let params = SurfaceGpuParams {
             min_z: -1.0,
             max_z: 1.0,

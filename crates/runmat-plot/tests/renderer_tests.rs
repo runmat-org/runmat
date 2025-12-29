@@ -41,9 +41,9 @@ mod export_subplot_tests {
         let rows = 5usize;
         let cols = 5usize;
         let mut grid = vec![vec![0.0; cols]; rows];
-        for r in 0..rows {
-            for c in 0..cols {
-                grid[r][c] = (r as f64) / (rows as f64);
+        for (r, row_vec) in grid.iter_mut().enumerate() {
+            for cell in row_vec.iter_mut() {
+                *cell = (r as f64) / (rows as f64);
             }
         }
         let xv: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
@@ -119,9 +119,9 @@ mod export_subplot_tests {
         let rows = 10usize;
         let cols = 10usize;
         let mut grid = vec![vec![0.0f64; cols]; rows];
-        for r in 0..rows {
-            for c in 0..cols {
-                grid[r][c] = (r as f64) / (rows as f64);
+        for (r, row_vec) in grid.iter_mut().enumerate() {
+            for cell in row_vec.iter_mut() {
+                *cell = (r as f64) / (rows as f64);
             }
         }
         let x: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
@@ -808,10 +808,10 @@ mod new_plots_tests {
         let values = vec![1.0, 2.0, 3.0];
         let mut p = PieChart::new(values, None).unwrap();
         let (_v, i) = p.generate_vertices();
-        assert!(i.len() > 0);
+        assert!(!i.is_empty());
         let rd = p.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Triangles);
-        assert!(rd.indices.as_ref().unwrap().len() > 0);
+        assert!(!rd.indices.as_ref().unwrap().is_empty());
     }
     fn test_errorbar_geometry_with_caps() {
         let x = vec![0.0, 1.0, 2.0];
@@ -866,7 +866,7 @@ mod new_plots_tests {
         assert_eq!(i.len(), 12); // 2 segments * 2 triangles * 3 indices
         let rd = ar.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Triangles);
-        assert!(rd.indices.as_ref().unwrap().len() > 0);
+        assert!(!rd.indices.as_ref().unwrap().is_empty());
     }
 }
 
@@ -1110,8 +1110,8 @@ mod export_parity_more_tests {
     #[tokio::test]
     async fn test_area_export_stacked() {
         let x = vec![1.0, 2.0, 3.0, 4.0];
-        let y1 = vec![1.0, 2.0, 1.0, 2.0];
-        let y2 = vec![0.5, 0.5, 0.5, 0.5];
+        let y1 = [1.0, 2.0, 1.0, 2.0];
+        let y2 = [0.5, 0.5, 0.5, 0.5];
         // Build stacked by adding two area plots with increasing baseline via area semantics
         let acc = vec![0.0f64; x.len()];
         let y1_top: Vec<f64> = (0..x.len()).map(|i| acc[i] + y1[i]).collect();
@@ -1189,7 +1189,7 @@ mod gpu_stress {
     }
 
     fn ensure_shared_context() -> bool {
-        *CONTEXT_READY.get_or_init(|| install_context())
+        *CONTEXT_READY.get_or_init(install_context)
     }
 
     fn install_context() -> bool {

@@ -765,13 +765,15 @@ pub(crate) mod tests {
     #[test]
     fn scatter_accepts_flat_marker_edge_color_when_colors_supplied() {
         setup_plot_tests();
-        let mut appearance = LineAppearance::default();
-        appearance.marker = Some(MarkerAppearance {
-            kind: MarkerKind::Circle,
-            size: None,
-            edge_color: MarkerColor::Flat,
-            face_color: MarkerColor::Auto,
-        });
+        let appearance = LineAppearance {
+            marker: Some(MarkerAppearance {
+                kind: MarkerKind::Circle,
+                size: None,
+                edge_color: MarkerColor::Flat,
+                face_color: MarkerColor::Auto,
+            }),
+            ..Default::default()
+        };
         let args = PointArgs {
             size: PointSizeArg::Default,
             color: PointColorArg::ScalarValues(Value::Tensor(tensor_from(&[0.1, 0.5]))),

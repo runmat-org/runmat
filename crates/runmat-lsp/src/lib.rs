@@ -9,7 +9,7 @@ pub mod native;
 #[cfg(feature = "native")]
 pub mod backend;
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub mod wasm;
 
 pub mod core;

@@ -1069,6 +1069,50 @@ fn implicit_axis(len: usize) -> Vec<f64> {
     (0..len).map(|idx| (idx + 1) as f64).collect()
 }
 
+fn ensure_fill_levels(
+    level_spec: &ContourLevelSpec,
+    min_z: f32,
+    max_z: f32,
+) -> Result<Vec<f32>, String> {
+    let mut levels = level_spec.resolve(min_z, max_z)?;
+    if levels.len() < 2 {
+        let second = if (max_z - min_z).abs() < f32::EPSILON {
+            min_z + 1.0
+        } else {
+            max_z
+        };
+        levels = vec![min_z, second];
+    }
+    Ok(levels)
+}
+
+fn palette_size(levels: &[f32]) -> usize {
+    levels.len().saturating_sub(1).max(1)
+}
+
+fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
+    if palette.is_empty() {
+        return Vec4::new(1.0, 1.0, 1.0, 1.0);
+    }
+    let mut idx = 0usize;
+    while idx + 1 < levels.len() && value >= levels[idx + 1] {
+        idx += 1;
+    }
+    palette[idx.min(palette.len() - 1)]
+}
+
+fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
+    let normal = Vec3::new(0.0, 0.0, 1.0);
+    for i in 0..3 {
+        vertices.push(Vertex {
+            position: positions[i].to_array(),
+            color: colors[i].to_array(),
+            normal: normal.to_array(),
+            tex_coords: [0.0, 0.0],
+        });
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1234,49 +1278,5 @@ pub(crate) mod tests {
             ],
         );
         assert!(ok.is_ok());
-    }
-}
-
-fn ensure_fill_levels(
-    level_spec: &ContourLevelSpec,
-    min_z: f32,
-    max_z: f32,
-) -> Result<Vec<f32>, String> {
-    let mut levels = level_spec.resolve(min_z, max_z)?;
-    if levels.len() < 2 {
-        let second = if (max_z - min_z).abs() < f32::EPSILON {
-            min_z + 1.0
-        } else {
-            max_z
-        };
-        levels = vec![min_z, second];
-    }
-    Ok(levels)
-}
-
-fn palette_size(levels: &[f32]) -> usize {
-    levels.len().saturating_sub(1).max(1)
-}
-
-fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
-    if palette.is_empty() {
-        return Vec4::new(1.0, 1.0, 1.0, 1.0);
-    }
-    let mut idx = 0usize;
-    while idx + 1 < levels.len() && value >= levels[idx + 1] {
-        idx += 1;
-    }
-    palette[idx.min(palette.len() - 1)]
-}
-
-fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
-    let normal = Vec3::new(0.0, 0.0, 1.0);
-    for i in 0..3 {
-        vertices.push(Vertex {
-            position: positions[i].to_array(),
-            color: colors[i].to_array(),
-            normal: normal.to_array(),
-            tex_coords: [0.0, 0.0],
-        });
     }
 }
