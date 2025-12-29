@@ -48,7 +48,7 @@ The compiler is responsible for stack shaping and choosing appropriate instructi
   - `Number` → `LoadConst`
   - `String('...')` → `LoadCharRow` (char row vector)
   - `String("...")` → `LoadString` (scalar string)
-  - `Constant` → constant lookup or `LoadStaticProperty` via Class.* imports
+  - `Constant` → constant lookup (`LoadConst`/`LoadBool`/`LoadComplex`) or `LoadStaticProperty` via Class.* imports
 
 - Unary and binary ops:
   - Emit left then right then the operator instruction (e.g., `Add`, `ElemMul`, `Pow`)

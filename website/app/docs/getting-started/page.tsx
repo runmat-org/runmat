@@ -218,7 +218,7 @@ export default function GettingStartedPage() {
         </section>
 
         {/* Jupyter Integration */}
-        <section className="mb-12">
+        <section id="jupyter-notebook-integration" className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
             Jupyter Notebook Integration
           </h2>

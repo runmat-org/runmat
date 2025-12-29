@@ -1,6 +1,6 @@
 [package]
 name = "runmat-core"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -38,7 +38,7 @@ runmat-runtime = { workspace = true }
 runmat-snapshot = { workspace = true, default-features = false, features = ["compression-native", "validation"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false, features = ["plot-web"] }
+runmat-runtime = { workspace = true, default-features = false, features = ["plot-web"] }
 runmat-snapshot = { workspace = true, default-features = false, features = ["compression-wasm", "validation"] }
 
 [dev-dependencies]

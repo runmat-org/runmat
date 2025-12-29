@@ -200,6 +200,7 @@ struct TokenInfo {
     token: Token,
     lexeme: String,
     position: usize,
+    end: usize,
 }
 
 #[derive(Debug)]
@@ -237,6 +238,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
             token: t.token,
             lexeme: t.lexeme,
             position: t.start,
+            end: t.end,
         });
     }
 
@@ -390,6 +392,13 @@ const COMMAND_VERBS: &[CommandVerb] = &[
 impl Parser {
     fn skip_newlines(&mut self) {
         while self.consume(&Token::Newline) {}
+    }
+
+    fn tokens_adjacent(&self, left: usize, right: usize) -> bool {
+        match (self.tokens.get(left), self.tokens.get(right)) {
+            (Some(a), Some(b)) => a.end == b.position,
+            _ => false,
+        }
     }
 
     fn is_simple_assignment_ahead(&self) -> bool {
@@ -960,6 +969,19 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut node = self.parse_unary()?;
         loop {
+            if self.peek_token() == Some(&Token::Ident) && self.pos > 0 {
+                let prev = &self.tokens[self.pos - 1];
+                let curr = &self.tokens[self.pos];
+                let is_adjacent = self.tokens_adjacent(self.pos - 1, self.pos);
+                let is_imag =
+                    curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
+                if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
+                    let ident = self.next().unwrap().lexeme;
+                    let rhs = Expr::Ident(ident);
+                    node = Expr::Binary(Box::new(node), BinOp::Mul, Box::new(rhs));
+                    continue;
+                }
+            }
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,

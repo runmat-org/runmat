@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -14,7 +14,7 @@ links = "runmat_runtime_native"
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
-runmat-plot = { path = "../runmat-plot", version = "=0.2.7", optional = true, default-features = false }
+runmat-plot = { workspace = true, optional = true, default-features = false }
 runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }

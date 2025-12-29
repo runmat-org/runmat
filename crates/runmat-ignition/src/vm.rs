@@ -1674,6 +1674,17 @@ fn run_interpreter(
                     debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
                 }
             }
+            Instr::LoadComplex(re, im) => {
+                stack.push(Value::Complex(re, im));
+                if debug_stack {
+                    eprintln!(
+                        "  -> LoadComplex pushed ({}, {}), new_len={}",
+                        re,
+                        im,
+                        stack.len()
+                    );
+                }
+            }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {
@@ -2142,7 +2153,17 @@ fn run_interpreter(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
-                let result = runmat_runtime::transpose(promoted)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("transpose", &args)?;
+                stack.push(result);
+            }
+            Instr::ConjugateTranspose => {
+                let value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
+                let args = [promoted];
+                let result = runmat_runtime::call_builtin("ctranspose", &args)?;
                 stack.push(result);
             }
             Instr::ElemMul => {
@@ -4124,7 +4145,6 @@ fn run_interpreter(
                                     }
                                     for vi in 0..need {
                                         stack.push((*ca.data[vi]).clone());
-                                        pushed += 1;
                                     }
                                 }
                             }

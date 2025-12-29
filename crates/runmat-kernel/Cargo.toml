@@ -1,6 +1,6 @@
 [package]
 name = "runmat-kernel"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"

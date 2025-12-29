@@ -5,7 +5,17 @@ use std::convert::TryInto;
 
 #[test]
 fn break_and_continue() {
-    let ast = parse("x=0; while 1; x=x+1; break; x=x+1; end").unwrap();
+    let ast = parse(
+        r#"
+            x=0;
+            while 1;
+                x=x+1;
+                break;
+                x=x+1;
+            end
+        "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
@@ -14,7 +24,19 @@ fn break_and_continue() {
 
 #[test]
 fn elseif_executes_correct_branch() {
-    let ast = parse("x=2; if x-2; y=1; elseif x-1; y=2; else; y=3; end").unwrap();
+    let ast = parse(
+        r#"
+            x=2;
+            if x-2;
+                y=1;
+            elseif x-1;
+                y=2;
+            else;
+                y=3;
+            end
+        "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let y: f64 = (&vars[1]).try_into().unwrap();
@@ -24,9 +46,21 @@ fn elseif_executes_correct_branch() {
 #[test]
 fn switch_case_otherwise_executes_correct_branch() {
     // The parser expects line-based case/otherwise; use newlines
-    let ast =
-        parse("x=2; y=0; switch x\n case 1\n y=10;\n case 2\n y=20;\n otherwise\n y=30;\n end")
-            .unwrap();
+    let ast = parse(
+        r#"
+            x=2;
+            y=0;
+            switch x
+                case 1
+                    y=10;
+                case 2
+                    y=20;
+                otherwise
+                    y=30;
+            end
+        "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let y: f64 = (&vars[1]).try_into().unwrap();
@@ -35,7 +69,17 @@ fn switch_case_otherwise_executes_correct_branch() {
 
 #[test]
 fn try_catch_executes_try_body_when_no_error() {
-    let ast = parse("x=0; try; x=1; catch e; x=2; end").unwrap();
+    let ast = parse(
+        r#"
+            x=0;
+            try;
+                x=1;
+            catch e;
+                x=2;
+            end
+        "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
@@ -45,7 +89,18 @@ fn try_catch_executes_try_body_when_no_error() {
 #[test]
 fn try_catch_catches_error_and_binds_identifier() {
     // Unknown builtin should raise; catch should bind 'e' and execute catch body
-    let ast = parse("x=0; try; nosuchbuiltin(1); x=99; catch e; x=2; end").unwrap();
+    let ast = parse(
+        r#"
+            x=0;
+            try;
+                nosuchbuiltin(1);
+                x=99;
+            catch e;
+                x=2;
+            end
+        "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
@@ -55,7 +110,20 @@ fn try_catch_catches_error_and_binds_identifier() {
 #[test]
 fn nested_break_and_continue_scopes() {
     let ast = parse(
-        "x=0; for i=1:3; for j=1:3; if j-2; continue; end; if i-3; break; end; x=x+1; end; end",
+        r#"
+            x=0;
+            for i=1:3;
+                for j=1:3;
+                    if j-2;
+                        continue;
+                    end;
+                    if i-3;
+                        break;
+                    end;
+                    x=x+1;
+                end;
+            end
+        "#,
     )
     .unwrap();
     let hir = lower(&ast).unwrap();
@@ -87,7 +155,14 @@ fn block_comment_is_ignored() {
 #[test]
 fn apostrophe_is_transpose_when_adjacent() {
     // Adjacent apostrophe after value is transpose
-    let ast = parse("A = [1 2; 3 4]; B = A'; s = sum(B(:));").unwrap();
+    let ast = parse(
+        r#"
+            A = [1 2; 3 4];
+            B = A';
+            s = sum(B(:));
+            "#,
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // sum is invariant under transpose: sum 10
@@ -110,6 +185,35 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
         )
     });
     assert!(has_text);
+}
+
+#[test]
+fn apostrophe_conjugates_complex() {
+    let ast = parse(
+        r#"
+            z = sqrt(-1);
+            A = [1 z; 0 1];
+            B = A';
+            C = A.';
+            b = imag(B);
+            c = imag(C);
+            b21 = b(2,1);
+            c21 = c(2,1);
+            "#,
+    )
+    .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let b21: f64 = (&vars[6]).try_into().unwrap();
+    let c21: f64 = (&vars[7]).try_into().unwrap();
+    assert!(
+        (b21 + 1.0).abs() < 1e-9,
+        "expected imag(B(2,1)) == -1, got {b21}"
+    );
+    assert!(
+        (c21 - 1.0).abs() < 1e-9,
+        "expected imag(C(2,1)) == 1, got {c21}"
+    );
 }
 
 #[test]

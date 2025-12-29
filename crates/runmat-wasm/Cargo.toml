@@ -1,6 +1,6 @@
 [package]
 name = "runmat-wasm"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -17,11 +17,11 @@ jit = ["runmat-core/jit"]
 gpu = ["runmat-accelerate/wgpu"]
 
 [dependencies]
-runmat-core = { path = "../runmat-core", version = "=0.2.7", default-features = false }
+runmat-core = { workspace = true, default-features = false }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
-runmat-filesystem = { path = "../runmat-filesystem", version = "=0.2.7" }
+runmat-filesystem = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6"
@@ -40,5 +40,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false, features = ["plot-web"] }
-runmat-plot = { path = "../runmat-plot", version = "=0.2.7", default-features = false, features = ["web"] }
+runmat-runtime = { workspace = true, default-features = false, features = ["plot-web"] }
+runmat-plot = { workspace = true, default-features = false, features = ["web"] }

@@ -1,16 +1,16 @@
 [package]
 name = "runmat-ignition"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
-license-file = "../LICENSE.md"
+license-file = "../../LICENSE.md"
 description = "Baseline interpreter for RunMat enabling instant startup and execution"
 homepage = "https://runmat.org"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-builtins = { workspace = true }
-runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false }
+runmat-runtime = { workspace = true, optional = true }
 runmat-accelerate = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, optional = true }
 runmat-lexer = { workspace = true }

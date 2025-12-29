@@ -30,3 +30,4 @@ bindings/ts/pkg-web/
 bindings/ts/dist/
 
 .idea
+*.iml

@@ -1,7 +1,7 @@
 #![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
 use runmat_builtins::{CellArray, Tensor as Matrix, Value};
-use runmat_runtime::{blas::*, call_builtin, lapack::*, matrix_transpose};
+use runmat_runtime::{blas::*, call_builtin, lapack::*};
 
 #[test]
 fn test_blas_matrix_multiplication() {
@@ -103,7 +103,11 @@ fn test_lapack_qr_decomposition() {
     assert_eq!(qr.r.cols(), 2);
 
     // Q should be orthogonal (Q^T * Q = I)
-    let qt_q = blas_matrix_mul(&matrix_transpose(&qr.q), &qr.q).unwrap();
+    let qt = match call_builtin("transpose", &[Value::Tensor(qr.q.clone())]).unwrap() {
+        Value::Tensor(t) => t,
+        other => panic!("expected tensor transpose, got {other:?}"),
+    };
+    let qt_q = blas_matrix_mul(&qt, &qr.q).unwrap();
 
     // Check if Q^T * Q is approximately identity
     let tolerance = 1e-10;

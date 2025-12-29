@@ -39,12 +39,15 @@ fn test_scalar_operations() {
 fn test_matrix_transpose() {
     // Build A as 3x2 with column-major data for [[1,2],[3,4],[5,6]]
     let a = Matrix::new_2d(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2).unwrap();
-    let b = matrix_transpose(&a);
+    let b = match call_builtin("transpose", &[Value::Tensor(a)]).unwrap() {
+        Value::Tensor(t) => t,
+        other => panic!("expected tensor transpose, got {other:?}"),
+    };
 
     assert_eq!(b.rows(), 2);
     assert_eq!(b.cols(), 3);
     // Transpose should yield [[1,3,5],[2,4,6]] with col-major data [1,2,3,4,5,6]
-    assert_eq!(b.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+    assert_eq!(b.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -126,7 +129,7 @@ fn test_builtin_functions() {
     assert!(names.contains(&"matrix_zeros"));
     assert!(names.contains(&"matrix_ones"));
     assert!(names.contains(&"matrix_eye"));
-    assert!(names.contains(&"matrix_transpose"));
+    assert!(names.contains(&"transpose"));
     assert!(names.contains(&"gt"));
     assert!(names.contains(&"lt"));
     assert!(names.contains(&"eq"));

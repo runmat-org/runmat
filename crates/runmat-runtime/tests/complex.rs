@@ -104,7 +104,7 @@ fn complex_matmul_and_transpose() {
         assert_eq!(m.cols, 2);
     }
     // transpose conjugate on complex matrix
-    let t = runmat_runtime::transpose(Value::ComplexTensor(a)).unwrap();
+    let t = runmat_runtime::call_builtin("transpose", &[Value::ComplexTensor(a)]).unwrap();
     if let Value::ComplexTensor(ct) = t {
         assert_eq!(ct.rows, 2);
         assert_eq!(ct.cols, 2);

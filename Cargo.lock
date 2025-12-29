@@ -2340,6 +2340,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
+name = "endian-type"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
+
+[[package]]
 name = "enum-primitive-derive"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2544,6 +2550,17 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "fd-lock"
+version = "4.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
+dependencies = [
+ "cfg-if",
+ "rustix 1.0.8",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "fdeflate"
@@ -4473,6 +4490,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nibble_vec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "nix"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5544,6 +5570,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
+name = "radix_trie"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
+dependencies = [
+ "endian-type",
+ "nibble_vec",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5887,7 +5923,7 @@ checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
 name = "runmat"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "atty",
@@ -5913,6 +5949,8 @@ dependencies = [
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-time",
+ "runmat-turbine",
+ "rustyline",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5926,7 +5964,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5956,7 +5994,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate-api"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -5966,7 +6004,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-builtins"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "indexmap 1.9.3",
  "inventory",
@@ -5980,7 +6018,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-config"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -5998,7 +6036,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "log",
@@ -6021,7 +6059,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-filesystem"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "axum 0.7.9",
  "crossbeam-utils",
@@ -6039,7 +6077,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "criterion",
  "log",
@@ -6062,11 +6100,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc-api"
-version = "0.2.7"
+version = "0.2.8"
 
 [[package]]
 name = "runmat-hir"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "runmat-builtins",
  "runmat-lexer",
@@ -6076,7 +6114,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-ignition"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "log",
@@ -6096,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-kernel"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "chrono",
  "env_logger 0.11.8",
@@ -6125,7 +6163,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lexer"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "logos",
 ]
@@ -6149,7 +6187,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lsp"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "env_logger 0.11.8",
@@ -6174,7 +6212,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-macros"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "inventory",
  "proc-macro2",
@@ -6186,7 +6224,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-parser"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "logos",
  "runmat-lexer",
@@ -6195,7 +6233,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-plot"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "atty",
  "base64 0.22.1",
@@ -6237,7 +6275,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "accelerate-src",
  "axum 0.7.9",
@@ -6289,7 +6327,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime-integration-tests"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "inventory",
  "runmat-accelerate",
@@ -6301,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-snapshot"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "bincode",
@@ -6338,7 +6376,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-time"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "instant",
  "js-sys",
@@ -6346,7 +6384,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-turbine"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -6371,7 +6409,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-wasm"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -6400,7 +6438,7 @@ dependencies = [
 
 [[package]]
 name = "runmatfunc"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -6566,6 +6604,28 @@ name = "rustversion"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+
+[[package]]
+name = "rustyline"
+version = "14.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7803e8936da37efd9b6d4478277f4b2b9bb5cdb37a113e8d63222e58da647e63"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "clipboard-win",
+ "fd-lock",
+ "home",
+ "libc",
+ "log",
+ "memchr",
+ "nix 0.28.0",
+ "radix_trie",
+ "unicode-segmentation",
+ "unicode-width 0.1.14",
+ "utf8parse",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "ruzstd"
