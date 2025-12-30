@@ -57,7 +57,29 @@ impl SandboxFsProvider {
 
     fn virtualize(&self, real: &Path) -> PathBuf {
         let relative = real.strip_prefix(&self.root).unwrap_or(Path::new(""));
-        let mut virt = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        let mut virt = PathBuf::new();
+        #[cfg(windows)]
+        {
+            let prefix = self
+                .root
+                .components()
+                .next()
+                .and_then(|component| match component {
+                    Component::Prefix(prefix) => Some(prefix.as_os_str()),
+                    _ => None,
+                });
+            if let Some(prefix) = prefix {
+                let mut root = OsString::from(prefix);
+                root.push(std::path::MAIN_SEPARATOR.to_string());
+                virt.push(root);
+            } else {
+                virt.push(std::path::MAIN_SEPARATOR.to_string());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            virt.push(std::path::MAIN_SEPARATOR.to_string());
+        }
         if !relative.as_os_str().is_empty() {
             virt.push(relative);
         }
