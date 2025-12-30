@@ -834,7 +834,7 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
     wasm_format_float(value, spec)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: usize,
