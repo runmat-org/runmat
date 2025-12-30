@@ -2,7 +2,10 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use core::ffi::{c_char, c_int};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(
+    all(not(target_arch = "wasm32"), not(windows)),
+    all(windows, target_env = "gnu")
+))]
 use libc;
 use runmat_builtins::{Tensor, Value};
 use runmat_filesystem::{self as vfs, File, OpenOptions};
