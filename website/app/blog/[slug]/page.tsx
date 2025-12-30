@@ -26,6 +26,7 @@ interface BlogPost {
     image?: string;
     imageAlt?: string;
     canonical?: string;
+    jsonLd?: unknown;
   };
   content: string;
 }
@@ -125,6 +126,12 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
       tags={post.frontmatter.tags}
       rightAside={<HeadingsNav source={post.content} />}
     >
+      {post.frontmatter.jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(post.frontmatter.jsonLd) }}
+        />
+      )}
       <MarkdownRenderer source={post.content} />
       
       {/* Newsletter CTA specific to blog posts */}

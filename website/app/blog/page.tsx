@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import Image from "next/image";
 import { Calendar, Clock, User } from "lucide-react";
-import { getAllBlogPosts } from '@/lib/blog';
+import { getPublicBlogPosts } from '@/lib/blog';
 
 export const metadata: Metadata = {
   title: "RunMat Blog - Stories and Insights",
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 export default function BlogPage() {
-  const blogPosts = getAllBlogPosts();
+  const blogPosts = getPublicBlogPosts();
 
   return (
     <div className="min-h-screen bg-background">

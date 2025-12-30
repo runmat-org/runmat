@@ -12,6 +12,7 @@ export interface BlogPost {
   tags: string[]
   image?: string
   imageAlt?: string
+  visibility: 'public' | 'unlisted'
 }
 
 export function getAllBlogPosts(): BlogPost[] {
@@ -35,6 +36,7 @@ export function getAllBlogPosts(): BlogPost[] {
         tags: frontmatter.tags || [],
         image: frontmatter.image,
         imageAlt: frontmatter.imageAlt,
+        visibility: frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public',
       }
     })
 
@@ -43,4 +45,8 @@ export function getAllBlogPosts(): BlogPost[] {
     console.error('Error reading blog posts:', error)
     return []
   }
+}
+
+export function getPublicBlogPosts(): BlogPost[] {
+  return getAllBlogPosts().filter(post => post.visibility !== 'unlisted')
 }
