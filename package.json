@@ -1,0 +1,8 @@
+{
+  "name": "runmat",
+  "private": true,
+  "workspaces": [
+    "bindings/ts",
+    "website"
+  ]
+}
