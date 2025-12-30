@@ -209,11 +209,9 @@ mod tests {
         assert!(entries.iter().any(|entry| entry.file_name() == "evil.txt"));
 
         let listing = provider.read_dir(Path::new("nested")).expect("list nested");
-        let names: Vec<_> = listing
+        assert!(listing
             .iter()
-            .map(|entry| entry.path().display().to_string())
-            .collect();
-        assert!(names.iter().any(|p| p.ends_with("nested/sub")));
+            .any(|entry| entry.path().ends_with(Path::new("nested/sub"))));
 
         let sandbox_read = provider
             .read(Path::new("/nested/sub/file.txt"))
@@ -234,7 +232,7 @@ mod tests {
         let canonical = provider
             .canonicalize(Path::new("./data/./file.bin"))
             .expect("canonicalize");
-        assert!(canonical.to_string_lossy().ends_with("data/file.bin"));
+        assert!(canonical.ends_with(Path::new("data/file.bin")));
         assert!(canonical.is_absolute());
     }
 }
