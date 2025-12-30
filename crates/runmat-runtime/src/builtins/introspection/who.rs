@@ -11,12 +11,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::io::mat::load::read_mat_file;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "who",
+        builtin_path = "crate::builtins::introspection::who"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "who"
 category: "introspection"
@@ -151,6 +155,7 @@ Yes. The builtin reads just enough metadata to enumerate variable names; it does
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::who")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "who",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -166,8 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; no kernels are launched.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::who")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "who",
     shape: ShapeRequirements::Any,
@@ -178,17 +182,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Introspection builtin; registered for diagnostics only.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("who", DOC_MD);
-
 #[runtime_builtin(
     name = "who",
     category = "introspection",
     summary = "List the names of variables in the workspace or MAT-files (MATLAB-compatible).",
     keywords = "who,workspace,variables,introspection",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::introspection::who"
 )]
 fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
     #[cfg(all(test, feature = "wgpu"))]
@@ -463,7 +463,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::whos::tests::{
         char_array_from_rows as shared_char_array_from_rows,
         ensure_test_resolver as ensure_shared_resolver, set_workspace as shared_set_workspace,
@@ -498,6 +498,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_lists_workspace_variables() {
         ensure_shared_resolver();
@@ -512,6 +513,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_with_wildcard() {
         ensure_shared_resolver();
@@ -525,6 +527,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_with_regex() {
         ensure_shared_resolver();
@@ -542,6 +545,7 @@ mod tests {
         assert_eq!(names, vec!["bar".to_string(), "baz".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_combines_wildcard_and_regex_filters() {
         ensure_shared_resolver();
@@ -565,6 +569,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_filters_global_only() {
         ensure_shared_resolver();
@@ -578,6 +583,7 @@ mod tests {
         assert_eq!(names, vec!["shared".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_global_option_is_case_insensitive() {
         ensure_shared_resolver();
@@ -591,6 +597,7 @@ mod tests {
         assert_eq!(names, vec!["Shared".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_char_array_arguments() {
         ensure_shared_resolver();
@@ -609,6 +616,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_string_array_arguments() {
         ensure_shared_resolver();
@@ -628,6 +636,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_accepts_cell_array_arguments() {
         ensure_shared_resolver();
@@ -646,6 +655,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_numeric_selection() {
         ensure_shared_resolver();
@@ -657,6 +667,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_unknown_option() {
         ensure_shared_resolver();
@@ -668,6 +679,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_requires_filename_for_file_option() {
         ensure_shared_resolver();
@@ -676,6 +688,7 @@ mod tests {
         assert!(err.contains("'-file' requires a filename"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_requires_pattern_for_regexp() {
         ensure_shared_resolver();
@@ -687,6 +700,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_invalid_regex() {
         ensure_shared_resolver();
@@ -696,6 +710,7 @@ mod tests {
         assert!(err.contains("invalid regular expression"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_returns_empty_column_cell_when_no_match() {
         ensure_shared_resolver();
@@ -711,6 +726,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_reads_mat_file() {
         ensure_shared_resolver();
@@ -742,6 +758,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_combines_literal_and_regex_selectors() {
         ensure_shared_resolver();
@@ -782,6 +799,7 @@ mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_file_option_adds_mat_extension() {
         ensure_shared_resolver();
@@ -798,6 +816,7 @@ mod tests {
         assert_eq!(names, vec!["v".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_handles_gpu_workspace_entries() {
         ensure_shared_resolver();
@@ -816,6 +835,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_respects_global_filter_with_gpu_variables() {
         ensure_shared_resolver();
@@ -831,6 +851,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn who_handles_workspace_with_wgpu_provider() {
@@ -850,8 +871,8 @@ mod tests {
         shared_set_workspace(&[], &[]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

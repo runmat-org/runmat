@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "issymmetric",
+        builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "issymmetric"
 category: "math/linalg/structure"
@@ -202,6 +205,9 @@ Only the execution strategy changes (device-side predicate vs. host fallback).
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issymmetric",
     op_kind: GpuOpKind::Custom("structure_analysis"),
@@ -217,8 +223,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a symmetry predicate hook; otherwise the runtime gathers the tensor and evaluates on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issymmetric",
     shape: ShapeRequirements::Any,
@@ -229,17 +236,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Returns a host logical scalar and acts as a fusion sink.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("issymmetric", DOC_MD);
-
 #[runtime_builtin(
     name = "issymmetric",
     category = "math/linalg/structure",
     summary = "Test whether a matrix is symmetric or skew-symmetric.",
     keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mode, tol) = parse_optional_args(&rest)?;
@@ -556,13 +559,14 @@ pub fn issymmetric_host_complex_data(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symmetric_matrix_returns_true() {
         let tensor = Tensor::new(
@@ -574,6 +578,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nonsymmetric_matrix_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -581,6 +586,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn skew_symmetric_flag_requires_zero_diagonal() {
         let tensor = Tensor::new(vec![0.0, 2.0, -2.0, 0.0], vec![2, 2]).unwrap();
@@ -594,6 +600,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_allows_small_deviations() {
         let tensor = Tensor::new(vec![1.0, 1.0 + 1e-12, 1.0 - 1e-12, 1.0], vec![2, 2]).unwrap();
@@ -602,6 +609,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_matrix_symmetry() {
         let tensor = ComplexTensor::new(
@@ -614,6 +622,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_matrix_promoted() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -622,6 +631,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_square_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -629,6 +639,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn higher_dimensional_inputs_error() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -639,6 +650,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_and_flag_in_any_order() {
         let tensor = Tensor::new(vec![0.0, 1.0, -1.0000000001, 0.0], vec![2, 2]).unwrap();
@@ -657,6 +669,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -668,6 +681,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -682,6 +696,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -692,6 +707,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_inputs_follow_rules() {
         let result = issymmetric_builtin(Value::Num(5.0), Vec::new()).expect("issymmetric scalar");
@@ -702,6 +718,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issymmetric_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -717,13 +734,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn issymmetric_wgpu_matches_cpu() {

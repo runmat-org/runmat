@@ -9,13 +9,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
+use runmat_filesystem as vfs;
 use std::env;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_FILENAME: &str = "pathdef.m";
@@ -24,7 +22,14 @@ const ERROR_EMPTY_FILENAME: &str = "savepath: filename must not be empty";
 const MESSAGE_ID_CANNOT_WRITE: &str = "MATLAB:savepath:cannotWriteFile";
 const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "savepath",
+        builtin_path = "crate::builtins::io::repl_fs::savepath"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "savepath"
 category: "io/repl_fs"
@@ -197,6 +202,7 @@ Expected behavior:
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "savepath",
     op_kind: GpuOpKind::Custom("io"),
@@ -213,8 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Filesystem persistence executes on the host; GPU-resident filenames are gathered before writing pathdef.m.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "savepath",
     shape: ShapeRequirements::Any,
@@ -226,17 +231,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side-effects are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("savepath", DOC_MD);
-
 #[runtime_builtin(
     name = "savepath",
     category = "io/repl_fs",
     summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 fn savepath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -350,24 +351,14 @@ impl SavepathFailure {
 
 fn persist_path(target: &Path, path_string: &str) -> Result<(), SavepathFailure> {
     if let Some(parent) = target.parent() {
-        if let Err(err) = fs::create_dir_all(parent) {
+        if let Err(err) = vfs::create_dir_all(parent) {
             return Err(SavepathFailure::cannot_write(target, err));
         }
     }
 
     let contents = build_pathdef_contents(path_string);
-    match File::create(target) {
-        Ok(mut file) => {
-            if let Err(err) = file.write_all(contents.as_bytes()) {
-                return Err(SavepathFailure::cannot_write(target, err));
-            }
-            if let Err(err) = file.flush() {
-                return Err(SavepathFailure::cannot_write(target, err));
-            }
-            Ok(())
-        }
-        Err(err) => Err(SavepathFailure::cannot_write(target, err)),
-    }
+    vfs::write(target, contents.as_bytes())
+        .map_err(|err| SavepathFailure::cannot_write(target, err))
 }
 
 fn default_target_path() -> Result<PathBuf, SavepathFailure> {
@@ -409,7 +400,7 @@ fn path_should_be_directory(path: &Path, original: &str) -> bool {
     if cfg!(windows) && original.ends_with('\\') {
         return true;
     }
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(metadata) => metadata.is_dir(),
         Err(_) => false,
     }
@@ -502,7 +493,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::{current_path_string, set_path_string};
@@ -559,6 +550,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_writes_to_default_location_with_env_override() {
         let _lock = REPL_FS_TEST_LOCK
@@ -592,6 +584,7 @@ mod tests {
         assert_eq!(current_path_string(), path_string);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_env_override_empty_returns_failure() {
         let _lock = REPL_FS_TEST_LOCK
@@ -608,6 +601,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_CANNOT_RESOLVE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_accepts_explicit_filename_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -625,6 +619,7 @@ mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_appends_default_filename_for_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -642,6 +637,7 @@ mod tests {
         assert!(expected.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_appends_default_filename_for_trailing_separator() {
         let _lock = REPL_FS_TEST_LOCK
@@ -660,6 +656,7 @@ mod tests {
         assert!(dir.join(DEFAULT_FILENAME).exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_returns_failure_when_write_fails() {
         let _lock = REPL_FS_TEST_LOCK
@@ -685,6 +682,7 @@ mod tests {
         let _ = fs::set_permissions(&target, original_perms);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_outputs_vector_contains_message_and_id() {
         let _lock = REPL_FS_TEST_LOCK
@@ -703,6 +701,7 @@ mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_empty_filename() {
         let _lock = REPL_FS_TEST_LOCK
@@ -714,12 +713,14 @@ mod tests {
         assert_eq!(err, ERROR_EMPTY_FILENAME);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_non_string_input() {
         let err = savepath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert!(err.contains("savepath"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_accepts_string_array_scalar_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -738,6 +739,7 @@ mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_multi_element_string_array() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
@@ -746,6 +748,7 @@ mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_multi_row_char_array() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).expect("char array");
@@ -753,6 +756,7 @@ mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_tensor_with_fractional_codes() {
         let tensor = Tensor::new(vec![65.5], vec![1, 1]).expect("tensor");
@@ -760,6 +764,7 @@ mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_supports_gpu_tensor_filename() {
         let _lock = REPL_FS_TEST_LOCK
@@ -791,6 +796,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_supports_gpu_tensor_filename_with_wgpu_provider() {
         let _lock = REPL_FS_TEST_LOCK
@@ -823,8 +829,8 @@ mod tests {
         provider.free(&handle).expect("free");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

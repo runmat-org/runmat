@@ -1,6 +1,5 @@
 //! MATLAB-compatible `fileread` builtin for RunMat.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{CharArray, Value};
@@ -10,11 +9,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
+use runmat_filesystem as fs;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fileread",
+        builtin_path = "crate::builtins::io::filetext::fileread"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fileread"
 category: "io/filetext"
@@ -145,6 +150,7 @@ Relative paths are evaluated against the current working directory of the RunMat
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fileread",
     op_kind: GpuOpKind::Custom("io-file-read"),
@@ -160,8 +166,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; acceleration providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fileread",
     shape: ShapeRequirements::Any,
@@ -171,11 +176,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Not eligible for fusion; executes as a standalone host operation.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fileread", DOC_MD);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
@@ -210,7 +210,8 @@ impl FileEncoding {
     category = "io/filetext",
     summary = "Read the entire contents of a text file into a 1-by-N character vector.",
     keywords = "fileread,io,read file,text file,character vector",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fileread"
 )]
 fn fileread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("fileread: {e}"))?;
@@ -376,25 +377,22 @@ fn bytes_to_chars(bytes: Vec<u8>) -> Vec<char> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use std::fs;
+    use runmat_filesystem as fs;
+    use runmat_time::unix_timestamp_ms;
     use std::io::Write;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_reads_text_file() {
         let path = unique_path("fileread_text");
@@ -417,6 +415,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_char_array_input() {
         let path = unique_path("fileread_char_input");
@@ -440,6 +439,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_string_array_scalar() {
         let path = unique_path("fileread_string_scalar");
@@ -462,6 +462,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_returns_empty_for_empty_file() {
         let path = unique_path("fileread_empty");
@@ -481,6 +482,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_errors_when_file_missing() {
         let path = unique_path("fileread_missing");
@@ -492,6 +494,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_preserves_non_utf8_bytes() {
         let path = unique_path("fileread_raw_bytes");
@@ -512,6 +515,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_supports_encoding_keyword() {
         let path = unique_path("fileread_utf8_keyword");
@@ -534,6 +538,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_supports_single_encoding_argument() {
         let path = unique_path("fileread_latin1");
@@ -556,6 +561,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_raw_encoding_returns_bytes() {
         let path = unique_path("fileread_raw_encoding");
@@ -578,6 +584,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_ascii_encoding_errors_on_invalid_bytes() {
         let path = unique_path("fileread_ascii_error");
@@ -596,6 +603,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_encoding_keyword_missing_value_errors() {
         let path = unique_path("fileread_encoding_missing");
@@ -614,6 +622,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_too_many_arguments_errors() {
         let path = unique_path("fileread_too_many");
@@ -636,8 +645,8 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(

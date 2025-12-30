@@ -6,16 +6,20 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "kron",
+        builtin_path = "crate::builtins::array::shape::kron"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "kron"
 category: "array/shape"
@@ -178,6 +182,7 @@ host, computes the product, and re-uploads the result when a provider is availab
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/kron.rs`
 - Found an issue? Please open an issue with a minimal reproduction."#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::kron")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "kron",
     op_kind: GpuOpKind::Custom("kronecker"),
@@ -193,8 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on-device when the provider implements `kron`; otherwise the runtime gathers inputs, computes on the host, and re-uploads the result when possible.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::kron")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "kron",
     shape: ShapeRequirements::Any,
@@ -204,11 +208,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("kron", DOC_MD);
 
 #[derive(Clone)]
 enum KronNumericResult {
@@ -227,7 +226,8 @@ enum KronInput {
     category = "array/shape",
     summary = "Compute the Kronecker (tensor) product of two arrays.",
     keywords = "kron,kronecker product,tensor product,block matrix,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::shape::kron"
 )]
 fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -545,12 +545,13 @@ fn checked_total(shape: &[usize], context: &str) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_matrix_product() {
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -571,6 +572,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_scalar_scaling() {
         let a = Value::Num(3.0);
@@ -585,6 +587,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_complex_inputs() {
         let a = Value::Complex(1.0, 2.0);
@@ -601,6 +604,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_logical_promotes_to_double() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -620,6 +624,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_char_arrays_convert_to_double() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -639,6 +644,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_rejects_extra_arguments() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -655,6 +661,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -692,6 +699,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_mixed_gpu_host_reuploads() {
         test_support::with_test_provider(|provider| {
@@ -711,6 +719,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_empty_inputs() {
         let a = Tensor::new(Vec::new(), vec![0, 2]).unwrap();
@@ -725,6 +734,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn kron_wgpu_matches_cpu() {
@@ -780,8 +790,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }

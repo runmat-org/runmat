@@ -7,13 +7,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "erase",
+        builtin_path = "crate::builtins::strings::transform::erase"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "erase"
 category: "strings/transform"
@@ -171,6 +174,7 @@ removal rather than literal substring erasure.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::erase")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "erase",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -187,8 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before substrings are removed.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::erase")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "erase",
     shape: ShapeRequirements::Any,
@@ -199,11 +202,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "String manipulation builtin; not eligible for fusion plans and always gathers GPU inputs before execution.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("erase", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "erase: first argument must be a string array, character array, or cell array of character vectors";
@@ -217,7 +215,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/transform",
     summary = "Remove substring occurrences from strings, character arrays, and cell arrays.",
     keywords = "erase,remove substring,strings,character array,text",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::erase"
 )]
 fn erase_builtin(text: Value, pattern: Value) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("erase: {e}"))?;
@@ -378,11 +377,11 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> Result<Value, St
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_scalar_single_pattern() {
         let result = erase_builtin(
@@ -393,6 +392,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_multiple_patterns() {
         let strings = StringArray::new(
@@ -421,6 +421,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_shape_mismatch_applies_all_patterns() {
         let strings =
@@ -440,6 +441,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_adjusts_width() {
         let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
@@ -456,6 +458,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_handles_full_removal() {
         let chars = CharArray::new_row("abc");
@@ -471,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_multiple_rows_sequential_patterns() {
         let chars = CharArray::new(
@@ -498,6 +502,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -535,6 +540,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_preserves_shape() {
         let cell = CellArray::new(
@@ -561,6 +567,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_preserves_missing_string() {
         let result = erase_builtin(
@@ -571,6 +578,7 @@ mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_allows_empty_pattern_list() {
         let strings = StringArray::new(vec!["alpha".into(), "beta".into()], vec![2, 1]).unwrap();
@@ -583,20 +591,22 @@ mod tests {
         assert_eq!(result, Value::StringArray(strings));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_first_argument() {
         let err = erase_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
         assert_eq!(err, PATTERN_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

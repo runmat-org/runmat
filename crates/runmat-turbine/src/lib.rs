@@ -17,6 +17,7 @@ use runmat_ignition::{Bytecode, Instr};
 
 use target_lexicon::Triple;
 use thiserror::Error;
+use tracing::info_span;
 
 #[cfg(feature = "native-accel")]
 fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
@@ -679,12 +680,19 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = runmat_ignition::interpret_with_vars(
+    let func_result_vars = match runmat_ignition::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
-    )
-    .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
+    ) {
+        Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => Err(TurbineError::ExecutionError(
+            "interaction pending is unsupported in turbine execution".to_string(),
+        )),
+        Err(e) => Err(TurbineError::ExecutionError(format!(
+            "Failed to execute function: {e}"
+        ))),
+    }?;
 
     // Copy back the modified variables
     func_vars = func_result_vars;
@@ -1024,6 +1032,12 @@ impl TurbineEngine {
         vars: &mut [Value],
     ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
+        let _span = info_span!(
+            "turbine.execute_or_compile",
+            hash = hash,
+            instrs = bytecode.instructions.len()
+        )
+        .entered();
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
@@ -1056,7 +1070,12 @@ impl TurbineEngine {
 
         // Use the main Ignition interpreter which has full feature support
         match runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")) {
-            Ok(_) => Ok((0, false)), // false indicates interpreter was used, vars are updated in-place
+            Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
+            Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => {
+                Err(TurbineError::ExecutionError(
+                    "interaction pending is unsupported in turbine interpreter".to_string(),
+                ))
+            }
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }
     }

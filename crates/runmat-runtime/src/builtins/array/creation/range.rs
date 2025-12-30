@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "range",
+        builtin_path = "crate::builtins::array::creation::range"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "range"
 category: "array/creation"
@@ -187,6 +190,7 @@ Use `range(X, 'all')` to flatten all dimensions into a single scalar spread.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "range",
     op_kind: GpuOpKind::Reduction,
@@ -219,8 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Requires provider min/max reductions plus elem_sub; omitnan and multi-axis reductions gather to host when hooks are absent.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -231,17 +234,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "No fused kernel today; the runtime composes provider min/max reductions or gathers to host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("range", DOC_MD);
-
 #[runtime_builtin(
     name = "range",
     category = "array/creation",
     summary = "Compute the difference between the maximum and minimum values.",
     keywords = "range,max,min,spread,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::array::creation::range"
 )]
 fn range_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
@@ -752,12 +751,13 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_scalar_zero() {
         let result = range_builtin(Value::Num(42.0), Vec::new()).expect("range");
@@ -767,6 +767,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_vector_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0], vec![1, 3]).unwrap();
@@ -777,6 +778,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_matrix_columnwise() {
         let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).unwrap();
@@ -790,6 +792,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_matrix_rowwise() {
         let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).unwrap();
@@ -804,6 +807,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_all_collapse() {
         let tensor =
@@ -816,6 +820,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_omit_nan() {
         let tensor = Tensor::new(vec![2.0, 4.0, f64::NAN, 6.0, 5.0, f64::NAN], vec![2, 3]).unwrap();
@@ -830,6 +835,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_includenan_returns_nan() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
@@ -841,6 +847,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_all_omitnan() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 10.0, 4.0], vec![2, 2]).unwrap();
@@ -852,6 +859,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_dim_beyond_ndims_returns_zeros_or_nan() {
         let tensor = Tensor::new(vec![1.0, 4.0, f64::NAN, 7.0], vec![2, 2]).unwrap();
@@ -869,6 +877,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_multiple_dimensions() {
         let tensor = Tensor::new(
@@ -888,6 +897,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_vecdim_column_vector() {
         let tensor = Tensor::new(
@@ -908,6 +918,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_invalid_dimension_non_integer() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -916,6 +927,7 @@ mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -932,6 +944,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_row_vector_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -950,6 +963,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_all_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -968,6 +982,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn range_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -989,6 +1004,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn range_wgpu_dim2_matches_cpu() {
@@ -1025,8 +1041,8 @@ mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

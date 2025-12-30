@@ -8,19 +8,21 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{
-    make_cell, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::{make_cell, make_cell_with_shape};
 
 const ERR_INPUT_NOT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
 const ERR_CELL_CONTENT_NOT_TEXT: &str =
     "cellstr: cell array elements must be character vectors or string scalars";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "cellstr",
+        builtin_path = "crate::builtins::cells::core::cellstr"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cellstr"
 category: "cells/core"
@@ -203,6 +205,7 @@ Elements that are already character vectors are cloned so that downstream code c
 result without mutating the source cell.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellstr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellstr",
     op_kind: GpuOpKind::Custom("text-convert"),
@@ -218,8 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text conversion. Inputs originating on the GPU are gathered before processing, and the output is always a host cell array.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::cells::core::cellstr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellstr",
     shape: ShapeRequirements::Any,
@@ -231,17 +233,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Terminates fusion because the result is a host-resident cell array of character vectors.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cellstr", DOC_MD);
-
 #[runtime_builtin(
     name = "cellstr",
     category = "cells/core",
     summary = "Convert text to a cell array of character vectors.",
     keywords = "cellstr,text,character,string,conversion",
-    accel = "gather"
+    accel = "gather",
+    builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 fn cellstr_builtin(value: Value) -> Result<Value, String> {
     let host = gather_if_needed(&value).map_err(|e| format!("cellstr: {e}"))?;
@@ -397,9 +395,8 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn cell_to_strings(cell: &CellArray) -> Vec<String> {
@@ -412,6 +409,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_char_matrix_and_trims() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', 'd', 'o', 'g', ' ', 'f', 'o', 'x', ' '];
@@ -431,6 +429,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_string_array_with_shape() {
         let data = vec![
@@ -460,6 +459,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_string_scalar() {
         let result = cellstr_builtin(Value::String("RunMat".to_string())).expect("cellstr");
@@ -474,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn normalises_cell_elements() {
         let alpha = Value::CharArray(CharArray::new_row("alpha"));
@@ -491,6 +492,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_text_cell_element() {
         let cell = crate::make_cell(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -498,6 +500,7 @@ mod tests {
         assert!(err.contains("cell array elements must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_multirow_char_element() {
         let ca = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
@@ -506,12 +509,14 @@ mod tests {
         assert!(err.contains("cell array elements must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_text_input() {
         let err = cellstr_builtin(Value::Num(std::f64::consts::PI)).expect_err("expected error");
         assert!(err.contains("input must be"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_empty_char_array() {
         let ca = CharArray::new(Vec::new(), 0, 5).expect("empty char");
@@ -526,6 +531,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_row_of_spaces_becomes_empty_vector() {
         let ca = CharArray::new(vec![' '; 3], 1, 3).expect("char array");
@@ -547,6 +553,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_elements_preserve_trailing_spaces() {
         let ca = CharArray::new(vec!['a', ' ', ' '], 1, 3).expect("char array");
@@ -569,6 +576,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_missing_value_converts() {
         let sa = StringArray::new(vec!["<missing>".to_string()], vec![1, 1]).expect("string array");
@@ -582,6 +590,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_string_array_produces_empty_cell_shape() {
         let sa = StringArray::new(Vec::new(), vec![0, 2]).expect("string array");
@@ -596,8 +605,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

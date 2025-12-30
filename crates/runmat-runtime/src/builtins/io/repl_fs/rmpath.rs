@@ -11,20 +11,25 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
     "rmpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors";
 const ERROR_TOO_FEW_ARGS: &str = "rmpath: at least one folder must be specified";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rmpath",
+        builtin_path = "crate::builtins::io::repl_fs::rmpath"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmpath"
 category: "io/repl_fs"
@@ -152,6 +157,7 @@ Error: rmpath: folder 'nonexistent/toolbox' not found
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::rmpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -167,8 +173,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path manipulation is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::rmpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmpath",
     shape: ShapeRequirements::Any,
@@ -179,17 +184,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "IO builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rmpath", DOC_MD);
-
 #[runtime_builtin(
     name = "rmpath",
     category = "io/repl_fs",
     summary = "Remove folders from the MATLAB search path used by RunMat.",
     keywords = "rmpath,search path,matlab path,remove folder",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 fn rmpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -349,7 +350,7 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> Result<bool, Strin
         return Ok(true);
     }
 
-    match fs::metadata(&normalized) {
+    match vfs::metadata(&normalized) {
         Ok(meta) => {
             if !meta.is_dir() {
                 Err(format!("rmpath: '{raw}' is not a folder"))
@@ -434,11 +435,10 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::{current_path_segments, set_path_string};
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::CellArray;
     use std::convert::TryFrom;
@@ -467,6 +467,7 @@ mod tests {
         path_to_string(&normalized)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_removes_single_entry() {
         let _lock = REPL_FS_TEST_LOCK
@@ -494,6 +495,7 @@ mod tests {
         assert_eq!(segments, vec![keep_str]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_splits_path_list_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -525,6 +527,7 @@ mod tests {
         assert_eq!(segments, vec![str3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_accepts_string_containers() {
         let _lock = REPL_FS_TEST_LOCK
@@ -548,6 +551,7 @@ mod tests {
         assert!(segments.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_supports_cell_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -565,6 +569,7 @@ mod tests {
         assert!(segments.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_errors_on_missing_folder() {
         let _lock = REPL_FS_TEST_LOCK
@@ -578,6 +583,7 @@ mod tests {
         assert!(err.contains("not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_errors_when_folder_not_on_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -593,6 +599,7 @@ mod tests {
         assert!(err.contains("not on search path"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmpath_returns_previous_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -609,8 +616,8 @@ mod tests {
         assert_eq!(returned_str, str);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "eye",
+        builtin_path = "crate::builtins::array::creation::eye"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eye"
 category: "array/creation"
@@ -185,6 +188,7 @@ hook fall back to a single host upload, which is still efficient for typical siz
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eye",
     op_kind: GpuOpKind::Custom("generator"),
@@ -203,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates identity tensors on the device when providers expose dedicated hooks; otherwise falls back to uploading a host-constructed identity tensor.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::eye")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eye",
     shape: ShapeRequirements::Any,
@@ -215,17 +218,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Identity tensors are materialised directly; fusion planner treats eye() as a standalone allocation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("eye", DOC_MD);
-
 #[runtime_builtin(
     name = "eye",
     category = "array/creation",
     summary = "Identity matrix or N-D identity tensor.",
     keywords = "eye,identity,matrix,gpu,like,logical",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::eye"
 )]
 fn eye_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedEye::parse(rest)?;
@@ -582,19 +581,21 @@ fn visit_identity_positions(shape: &[usize], mut f: impl FnMut(usize)) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_default_scalar() {
         let result = eye_builtin(Vec::new()).expect("eye");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_square_from_scalar_dimension() {
         let args = vec![Value::Num(3.0)];
@@ -617,6 +618,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_rectangular_from_two_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -640,6 +642,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_accepts_size_vector_argument() {
         let size_vec = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
@@ -657,6 +660,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_zero_dimension_matrix() {
         let result = eye_builtin(vec![Value::Num(0.0)]).expect("eye");
@@ -669,6 +673,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_uses_tensor_argument_shape_and_type() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -683,6 +688,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_logical_output() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
@@ -705,6 +711,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_bool_produces_logical() {
         let args = vec![Value::Num(3.0), Value::from("like"), Value::Bool(true)];
@@ -727,6 +734,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_prototype_with_logical_override() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -742,6 +750,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_complex_like() {
         let args = vec![
@@ -762,6 +771,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_extra_dimensions_replicate_identity() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::Num(2.0)];
@@ -784,11 +794,13 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_requires_prototype() {
         assert!(eye_builtin(vec![Value::from("like")]).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
@@ -820,6 +832,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_gpu_prototype_infers_shape() {
         test_support::with_test_provider(|provider| {
@@ -836,6 +849,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_string_first_argument() {
         let proto = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -850,6 +864,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_and_logical_conflict() {
         let args = vec![
@@ -861,18 +876,21 @@ mod tests {
         assert!(eye_builtin(args).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_rejects_negative_dimension() {
         let args = vec![Value::Num(-1.0)];
         assert!(eye_builtin(args).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_rejects_non_integer_dimension() {
         let args = vec![Value::Num(2.5)];
         assert!(eye_builtin(args).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn eye_wgpu_matches_cpu() {
@@ -905,8 +923,8 @@ mod tests {
         assert_eq!(gathered.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

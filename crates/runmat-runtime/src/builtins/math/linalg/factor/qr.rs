@@ -5,10 +5,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::register_builtin_fusion_spec;
-use crate::register_builtin_gpu_spec;
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -16,7 +12,14 @@ use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "qr",
+        builtin_path = "crate::builtins::math::linalg::factor::qr"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "qr"
 category: "math/linalg/factor"
@@ -136,6 +139,7 @@ Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `
 - Issues & feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "qr",
     op_kind: GpuOpKind::Custom("qr-factor"),
@@ -151,8 +155,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "qr",
     shape: ShapeRequirements::Any,
@@ -163,18 +166,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "QR factorisation executes eagerly and does not participate in fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("qr", DOC_MD);
-
 #[runtime_builtin(
     name = "qr",
     category = "math/linalg/factor",
     summary = "QR factorization with optional column pivoting and economy-size outputs.",
     keywords = "qr,factorization,decomposition,householder",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
 fn qr_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;
@@ -871,7 +870,7 @@ const EPS_SCALAR: f64 = 1.0e-12;
 const EPS_CLEAN: f64 = 1.0e-12;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor as Matrix;
@@ -892,6 +891,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_single_output_returns_upper_triangular() {
         let data = vec![1.0, 4.0, 2.0, 5.0];
@@ -903,6 +903,7 @@ mod tests {
         tensor_close(&r_eval, &r_builtin, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_three_outputs_reconstructs_input() {
         let data = vec![1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
@@ -934,6 +935,7 @@ mod tests {
         tensor_close(&qr, &ae, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_vector_option_returns_pivot_vector() {
         let data = vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
@@ -945,6 +947,7 @@ mod tests {
         assert!(vector.data.iter().all(|v| *v == 1.0 || *v == 2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_economy_shapes_for_tall_matrix() {
         let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
@@ -957,6 +960,7 @@ mod tests {
         assert_eq!(r.shape, vec![3, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_economy_wide_matrix_matches_full() {
         let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
@@ -971,6 +975,7 @@ mod tests {
         tensor_close(&r_full, &r_econ, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_gpu_provider_returns_gpu_results() {
         test_support::with_test_provider(|provider| {
@@ -1007,6 +1012,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_matches_cpu() {
@@ -1050,6 +1056,7 @@ mod tests {
         tensor_close(&gpu_vec, &host_vec, tol);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_economy_device_path() {
@@ -1123,8 +1130,8 @@ mod tests {
         tensor_close(&qr_product, &a_matrix, 1e-3);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -7,11 +7,11 @@
 //! and numeric codes corresponding to ASCII delimiters.
 
 use std::char;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -19,11 +19,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "dlmread",
+        builtin_path = "crate::builtins::io::tabular::dlmread"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dlmread"
 category: "io/tabular"
@@ -218,6 +223,7 @@ No. Relative paths are resolved against the current working directory. `dlmread`
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmread",
     op_kind: GpuOpKind::Custom("io-dlmread"),
@@ -233,8 +239,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host CPU; providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::dlmread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dlmread",
     shape: ShapeRequirements::Any,
@@ -245,17 +250,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Standalone host operation; not eligible for fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("dlmread", DOC_MD);
-
 #[runtime_builtin(
     name = "dlmread",
     category = "io/tabular",
     summary = "Read numeric data from a delimiter-separated text file.",
     keywords = "dlmread,delimiter,ascii import,range",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
 fn dlmread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("dlmread: {e}"))?;
@@ -937,24 +938,20 @@ fn rows_to_tensor(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ns;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nanos = unix_timestamp_ns();
         let seq = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(
@@ -979,6 +976,7 @@ mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_default_delimiter() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -994,6 +992,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_semicolon_roundtrip() {
         let path = write_temp_file(&["1;2;3", "4;5;6"]);
@@ -1010,6 +1009,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_ascii_code_delimiter() {
         let path = write_temp_file(&["5|6|7", "8|9|10"]);
@@ -1026,6 +1026,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_char_array_filename() {
         let path = write_temp_file(&["1,2", "3,4"]);
@@ -1043,6 +1044,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_handles_utf8_bom() {
         let bytes = b"\xEF\xBB\xBF1,2\n3,4\n";
@@ -1059,6 +1061,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_empty_file_returns_empty_tensor() {
         let path = write_temp_file(&[]);
@@ -1074,6 +1077,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_with_offsets() {
         let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
@@ -1090,6 +1094,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_with_numeric_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1107,6 +1112,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_numeric_range_two_elements() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1124,6 +1130,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_excel_style_range_string() {
         let path = write_temp_file(&["1,2,3,4", "5,6,7,8", "9,10,11,12"]);
@@ -1140,6 +1147,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_range_without_delimiter() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -1157,6 +1165,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_nonnumeric_token_error() {
         let path = write_temp_file(&["1,foo"]);
@@ -1169,6 +1178,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_invalid_range_error() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -1183,6 +1193,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_space_delimiter() {
         let path = write_temp_file(&["1  3", " 4 5 ", "6 7  "]);
@@ -1207,8 +1218,8 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

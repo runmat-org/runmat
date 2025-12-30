@@ -16,11 +16,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ifft",
+        builtin_path = "crate::builtins::math::fft::ifft"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ifft"
 category: "math/fft"
@@ -174,6 +177,7 @@ Apply `ifft` sequentially along each dimension (e.g., `ifft(ifft(X, [], 1), [], 
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifft")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ifft",
     op_kind: GpuOpKind::Custom("ifft"),
@@ -189,8 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers should expose `ifft_dim` (or reuse `fft_dim` with inverse scaling); when absent, the runtime gathers to the host and evaluates the inverse FFT in software.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::fft::ifft")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ifft",
     shape: ShapeRequirements::Any,
@@ -201,16 +204,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Inverse FFT boundaries are not currently fused; fusion plans terminate before invoking `ifft`.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ifft", DOC_MD);
-
 #[runtime_builtin(
     name = "ifft",
     category = "math/fft",
     summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
-    keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu"
+    keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
+    builtin_path = "crate::builtins::math::fft::ifft"
 )]
 fn ifft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (length, dimension, symmetric) = parse_arguments(&rest)?;
@@ -493,7 +492,7 @@ fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex;
@@ -516,6 +515,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_inverts_known_fft() {
         let spectrum = HostComplexTensor::new(
@@ -536,6 +536,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symmetric_returns_real_tensor() {
         let spectrum = HostComplexTensor::new(
@@ -554,6 +555,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_zero_length_returns_empty_tensor() {
         let spectrum = HostComplexTensor::new(Vec::new(), vec![0]).unwrap();
@@ -568,6 +570,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_dimension_argument_recovers_matrix() {
         let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -600,18 +603,21 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_dimension_zero() {
         let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_unknown_string_option() {
         let err = parse_arguments(&[Value::from("invalidflag")]).unwrap_err();
         assert!(err.contains("unrecognized option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_accepts_nonsymmetric_flag() {
         let (len, dim, symmetric) = parse_arguments(&[Value::from("nonsymmetric")]).expect("parse");
@@ -632,12 +638,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_requires_final_position() {
         let err = parse_arguments(&[Value::from("nonsymmetric"), Value::Num(4.0)]).unwrap_err();
         assert!(err.contains("symmetry flag must appear as the final argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_accepts_whitespace() {
         let (len, dim, symmetric) = parse_arguments(&[Value::from(" symmetric ")]).expect("parse");
@@ -646,6 +654,7 @@ mod tests {
         assert!(symmetric);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_zero_padding_length_argument() {
         let spectrum = HostComplexTensor::new(vec![(4.0, 0.0)], vec![1]).unwrap();
@@ -662,6 +671,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_truncates_when_length_is_smaller() {
         let spectrum = HostComplexTensor::new(
@@ -688,6 +698,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_empty_length_with_symmetric_flag() {
         let empty = Tensor::new(Vec::new(), vec![0]).unwrap();
@@ -698,6 +709,7 @@ mod tests {
         assert!(symmetric);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -725,6 +737,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ifft_wgpu_matches_cpu() {
@@ -756,8 +769,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

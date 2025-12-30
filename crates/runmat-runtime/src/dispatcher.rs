@@ -1,6 +1,6 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 
-use crate::{make_cell_with_shape, new_object_builtin};
+use crate::{interaction, make_cell_with_shape, new_object_builtin};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -149,6 +149,9 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
                 return Ok(result);
             }
             Err(err) => {
+                if err == interaction::PENDING_INTERACTION_ERR {
+                    return Err(err);
+                }
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry(args) {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args) {

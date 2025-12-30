@@ -13,11 +13,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "symrcm",
+        builtin_path = "crate::builtins::math::linalg::structure::symrcm"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "symrcm"
 category: "math/linalg/structure"
@@ -197,6 +200,9 @@ row vector `[]`.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "symrcm",
     op_kind: GpuOpKind::Custom("graph-order"),
@@ -213,8 +219,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers return the symmetric reverse Cuthill-McKee permutation; the WGPU implementation currently downloads the matrix and reuses the host algorithm.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "symrcm",
     shape: ShapeRequirements::Any,
@@ -225,17 +232,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Structure-analysis builtin; fusion is not applicable.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("symrcm", DOC_MD);
-
 #[runtime_builtin(
     name = "symrcm",
     category = "math/linalg/structure",
     summary = "Compute the symmetric reverse Cuthill-McKee permutation that reduces matrix bandwidth.",
     keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
-    accel = "graph"
+    accel = "graph",
+    builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 fn symrcm_builtin(matrix: Value) -> Result<Value, String> {
     match matrix {
@@ -440,7 +443,7 @@ fn permutation_to_value(ordering: &[usize]) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
@@ -454,6 +457,7 @@ mod tests {
         Tensor::new(data, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_identity_matrix() {
         let tensor = tensor_from_entries(3, 3, &[(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0)]);
@@ -467,6 +471,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_scalar_input() {
         let result = symrcm_builtin(Value::Num(42.0)).expect("symrcm");
@@ -479,6 +484,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_path_graph() {
         let entries = vec![
@@ -502,6 +508,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_logical_matrix() {
         let data = vec![
@@ -521,6 +528,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_disconnected_components() {
         let entries = vec![(0, 1, 1.0), (1, 0, 1.0), (2, 3, 1.0), (3, 2, 1.0)];
@@ -535,6 +543,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_unsymmetric_treated_structurally() {
         let entries = vec![(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0), (3, 4, 1.0)];
@@ -549,6 +558,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_complex_matrix() {
         let data = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 2.0), (0.0, 0.0)];
@@ -563,6 +573,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -583,6 +594,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_empty_matrix() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -596,6 +608,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_requires_square_matrix() {
         let tensor = tensor_from_entries(2, 3, &[(0, 1, 1.0)]);
@@ -603,6 +616,7 @@ mod tests {
         assert!(err.contains("square"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_vector_is_not_square() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
@@ -613,6 +627,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_higher_dimensional_input() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -623,6 +638,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_unsupported_type() {
         let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
@@ -632,6 +648,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn symrcm_wgpu_matches_cpu() {
@@ -675,8 +692,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

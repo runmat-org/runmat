@@ -1,8 +1,5 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -11,7 +8,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "horzcat",
+        builtin_path = "crate::builtins::array::shape::horzcat"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "horzcat"
 category: "array/shape"
@@ -143,6 +147,7 @@ Scalars and row vectors remain in their natural dimensionality. Higher-dimension
 - Found an issue or behavioural difference? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::horzcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "horzcat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -158,8 +163,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to cat(dim=2); providers without cat fall back to host gather + upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::horzcat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "horzcat",
     shape: ShapeRequirements::Any,
@@ -170,17 +174,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("horzcat", DOC_MD);
-
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
     summary = "Concatenate inputs horizontally (dimension 2) just like MATLAB square brackets.",
     keywords = "horzcat,horizontal concatenation,array,gpu",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 fn horzcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -216,11 +216,12 @@ fn adapt_cat_error(message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = horzcat_builtin(Vec::new()).expect("horzcat");
@@ -233,12 +234,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_argument_round_trips() {
         let result = horzcat_builtin(vec![Value::Num(3.5)]).expect("horzcat");
         assert_eq!(result, Value::Num(3.5));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_horizontal_concat() {
         let left = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -254,6 +257,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_by_columns() {
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -271,6 +275,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_arrays_concatenate() {
         let left = StringArray::new(vec!["left".into(), "right".into()], vec![1, 2]).unwrap();
@@ -286,6 +291,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mismatched_rows_error_mentions_horzcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -295,6 +301,7 @@ mod tests {
         assert!(err.contains("dimension 1 mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -318,6 +325,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_concatenate() {
         let top = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -333,6 +341,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_arrays_concatenate() {
         let left = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
@@ -354,6 +363,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_arrays_concatenate_columns() {
         let lhs = CellArray::new(
@@ -389,6 +399,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
@@ -418,6 +429,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn horzcat_wgpu_matches_cpu() {
@@ -452,8 +464,8 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

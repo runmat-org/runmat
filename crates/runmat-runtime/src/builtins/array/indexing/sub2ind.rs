@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sub2ind",
+        builtin_path = "crate::builtins::array::indexing::sub2ind"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sub2ind"
 category: "array/indexing"
@@ -191,6 +194,7 @@ No. The output preserves the orientation (shape) of the subscript arrays, so row
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sub2ind",
     op_kind: GpuOpKind::Custom("indexing"),
@@ -206,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement the custom `sub2ind` hook to execute on device; runtimes fall back to host computation otherwise.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sub2ind",
     shape: ShapeRequirements::Any,
@@ -218,17 +221,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion executes eagerly on the host; fusion does not apply.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sub2ind", DOC_MD);
-
 #[runtime_builtin(
     name = "sub2ind",
     category = "array/indexing",
     summary = "Convert N-D subscripts into MATLAB-style column-major linear indices.",
     keywords = "sub2ind,linear index,column major,gpu indexing",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
@@ -475,11 +474,12 @@ fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> Result<Value, 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn converts_scalar_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -488,6 +488,7 @@ mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcasts_scalars_over_vectors() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -506,6 +507,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_three_dimensions() {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -526,6 +528,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_out_of_range_subscripts() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -537,6 +540,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_shape_mismatch() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -553,6 +557,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_integer_subscripts() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -564,6 +569,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_integer_value_variants() {
         let dims = Value::Tensor(Tensor::new(vec![3.0], vec![1, 1]).unwrap());
@@ -571,6 +577,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sub2ind_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -614,6 +621,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sub2ind_wgpu_matches_cpu() {
@@ -663,8 +671,8 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

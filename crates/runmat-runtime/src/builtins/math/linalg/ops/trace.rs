@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const NAME: &str = "trace";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::ops::trace"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "trace"
 category: "math/linalg/ops"
@@ -183,6 +187,7 @@ Fused kernels treat `trace` as a scalar reduction boundary. The planner emits GP
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Reduction,
@@ -204,8 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -216,17 +220,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Trace is treated as a scalar reduction boundary; fusion wrappers stop at trace so producers/consumers can fuse independently.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
-
 #[runtime_builtin(
     name = "trace",
     category = "math/linalg/ops",
     summary = "Sum the diagonal elements of matrices and matrix-like tensors.",
     keywords = "trace,matrix trace,diagonal sum,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 fn trace_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -356,18 +356,20 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_scalar_num() {
         let result = trace_builtin(Value::Num(7.0)).expect("trace");
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_rectangular_matrix() {
         let tensor = Tensor::new(vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0], vec![3, 2]).unwrap();
@@ -375,6 +377,7 @@ mod tests {
         assert_eq!(result, Value::Num(10.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_vector_returns_first_element() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -382,6 +385,7 @@ mod tests {
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![0, 5]).unwrap();
@@ -389,6 +393,7 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_complex_matrix() {
         let data = vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0), (7.0, 8.0)];
@@ -403,6 +408,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_promotes_to_double() {
         let chars = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
@@ -413,6 +419,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_square_matrix_uses_diagonal() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -426,6 +433,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -449,6 +457,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_gpu_fallback_uploads_scalar() {
         // Force gather path by using a zero-length diagonal
@@ -471,6 +480,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_integer_promotes_to_double() {
         let value = Value::Int(IntValue::I32(5));
@@ -478,12 +488,14 @@ mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_bool_promotes_to_double() {
         let result = trace_builtin(Value::Bool(true)).expect("trace");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_logical_array_matches_numeric() {
         let data = vec![1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -492,6 +504,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_complex_empty_matrix_returns_zero() {
         let complex = ComplexTensor::new(Vec::new(), vec![0, 5]).expect("complex");
@@ -505,6 +518,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_rejects_higher_dimensional_inputs() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -512,13 +526,14 @@ mod tests {
         assert_eq!(err, "trace: input must be 2-D");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn trace_wgpu_matches_cpu() {

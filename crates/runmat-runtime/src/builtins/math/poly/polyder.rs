@@ -12,13 +12,17 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{tensor, tensor::tensor_into_value};
 use crate::dispatcher;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "polyder",
+        builtin_path = "crate::builtins::math::poly::polyder"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "polyder"
 category: "math/poly"
@@ -216,6 +220,7 @@ All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB’s defau
 [polyval](./polyval), [polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyder",
     op_kind: GpuOpKind::Custom("polynomial-derivative"),
@@ -235,8 +240,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on-device when providers expose polyder hooks; falls back to the host for complex coefficients or unsupported shapes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyder",
     shape: ShapeRequirements::Any,
@@ -247,16 +251,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Symbolic operation on coefficient vectors; fusion bypasses this builtin.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyder", DOC_MD);
-
 #[runtime_builtin(
     name = "polyder",
     category = "math/poly",
     summary = "Differentiate polynomials, products, and ratios with MATLAB-compatible coefficient vectors.",
-    keywords = "polyder,polynomial,derivative,product,quotient"
+    keywords = "polyder,polynomial,derivative,product,quotient",
+    builtin_path = "crate::builtins::math::poly::polyder"
 )]
 fn polyder_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {
@@ -605,11 +605,12 @@ struct Polynomial {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_cubic_polynomial_is_correct() {
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
@@ -627,6 +628,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_product_matches_manual_rule() {
         let p = Tensor::new(vec![1.0, 0.0, -2.0], vec![1, 3]).unwrap();
@@ -646,6 +648,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn quotient_rule_produces_expected_num_and_den() {
         let u = Tensor::new(vec![1.0, 0.0, -4.0], vec![1, 3]).unwrap();
@@ -675,6 +678,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn column_vector_orientation_is_preserved() {
         let tensor = Tensor::new(vec![1.0, 0.0, -3.0], vec![3, 1]).unwrap();
@@ -692,6 +696,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_coefficients_are_supported() {
         let tensor =
@@ -713,6 +718,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_polynomial_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![1, 0]).unwrap();
@@ -720,6 +726,7 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_matrix_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -730,6 +737,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_string_input() {
         let err = derivative_single(Value::String("abc".into())).unwrap_err();
@@ -739,6 +747,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mixed_gpu_cpu_product_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -770,6 +779,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn builtin_rejects_too_many_inputs() {
         let err = super::polyder_builtin(Value::Num(1.0), vec![Value::Num(2.0), Value::Num(3.0)])
@@ -780,6 +790,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_inputs_remain_on_device() {
         test_support::with_test_provider(|provider| {
@@ -803,6 +814,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_product_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -840,6 +852,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_quotient_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -884,6 +897,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_single_matches_cpu() {
@@ -911,6 +925,7 @@ mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_product_matches_cpu() {
@@ -946,6 +961,7 @@ mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_quotient_matches_cpu() {
@@ -993,6 +1009,7 @@ mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_promotes_integers() {
         let value = Value::Int(IntValue::I32(5));
@@ -1000,8 +1017,8 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

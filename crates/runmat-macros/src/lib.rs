@@ -1,9 +1,17 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use syn::parse::{Parse, ParseStream};
 use syn::{
-    parse_macro_input, AttributeArgs, Expr, FnArg, ItemFn, Lit, Meta, MetaNameValue, NestedMeta,
-    Pat,
+    parse_macro_input, AttributeArgs, Expr, FnArg, ItemConst, ItemFn, Lit, LitStr, Meta,
+    MetaNameValue, NestedMeta, Pat,
 };
+
+static WASM_REGISTRY_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static WASM_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
 
 /// Attribute used to mark functions as implementing a runtime builtin.
 ///
@@ -33,6 +41,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut status_lit: Option<Lit> = None;
     let mut examples_lit: Option<Lit> = None;
     let mut accel_values: Vec<String> = Vec::new();
+    let mut builtin_path_lit: Option<LitStr> = None;
     let mut sink_flag = false;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
@@ -66,6 +75,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             } else if path.is_ident("sink") {
                 if let Lit::Bool(lb) = lit {
                     sink_flag = lb.value;
+                }
+            } else if path.is_ident("builtin_path") {
+                if let Lit::Str(ls) = lit {
+                    builtin_path_lit = Some(ls);
+                } else {
+                    panic!("builtin_path must be a string literal");
                 }
             } else {
                 // Gracefully ignore unknown parameters for better IDE experience
@@ -246,40 +261,67 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let sink_bool = sink_flag;
 
-    let register = quote! {
-        runmat_builtins::inventory::submit! {
-            runmat_builtins::BuiltinFunction::new(
-                #name_str,
-                #summary_tok,
-                #category_tok,
-                "",
-                "",
-                vec![#(#inferred_param_types),*],
-                #inferred_return_type,
-                #wrapper_ident,
-                #accel_slice,
-                #sink_bool,
-            )
-        }
-        runmat_builtins::inventory::submit! {
-            runmat_builtins::BuiltinDoc {
-                name: #name_str,
-                category: #category_opt_tok,
-                summary: #summary_opt_tok,
-                keywords: #keywords_opt_tok,
-                errors: #errors_opt_tok,
-                related: #related_opt_tok,
-                introduced: #introduced_opt_tok,
-                status: #status_opt_tok,
-                examples: #examples_opt_tok,
-            }
+    let builtin_expr = quote! {
+        runmat_builtins::BuiltinFunction::new(
+            #name_str,
+            #summary_tok,
+            #category_tok,
+            "",
+            "",
+            vec![#(#inferred_param_types),*],
+            #inferred_return_type,
+            #wrapper_ident,
+            #accel_slice,
+            #sink_bool,
+        )
+    };
+
+    let doc_expr = quote! {
+        runmat_builtins::BuiltinDoc {
+            name: #name_str,
+            category: #category_opt_tok,
+            summary: #summary_opt_tok,
+            keywords: #keywords_opt_tok,
+            errors: #errors_opt_tok,
+            related: #related_opt_tok,
+            introduced: #introduced_opt_tok,
+            status: #status_opt_tok,
+            examples: #examples_opt_tok,
         }
     };
 
+    let builtin_path_lit =
+        builtin_path_lit.expect("runtime_builtin requires `builtin_path = \"...\"`");
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
+        .expect("runtime_builtin `builtin_path` must be a valid path");
+    let helper_ident = format_ident!("__runmat_wasm_register_builtin_{}", ident);
+    let builtin_expr_helper = builtin_expr.clone();
+    let doc_expr_helper = doc_expr.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
+            runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
+        }
+    };
+    let register_native = quote! {
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #builtin_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #doc_expr }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+
     TokenStream::from(quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #func
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #wrapper
-        #register
+        #wasm_helper
+        #register_native
     })
 }
 
@@ -301,12 +343,19 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
     let mut name_lit: Option<Lit> = None;
     let mut value_expr: Option<Expr> = None;
+    let mut builtin_path_lit: Option<LitStr> = None;
 
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
                 if path.is_ident("name") {
                     name_lit = Some(lit);
+                } else if path.is_ident("builtin_path") {
+                    if let Lit::Str(ls) = lit {
+                        builtin_path_lit = Some(ls);
+                    } else {
+                        panic!("builtin_path must be a string literal");
+                    }
                 } else {
                     panic!("Unknown attribute parameter: {}", quote!(#path));
                 }
@@ -331,24 +380,381 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
         panic!("value parameter is required");
     });
 
+    let builtin_path_lit =
+        builtin_path_lit.expect("runtime_constant requires `builtin_path = \"...\"` argument");
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
+        .expect("runtime_constant `builtin_path` must be a valid path");
     let item = parse_macro_input!(input as syn::Item);
 
-    let register = {
-        quote! {
-            #[allow(non_upper_case_globals)]
-            runmat_builtins::inventory::submit! {
-                runmat_builtins::Constant {
-                    name: #name,
-                    value: runmat_builtins::Value::Num(#value),
-                }
-            }
+    let constant_expr = quote! {
+        runmat_builtins::Constant {
+            name: #name,
+            value: #value,
         }
     };
 
+    let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name);
+    let constant_expr_helper = constant_expr.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+        }
+    };
+    let register_native = quote! {
+        #[cfg(not(target_arch = "wasm32"))]
+        #[allow(non_upper_case_globals)]
+        runmat_builtins::inventory::submit! { #constant_expr }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+
     TokenStream::from(quote! {
         #item
-        #register
+        #wasm_helper
+        #register_native
     })
+}
+
+struct RegisterConstantArgs {
+    name: LitStr,
+    value: Expr,
+    builtin_path: LitStr,
+}
+
+impl syn::parse::Parse for RegisterConstantArgs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let name: LitStr = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        let value: Expr = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        let builtin_path: LitStr = input.parse()?;
+        if input.peek(syn::Token![,]) {
+            input.parse::<syn::Token![,]>()?;
+        }
+        Ok(RegisterConstantArgs {
+            name,
+            value,
+            builtin_path,
+        })
+    }
+}
+
+#[proc_macro]
+pub fn register_constant(input: TokenStream) -> TokenStream {
+    let RegisterConstantArgs {
+        name,
+        value,
+        builtin_path,
+    } = parse_macro_input!(input as RegisterConstantArgs);
+    let constant_expr = quote! {
+        runmat_builtins::Constant {
+            name: #name,
+            value: #value,
+        }
+    };
+    let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name.value());
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path.value())
+        .expect("register_constant `builtin_path` must be a valid path");
+    let constant_expr_helper = constant_expr.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+        }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+    TokenStream::from(quote! {
+        #wasm_helper
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #constant_expr }
+    })
+}
+
+struct RegisterSpecAttrArgs {
+    spec_expr: Option<Expr>,
+    builtin_path: Option<LitStr>,
+}
+
+impl Parse for RegisterSpecAttrArgs {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut spec_expr = None;
+        let mut builtin_path = None;
+        while !input.is_empty() {
+            let ident: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            if ident == "spec" {
+                spec_expr = Some(input.parse()?);
+            } else if ident == "builtin_path" {
+                let lit: LitStr = input.parse()?;
+                builtin_path = Some(lit);
+            } else {
+                return Err(syn::Error::new(ident.span(), "unknown attribute argument"));
+            }
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            spec_expr,
+            builtin_path,
+        })
+    }
+}
+
+struct RegisterDocAttrArgs {
+    name: Expr,
+    text: Option<Expr>,
+    builtin_path: Option<LitStr>,
+}
+
+impl Parse for RegisterDocAttrArgs {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut name = None;
+        let mut text = None;
+        let mut builtin_path = None;
+        while !input.is_empty() {
+            let ident: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            if ident == "name" {
+                name = Some(input.parse()?);
+            } else if ident == "text" {
+                text = Some(input.parse()?);
+            } else if ident == "builtin_path" {
+                let lit: LitStr = input.parse()?;
+                builtin_path = Some(lit);
+            } else {
+                return Err(syn::Error::new(ident.span(), "unknown attribute argument"));
+            }
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            name: name.ok_or_else(|| input.error("missing `name` argument"))?,
+            text,
+            builtin_path,
+        })
+    }
+}
+
+#[proc_macro_attribute]
+pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterSpecAttrArgs);
+    let RegisterSpecAttrArgs {
+        spec_expr,
+        builtin_path,
+    } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let spec_for_native = spec_tokens.clone();
+    let builtin_path_lit =
+        builtin_path.expect("register_gpu_spec requires `builtin_path = \"...\"` argument");
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
+        .expect("register_gpu_spec `builtin_path` must be a valid path");
+    let helper_ident = format_ident!(
+        "__runmat_wasm_register_gpu_spec_{}",
+        item_const.ident.to_string()
+    );
+    let spec_tokens_helper = spec_tokens.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            crate::builtins::common::spec::wasm_registry::submit_gpu_spec(&#spec_tokens_helper);
+        }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #wasm_helper
+        #[cfg(not(target_arch = "wasm32"))]
+        inventory::submit! {
+            crate::builtins::common::spec::GpuSpecInventory { spec: &#spec_for_native }
+        }
+    };
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterSpecAttrArgs);
+    let RegisterSpecAttrArgs {
+        spec_expr,
+        builtin_path,
+    } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let spec_for_native = spec_tokens.clone();
+    let builtin_path_lit =
+        builtin_path.expect("register_fusion_spec requires `builtin_path = \"...\"` argument");
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
+        .expect("register_fusion_spec `builtin_path` must be a valid path");
+    let helper_ident = format_ident!(
+        "__runmat_wasm_register_fusion_spec_{}",
+        item_const.ident.to_string()
+    );
+    let spec_tokens_helper = spec_tokens.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            crate::builtins::common::spec::wasm_registry::submit_fusion_spec(&#spec_tokens_helper);
+        }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #wasm_helper
+        #[cfg(not(target_arch = "wasm32"))]
+        inventory::submit! {
+            crate::builtins::common::spec::FusionSpecInventory { spec: &#spec_for_native }
+        }
+    };
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn register_doc_text(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as RegisterDocAttrArgs);
+    let RegisterDocAttrArgs {
+        name,
+        text,
+        builtin_path,
+    } = args;
+    let item_const = parse_macro_input!(item as ItemConst);
+    let name_tokens = quote! { #name };
+    let text_tokens = text.map(|expr| quote! { #expr }).unwrap_or_else(|| {
+        let ident = &item_const.ident;
+        quote! { #ident }
+    });
+    let builtin_path_lit =
+        builtin_path.expect("register_doc_text requires `builtin_path = \"...\"` argument");
+    let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
+        .expect("register_doc_text `builtin_path` must be a valid path");
+    let helper_ident = format_ident!(
+        "__runmat_wasm_register_doc_text_{}",
+        item_const.ident.to_string()
+    );
+    let wasm_name = name_tokens.clone();
+    let wasm_text = text_tokens.clone();
+    let wasm_helper = quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[allow(non_snake_case)]
+        pub(crate) fn #helper_ident() {
+            const ENTRY: crate::builtins::common::spec::DocTextInventory =
+                crate::builtins::common::spec::DocTextInventory {
+                    name: #wasm_name,
+                    text: #wasm_text,
+                };
+            crate::builtins::common::spec::wasm_registry::submit_doc_text(&ENTRY);
+        }
+    };
+    append_wasm_block(quote! {
+        #builtin_path::#helper_ident();
+    });
+    let expanded = quote! {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+        #item_const
+        #wasm_helper
+        #[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
+        inventory::submit! {
+            crate::builtins::common::spec::DocTextInventory { name: #name_tokens, text: #text_tokens }
+        }
+    };
+    expanded.into()
+}
+
+fn append_wasm_block(block: proc_macro2::TokenStream) {
+    if !should_generate_wasm_registry() {
+        return;
+    }
+    let path = match wasm_registry_path() {
+        Some(p) => p,
+        None => return,
+    };
+    let _guard = wasm_registry_lock().lock().unwrap();
+    initialize_registry_file(path);
+    let mut contents = fs::read_to_string(path).expect("failed to read wasm registry file");
+    let insertion = format!("    {}\n", block);
+    if let Some(pos) = contents.rfind('}') {
+        contents.insert_str(pos, &insertion);
+    } else {
+        contents.push_str(&insertion);
+        contents.push_str("}\n");
+    }
+    fs::write(path, contents).expect("failed to update wasm registry file");
+}
+
+fn wasm_registry_path() -> Option<&'static PathBuf> {
+    WASM_REGISTRY_PATH
+        .get_or_init(workspace_registry_path)
+        .as_ref()
+}
+
+fn wasm_registry_lock() -> &'static Mutex<()> {
+    WASM_REGISTRY_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn initialize_registry_file(path: &Path) {
+    WASM_REGISTRY_INIT.get_or_init(|| {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        const HEADER: &str = "pub fn register_all() {\n}\n";
+        fs::write(path, HEADER).expect("failed to create wasm registry file");
+    });
+}
+
+fn should_generate_wasm_registry() -> bool {
+    // Generate the registry file for all builds by default so that downstream
+    // wasm consumers (which compile proc-macros for the host) still produce the table.
+    // Allow opting out with RUNMAT_DISABLE_WASM_REGISTRY=1.
+    !matches!(
+        std::env::var("RUNMAT_DISABLE_WASM_REGISTRY"),
+        Ok(ref value) if value == "1"
+    )
+}
+
+fn workspace_registry_path() -> Option<PathBuf> {
+    let mut dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
+    loop {
+        if dir.join("Cargo.lock").exists() {
+            return Some(dir.join("target").join("runmat_wasm_registry.rs"));
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+fn helper_ident_from_name(prefix: &str, name: &str) -> proc_macro2::Ident {
+    let mut sanitized = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('_');
+        }
+    }
+    format_ident!("{}{}", prefix, sanitized)
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum

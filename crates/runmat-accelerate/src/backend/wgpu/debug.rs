@@ -1,7 +1,8 @@
+use runmat_time::Instant;
 use wgpu::util::DeviceExt;
 
 pub fn try_compile_kernel(device: &wgpu::Device, label: &str, wgsl_src: &str) {
-    let t0 = std::time::Instant::now();
+    let t0 = Instant::now();
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&format!("{}-module", label)),
         source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),
@@ -31,7 +32,7 @@ pub fn probe_kernel_with_buffers(
     wgsl_src: &str,
     wg: u32,
 ) {
-    let t0 = std::time::Instant::now();
+    let t0 = Instant::now();
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&format!("{}-module", label)),
         source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),

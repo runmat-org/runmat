@@ -9,11 +9,16 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strlength",
+        builtin_path = "crate::builtins::strings::core::strlength"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strlength"
 category: "strings/core"
@@ -151,6 +156,7 @@ No. The builtin inspects metadata and operates on host strings. If your data alr
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strlength")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strlength",
     op_kind: GpuOpKind::Custom("string-metadata"),
@@ -166,8 +172,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Measures string lengths on the CPU; any GPU-resident inputs are gathered before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strlength")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strlength",
     shape: ShapeRequirements::Any,
@@ -177,11 +182,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Metadata-only builtin; not eligible for fusion and never emits GPU kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strlength", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "strlength: first argument must be a string array, character array, or cell array of character vectors";
@@ -193,7 +193,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/core",
     summary = "Count characters in string arrays, character arrays, or cell arrays of character vectors.",
     keywords = "strlength,string length,text,count,characters",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::core::strlength"
 )]
 fn strlength_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strlength: {e}"))?;
@@ -277,17 +278,18 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_scalar() {
         let result = strlength_builtin(Value::String("RunMat".into())).expect("strlength");
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_with_missing() {
         let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![2, 1]).unwrap();
@@ -303,6 +305,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
@@ -317,6 +320,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_vector_retains_explicit_spaces() {
         let data: Vec<char> = "hi   ".chars().collect();
@@ -325,6 +329,7 @@ mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_cell_array_of_char_vectors() {
         let cell = CellArray::new(
@@ -346,6 +351,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_cell_array_with_string_scalars() {
         let cell = CellArray::new(
@@ -371,6 +377,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_preserves_shape() {
         let array = StringArray::new(
@@ -388,6 +395,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_array_trims_padding() {
         let data: Vec<char> = vec!['d', 'o', 'g', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
@@ -402,12 +410,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_errors_on_invalid_input() {
         let err = strlength_builtin(Value::Num(1.0)).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_rejects_cell_with_invalid_element() {
         let cell = CellArray::new(
@@ -420,8 +430,8 @@ mod tests {
         assert_eq!(err, CELL_ELEMENT_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

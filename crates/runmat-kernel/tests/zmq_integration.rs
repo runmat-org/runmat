@@ -3,6 +3,7 @@ use runmat_kernel::{
     transport::{recv_jupyter_message, send_jupyter_message},
     KernelConfig, KernelServer,
 };
+use runmat_time::Instant;
 use std::collections::HashMap;
 
 fn assign_ports_or_skip(config: &mut KernelConfig) -> bool {
@@ -18,7 +19,7 @@ fn assign_ports_or_skip(config: &mut KernelConfig) -> bool {
 
 fn poll_readable(socket: &zmq::Socket, timeout_ms: i64) -> bool {
     // Fallback polling via get_events since PollItem construction is limited
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         if let Ok(ev) = socket.get_events() {
             if ev.contains(zmq::POLLIN) {

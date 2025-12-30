@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "eq",
+        builtin_path = "crate::builtins::logical::rel::eq"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eq"
 category: "logical/rel"
@@ -181,6 +184,7 @@ Yes. String arrays support MATLAB-style implicit expansion, so you can compare a
 Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::eq")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eq",
     op_kind: GpuOpKind::Elementwise,
@@ -200,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_eq kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::eq")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eq",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -224,17 +227,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits comparison kernels that write 0 or 1; providers may override with specialised shaders.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("eq", DOC_MD);
-
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
     summary = "Element-wise equality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "eq,equality,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::rel::eq"
 )]
 fn eq_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
@@ -574,7 +573,7 @@ fn promote_numeric_to_complex(buffer: &NumericBuffer) -> ComplexBuffer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -582,18 +581,21 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::HandleRef;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_scalar_true() {
         let result = eq_builtin(Value::Num(5.0), Value::Num(5.0)).expect("eq");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_scalar_false() {
         let result = eq_builtin(Value::Num(5.0), Value::Num(4.0)).expect("eq");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 2.0], vec![1, 4]).unwrap();
@@ -607,6 +609,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_char_array_against_numeric() {
         let char_array = CharArray::new(vec!['A', 'B', 'A'], 1, 3).unwrap();
@@ -621,6 +624,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_string_array_broadcast() {
         let sa = StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap();
@@ -634,6 +638,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_handle_identity() {
         unsafe {
@@ -660,6 +665,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -678,12 +684,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_numeric_and_string_error() {
         let err = eq_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.contains("mixing numeric and string inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_complex_and_numeric() {
         let complex = Value::Complex(2.0, 0.0);
@@ -691,13 +699,14 @@ mod tests {
         assert_eq!(eq_builtin(complex, numeric).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn eq_wgpu_matches_host() {

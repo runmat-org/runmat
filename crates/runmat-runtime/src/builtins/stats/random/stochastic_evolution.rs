@@ -27,10 +27,11 @@ pub fn stochastic_evolution_host(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::random;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cpu_fallback_handles_zero_scale() {
         let _guard = random::test_lock().lock().unwrap();

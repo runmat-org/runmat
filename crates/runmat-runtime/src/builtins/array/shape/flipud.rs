@@ -9,15 +9,19 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{CellArray, ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "flipud",
+        builtin_path = "crate::builtins::array::shape::flipud"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "flipud"
 category: "array/shape"
@@ -185,6 +189,7 @@ Yes. The function only reorders elements; values are never modified, so it is nu
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flipud")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "flipud",
     op_kind: GpuOpKind::Custom("flip"),
@@ -205,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the generic flip hook with axis=0; falls back to host mirror when the hook is missing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::flipud")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "flipud",
     shape: ShapeRequirements::Any,
@@ -217,17 +221,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through flipud.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("flipud", DOC_MD);
-
 #[runtime_builtin(
     name = "flipud",
     category = "array/shape",
     summary = "Flip an array up-to-down along the first dimension.",
     keywords = "flipud,flip,vertical,matrix,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::shape::flipud"
 )]
 fn flipud_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -307,7 +307,7 @@ fn flip_cell_array_rows(cell: CellArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -315,6 +315,7 @@ mod tests {
         CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_matrix_reverses_rows() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("tensor");
@@ -329,6 +330,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_column_vector_reverses_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -340,6 +342,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_row_vector_noop() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -351,6 +354,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_nd_tensor_flips_first_dim_only() {
         let tensor = Tensor::new((1..=24).map(|v| v as f64).collect(), vec![3, 4, 2]).unwrap();
@@ -365,6 +369,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_char_array() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -378,6 +383,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_string_array() {
         let strings =
@@ -389,6 +395,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_cell_array_reverses_rows() {
         let cell = CellArray::new(
@@ -416,6 +423,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_logical_array_preserves_bits() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -427,6 +435,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_scalar_numeric_noop() {
         let result = flipud_builtin(Value::Num(42.0)).expect("flipud");
@@ -436,6 +445,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_complex_tensor_defaults_to_first_dim() {
         let tensor = ComplexTensor::new(
@@ -451,6 +461,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_rejects_struct_inputs() {
         let mut st = StructValue::new();
@@ -459,6 +470,7 @@ mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -476,6 +488,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_preserves_row_vector() {
         test_support::with_test_provider(|provider| {
@@ -492,6 +505,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_falls_back_when_axis_missing() {
         // The simple provider does not expose flip, so this exercises gather→flip→upload.
@@ -503,6 +517,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_gpu_with_registered_provider_preserves_gpu_type() {
         test_support::with_test_provider(|provider| {
@@ -517,13 +532,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn flipud_wgpu_matches_cpu() {

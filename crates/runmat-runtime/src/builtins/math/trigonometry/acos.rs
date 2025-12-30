@@ -16,14 +16,18 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const ZERO_EPS: f64 = 1e-12;
 const DOMAIN_TOL: f64 = 1e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "acos",
+        builtin_path = "crate::builtins::math::trigonometry::acos"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "acos"
 category: "math/trigonometry"
@@ -201,6 +205,7 @@ generated path, allowing fused GPU execution without intermediate buffers.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "acos",
     op_kind: GpuOpKind::Elementwise,
@@ -216,8 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acos in-place when inputs stay within [-1, 1]; otherwise the runtime gathers to host to honour MATLAB-compatible complex promotion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acos",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -234,17 +238,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL acos calls; providers can substitute custom kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("acos", DOC_MD);
-
 #[runtime_builtin(
     name = "acos",
     category = "math/trigonometry",
     summary = "Element-wise inverse cosine with MATLAB-compatible complex promotion.",
     keywords = "acos,inverse cosine,arccos,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::acos"
 )]
 fn acos_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -408,11 +408,12 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_within_domain() {
         let result = acos_builtin(Value::Num(0.5)).expect("acos");
@@ -422,6 +423,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_outside_domain_returns_complex() {
         let result = acos_builtin(Value::Num(1.2)).expect("acos");
@@ -435,6 +437,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_matrix_elementwise() {
         let tensor = Tensor::new(vec![0.0, -0.5, 0.75, 1.0], vec![2, 2]).expect("tensor");
@@ -456,6 +459,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_logical_array() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical");
@@ -470,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_char_array_complex_promotion() {
         let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
@@ -487,12 +492,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_string_errors() {
         let err = acos_builtin(Value::from("hello")).expect_err("acos string should error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_integer_scalar() {
         let result = acos_builtin(Value::Int(IntValue::I32(1))).expect("acos int");
@@ -502,6 +509,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_complex_scalar_input() {
         let result = acos_builtin(Value::Complex(1.0, 2.0)).expect("acos complex");
@@ -515,6 +523,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -539,6 +548,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_gpu_outside_domain_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -559,13 +569,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn acos_wgpu_matches_cpu_elementwise() {

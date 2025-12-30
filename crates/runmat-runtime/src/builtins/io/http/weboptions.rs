@@ -10,14 +10,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(
+    name = "weboptions",
+    builtin_path = "crate::builtins::io::http::weboptions"
+)]
 pub const DOC_MD: &str = r#"---
 title: "weboptions"
 category: "io/http"
@@ -148,6 +148,7 @@ Pass an empty struct (`struct()`) or empty cell array (`{}`) to reset the respec
 [webread](./webread), [webwrite](./webwrite), [jsondecode](../json/jsondecode), [jsonencode](../json/jsonencode)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::weboptions")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "weboptions",
     op_kind: GpuOpKind::Custom("http-options"),
@@ -163,8 +164,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "weboptions validates CPU metadata only; gpuArray inputs are gathered eagerly.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::weboptions")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "weboptions",
     shape: ShapeRequirements::Any,
@@ -175,17 +175,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "weboptions constructs option structs and terminates fusion graphs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("weboptions", DOC_MD);
-
 #[runtime_builtin(
     name = "weboptions",
     category = "io/http",
     summary = "Create an options struct that configures webread and webwrite HTTP behaviour.",
     keywords = "weboptions,http options,timeout,headers,rest client",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::http::weboptions"
 )]
 fn weboptions_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let mut gathered = Vec::with_capacity(rest.len());
@@ -492,7 +488,7 @@ fn expect_string_scalar(value: &Value, context: &str) -> Result<String, String> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -502,7 +498,6 @@ mod tests {
     use crate::call_builtin;
     use runmat_builtins::CellArray;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn spawn_server<F>(handler: F) -> String
@@ -554,6 +549,7 @@ mod tests {
         let _ = stream.write_all(body);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_default_struct_matches_expected_fields() {
         let result = weboptions_builtin(Vec::new()).expect("weboptions");
@@ -594,6 +590,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_overrides_timeout_and_headers() {
         let mut headers = StructValue::new();
@@ -632,6 +629,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_updates_existing_struct() {
         let base = weboptions_builtin(vec![Value::from("ContentType"), Value::from("json")])
@@ -657,6 +655,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_unknown_option() {
         let err = weboptions_builtin(vec![Value::from("BogusOption"), Value::Num(1.0)])
@@ -664,6 +663,7 @@ mod tests {
         assert!(err.contains("unknown option"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_requires_username_when_password_provided() {
         let err = weboptions_builtin(vec![Value::from("Password"), Value::from("secret")])
@@ -674,6 +674,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_timeout_nonpositive() {
         let err = weboptions_builtin(vec![Value::from("Timeout"), Value::Num(0.0)])
@@ -684,6 +685,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_headerfields_bad_cell_shape() {
         let cell = CellArray::new(vec![Value::from("Accept")], 1, 1).expect("cell");
@@ -695,6 +697,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_uses_weboptions_without_polluting_query() {
         let options = weboptions_builtin(Vec::new()).expect("weboptions");
@@ -721,6 +724,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_uses_weboptions_auto_request_method() {
         let options = weboptions_builtin(Vec::new()).expect("weboptions default");
@@ -751,8 +755,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

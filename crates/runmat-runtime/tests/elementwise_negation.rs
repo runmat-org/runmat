@@ -1,6 +1,9 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::elementwise_neg;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_scalar_negation() {
     // Test numeric scalar
@@ -19,6 +22,7 @@ fn test_scalar_negation() {
     assert_eq!(result, Value::Bool(false));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_negation() {
     // Test 2x2 matrix
@@ -35,6 +39,7 @@ fn test_matrix_negation() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_vector_negation() {
     // Test row vector
@@ -51,6 +56,7 @@ fn test_vector_negation() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_zero_negation() {
     // Test that -0 = 0
@@ -59,6 +65,7 @@ fn test_zero_negation() {
     assert_eq!(result, Value::Num(-0.0));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_unsupported_type() {
     // Test string negation should fail

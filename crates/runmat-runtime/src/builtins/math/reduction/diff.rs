@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "diff",
+        builtin_path = "crate::builtins::math::reduction::diff"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "diff"
 category: "math/reduction"
@@ -169,6 +172,7 @@ to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces ident
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diff",
     op_kind: GpuOpKind::Custom("finite-difference"),
@@ -184,8 +188,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers surface finite-difference kernels through `diff_dim`; the WGPU backend keeps tensors on the device.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::diff")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diff",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -196,17 +199,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently delegates to the runtime implementation; providers can override with custom kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("diff", DOC_MD);
-
 #[runtime_builtin(
     name = "diff",
     category = "math/reduction",
     summary = "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
     keywords = "diff,difference,finite difference,nth difference,gpu",
-    accel = "diff"
+    accel = "diff",
+    builtin_path = "crate::builtins::math::reduction::diff"
 )]
 fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (order, dim) = parse_arguments(&rest)?;
@@ -478,11 +477,12 @@ fn product(dims: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_row_vector_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
@@ -496,6 +496,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_column_vector_second_order() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![4, 1]).unwrap();
@@ -510,6 +511,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_matrix_along_columns() {
         let tensor = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
@@ -524,6 +526,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_handles_empty_when_order_exceeds_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -538,6 +541,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_char_array_promotes_to_double() {
         let chars = CharArray::new("ACEG".chars().collect(), 1, 4).unwrap();
@@ -551,6 +555,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_complex_tensor_preserves_type() {
         let tensor =
@@ -565,6 +570,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_zero_order_returns_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -573,6 +579,7 @@ mod tests {
         assert_eq!(result, Value::Tensor(tensor));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_order_argument() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![3, 1]).unwrap();
@@ -582,6 +589,7 @@ mod tests {
         assert_eq!(result, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![1, 4]).unwrap();
@@ -599,6 +607,7 @@ mod tests {
         assert_eq!(result, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_negative_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -607,6 +616,7 @@ mod tests {
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_non_integer_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -615,6 +625,7 @@ mod tests {
         assert!(err.contains("non-negative integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_invalid_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -623,6 +634,7 @@ mod tests {
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -639,6 +651,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn diff_wgpu_matches_cpu() {
@@ -677,8 +690,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

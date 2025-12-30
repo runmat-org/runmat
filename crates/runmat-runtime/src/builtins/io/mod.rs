@@ -1,6 +1,7 @@
 pub mod disp;
 pub mod filetext;
 pub mod http;
+pub mod input;
 pub mod json;
 pub mod mat;
 pub mod net;

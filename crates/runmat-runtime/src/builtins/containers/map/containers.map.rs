@@ -15,14 +15,19 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "containers.Map",
+        builtin_path = "crate::builtins::containers::map::containers_map"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "containers.Map"
 category: "containers/map"
@@ -210,6 +215,9 @@ error pointing to the offending argument.
 [remove](./containers.Map.remove), [length](../../array/introspection/length)
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "containers.Map",
     op_kind: GpuOpKind::Custom("map"),
@@ -225,8 +233,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Map storage is host-resident; GPU inputs are gathered only when split into multiple entries.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "containers.Map",
     shape: ShapeRequirements::Any,
@@ -236,11 +245,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Handles act as fusion sinks; map construction terminates GPU fusion plans.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("containers.Map", DOC_MD);
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
@@ -534,7 +538,8 @@ struct KeyCandidate {
     summary = "Create MATLAB-style dictionary objects that map keys to values.",
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_constructor_args(args)?;
@@ -542,7 +547,10 @@ fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
     allocate_handle(store)
 }
 
-#[runtime_builtin(name = "containers.Map.keys")]
+#[runtime_builtin(
+    name = "containers.Map.keys",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_keys(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let values = store.keys();
@@ -550,7 +558,10 @@ fn containers_map_keys(map: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.values")]
+#[runtime_builtin(
+    name = "containers.Map.values",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_values(map: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let values = store.values();
@@ -558,7 +569,10 @@ fn containers_map_values(map: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.isKey")]
+#[runtime_builtin(
+    name = "containers.Map.isKey",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
@@ -578,7 +592,10 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
     })
 }
 
-#[runtime_builtin(name = "containers.Map.remove")]
+#[runtime_builtin(
+    name = "containers.Map.remove",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     with_store_mut(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
@@ -591,7 +608,10 @@ fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     Ok(map)
 }
 
-#[runtime_builtin(name = "containers.Map.subsref")]
+#[runtime_builtin(
+    name = "containers.Map.subsref",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Value, String> {
     if !matches!(map, Value::HandleObject(_)) {
         return Err(format!(
@@ -649,7 +669,10 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Va
     }
 }
 
-#[runtime_builtin(name = "containers.Map.subsasgn")]
+#[runtime_builtin(
+    name = "containers.Map.subsasgn",
+    builtin_path = "crate::builtins::containers::map::containers_map"
+)]
 fn containers_map_subsasgn(
     map: Value,
     kind: String,
@@ -1391,10 +1414,11 @@ pub fn map_length(value: &Value) -> Option<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn construct_empty_map_defaults() {
         let map = containers_map_builtin(Vec::new()).expect("map");
@@ -1429,6 +1453,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_with_cells_lookup() {
         let keys = crate::make_cell(vec![Value::from("apple"), Value::from("pear")], 1, 2).unwrap();
@@ -1443,6 +1468,7 @@ mod tests {
         assert_eq!(apple, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_rejects_duplicate_keys() {
         let keys = crate::make_cell(vec![Value::from("dup"), Value::from("dup")], 1, 2).unwrap();
@@ -1451,6 +1477,7 @@ mod tests {
         assert!(err.contains("Duplicate key name"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn constructor_errors_when_value_count_mismatch() {
         let keys = crate::make_cell(vec![Value::from("a"), Value::from("b")], 1, 2).unwrap();
@@ -1459,6 +1486,7 @@ mod tests {
         assert!(err.contains("number of keys"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn comparison_method_rejects_unknown_values() {
         let keys = crate::make_cell(vec![Value::from("a")], 1, 1).unwrap();
@@ -1473,6 +1501,7 @@ mod tests {
         assert!(err.contains("ComparisonMethod"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn key_type_single_roundtrip() {
         let map = containers_map_builtin(vec![Value::from("KeyType"), Value::from("single")])
@@ -1491,6 +1520,7 @@ mod tests {
         assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_type_double_converts_integers() {
         let keys = crate::make_cell(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -1509,6 +1539,7 @@ mod tests {
         assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_type_logical_converts_numeric_arrays() {
         let keys = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
@@ -1532,6 +1563,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn uniform_values_enforced_on_assignment() {
         let map = containers_map_builtin(vec![Value::from("UniformValues"), Value::from(true)])
@@ -1544,6 +1576,7 @@ mod tests {
         assert!(err.contains("UniformValues"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assignment_updates_and_inserts() {
         let map = containers_map_builtin(Vec::new()).expect("map");
@@ -1574,6 +1607,7 @@ mod tests {
         assert_eq!(value, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsref_multiple_keys_preserves_shape() {
         let keys = crate::make_cell(
@@ -1604,6 +1638,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsref_empty_key_collection_returns_empty_cell() {
         let keys = crate::make_cell(vec![Value::from("z")], 1, 1).unwrap();
@@ -1622,6 +1657,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsasgn_with_cell_keys_updates_all_targets() {
         let keys = crate::make_cell(vec![Value::from("a"), Value::from("b")], 1, 2).unwrap();
@@ -1642,6 +1678,7 @@ mod tests {
         assert_eq!(b_value, Value::Num(20.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assignment_value_count_mismatch_errors() {
         let keys = crate::make_cell(vec![Value::from("x"), Value::from("y")], 1, 2).unwrap();
@@ -1655,6 +1692,7 @@ mod tests {
         assert!(err.contains("requires 2 values"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn subsasgn_empty_key_collection_is_noop() {
         let keys = crate::make_cell(vec![Value::from("root")], 1, 1).unwrap();
@@ -1671,6 +1709,7 @@ mod tests {
         assert_eq!(value, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn keys_values_iskey_remove() {
         let keys = crate::make_cell(
@@ -1715,6 +1754,7 @@ mod tests {
         assert_eq!(mask, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_missing_key_returns_error() {
         let keys = crate::make_cell(vec![Value::from("key")], 1, 1).unwrap();
@@ -1728,6 +1768,7 @@ mod tests {
         assert_eq!(err, MISSING_KEY_ERR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_delegates_to_map_count() {
         let keys = crate::make_cell(
@@ -1746,6 +1787,7 @@ mod tests {
         assert_eq!(map_length(&map), Some(3));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn map_constructor_gathers_gpu_values() {
         test_support::with_test_provider(|provider| {
@@ -1771,8 +1813,8 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

@@ -1,6 +1,6 @@
 //! MATLAB-compatible `delete` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -13,9 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
 const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
@@ -28,7 +26,14 @@ const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:DELETE:InvalidHandle";
 const ERR_FILENAME_ARG: &str =
     "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "delete",
+        builtin_path = "crate::builtins::io::repl_fs::delete"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "delete"
 category: "io/repl_fs"
@@ -161,6 +166,7 @@ No. `delete` executes on the CPU. If a script accidentally wraps path strings in
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "delete",
     op_kind: GpuOpKind::Custom("io"),
@@ -177,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path values are gathered automatically before deletion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "delete",
     shape: ShapeRequirements::Any,
@@ -190,18 +195,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side-effects are executed immediately; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("delete", DOC_MD);
-
 #[runtime_builtin(
     name = "delete",
     category = "io/repl_fs",
     summary = "Remove files using MATLAB-compatible wildcard expansion, array inputs, and error diagnostics.",
     keywords = "delete,remove file,wildcard delete,cleanup,temporary files,MATLAB delete",
     accel = "cpu",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 fn delete_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -312,7 +313,7 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
 }
 
 fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(meta) => {
             if meta.is_dir() {
                 return Err(runtime_error(
@@ -323,7 +324,7 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
                     ),
                 ));
             }
-            fs::remove_file(path).map_err(|err| {
+            vfs::remove_file(path).map_err(|err| {
                 runtime_error(
                     MESSAGE_ID_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
@@ -528,13 +529,14 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, Value};
     use std::fs::File;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_removes_single_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -551,6 +553,7 @@ mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_removes_files_with_wildcard() {
         let _lock = REPL_FS_TEST_LOCK
@@ -569,6 +572,7 @@ mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -595,6 +599,7 @@ mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -630,6 +635,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_cell_array_of_paths() {
         let _lock = REPL_FS_TEST_LOCK
@@ -657,6 +663,7 @@ mod tests {
         assert!(!file_b.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_empty_string_array_is_noop() {
         let array = StringArray::new(Vec::<String>::new(), vec![0]).expect("empty array");
@@ -664,6 +671,7 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_empty_string_argument() {
         let err = delete_builtin(vec![Value::from(String::new())]).expect_err("empty string");
@@ -673,6 +681,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_string_array_empty_element() {
         let array =
@@ -684,6 +693,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_char_array_blank_row() {
         let data = vec![' '; 4];
@@ -695,6 +705,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
@@ -705,6 +716,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_missing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -721,6 +733,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -738,6 +751,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_handle_returns_invalid_handle() {
         let handle =
@@ -757,6 +771,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_rejects_mixed_handle_and_filename() {
         let handle =
@@ -772,6 +787,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_accepts_cell_of_handles() {
         let handle_a =
@@ -784,6 +800,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_runs_with_wgpu_provider_registered() {
         let _lock = REPL_FS_TEST_LOCK
@@ -802,8 +819,8 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_parse() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

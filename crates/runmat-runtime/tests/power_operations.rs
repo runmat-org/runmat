@@ -1,6 +1,9 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::{elementwise_pow, power};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_scalar_power() {
     // Test numeric scalar
@@ -32,6 +35,7 @@ fn test_scalar_power() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_power() {
     // Test A^0 = I (identity)
@@ -84,6 +88,7 @@ fn test_matrix_power() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_power_float_integer() {
     // Test A^2.0 (float that's an integer)
@@ -98,6 +103,7 @@ fn test_matrix_power_float_integer() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_power_non_integer_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -106,6 +112,7 @@ fn test_matrix_power_non_integer_fails() {
     assert!(result.unwrap_err().contains("integer exponent"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_power_non_square_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap(); // 2x3 matrix
@@ -117,6 +124,7 @@ fn test_matrix_power_non_square_fails() {
     assert!(result.unwrap_err().contains("square"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_power_negative_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -128,6 +136,7 @@ fn test_matrix_power_negative_fails() {
     assert!(result.unwrap_err().contains("Negative"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_elementwise_vs_matrix_power() {
     // A = [2 4; 3 5] column-major
@@ -159,6 +168,7 @@ fn test_elementwise_vs_matrix_power() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_unsupported_power_combinations() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();

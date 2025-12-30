@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "cov",
+        builtin_path = "crate::builtins::stats::summary::cov"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cov"
 category: "stats/summary"
@@ -194,6 +197,7 @@ covariance is computed, matching MATLAB's behaviour.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::cov")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cov",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -209,8 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU execution is available when rows='all' and no weight vector is supplied; other cases fall back to the CPU path.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::summary::cov")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cov",
     shape: ShapeRequirements::Any,
@@ -221,17 +224,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "The covariance builtin is treated as a fusion boundary and executes via dedicated kernels or the host reference.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cov", DOC_MD);
-
 #[runtime_builtin(
     name = "cov",
     category = "stats/summary",
     summary = "Compute covariance matrices for vectors, matrices, or paired data sets.",
     keywords = "cov,covariance,statistics,weights,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::stats::summary::cov"
 )]
 fn cov_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = CovArgs::parse(value, rest)?;
@@ -940,7 +939,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
@@ -963,6 +962,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_matrix_basic() {
         let tensor = Tensor::new(
@@ -987,6 +987,7 @@ mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_two_vectors() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -1005,6 +1006,7 @@ mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_weighted_vector() {
         let tensor = Tensor::new(
@@ -1030,6 +1032,7 @@ mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_omitrows() {
         let tensor = Tensor::new(
@@ -1064,6 +1067,7 @@ mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_partialrows() {
         let tensor = Tensor::new(
@@ -1101,6 +1105,7 @@ mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1127,13 +1132,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cov_wgpu_matches_cpu() {

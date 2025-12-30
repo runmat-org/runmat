@@ -5,8 +5,8 @@
 
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
 use runmat_builtins::Value;
+use runmat_time::Instant;
 use std::collections::HashSet;
-use std::time::Instant;
 
 /// Mark-and-sweep garbage collector
 pub struct MarkSweepCollector {
@@ -491,7 +491,7 @@ impl IncrementalCollector {
         let actual_budget = work_budget.min(self.work_budget);
 
         // Use the base collector for actual work (simplified)
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
         let objects_processed = 10; // Would be computed from actual collection
 
         // Simulate some work to ensure non-zero work_done

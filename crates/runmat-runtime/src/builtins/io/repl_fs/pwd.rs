@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pwd",
+        builtin_path = "crate::builtins::io::repl_fs::pwd"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pwd"
 category: "io/repl_fs"
@@ -152,6 +155,7 @@ Expected output:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pwd",
     op_kind: GpuOpKind::Custom("io"),
@@ -167,8 +171,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only operation that queries the process working folder; no GPU provider hooks are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::pwd")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pwd",
     shape: ShapeRequirements::Any,
@@ -179,17 +182,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for introspection completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pwd", DOC_MD);
-
 #[runtime_builtin(
     name = "pwd",
     category = "io/repl_fs",
     summary = "Return the absolute path to the folder where RunMat is currently executing.",
     keywords = "pwd,current directory,working folder,present working directory",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
 fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
     if !args.is_empty() {
@@ -206,7 +205,7 @@ fn path_to_value(path: &Path) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::CharArray;
@@ -231,6 +230,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_returns_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -244,6 +244,7 @@ mod tests {
         assert_eq!(actual, expected.to_string_lossy());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_reflects_directory_changes() {
         let _lock = REPL_FS_TEST_LOCK
@@ -266,6 +267,7 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_returns_char_array_row_vector() {
         let _lock = REPL_FS_TEST_LOCK
@@ -283,6 +285,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pwd_errors_when_arguments_provided() {
         let _lock = REPL_FS_TEST_LOCK
@@ -294,8 +297,8 @@ mod tests {
         assert_eq!(err, "pwd: too many input arguments");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

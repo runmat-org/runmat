@@ -1,5 +1,8 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::Value;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn handle_identity_and_delete() {
     let h1 =
@@ -35,6 +38,7 @@ fn handle_identity_and_delete() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn events_addlistener_notify() {
     // Add a simple listener and ensure notify calls do not error

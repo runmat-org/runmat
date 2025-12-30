@@ -4,13 +4,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "vertcat",
+        builtin_path = "crate::builtins::array::shape::vertcat"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "vertcat"
 category: "array/shape"
@@ -187,6 +191,7 @@ No. Concatenation materialises results immediately and is treated as a fusion si
 - Found an issue or behavioral difference? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "vertcat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -202,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to cat(dim=1); providers without cat fall back to host gather + upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "vertcat",
     shape: ShapeRequirements::Any,
@@ -214,17 +218,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("vertcat", DOC_MD);
-
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
     summary = "Concatenate inputs vertically (dimension 1) just like MATLAB semicolons.",
     keywords = "vertcat,vertical concatenation,array,gpu",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 fn vertcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -260,11 +260,12 @@ fn adapt_cat_error(message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = vertcat_builtin(Vec::new()).expect("vertcat");
@@ -277,6 +278,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_argument_round_trips() {
         let value = Value::Num(42.0);
@@ -284,6 +286,7 @@ mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_vertical_concat() {
         let top = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -299,6 +302,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_rows() {
         let top = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
@@ -318,6 +322,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_arrays_concatenate_rows() {
         let header = StringArray::new(vec!["Name".into(), "Score".into()], vec![1, 2]).unwrap();
@@ -333,6 +338,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mismatched_columns_error_mentions_vertcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -342,6 +348,7 @@ mod tests {
         assert!(err.contains("dimension 2 mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vertcat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -365,6 +372,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_concatenate_rows() {
         let first = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -383,6 +391,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_arrays_concatenate_rows() {
         let first = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2, 1]).unwrap();
@@ -404,6 +413,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_arrays_concatenate_rows() {
         let first = CellArray::new(vec![Value::Num(1.0), Value::from("low")], 1, 2).unwrap();
@@ -419,6 +429,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vertcat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
@@ -448,6 +459,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn vertcat_wgpu_matches_cpu() {
@@ -485,8 +497,8 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

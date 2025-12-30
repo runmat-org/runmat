@@ -11,7 +11,9 @@ pub use bytecode::{compile, compile_with_functions};
 pub use functions::{Bytecode, ExecutionContext, UserFunction};
 pub use instr::Instr;
 pub use vm::{
-    interpret, interpret_with_vars, push_pending_workspace, take_updated_workspace_state,
+    interpret, interpret_with_vars, push_pending_workspace, resume_with_state,
+    take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingExecution,
+    PendingWorkspaceGuard,
 };
 
 use runmat_builtins::Value;

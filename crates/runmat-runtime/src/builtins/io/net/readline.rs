@@ -9,19 +9,23 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:readline:InvalidTcpClient";
 const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:readline:NotConnected";
 const MESSAGE_ID_INVALID_ARGUMENTS: &str = "MATLAB:readline:InvalidArguments";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:readline:InternalError";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "readline",
+        builtin_path = "crate::builtins::io::net::readline"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "readline"
 category: "io/net"
@@ -188,6 +192,7 @@ on the CPU and there is no benefit to calling `gpuArray` for networking builtins
 - Issues & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readline",
     op_kind: GpuOpKind::Custom("network"),
@@ -203,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Networking occurs on the host CPU; GPU providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readline",
     shape: ShapeRequirements::Any,
@@ -215,16 +219,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtin executed eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("readline", DOC_MD);
-
 #[runtime_builtin(
     name = "readline",
     category = "io/net",
     summary = "Read ASCII text until the terminator from a TCP/IP client.",
-    keywords = "readline,tcpclient,networking"
+    keywords = "readline,tcpclient,networking",
+    builtin_path = "crate::builtins::io::net::readline"
 )]
 fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -410,9 +410,8 @@ fn runtime_error(message_id: &'static str, message: impl Into<String>) -> String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         client_handle, configure_stream, insert_client, remove_client_for_test,
@@ -446,6 +445,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_line_without_terminator() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -468,6 +468,7 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_strips_crlf_pairs() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -490,6 +491,7 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_empty_matrix_on_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -516,6 +518,7 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_buffers_partial_data_across_timeouts() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -567,6 +570,7 @@ mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_partial_line_on_connection_close() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -596,6 +600,7 @@ mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_on_additional_arguments() {
         let err = readline_builtin(Value::Num(42.0), vec![Value::Num(1.0)])
@@ -606,6 +611,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_rejects_non_struct_argument() {
         let err = readline_builtin(Value::Num(5.0), Vec::new())
@@ -616,6 +622,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_when_not_connected() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -648,8 +655,8 @@ mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

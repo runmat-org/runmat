@@ -1,6 +1,5 @@
 //! MATLAB-compatible `filewrite` builtin for RunMat.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -11,11 +10,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
+use runmat_filesystem::OpenOptions;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "filewrite",
+        builtin_path = "crate::builtins::io::filetext::filewrite"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "filewrite"
 category: "io/filetext"
@@ -147,6 +152,7 @@ No. The parent directory must already exist. Use `mkdir` before calling `filewri
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::filewrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filewrite",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -162,8 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host file I/O; GPU providers do not participate.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::filewrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filewrite",
     shape: ShapeRequirements::Any,
@@ -173,11 +178,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Standalone host-side operation; never fused with other kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("filewrite", DOC_MD);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
@@ -239,7 +239,8 @@ impl Default for FilewriteOptions {
     category = "io/filetext",
     summary = "Write text or raw bytes to a file.",
     keywords = "filewrite,io,write file,text file,append,encoding",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
 fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let path = gather_if_needed(&path).map_err(|e| format!("filewrite: {e}"))?;
@@ -616,25 +617,22 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> Result<usize, St
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use std::fs;
+    use runmat_filesystem as fs;
+    use runmat_time::unix_timestamp_ms;
     use std::io::Read;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_text_content() {
         let path = unique_path("filewrite_text");
@@ -658,6 +656,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_appends_when_requested() {
         let path = unique_path("filewrite_append");
@@ -676,6 +675,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_invalid_ascii() {
         let path = unique_path("filewrite_ascii_error");
@@ -692,6 +692,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_raw_bytes_from_tensor() {
         let path = unique_path("filewrite_raw_bytes");
@@ -713,6 +714,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_numeric_scalar_writes_byte() {
         let path = unique_path("filewrite_numeric_scalar");
@@ -729,6 +731,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_bool_scalar_writes_byte() {
         let path = unique_path("filewrite_bool_scalar");
@@ -745,6 +748,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_writes_logical_array_bytes() {
         let path = unique_path("filewrite_logical_array");
@@ -762,6 +766,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_numeric_out_of_range() {
         let path = unique_path("filewrite_out_of_range");
@@ -778,6 +783,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_errors_on_non_integer_numeric() {
         let path = unique_path("filewrite_non_integer");
@@ -794,6 +800,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_ascii_numeric_bytes_above_range() {
         let path = unique_path("filewrite_ascii_bytes");
@@ -811,6 +818,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_positional_encoding_argument() {
         let path = unique_path("filewrite_positional_encoding");
@@ -827,6 +835,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_utf8_encoding_allows_arbitrary_bytes() {
         let path = unique_path("filewrite_utf8_numeric");
@@ -844,6 +853,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_unknown_option() {
         let path = unique_path("filewrite_unknown_option");
@@ -860,6 +870,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_duplicate_encoding() {
         let path = unique_path("filewrite_duplicate_encoding");
@@ -880,6 +891,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_duplicate_writemode() {
         let path = unique_path("filewrite_duplicate_writemode");
@@ -901,6 +913,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_invalid_writemode_value() {
         let path = unique_path("filewrite_invalid_writemode");
@@ -917,6 +930,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_rejects_invalid_encoding_value() {
         let path = unique_path("filewrite_invalid_encoding");
@@ -933,6 +947,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_accepts_char_array_filename() {
         let path = unique_path("filewrite_char_path");
@@ -953,6 +968,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_string_array_stores_newlines() {
         let path = unique_path("filewrite_string_array");
@@ -971,7 +987,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

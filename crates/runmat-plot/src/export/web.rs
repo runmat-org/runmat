@@ -2,6 +2,7 @@
 //!
 //! Production-ready interactive plot widgets using WebAssembly and WebGL.
 
+use runmat_time::unix_timestamp_us;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -95,13 +96,13 @@ impl WebExporter {
         let html_content = self.render_to_html()?;
         std::fs::write(path, html_content)
             .map_err(|e| format!("Failed to write HTML file: {e}"))?;
-        println!("DEBUG: HTML widget export completed successfully");
+        log::debug!(target: "runmat_plot", "html widget export completed");
         Ok(())
     }
 
     /// Render figure to HTML widget string (placeholder implementation)
     pub fn render_to_html(&mut self) -> Result<String, String> {
-        println!("DEBUG: Starting HTML widget export");
+        log::debug!(target: "runmat_plot", "html widget export start");
 
         let widget_id = self.generate_widget_id();
 
@@ -147,24 +148,17 @@ impl WebExporter {
             widget_id
         );
 
-        println!(
-            "DEBUG: HTML widget render completed, {} characters generated",
-            html.len()
-        );
+        log::debug!(target: "runmat_plot", "html widget size chars={}", html.len());
         Ok(html)
     }
 
     /// Generate unique widget ID
     fn generate_widget_id(&self) -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{SystemTime, UNIX_EPOCH};
 
         static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros();
+        let timestamp = unix_timestamp_us();
         let inc = COUNTER.fetch_add(1, Ordering::Relaxed);
 
         // Combine time with a monotonic counter for cross-platform uniqueness

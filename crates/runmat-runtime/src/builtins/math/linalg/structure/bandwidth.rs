@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "bandwidth",
+        builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "bandwidth"
 category: "math/linalg/structure"
@@ -198,6 +201,9 @@ and contribute to the bandwidth calculation.
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bandwidth",
     op_kind: GpuOpKind::Custom("structure_analysis"),
@@ -214,8 +220,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "WGPU providers compute bandwidth on-device when available; runtimes gather to the host as a fallback when providers lack the hook.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "bandwidth",
     shape: ShapeRequirements::Any,
@@ -225,11 +232,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Structure query that returns a small host tensor; fusion treats it as a metadata operation.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("bandwidth", DOC_MD);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BandSelector {
@@ -243,7 +245,8 @@ enum BandSelector {
     category = "math/linalg/structure",
     summary = "Compute the lower and upper bandwidth of a matrix.",
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
-    accel = "structure"
+    accel = "structure",
+    builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> Result<Value, String> {
     let selector = parse_selector(&rest)?;
@@ -422,11 +425,12 @@ fn compute_complex_bandwidth(rows: usize, cols: usize, data: &[(f64, f64)]) -> (
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_diagonal_matrix() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -441,6 +445,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_lower_selector() {
         let tensor = Tensor::new(
@@ -456,6 +461,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_upper_selector() {
         let tensor = Tensor::new(
@@ -471,6 +477,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_complex_matrix() {
         let data = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 2.0), (0.0, 0.0)];
@@ -485,6 +492,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_rectangular_matrix() {
         let tensor = Tensor::new(
@@ -499,6 +507,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -509,6 +518,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_nan_counts_as_nonzero() {
         let tensor =
@@ -520,6 +530,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_logical_input_supported() {
         let logical = LogicalArray::new(vec![1, 1, 1, 0], vec![2, 2]).expect("logical array");
@@ -531,6 +542,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_selector_validation() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -542,6 +554,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_rejects_higher_dimensions() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
@@ -549,6 +562,7 @@ mod tests {
         assert!(err.contains("2-D"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -566,13 +580,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn bandwidth_wgpu_matches_cpu() {

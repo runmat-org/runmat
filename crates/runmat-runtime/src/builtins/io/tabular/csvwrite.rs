@@ -6,11 +6,11 @@
 //! API and zero-based offset arguments. This implementation mirrors those
 //! semantics while integrating with RunMat's builtin framework.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -19,11 +19,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "csvwrite",
+        builtin_path = "crate::builtins::io::tabular::csvwrite"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "csvwrite"
 category: "io/tabular"
@@ -189,6 +194,7 @@ CSV consumers handle either convention transparently.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "csvwrite",
     op_kind: GpuOpKind::Custom("io-csvwrite"),
@@ -204,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "csvwrite",
     shape: ShapeRequirements::Any,
@@ -216,17 +221,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("csvwrite", DOC_MD);
-
 #[runtime_builtin(
     name = "csvwrite",
     category = "io/tabular",
     summary = "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
     keywords = "csvwrite,csv,write,row offset,column offset",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
 fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let filename_value = gather_if_needed(&filename).map_err(|e| format!("csvwrite: {e}"))?;
@@ -481,11 +482,11 @@ fn normalize_exponent(exponent: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray};
@@ -496,10 +497,7 @@ mod tests {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(ext: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(
@@ -516,6 +514,7 @@ mod tests {
         default_line_ending()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_writes_basic_matrix() {
         let path = temp_path("csv");
@@ -530,6 +529,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_honours_offsets() {
         let path = temp_path("csv");
@@ -551,6 +551,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_gpu_tensors() {
         test_support::with_test_provider(|provider| {
@@ -572,6 +573,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_formats_with_short_g_precision() {
         let path = temp_path("csv");
@@ -590,6 +592,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_rejects_negative_offsets() {
         let path = temp_path("csv");
@@ -608,6 +611,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_wgpu_provider_gather() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -634,6 +638,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_expands_home_directory() {
         let Some(mut home) = fs_helpers::home_directory() else {
@@ -658,6 +663,7 @@ mod tests {
         let _ = fs::remove_file(home);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_rejects_non_numeric_inputs() {
         let path = temp_path("csv");
@@ -671,6 +677,7 @@ mod tests {
         assert!(err.contains("csvwrite"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_accepts_logical_arrays() {
         let path = temp_path("csv");
@@ -689,8 +696,8 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

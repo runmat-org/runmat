@@ -14,14 +14,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "rank";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::solve::rank"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rank"
 category: "math/linalg/solve"
@@ -196,10 +199,7 @@ LAPACK when enabled). GPU providers are free to reuse buffers or stream the comp
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
-
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rank")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("matrix-rank"),
@@ -216,8 +216,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may keep the computation on-device via the `rank` hook; the reference backend gathers to the host and re-uploads a scalar.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::rank")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -228,17 +227,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`rank` terminates fusion plans and executes eagerly via an SVD.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
-
 #[runtime_builtin(
     name = "rank",
     category = "math/linalg/solve",
     summary = "Compute the numerical rank of a matrix using SVD with MATLAB-compatible tolerance handling.",
     keywords = "rank,svd,tolerance,matrix,gpu",
-    accel = "rank"
+    accel = "rank",
+    builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
 fn rank_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let tol = parse_tolerance_arg(NAME, &rest)?;
@@ -362,11 +357,12 @@ pub fn rank_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_full_matrix() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -377,6 +373,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_singular_matrix() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -387,6 +384,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_default_tolerance_reduces_rank() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-16], vec![2, 2]).unwrap();
@@ -394,6 +392,7 @@ mod tests {
         assert_eq!(rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_custom_tolerance_behavior() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-4], vec![2, 2]).unwrap();
@@ -403,6 +402,7 @@ mod tests {
         assert_eq!(custom_rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -413,6 +413,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_vector_input() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0], vec![3, 1]).unwrap();
@@ -420,6 +421,7 @@ mod tests {
         assert_eq!(rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_zero_vector_is_zero() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0], vec![3, 1]).unwrap();
@@ -427,6 +429,7 @@ mod tests {
         assert_eq!(rank, 0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_invalid_shape_errors() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -437,6 +440,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -447,6 +451,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_non_scalar_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -458,6 +463,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_complex_matrix() {
         let tensor = ComplexTensor::new(
@@ -472,6 +478,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_scalar_bool_and_int() {
         let bool_rank = rank_builtin(Value::Bool(false), Vec::new()).expect("rank");
@@ -486,6 +493,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_gpu_round_trip() {
         test_support::with_test_provider(|provider| {
@@ -501,6 +509,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rank_wgpu_matches_cpu() {
@@ -530,8 +539,8 @@ mod tests {
         assert_eq!(gathered.data, vec![cpu_rank]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -6,13 +6,17 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::containers::map::map_length;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "length",
+        builtin_path = "crate::builtins::array::introspection::length"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "length"
 category: "array/introspection"
@@ -163,6 +167,7 @@ won't break fusion plans.
 [size](./size), [numel (MathWorks)](https://www.mathworks.com/help/matlab/ref/numel.html), [strlength (MathWorks)](https://www.mathworks.com/help/matlab/ref/strlength.html)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::length")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "length",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -178,8 +183,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads tensor metadata from handles; falls back to gathering only when provider metadata is absent.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::length"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "length",
     shape: ShapeRequirements::Any,
@@ -190,17 +196,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner treats this as a host scalar lookup.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("length", DOC_MD);
-
 #[runtime_builtin(
     name = "length",
     category = "array/introspection",
     summary = "Return the length of the largest dimension of scalars, vectors, matrices, and N-D arrays.",
     keywords = "length,largest dimension,vector length,gpu metadata,array size",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::array::introspection::length"
 )]
 fn length_builtin(value: Value) -> Result<Value, String> {
     if let Some(count) = map_length(&value) {
@@ -216,19 +218,21 @@ fn max_dimension(value: &Value) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_scalar_is_one() {
         let result = length_builtin(Value::Num(5.0)).expect("length");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_column_vector_uses_rows() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -236,6 +240,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_matrix_returns_larger_dimension() {
         let tensor = Tensor::new(vec![0.0; 10], vec![2, 5]).unwrap();
@@ -243,6 +248,7 @@ mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_high_rank_tensor_reports_global_max() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -250,6 +256,7 @@ mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_partial_empty_tensor_returns_max_dimension() {
         let tensor = Tensor::new(vec![], vec![0, 0, 5]).unwrap();
@@ -257,6 +264,7 @@ mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_empty_matrix_with_nonzero_dimension() {
         let tensor = Tensor::new(vec![], vec![0, 7]).unwrap();
@@ -264,6 +272,7 @@ mod tests {
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_fully_empty_matrix_returns_zero() {
         let tensor = Tensor::new(vec![], vec![0, 0]).unwrap();
@@ -271,6 +280,7 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_character_array_uses_shape() {
         let chars = CharArray::new_row("RunMat");
@@ -278,6 +288,7 @@ mod tests {
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_complex_tensor_uses_shape() {
         let complex = ComplexTensor::new(vec![(0.0, 0.0); 12], vec![3, 4]).unwrap();
@@ -285,6 +296,7 @@ mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_cell_array_respects_dimensions() {
         let cells = CellArray::new(
@@ -302,6 +314,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_string_array_defaults_to_shape() {
         let sa = StringArray::new(vec!["a".into(), "bb".into()], vec![2, 1]).unwrap();
@@ -309,6 +322,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_logical_array_uses_shape() {
         let la = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -316,6 +330,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn length_gpu_tensor_reads_shape() {
         test_support::with_test_provider(|provider| {
@@ -330,12 +345,13 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn length_wgpu_tensor_uses_handle_shape() {

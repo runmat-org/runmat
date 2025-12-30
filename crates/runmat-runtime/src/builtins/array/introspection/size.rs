@@ -6,13 +6,17 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "size",
+        builtin_path = "crate::builtins::array::introspection::size"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "size"
 category: "array/introspection"
@@ -160,6 +164,7 @@ No. The dimension argument must be positive integers; fractions or negatives rai
 [length (MathWorks)](https://www.mathworks.com/help/matlab/ref/length.html), [ndims (MathWorks)](https://www.mathworks.com/help/matlab/ref/ndims.html), [numel (MathWorks)](https://www.mathworks.com/help/matlab/ref/numel.html), [MathWorks size reference](https://www.mathworks.com/help/matlab/ref/size.html)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::size")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "size",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -176,8 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Reads dimension metadata from tensor handles; no kernels or provider hooks are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::introspection::size")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "size",
     shape: ShapeRequirements::Any,
@@ -188,16 +192,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner bypasses this builtin.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("size", DOC_MD);
-
 #[runtime_builtin(
     name = "size",
     category = "array/introspection",
     summary = "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
-    keywords = "size,dimensions,shape,gpu,introspection"
+    keywords = "size,dimensions,shape,gpu,introspection",
+    builtin_path = "crate::builtins::array::introspection::size"
 )]
 fn size_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let dims = value_dimensions(&value);
@@ -281,11 +281,12 @@ fn dimension_extent(dimensions: &[usize], dim: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_matrix_returns_row_vector() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -299,6 +300,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_with_dimension_scalar_returns_extent() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -309,6 +311,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_with_dimension_vector_returns_row_vector() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -324,6 +327,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_gpu_tensor_uses_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -344,6 +348,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn size_wgpu_preserves_shape_metadata() {
@@ -385,6 +390,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_rejects_non_numeric_dimension() {
         let err = size_builtin(Value::Num(1.0), vec![Value::from("dim")]).unwrap_err();
@@ -394,6 +400,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_beyond_rank_returns_one() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -404,6 +411,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_requires_positive_integers() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -413,6 +421,7 @@ mod tests {
         assert!(err.contains("dimension must be an integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_must_not_be_matrix() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -422,6 +431,7 @@ mod tests {
         assert!(err.contains("dimension vector must be a vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_must_not_be_empty() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -431,8 +441,8 @@ mod tests {
         assert!(err.contains("must contain at least one element"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

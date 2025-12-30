@@ -8,11 +8,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "replace",
+        builtin_path = "crate::builtins::strings::transform::replace"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "replace"
 category: "strings/transform"
@@ -197,6 +202,7 @@ returned on the host. Providers do not need to implement a GPU kernel for this b
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::replace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "replace",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -213,8 +219,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory prior to replacement.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::transform::replace"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "replace",
     shape: ShapeRequirements::Any,
@@ -225,11 +232,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "String manipulation builtin; not eligible for fusion plans and always gathers GPU inputs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("replace", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "replace: first argument must be a string array, character array, or cell array of character vectors";
@@ -251,7 +253,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/transform",
     summary = "Replace substring occurrences in strings, character arrays, and cell arrays.",
     keywords = "replace,strrep,strings,character array,text",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::replace"
 )]
 fn replace_builtin(text: Value, old: Value, new: Value) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("replace: {e}"))?;
@@ -446,11 +449,11 @@ impl ReplacementSpec {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_string_scalar_single_term() {
         let result = replace_builtin(
@@ -462,6 +465,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat engine".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_string_array_multiple_terms() {
         let strings = StringArray::new(
@@ -493,6 +497,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_char_array_adjusts_width() {
         let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
@@ -513,6 +518,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_char_array_handles_padding() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
@@ -533,6 +539,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -573,6 +580,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_invalid_first_argument() {
         let err = replace_builtin(
@@ -584,6 +592,7 @@ mod tests {
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_invalid_pattern_type() {
         let err = replace_builtin(
@@ -595,6 +604,7 @@ mod tests {
         assert_eq!(err, PATTERN_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_errors_on_size_mismatch() {
         let err = replace_builtin(
@@ -608,6 +618,7 @@ mod tests {
         assert_eq!(err, SIZE_MISMATCH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replace_preserves_missing_string() {
         let result = replace_builtin(
@@ -619,8 +630,8 @@ mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

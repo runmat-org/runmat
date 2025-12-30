@@ -15,11 +15,14 @@ use crate::builtins::common::{
     },
     tensor,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "single",
+        builtin_path = "crate::builtins::math::elementwise::single"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "single"
 category: "math/elementwise"
@@ -205,6 +208,7 @@ implementation.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::single")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "single",
     op_kind: GpuOpKind::Elementwise,
@@ -222,8 +226,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts tensors to float32. Providers may implement `unary_single`; otherwise the runtime gathers, converts, and re-uploads to keep gpuArray results resident.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::single")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "single",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -244,17 +247,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a cast via `f32` then widens back to the WGSL scalar type when necessary.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("single", DOC_MD);
-
 #[runtime_builtin(
     name = "single",
     category = "math/elementwise",
     summary = "Convert scalars, arrays, and gpuArray values to single precision.",
     keywords = "single,float32,cast,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::single"
 )]
 fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -467,11 +466,12 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_scalar_rounds_to_f32() {
         let value = Value::Num(std::f64::consts::PI);
@@ -482,6 +482,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2]).unwrap();
@@ -499,6 +500,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_complex_tensor_rounds_both_components() {
         let tensor = ComplexTensor::new(
@@ -520,6 +522,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_char_array_produces_codes() {
         let chars = CharArray::new_row("AZ");
@@ -533,6 +536,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_errors_on_string_input() {
         let err = single_builtin(Value::String("hello".to_string()), Vec::new())
@@ -541,6 +545,7 @@ mod tests {
         assert!(err.contains("string"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -566,13 +571,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_host_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -594,6 +600,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -623,6 +630,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_case_insensitive() {
         let tensor = Tensor::new(vec![1.5, 2.25], vec![2, 1]).unwrap();
@@ -644,6 +652,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_large_ones_preserve_values() {
         // Create a large ones tensor and ensure single() preserves ones exactly.
@@ -666,6 +675,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn single_wgpu_matches_cpu() {
@@ -686,6 +696,7 @@ mod tests {
         assert_eq!(gathered.data, cpu.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn single_wgpu_large_ones_all_ones() {

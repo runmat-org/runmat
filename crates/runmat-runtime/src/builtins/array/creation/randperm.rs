@@ -11,13 +11,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "randperm",
+        builtin_path = "crate::builtins::array::creation::randperm"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "randperm"
 category: "array/creation"
@@ -200,6 +204,7 @@ the fallback without changing user code.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "randperm",
     op_kind: GpuOpKind::Custom("permutation"),
@@ -218,8 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider random_permutation(_like) hooks (WGPU implements a native kernel); falls back to host generation + upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
     shape: ShapeRequirements::Any,
@@ -230,17 +234,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Random permutation generation is treated as a sink and is not eligible for fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("randperm", DOC_MD);
-
 #[runtime_builtin(
     name = "randperm",
     category = "array/creation",
     summary = "Random permutations of 1:n.",
     keywords = "randperm,permutation,random,indices,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::randperm"
 )]
 fn randperm_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRandPerm::parse(args)?;
@@ -494,7 +494,7 @@ fn parse_numeric(value: f64, allow_zero: bool, message: &str) -> Result<usize, S
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 
@@ -533,6 +533,7 @@ mod tests {
         values
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_full_permutation_matches_expected_sequence() {
         let _guard = random::test_lock().lock().unwrap();
@@ -545,6 +546,7 @@ mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_partial_selection_is_unique_and_sorted() {
         let _guard = random::test_lock().lock().unwrap();
@@ -565,6 +567,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_zero_length_returns_empty() {
         let args = vec![Value::from(0)];
@@ -574,6 +577,7 @@ mod tests {
         assert!(gathered.data.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_errors_when_k_exceeds_n() {
         let args = vec![Value::from(3), Value::from(4)];
@@ -581,6 +585,7 @@ mod tests {
         assert!(err.contains("K must satisfy 0 <= K <= N"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_errors_for_negative_input() {
         let args = vec![Value::Num(-1.0)];
@@ -588,6 +593,7 @@ mod tests {
         assert!(err.contains("N must be a non-negative integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_rejects_single_precision_request() {
         let args = vec![Value::from(5), Value::from("single")];
@@ -595,6 +601,7 @@ mod tests {
         assert!(err.contains("single precision"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_accepts_double_keyword() {
         let _guard = random::test_lock().lock().unwrap();
@@ -607,6 +614,7 @@ mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_tensor_matches_host_output() {
         let _guard = random::test_lock().lock().unwrap();
@@ -624,6 +632,7 @@ mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -653,6 +662,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_requires_prototype() {
         let args = vec![Value::from(4), Value::from("like")];
@@ -660,6 +670,7 @@ mod tests {
         assert!(err.contains("prototype after 'like'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randperm_wgpu_produces_unique_indices() {
@@ -675,11 +686,11 @@ mod tests {
         let provider = match registration {
             Ok(Ok(_)) => runmat_accelerate_api::provider().expect("wgpu provider registered"),
             Ok(Err(err)) => {
-                eprintln!("skipping wgpu randperm test: {err}");
+                tracing::warn!("skipping wgpu randperm test: {err}");
                 return;
             }
             Err(_) => {
-                eprintln!("skipping wgpu randperm test: provider initialization panicked");
+                tracing::warn!("skipping wgpu randperm test: provider initialization panicked");
                 return;
             }
         };
@@ -726,8 +737,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

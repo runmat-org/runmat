@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "tan",
+        builtin_path = "crate::builtins::math::trigonometry::tan"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tan"
 category: "math/trigonometry"
@@ -207,6 +210,7 @@ Definitely. The fusion planner emits WGSL `tan` calls for GPU execution, and pro
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tan",
     op_kind: GpuOpKind::Elementwise,
@@ -222,8 +226,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute tan in place via unary_tan; runtimes gather to host when the hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tan",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -241,17 +244,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion planner emits WGSL tan calls; providers can override with optimised fused kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tan", DOC_MD);
-
 #[runtime_builtin(
     name = "tan",
     category = "math/trigonometry",
     summary = "Tangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "tan,tangent,trigonometry,radians,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
 fn tan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -414,12 +413,13 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_scalar_pi_over_four() {
         let result = tan_builtin(Value::Num(std::f64::consts::FRAC_PI_4), Vec::new()).expect("tan");
@@ -429,6 +429,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::FRAC_PI_4], vec![2, 1]).unwrap();
@@ -443,12 +444,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_string_input_errors() {
         let err = tan_builtin(Value::from("invalid"), Vec::new()).expect_err("expected error");
         assert!(err.contains("numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_int_promotes() {
         let result = tan_builtin(Value::Int(IntValue::I32(1)), Vec::new()).expect("tan");
@@ -458,6 +461,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_complex_scalar_matches_formula() {
         let result = tan_builtin(Value::Complex(1.0, 0.5), Vec::new()).expect("tan");
@@ -471,6 +475,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_complex_on_real_axis_matches_real_value() {
         let angle = std::f64::consts::FRAC_PI_2 * 0.9;
@@ -484,6 +489,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_char_array_roundtrip() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -503,6 +509,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -520,6 +527,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_missing_prototype_errors() {
         let err =
@@ -527,6 +535,7 @@ mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_complex_prototype_errors() {
         let err = tan_builtin(
@@ -537,6 +546,7 @@ mod tests {
         assert!(err.contains("complex prototypes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -563,6 +573,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_host_with_gpu_input_gathers() {
         test_support::with_test_provider(|provider| {
@@ -589,6 +600,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_rejects_extra_arguments() {
         let err = tan_builtin(
@@ -599,6 +611,7 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_keyword_case_insensitive() {
         let tensor = Tensor::new(vec![0.0, 0.1], vec![2, 1]).unwrap();
@@ -617,6 +630,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
@@ -631,6 +645,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_string_array_keyword() {
         let keyword = StringArray::new(vec!["LIKE".to_string()], vec![1]).unwrap();
@@ -645,6 +660,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_unrecognised_option_errors() {
         let err =
@@ -652,13 +668,14 @@ mod tests {
         assert!(err.contains("unrecognised argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn tan_wgpu_matches_cpu_elementwise() {

@@ -12,13 +12,20 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::console::{record_console_output, ConsoleStream};
+use crate::warning_store;
+use tracing;
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "warning",
+        builtin_path = "crate::builtins::diagnostics::warning"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "warning"
 category: "diagnostics"
@@ -146,6 +153,7 @@ warning("default", "verbose");   % restore the default verbosity
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::warning")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "warning",
     op_kind: GpuOpKind::Custom("control"),
@@ -161,8 +169,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU backends are never invoked.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::warning")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "warning",
     shape: ShapeRequirements::Any,
@@ -172,11 +179,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("warning", DOC_MD);
 
 static MANAGER: Lazy<Mutex<WarningManager>> = Lazy::new(|| Mutex::new(WarningManager::default()));
 
@@ -198,7 +200,8 @@ where
     summary = "Display formatted warnings, control warning state, and query per-identifier settings.",
     keywords = "warning,diagnostics,state,query,backtrace",
     accel = "metadata",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -271,9 +274,13 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> Result<Value
         WarningAction::Suppress => Ok(Value::Num(0.0)),
         WarningAction::Display => {
             print_warning(&identifier, &message);
+            warning_store::push(&identifier, &message);
             Ok(Value::Num(0.0))
         }
-        WarningAction::AsError => Err(build_error(&identifier, &message)),
+        WarningAction::AsError => {
+            warning_store::push(&identifier, &message);
+            Err(build_error(&identifier, &message))
+        }
     }
 }
 
@@ -281,9 +288,9 @@ fn print_warning(identifier: &str, message: &str) {
     let (backtrace_enabled, verbose_enabled) =
         with_manager(|mgr| (mgr.backtrace_enabled, mgr.verbose_enabled));
 
-    eprintln!("Warning: {message}");
+    emit_stderr_line(format!("Warning: {message}"));
     if identifier != DEFAULT_IDENTIFIER {
-        eprintln!("identifier: {identifier}");
+        emit_stderr_line(format!("identifier: {identifier}"));
     }
 
     if verbose_enabled {
@@ -292,13 +299,20 @@ fn print_warning(identifier: &str, message: &str) {
         } else {
             identifier.to_string()
         };
-        eprintln!("(Type \"warning('off','{suppression}')\" to suppress this warning.)");
+        emit_stderr_line(format!(
+            "(Type \"warning('off','{suppression}')\" to suppress this warning.)"
+        ));
     }
 
     if backtrace_enabled {
         let bt = std::backtrace::Backtrace::force_capture();
-        eprintln!("{bt}");
+        emit_stderr_line(format!("{bt}"));
     }
+}
+
+fn emit_stderr_line(line: String) {
+    tracing::warn!("{line}");
+    record_console_output(ConsoleStream::Stderr, line);
 }
 
 fn reissue_exception(mex: &runmat_builtins::MException) -> Result<Value, String> {
@@ -518,7 +532,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
     let value = query_command(&[])?;
     match &value {
         Value::Cell(cell) => {
-            eprintln!("Warning status:");
+            emit_stderr_line("Warning status:".to_string());
             for idx in 0..cell.data.len() {
                 let entry = (*cell.data[idx]).clone();
                 if let Value::Struct(st) = entry {
@@ -532,7 +546,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
                         .get("state")
                         .and_then(|v| value_to_string("warning", v).ok())
                         .unwrap_or_default();
-                    eprintln!("  {identifier}: {state}");
+                    emit_stderr_line(format!("  {identifier}: {state}"));
                 }
             }
         }
@@ -547,7 +561,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
                 .get("state")
                 .and_then(|v| value_to_string("warning", v).ok())
                 .unwrap_or_default();
-            eprintln!("Warning status -> {identifier}: {state}");
+            emit_stderr_line(format!("Warning status -> {identifier}: {state}"));
         }
         _ => {}
     }
@@ -934,7 +948,7 @@ fn structs_to_cell(structs: Vec<StructValue>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -986,6 +1000,7 @@ mod tests {
             .and_then(|value| String::try_from(value).ok())
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn emits_basic_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -999,6 +1014,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn emits_warning_with_identifier_and_format() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1016,6 +1032,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn off_suppresses_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1028,6 +1045,7 @@ mod tests {
         assert!(last.is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn once_only_emits_first_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1044,6 +1062,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_mode_promotes_to_error() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1055,6 +1074,7 @@ mod tests {
         assert_eq!(err, "MATLAB:warning: Promoted");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_returns_state_struct() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1072,6 +1092,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn state_struct_restores_mode() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1092,6 +1113,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_backtrace_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1106,6 +1128,7 @@ mod tests {
         assert!(!with_manager(|mgr| mgr.backtrace_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_verbose_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1120,6 +1143,7 @@ mod tests {
         assert!(!with_manager(|mgr| mgr.verbose_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn special_mode_rejects_invalid_state() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1132,6 +1156,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn set_mode_last_requires_identifier() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1150,6 +1175,7 @@ mod tests {
         assert!(matches!(last_mode, WarningMode::Off));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_returns_snapshot() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1178,6 +1204,7 @@ mod tests {
         assert!(with_manager(|mgr| mgr.rules.is_empty()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_special_modes_reset() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1196,6 +1223,7 @@ mod tests {
         assert!(!with_manager(|mgr| mgr.backtrace_enabled));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_backtrace_and_verbose() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1209,6 +1237,7 @@ mod tests {
         assert_state_struct(&backtrace, "backtrace", "off");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn apply_state_struct_special_modes() {
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1247,11 +1276,11 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
-    mod doc_tests {
+    pub(crate) mod doc_tests {
         use super::*;
         use crate::builtins::common::test_support;
 
+        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
         #[test]
         fn doc_examples_present() {
             let blocks = test_support::doc_examples(DOC_MD);

@@ -17,11 +17,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "filter2",
+        builtin_path = "crate::builtins::image::filters::filter2"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "filter2"
 category: "image/filters"
@@ -184,6 +187,7 @@ and dimensionality.
 - Report issues or differences at https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::filter2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter2",
     op_kind: GpuOpKind::Custom("filter2"),
@@ -199,8 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to the provider `imfilter` hook with zero padding and correlation/convolution options.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::filters::filter2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filter2",
     shape: ShapeRequirements::Any,
@@ -211,17 +214,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not a fusion candidate; executes via the dedicated filtering pipeline.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("filter2", DOC_MD);
-
 #[runtime_builtin(
     name = "filter2",
     category = "image/filters",
     summary = "Apply a 2-D correlation or convolution with MATLAB-compatible sizing.",
     keywords = "filter2,correlation,convolution,image filtering,gpu",
-    accel = "custom-imfilter"
+    accel = "custom-imfilter",
+    builtin_path = "crate::builtins::image::filters::filter2"
 )]
 fn filter2_builtin(kernel: Value, image: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_filter2_options(&rest)?;
@@ -355,7 +354,7 @@ fn parse_filter2_options(args: &[Value]) -> Result<ImfilterOptions, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape};
@@ -365,6 +364,7 @@ mod tests {
         Tensor::new(data, vec![rows, cols]).expect("tensor construction")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_same_matches_imfilter_reference() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -386,6 +386,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn full_shape_option_expands_output() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -406,6 +407,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_shape_option_matches_reference() {
         let kernel = tensor(vec![1.0, 0.0, 0.0, -1.0], 2, 2);
@@ -426,6 +428,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn convolution_mode_rotates_kernel() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -446,6 +449,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_corr_option_matches_default() {
         let kernel = tensor(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
@@ -470,6 +474,7 @@ mod tests {
         assert_eq!(default_tensor.data, corr_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_and_shape_order_independent() {
         let kernel = tensor(vec![1.0, -1.0, 2.0, -2.0], 2, 2);
@@ -494,6 +499,7 @@ mod tests {
         assert_eq!(conv_first_tensor.data, shape_first_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_string_option_is_rejected() {
         let kernel = tensor(vec![1.0], 1, 1);
@@ -510,6 +516,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_input_promoted_to_double() {
         let kernel = tensor(vec![1.0, 1.0, 1.0, 1.0], 2, 2);
@@ -539,6 +546,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_option() {
         let kernel = tensor(vec![1.0], 1, 1);
@@ -555,6 +563,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter2_gpu_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -579,6 +588,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter2_gpu_kernel_and_image() {
         test_support::with_test_provider(|provider| {
@@ -608,6 +618,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_same_matches_cpu() {
@@ -669,6 +680,7 @@ mod tests {
         std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_full_conv_matches_cpu() {
@@ -733,8 +745,8 @@ mod tests {
         std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

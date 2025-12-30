@@ -1,9 +1,9 @@
 //! MATLAB-compatible `mkdir` builtin for RunMat.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -11,9 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -24,7 +22,14 @@ const MESSAGE_ID_EMPTY_NAME: &str = "MATLAB:MKDIR:InvalidFolderName";
 const ERR_FOLDER_ARG: &str = "mkdir: folder name must be a character vector or string scalar";
 const ERR_PARENT_ARG: &str = "mkdir: parent folder must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "mkdir",
+        builtin_path = "crate::builtins::io::repl_fs::mkdir"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mkdir"
 category: "io/repl_fs"
@@ -174,6 +179,7 @@ status =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::mkdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mkdir",
     op_kind: GpuOpKind::Custom("io"),
@@ -190,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. GPU-resident path arguments are gathered automatically before directory creation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::mkdir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mkdir",
     shape: ShapeRequirements::Any,
@@ -202,17 +207,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects terminate fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mkdir", DOC_MD);
-
 #[runtime_builtin(
     name = "mkdir",
     category = "io/repl_fs",
     summary = "Create folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "mkdir,create directory,folder,filesystem,status,message,messageid",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
 fn mkdir_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -328,7 +329,7 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
 
     if let Some(parent_text) = parent_expanded {
         let parent_path = PathBuf::from(&parent_text);
-        if !parent_path.exists() {
+        if !path_exists(&parent_path) {
             let message = format!("Parent folder \"{}\" does not exist.", parent_text);
             return Ok(MkdirResult::failure(message, MESSAGE_ID_INVALID_PARENT));
         }
@@ -345,7 +346,7 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
 
 fn create_directory(path: &Path) -> MkdirResult {
     let display = path.display().to_string();
-    if path.exists() {
+    if path_exists(path) {
         if path_is_existing_directory(path) {
             return MkdirResult::already_exists();
         }
@@ -358,7 +359,7 @@ fn create_directory(path: &Path) -> MkdirResult {
         );
     }
 
-    match fs::create_dir_all(path) {
+    match vfs::create_dir_all(path) {
         Ok(_) => MkdirResult::success(),
         Err(err) => MkdirResult::failure(
             format!("Unable to create folder \"{}\": {}", display, err),
@@ -368,10 +369,14 @@ fn create_directory(path: &Path) -> MkdirResult {
 }
 
 fn path_is_existing_directory(path: &Path) -> bool {
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(meta) => meta.is_dir(),
         Err(_) => false,
     }
+}
+
+fn path_exists(path: &Path) -> bool {
+    vfs::metadata(path).is_ok()
 }
 
 fn extract_folder_name(value: &Value, error_message: &str) -> Result<String, String> {
@@ -408,13 +413,16 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::Value;
+    use runmat_filesystem as vfs;
+    use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_creates_directory_with_single_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -426,9 +434,10 @@ mod tests {
         let result =
             mkdir_builtin(vec![Value::from(target.to_string_lossy().to_string())]).expect("mkdir");
         assert_eq!(result, Value::Num(1.0));
-        assert!(target.is_dir());
+        assert!(path_is_existing_directory(&target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_returns_success_when_directory_already_exists() {
         let _lock = REPL_FS_TEST_LOCK
@@ -437,15 +446,16 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let target = temp.path().join("existing");
-        fs::create_dir(&target).expect("seed dir");
+        vfs::create_dir(&target).expect("seed dir");
 
         let eval = evaluate(&[Value::from(target.to_string_lossy().to_string())]).unwrap();
         assert_eq!(eval.status(), 1.0);
         assert_eq!(eval.message(), "Directory already exists.");
         assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_EXISTS);
-        assert!(target.is_dir());
+        assert!(path_is_existing_directory(&target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_combines_parent_and_child_paths() {
         let _lock = REPL_FS_TEST_LOCK
@@ -464,9 +474,10 @@ mod tests {
         .expect("mkdir");
         assert_eq!(eval.status(), 1.0);
         assert!(eval.message().is_empty());
-        assert!(parent.join(child).is_dir());
+        assert!(path_is_existing_directory(&parent.join(child)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_requires_string_inputs() {
         let _lock = REPL_FS_TEST_LOCK
@@ -480,6 +491,7 @@ mod tests {
         assert_eq!(err, ERR_FOLDER_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_detects_missing_parent_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -497,9 +509,10 @@ mod tests {
         assert_eq!(eval.status(), 0.0);
         assert_eq!(eval.message_id(), MESSAGE_ID_INVALID_PARENT);
         assert!(eval.message().contains("does not exist"));
-        assert!(!expected_target.exists());
+        assert!(!path_exists(&expected_target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_detects_parent_path_is_not_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -518,9 +531,11 @@ mod tests {
         assert_eq!(eval.status(), 0.0);
         assert_eq!(eval.message_id(), MESSAGE_ID_NOT_A_DIRECTORY);
         assert!(eval.message().contains("not a directory"));
-        assert!(!parent_file.with_file_name("child").exists());
+        let child = parent_file.with_file_name("child");
+        assert!(!path_exists(&child));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_captures_failure_status_and_message() {
         let _lock = REPL_FS_TEST_LOCK
@@ -538,6 +553,7 @@ mod tests {
         assert!(eval.message().contains("non-directory"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_rejects_empty_folder_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -556,6 +572,7 @@ mod tests {
         assert!(paired.message().contains("must not be empty"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_outputs_vector_contains_message_and_id() {
         let _lock = REPL_FS_TEST_LOCK
@@ -572,8 +589,8 @@ mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

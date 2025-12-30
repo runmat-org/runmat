@@ -10,12 +10,16 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::make_cell;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ind2sub",
+        builtin_path = "crate::builtins::array::indexing::ind2sub"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ind2sub"
 category: "array/indexing"
@@ -183,6 +187,7 @@ Definitely—`ind2sub` works for any number of dimensions represented in `siz`.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::ind2sub")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ind2sub",
     op_kind: GpuOpKind::Custom("indexing"),
@@ -198,8 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider executes `ind2sub` entirely on-device; other providers fall back to the host implementation and re-upload results to preserve residency.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::indexing::ind2sub")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ind2sub",
     shape: ShapeRequirements::Any,
@@ -210,17 +214,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion is eager and does not participate in fusion today.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ind2sub", DOC_MD);
-
 #[runtime_builtin(
     name = "ind2sub",
     category = "array/indexing",
     summary = "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
     keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
 fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
@@ -399,7 +399,7 @@ fn coerce_linear_index(value: f64, max_index: usize) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -409,6 +409,7 @@ mod tests {
         cell.data.iter().map(|ptr| (**ptr).clone()).collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn recovers_matrix_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -424,6 +425,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_vector_indices() {
         let dims = Tensor::new(vec![3.0, 5.0], vec![1, 2]).unwrap();
@@ -453,6 +455,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn recovers_three_dimensional_indices() {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -479,6 +482,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_out_of_range_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -490,6 +494,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_zero_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -501,6 +506,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_fractional_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -512,6 +518,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_invalid_size_elements() {
         let dims = Tensor::new(vec![3.5, 4.0], vec![1, 2]).unwrap();
@@ -522,6 +529,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ind2sub_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -557,13 +565,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ind2sub_wgpu_matches_cpu() {

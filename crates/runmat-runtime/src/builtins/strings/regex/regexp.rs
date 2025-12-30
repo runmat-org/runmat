@@ -11,11 +11,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "regexp",
+        builtin_path = "crate::builtins::strings::regex::regexp"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "regexp"
 category: "strings/regex"
@@ -200,6 +205,7 @@ specified become numeric zeros.
 - Found a difference from MATLAB? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "regexp",
     op_kind: GpuOpKind::Custom("regex"),
@@ -215,8 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; when inputs live on the GPU, the runtime gathers them before matching and re-uploads numeric tensors afterwards.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "regexp",
     shape: ShapeRequirements::Any,
@@ -226,11 +231,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("regexp", DOC_MD);
 
 /// Evaluate a regular expression and return an evaluation handle that can produce MATLAB-compatible outputs.
 pub fn evaluate(
@@ -249,7 +249,8 @@ pub fn evaluate(
     category = "strings/regex",
     summary = "Regular expression matching with MATLAB-compatible outputs.",
     keywords = "regexp,regex,pattern,match,tokens,split",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let evaluation = evaluate(subject, pattern, &rest)?;
@@ -1038,11 +1039,11 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_basic_positions() {
         let eval = evaluate(
@@ -1062,6 +1063,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_match_output() {
         let eval = evaluate(
@@ -1084,6 +1086,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_tokens_output() {
         let eval = evaluate(
@@ -1115,6 +1118,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_match_once_returns_scalar() {
         let eval = evaluate(
@@ -1131,6 +1135,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_tokens_once_flattens() {
         let eval = evaluate(
@@ -1157,6 +1162,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_token_extents_once_matrix() {
         let eval = evaluate(
@@ -1179,6 +1185,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_names_once_struct() {
         let eval = evaluate(
@@ -1204,6 +1211,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_split_string_array() {
         let array = StringArray::new(vec!["a,b,c".into(), "1,2,3".into()], vec![2, 1]).unwrap();
@@ -1229,6 +1237,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_once_flag() {
         let eval = evaluate(
@@ -1246,6 +1255,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_multi_output_default() {
         let eval = evaluate(
@@ -1272,6 +1282,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_emptymatch_allow() {
         let eval = evaluate(
@@ -1291,6 +1302,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_names_output() {
         let eval = evaluate(
@@ -1337,6 +1349,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_token_extents_output() {
         let eval = evaluate(
@@ -1369,6 +1382,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_force_cell_output_scalar() {
         let eval = evaluate(
@@ -1394,6 +1408,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_string_array_multi_dim_order() {
         let sa = StringArray::new(
@@ -1439,6 +1454,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_cell_array_multi_dim_order() {
         let cell = runmat_builtins::CellArray::new(
@@ -1489,6 +1505,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_ignorecase_flag() {
         let eval = evaluate(
@@ -1521,6 +1538,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_lineanchors_and_dotall_flags() {
         let eval = evaluate(
@@ -1569,8 +1587,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(super::DOC_MD);
         assert!(!blocks.is_empty());

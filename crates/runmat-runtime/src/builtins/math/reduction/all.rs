@@ -6,14 +6,18 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "all",
+        builtin_path = "crate::builtins::math::reduction::all"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "all"
 category: "math/reduction"
@@ -172,6 +176,7 @@ Providers may expose specialised AND-reduction kernels (`reduce_all_dim`, `reduc
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "all",
     op_kind: GpuOpKind::Reduction,
@@ -194,8 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side AND reductions; runtimes gather to host when hooks are unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "all",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -214,17 +218,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion reductions treat NaNs as true; providers can substitute native kernels when profitable.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("all", DOC_MD);
-
 #[runtime_builtin(
     name = "all",
     category = "math/reduction",
     summary = "Test whether every element of an array is nonzero with MATLAB-compatible options.",
     keywords = "all,logical,reduction,omitnan,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::reduction::all"
 )]
 fn all_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (spec, nan_mode) = parse_arguments(&rest)?;
@@ -802,12 +802,13 @@ fn product(dims: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 1.0, 4.0, 5.0, 0.0, 6.0], vec![2, 3]).unwrap();
@@ -821,6 +822,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_zero_column_matrix_returns_empty_row() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![2, 0]).unwrap();
@@ -834,6 +836,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_row_dimension() {
         let tensor = Tensor::new(vec![1.0, 1.0, 4.0, 5.0, 0.0, 6.0], vec![2, 3]).unwrap();
@@ -848,6 +851,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_zero_row_matrix_dim_two() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -862,6 +866,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_vecdim_multiple_axes() {
         let tensor = Tensor::new((1..=24).map(|v| v as f64).collect(), vec![3, 4, 2]).unwrap();
@@ -876,6 +881,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_all_option_returns_scalar() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -886,6 +892,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_all_on_empty_returns_true() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -896,6 +903,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_handles_nan_modes() {
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
@@ -913,6 +921,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_char_array_support() {
         let chars = CharArray::new("a\0c".chars().collect(), 1, 3).unwrap();
@@ -924,6 +933,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_includenan_keyword_allowed() {
         let tensor = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
@@ -939,6 +949,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_complex_tensor_with_omitnan() {
         let complex = ComplexTensor::new(vec![(f64::NAN, 0.0), (1.0, 0.0)], vec![2, 1]).unwrap();
@@ -963,6 +974,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_vecdim_with_omitnan() {
         let mut data = vec![0.0; 8];
@@ -980,6 +992,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_all_with_dim_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
@@ -988,6 +1001,7 @@ mod tests {
         assert!(err.contains("dimension"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1008,6 +1022,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_gpu_provider_omitnan_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1029,7 +1044,7 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -1037,6 +1052,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_wgpu_default_matches_cpu() {
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1045,11 +1061,13 @@ mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            eprintln!("skipping all_wgpu_default_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!(
+                "skipping all_wgpu_default_matches_cpu: wgpu provider panicked during init"
+            );
             return;
         };
         if reg_result.is_err() {
-            eprintln!("skipping all_wgpu_default_matches_cpu: wgpu provider unavailable");
+            tracing::warn!("skipping all_wgpu_default_matches_cpu: wgpu provider unavailable");
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.0, 2.0, 0.0, 0.0, 0.0], vec![2, 3]).unwrap();
@@ -1066,14 +1084,14 @@ mod tests {
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => {
-                eprintln!("skipping all_wgpu_default_matches_cpu: provider not registered");
+                tracing::warn!("skipping all_wgpu_default_matches_cpu: provider not registered");
                 return;
             }
         };
         let handle = match provider.upload(&view) {
             Ok(h) => h,
             Err(err) => {
-                eprintln!("skipping all_wgpu_default_matches_cpu: upload failed: {err}");
+                tracing::warn!("skipping all_wgpu_default_matches_cpu: upload failed: {err}");
                 return;
             }
         };
@@ -1088,6 +1106,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_wgpu_omitnan_matches_cpu() {
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1096,11 +1115,13 @@ mod tests {
             )
         }));
         let Ok(reg_result) = init else {
-            eprintln!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider panicked during init");
+            tracing::warn!(
+                "skipping all_wgpu_omitnan_matches_cpu: wgpu provider panicked during init"
+            );
             return;
         };
         if reg_result.is_err() {
-            eprintln!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider unavailable");
+            tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: wgpu provider unavailable");
             return;
         }
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -1117,14 +1138,14 @@ mod tests {
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => {
-                eprintln!("skipping all_wgpu_omitnan_matches_cpu: provider not registered");
+                tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: provider not registered");
                 return;
             }
         };
         let handle = match provider.upload(&view) {
             Ok(h) => h,
             Err(err) => {
-                eprintln!("skipping all_wgpu_omitnan_matches_cpu: upload failed: {err}");
+                tracing::warn!("skipping all_wgpu_omitnan_matches_cpu: upload failed: {err}");
                 return;
             }
         };

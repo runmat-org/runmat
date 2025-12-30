@@ -8,11 +8,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "join",
+        builtin_path = "crate::builtins::strings::transform::join"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "join"
 category: "strings/transform"
@@ -188,6 +193,7 @@ MATLAB.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::join")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "join",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -203,8 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host; GPU-resident inputs and delimiters are gathered before concatenation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::join")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "join",
     shape: ShapeRequirements::Any,
@@ -214,11 +219,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Joins operate on CPU-managed text and are ineligible for fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("join", DOC_MD);
 
 const INPUT_TYPE_ERROR: &str =
     "join: input must be a string array, string scalar, character array, or cell array of character vectors";
@@ -233,7 +233,8 @@ const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer s
     category = "strings/transform",
     summary = "Combine text across a specified dimension inserting delimiters between elements.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
-    accel = "none"
+    accel = "none",
+    builtin_path = "crate::builtins::strings::transform::join"
 )]
 fn join_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("join: {e}"))?;
@@ -702,14 +703,14 @@ fn increment_coords(coords: &mut [usize], shape: &[usize], axis_idx: usize) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_string_array_default_dimension() {
         let array = StringArray::new(
@@ -741,6 +742,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_custom_scalar_delimiter() {
         let array = StringArray::new(
@@ -766,6 +768,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_delimiter_array_per_row() {
         let array = StringArray::new(
@@ -799,6 +802,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_dimension_argument() {
         let array = StringArray::new(
@@ -833,6 +837,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_dimension_greater_than_ndims_returns_input() {
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
@@ -850,6 +855,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_cell_array_of_char_vectors() {
         let gpu = CharArray::new_row("GPU");
@@ -888,6 +894,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_numeric_second_argument_uses_default_delimiter() {
         let array = StringArray::new(
@@ -909,6 +916,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_char_array_input_produces_string_array() {
         let data: Vec<char> = "RunMatGPUDev".chars().collect();
@@ -923,6 +931,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_cell_delimiter_array() {
         let array = StringArray::new(
@@ -968,6 +977,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_3d_string_array_along_third_dimension() {
         let mut data = Vec::new();
@@ -999,6 +1009,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_errors_on_zero_dimension() {
         let array = StringArray::new(vec!["a".into()], vec![1, 1]).unwrap();
@@ -1013,6 +1024,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_errors_on_mismatched_delimiter_shape() {
         let array = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap();
@@ -1022,6 +1034,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_propagates_missing_strings() {
         let array = StringArray::new(vec!["GPU".into(), "<missing>".into()], vec![1, 2]).unwrap();
@@ -1034,6 +1047,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_accepts_char_delimiter_scalar() {
         let array = StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap();
@@ -1051,6 +1065,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_handles_empty_axis() {
         let array = StringArray::new(Vec::new(), vec![2, 0]).unwrap();
@@ -1064,6 +1079,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_missing_dimension_broadcast_delimiters() {
         let array = StringArray::new(
@@ -1086,13 +1102,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn join_executes_with_wgpu_provider_registered() {

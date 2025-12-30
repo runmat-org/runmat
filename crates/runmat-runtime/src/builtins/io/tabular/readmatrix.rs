@@ -2,23 +2,28 @@
 
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "readmatrix",
+        builtin_path = "crate::builtins::io::tabular::readmatrix"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "readmatrix"
 category: "io/tabular"
@@ -198,6 +203,7 @@ No. Relative paths are resolved against the current working directory, exactly l
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readmatrix",
     op_kind: GpuOpKind::Custom("io-readmatrix"),
@@ -213,8 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readmatrix",
     shape: ShapeRequirements::Any,
@@ -225,17 +230,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; executes as a standalone host operation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("readmatrix", DOC_MD);
-
 #[runtime_builtin(
     name = "readmatrix",
     category = "io/tabular",
     summary = "Import numeric data from delimited text files into a RunMat matrix.",
     keywords = "readmatrix,csv,delimited text,numeric import,table",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let path_value = gather_if_needed(&path).map_err(|e| format!("readmatrix: {e}"))?;
@@ -1184,10 +1185,10 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
@@ -1195,15 +1196,13 @@ mod tests {
     use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_reads_csv_data() {
         let path = unique_path("readmatrix_csv");
@@ -1221,6 +1220,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_skips_header_lines() {
         let path = unique_path("readmatrix_header");
@@ -1238,6 +1238,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_delimiter_option() {
         let path = unique_path("readmatrix_tab");
@@ -1255,6 +1256,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_range_string() {
         let path = unique_path("readmatrix_range_string");
@@ -1272,6 +1274,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_respects_range_numeric_vector() {
         let path = unique_path("readmatrix_range_numeric");
@@ -1290,6 +1293,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_treats_custom_missing_tokens() {
         let path = unique_path("readmatrix_missing");
@@ -1311,6 +1315,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_uses_decimal_and_thousands_separators() {
         let path = unique_path("readmatrix_decimal");
@@ -1336,6 +1341,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_applies_empty_value() {
         let path = unique_path("readmatrix_empty_value");
@@ -1353,6 +1359,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_accepts_struct_options() {
         let path = unique_path("readmatrix_struct_opts");
@@ -1377,6 +1384,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_errors_on_non_numeric_field() {
         let path = unique_path("readmatrix_error");
@@ -1390,6 +1398,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_returns_empty_on_no_data() {
         let path = unique_path("readmatrix_empty");
@@ -1407,13 +1416,14 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_output_type_logical() {
         let path = unique_path("readmatrix_output_logical");
@@ -1431,6 +1441,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_logical_proto() {
         let path = unique_path("readmatrix_like_logical");
@@ -1449,6 +1460,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_gpu_proto() {
         test_support::with_test_provider(|provider| {
@@ -1474,6 +1486,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_accepts_character_vector_path() {
         let path = unique_path("readmatrix_char_path");
@@ -1494,6 +1507,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_handles_quoted_fields() {
         let path = unique_path("readmatrix_quotes");
@@ -1511,6 +1525,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_preserves_negative_infinity() {
         let path = unique_path("readmatrix_infinity");
@@ -1530,6 +1545,7 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_supports_whitespace_delimiter() {
         let path = unique_path("readmatrix_whitespace");

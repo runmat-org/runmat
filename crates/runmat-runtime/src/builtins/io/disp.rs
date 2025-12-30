@@ -14,11 +14,14 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::console::{record_console_output, ConsoleStream};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "disp", builtin_path = "crate::builtins::io::disp")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "disp"
 category: "io"
@@ -176,6 +179,7 @@ Use `fprintf` instead. `disp` always terminates the output with a newline.
 [fprintf](../filetext/fprintf), [sprintf](../../strings/core/sprintf), [string](../../strings/core/string), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::disp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "disp",
     op_kind: GpuOpKind::Custom("sink"),
@@ -191,8 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always formats on the CPU; GPU tensors are gathered via the active provider before display.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::disp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "disp",
     shape: ShapeRequirements::Any,
@@ -202,11 +205,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Side-effecting sink; excluded from fusion planning.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("disp", DOC_MD);
 
 /// Minimum column width (in characters) for numeric and logical displays.
 const NUMERIC_MIN_COLUMN_WIDTH: usize = 6;
@@ -235,7 +233,8 @@ enum Align {
     summary = "Display value in the Command Window without returning output.",
     keywords = "disp,display,print,gpu",
     sink = true,
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::io::disp"
 )]
 fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -248,10 +247,12 @@ fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut stdout = io::stdout().lock();
     if lines.is_empty() {
         writeln!(&mut stdout).map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
+        record_console_output(ConsoleStream::Stdout, "");
     } else {
         for line in lines {
             writeln!(&mut stdout, "{line}")
                 .map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
+            record_console_output(ConsoleStream::Stdout, line.as_str());
         }
     }
 
@@ -837,18 +838,20 @@ fn empty_return_value() -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
     use runmat_builtins::{ComplexTensor, IntValue, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_without_quotes() {
         let lines = format_for_disp(&Value::String("Simulation complete.".into()));
         assert_eq!(lines, vec!["Simulation complete.".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_field_string_has_quotes() {
         let mut sv = StructValue::new();
@@ -857,6 +860,7 @@ mod tests {
         assert_eq!(lines, vec!["    msg: \"ok\"".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_matrix_right_aligned() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor");
@@ -867,6 +871,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_tensor_three_dimensional_pages() {
         let tensor =
@@ -886,6 +891,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_tensor_three_dimensional_pages() {
         let data: Vec<(f64, f64)> = vec![
@@ -914,6 +920,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_left_aligned() {
         let array = StringArray::new(
@@ -936,6 +943,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_array_summaries() {
         let cell =
@@ -944,6 +952,7 @@ mod tests {
         assert_eq!(lines, vec!["    [1]  \"alpha\"".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_field_matrix_summarised() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
@@ -953,12 +962,14 @@ mod tests {
         assert_eq!(lines, vec!["    A: [2x2 double]".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_64_bit_display() {
         let lines = format_for_disp(&Value::Int(IntValue::U64(u64::MAX)));
         assert_eq!(lines, vec![u64::MAX.to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_accepts_gpu_tensor() {
         test_support::with_test_provider(|provider| {
@@ -974,6 +985,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn disp_gathers_wgpu_tensor() {
@@ -991,6 +1003,7 @@ mod tests {
         disp_builtin(Value::GpuTensor(handle), Vec::new()).expect("disp");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_rejects_extra_arguments() {
         let err = disp_builtin(Value::Num(1.0), vec![Value::Int(IntValue::I32(2))])
@@ -998,8 +1011,8 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

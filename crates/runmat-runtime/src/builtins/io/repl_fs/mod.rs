@@ -19,10 +19,7 @@ pub mod savepath;
 pub mod setenv;
 pub mod tempdir;
 pub mod tempname;
-#[cfg(test)]
 use once_cell::sync::Lazy;
-#[cfg(test)]
 use std::sync::Mutex;
 
-#[cfg(test)]
-pub(crate) static REPL_FS_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+pub static REPL_FS_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));

@@ -6,11 +6,10 @@
 //! sharing the platform-specific details for locating files, class folders,
 //! and packages.
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
 use std::ffi::OsString;
-use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::fs::expand_user_path;
@@ -275,7 +274,7 @@ pub fn find_file_with_extensions(
     error_prefix: &str,
 ) -> Result<Option<PathBuf>, String> {
     let candidates = file_candidates(name, extensions, error_prefix)?;
-    Ok(candidates.into_iter().find(|path| path.is_file()))
+    Ok(candidates.into_iter().find(|path| path_is_file(path)))
 }
 
 /// Return all existing files for a symbol given the list of candidate
@@ -288,7 +287,7 @@ pub fn find_all_files_with_extensions(
     let mut matches = Vec::new();
     let mut seen = HashSet::new();
     for path in file_candidates(name, extensions, error_prefix)? {
-        if path.is_file() && seen.insert(path.clone()) {
+        if path_is_file(&path) && seen.insert(path.clone()) {
             matches.push(path);
         }
     }
@@ -369,18 +368,16 @@ pub fn class_file_paths(
 
 fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
     const MAX_BYTES: usize = 64 * 1024;
-    if let Ok(file) = fs::File::open(path) {
-        let mut buffer = Vec::new();
-        let mut reader = file.take(MAX_BYTES as u64);
-        if reader.read_to_end(&mut buffer).is_ok() {
+    match vfs::read(path) {
+        Ok(mut buffer) => {
+            if buffer.len() > MAX_BYTES {
+                buffer.truncate(MAX_BYTES);
+            }
             let text = String::from_utf8_lossy(&buffer);
             text.to_ascii_lowercase()
                 .contains(&keyword.to_ascii_lowercase())
-        } else {
-            false
         }
-    } else {
-        false
+        Err(_) => false,
     }
 }
 
@@ -394,4 +391,16 @@ fn push_unique_dir(vec: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, value: P
     if seen.insert(value.clone()) {
         vec.push(value);
     }
+}
+
+pub fn path_is_file(path: &Path) -> bool {
+    vfs::metadata(path)
+        .map(|meta| meta.is_file())
+        .unwrap_or(false)
+}
+
+pub fn path_is_directory(path: &Path) -> bool {
+    vfs::metadata(path)
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false)
 }

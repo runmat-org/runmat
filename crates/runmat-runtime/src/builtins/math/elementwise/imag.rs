@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "imag",
+        builtin_path = "crate::builtins::math::elementwise::imag"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "imag"
 category: "math/elementwise"
@@ -157,6 +160,7 @@ Yes. The fusion planner can fold `imag` into neighbouring elementwise kernels, l
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imag",
     op_kind: GpuOpKind::Elementwise,
@@ -172,8 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_imag to materialise zero tensors in-place; the runtime gathers to the host whenever complex storage or string conversions are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imag",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -194,17 +197,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels treat imag as a zero-producing transform for real tensors; providers can override via fused pipelines to keep tensors resident on the GPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("imag", DOC_MD);
-
 #[runtime_builtin(
     name = "imag",
     category = "math/elementwise",
     summary = "Extract the imaginary component of scalars, vectors, matrices, or N-D tensors.",
     keywords = "imag,imaginary,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::imag"
 )]
 fn imag_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -258,11 +257,12 @@ fn imag_char_array(ca: CharArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_scalar_real_zero() {
         let result = imag_builtin(Value::Num(-2.5)).expect("imag");
@@ -272,6 +272,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_complex_scalar() {
         let result = imag_builtin(Value::Complex(3.0, 4.0)).expect("imag");
@@ -281,6 +282,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_bool_scalar_zero() {
         let result = imag_builtin(Value::Bool(true)).expect("imag");
@@ -290,6 +292,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_int_scalar_zero() {
         let result = imag_builtin(Value::Int(IntValue::I32(-42))).expect("imag");
@@ -299,6 +302,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_tensor_real_is_zero() {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5, 4.25], vec![4, 1]).unwrap();
@@ -312,6 +316,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_empty_tensor_zero_length() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -325,6 +330,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_complex_tensor_to_tensor_of_imag_parts() {
         let complex =
@@ -339,6 +345,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_logical_array_zero() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical array");
@@ -352,6 +359,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_char_array_zeroes() {
         let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
@@ -365,12 +373,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_string_array_error() {
         let arr =
@@ -379,6 +389,7 @@ mod tests {
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -395,13 +406,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn imag_wgpu_matches_cpu_zero() {

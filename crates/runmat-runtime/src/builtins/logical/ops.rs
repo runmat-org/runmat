@@ -13,11 +13,14 @@ use crate::builtins::common::{
     },
     tensor,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "logical",
+        builtin_path = "crate::builtins::logical::ops"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "logical"
 category: "logical"
@@ -186,6 +189,7 @@ See the references below and the RunMat source for implementation details.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logical",
     op_kind: GpuOpKind::Elementwise,
@@ -204,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Preferred path issues elem_ne(X, 0) on the device; missing hooks trigger a gather → host cast → re-upload sequence flagged as logical.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logical",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -216,17 +219,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion support will arrive alongside a dedicated WGSL template; today the builtin executes outside fusion plans.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("logical", DOC_MD);
-
 #[runtime_builtin(
     name = "logical",
     category = "logical",
     summary = "Convert scalars, arrays, and gpuArray values to logical outputs.",
     keywords = "logical,boolean,gpuArray,mask,conversion",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::logical::ops"
 )]
 fn logical_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if !rest.is_empty() {
@@ -431,12 +430,13 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, IntValue, MException, ObjectInstance, StructValue};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalar_num() {
         let result = logical_builtin(Value::Num(5.0), Vec::new()).expect("logical");
@@ -446,6 +446,7 @@ mod tests {
         assert_eq!(zero_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_nan_is_true() {
         let tensor = Tensor::new(vec![0.0, f64::NAN, -0.0], vec![1, 3]).unwrap();
@@ -456,6 +457,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_tensor_matrix() {
         let tensor = Tensor::new(vec![0.0, 2.0, -3.0, 0.0], vec![2, 2]).unwrap();
@@ -469,6 +471,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_complex_conversion() {
         let complex =
@@ -482,6 +485,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_char_array_conversion() {
         let chars = CharArray::new(vec!['A', '\0', 'C'], 1, 3).unwrap();
@@ -492,6 +496,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_string_error() {
         let err = logical_builtin(Value::String("runmat".to_string()), Vec::new()).unwrap_err();
@@ -501,6 +506,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_struct_error() {
         let mut st = StructValue::new();
@@ -509,6 +515,7 @@ mod tests {
         assert!(err.contains("struct"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_cell_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell creation");
@@ -519,6 +526,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_function_handle_error() {
         let err = logical_builtin(Value::FunctionHandle("foo".into()), Vec::new()).unwrap_err();
@@ -528,6 +536,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_object_error() {
         let obj = ObjectInstance::new("DemoClass".to_string());
@@ -538,6 +547,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_mexception_error() {
         let mex = MException::new("id:logical".into(), "message".into());
@@ -548,6 +558,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -569,6 +580,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_gpu_passthrough_for_logical_handle() {
         test_support::with_test_provider(|provider| {
@@ -588,6 +600,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_bool_and_logical_inputs_passthrough() {
         let res_bool = logical_builtin(Value::Bool(true), Vec::new()).expect("logical");
@@ -599,6 +612,7 @@ mod tests {
         assert_eq!(res_array, Value::LogicalArray(logical));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -612,6 +626,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_integer_scalar() {
         let res = logical_builtin(Value::Int(IntValue::I32(0)), Vec::new()).expect("logical");
@@ -622,13 +637,14 @@ mod tests {
         assert_eq!(res_nonzero, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn logical_wgpu_matches_cpu_conversion() {

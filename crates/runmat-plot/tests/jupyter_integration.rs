@@ -1,10 +1,11 @@
+#![cfg(feature = "jupyter")]
 //! Comprehensive Jupyter integration tests for RunMat plotting
 //!
 //! Tests the complete Jupyter plotting pipeline including export systems,
 //! widget generation, and protocol integration.
 
 use runmat_plot::jupyter::{ExportSettings, JupyterBackend, OutputFormat, Quality};
-use runmat_plot::plots::{BarChart, Figure, Histogram, LinePlot, ScatterPlot};
+use runmat_plot::plots::{BarChart, Figure, LinePlot, ScatterPlot};
 use tempfile::TempDir;
 
 #[test]
@@ -114,18 +115,9 @@ fn test_base64_export() {
     figure.add_line_plot(line_plot);
 
     let result = backend.display_figure(&mut figure);
-    let base64_html = match result {
-        Ok(html) => html,
-        Err(err)
-            if err
-                .to_string()
-                .contains("Failed to find suitable GPU adapter") =>
-        {
-            eprintln!("skipping base64 export test: {err}");
-            return;
-        }
-        Err(err) => panic!("{err}"),
-    };
+    assert!(result.is_ok());
+
+    let base64_html = result.unwrap();
     assert!(base64_html.contains("data:image/png;base64,"));
     assert!(base64_html.contains("<img"));
 }
@@ -215,9 +207,17 @@ fn test_multiple_plot_types_in_figure() {
     .unwrap();
     figure.add_bar_chart(bar_chart);
 
-    // Add histogram
-    let histogram = Histogram::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], 5).unwrap();
-    figure.add_histogram(histogram);
+    // Add histogram-like bar chart
+    let labels = vec![
+        "[1.0,2.0)".to_string(),
+        "[2.0,3.0)".to_string(),
+        "[3.0,4.0)".to_string(),
+        "[4.0,5.0)".to_string(),
+        "[5.0,6.0)".to_string(),
+    ];
+    let values = vec![1.0, 2.0, 3.0, 1.0, 0.0];
+    let histogram_bars = BarChart::new(labels, values).unwrap();
+    figure.add_bar_chart(histogram_bars);
 
     let result = backend.display_figure(&mut figure);
     assert!(result.is_ok());
@@ -366,7 +366,7 @@ fn test_edge_cases() {
 
 #[test]
 fn test_performance_benchmarks() {
-    use std::time::Instant;
+    use runmat_time::Instant;
 
     let mut backend = JupyterBackend::with_format(OutputFormat::HTML);
 
@@ -409,18 +409,9 @@ fn test_export_integration() {
     // Test PNG export using our export system
     let mut backend = JupyterBackend::with_format(OutputFormat::PNG);
     let result = backend.display_figure(&mut figure);
-    let png_html = match result {
-        Ok(html) => html,
-        Err(err)
-            if err
-                .to_string()
-                .contains("Failed to find suitable GPU adapter") =>
-        {
-            eprintln!("skipping PNG export integration test: {err}");
-            return;
-        }
-        Err(err) => panic!("{err}"),
-    };
+
+    assert!(result.is_ok());
+    let png_html = result.unwrap();
     assert!(png_html.contains("<img"));
     assert!(png_html.contains(".png"));
 }

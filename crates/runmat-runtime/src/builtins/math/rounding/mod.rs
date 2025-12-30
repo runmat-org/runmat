@@ -1,10 +1,10 @@
 //! MATLAB-compatible `mod` builtin plus rounding helpers for RunMat.
 
-mod ceil;
-mod fix;
-mod floor;
-mod rem;
-mod round;
+pub(crate) mod ceil;
+pub(crate) mod fix;
+pub(crate) mod floor;
+pub(crate) mod rem;
+pub(crate) mod round;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -17,11 +17,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "mod",
+        builtin_path = "crate::builtins::math::rounding"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mod"
 category: "math/rounding"
@@ -178,6 +181,7 @@ Explicit `gpuArray` / `gather` calls remain available for scripts that mirror Ma
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mod",
     op_kind: GpuOpKind::Elementwise,
@@ -208,8 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers can keep mod on-device by composing elem_div → unary_floor → elem_mul → elem_sub for matching shapes. Future backends may expose a dedicated elem_mod hook.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -230,17 +233,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion generates floor(a / b) followed by a - b * q; providers may substitute specialised kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mod", DOC_MD);
-
 #[runtime_builtin(
     name = "mod",
     category = "math/rounding",
     summary = "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
     keywords = "mod,modulus,remainder,gpu",
-    accel = "binary"
+    accel = "binary",
+    builtin_path = "crate::builtins::math::rounding"
 )]
 fn mod_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     match (lhs, rhs) {
@@ -479,11 +478,12 @@ fn into_complex(input: NumericArray) -> Result<ComplexTensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_positive_values() {
         let result = mod_builtin(Value::Num(17.0), Value::Num(5.0)).expect("mod");
@@ -493,6 +493,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_negative_divisor_keeps_sign() {
         let tensor = Tensor::new(vec![-7.0, -3.0, 4.0, 9.0], vec![4, 1]).unwrap();
@@ -507,6 +508,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_negative_numerator_positive_divisor() {
         let result = mod_builtin(Value::Num(-3.0), Value::Num(2.0)).expect("mod");
@@ -516,6 +518,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_zero_divisor_returns_nan() {
         let result = mod_builtin(Value::Num(3.0), Value::Num(0.0)).expect("mod");
@@ -525,6 +528,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_matrix_scalar_broadcast() {
         let matrix = Tensor::new(vec![4.5, 7.1, -2.3, 0.4], vec![2, 2]).unwrap();
@@ -541,6 +545,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_complex_operands() {
         let complex =
@@ -561,6 +566,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_char_array_support() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -571,6 +577,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_string_input_errors() {
         let err = mod_builtin(Value::from("abc"), Value::Num(3.0))
@@ -578,6 +585,7 @@ mod tests {
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_logical_array_support() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -589,6 +597,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_vector_broadcasting() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -603,6 +612,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_nan_inputs_propagate() {
         let result = mod_builtin(Value::Num(f64::NAN), Value::Num(3.0)).expect("mod");
@@ -612,6 +622,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -635,6 +646,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_int_scalar_promotes() {
         let result =
@@ -645,6 +657,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn mod_wgpu_matches_cpu() {
@@ -692,8 +705,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

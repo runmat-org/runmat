@@ -8,10 +8,10 @@ use parking_lot::{Mutex, RwLock};
 // Use a local trait-alias shim to avoid compile-time dependency ordering issues.
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
 use runmat_builtins::Value;
+use runmat_time::Instant;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 use thiserror::Error;
 
 pub mod allocator;

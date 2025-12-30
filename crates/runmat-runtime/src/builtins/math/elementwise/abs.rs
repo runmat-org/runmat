@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "abs",
+        builtin_path = "crate::builtins::math::elementwise::abs"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "abs"
 category: "math/elementwise"
@@ -189,6 +192,7 @@ Yes. Logical inputs are promoted to doubles (0 or 1) before applying `abs`, just
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::abs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "abs",
     op_kind: GpuOpKind::Elementwise,
@@ -204,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute abs in-place; the runtime gathers to host when unary_abs is unavailable or when complex magnitudes are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::abs")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "abs",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -222,17 +225,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL abs; providers can swap in specialised kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("abs", DOC_MD);
-
 #[runtime_builtin(
     name = "abs",
     category = "math/elementwise",
     summary = "Absolute value or magnitude of scalars, vectors, matrices, or N-D tensors.",
     keywords = "abs,absolute value,magnitude,complex,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::abs"
 )]
 fn abs_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -291,11 +290,12 @@ fn complex_magnitude(re: f64, im: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_scalar_negative() {
         let result = abs_builtin(Value::Num(-3.5)).expect("abs");
@@ -305,6 +305,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_int_promotes() {
         let result = abs_builtin(Value::Int(IntValue::I32(-8))).expect("abs");
@@ -314,6 +315,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, -2.0, 3.0, -4.0], vec![2, 2]).unwrap();
@@ -327,6 +329,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_complex_scalar() {
         let result = abs_builtin(Value::Complex(3.0, 4.0)).expect("abs");
@@ -336,6 +339,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_complex_tensor_to_real_tensor() {
         let complex = ComplexTensor::new(vec![(3.0, 4.0), (1.0, -1.0)], vec![2, 1]).unwrap();
@@ -350,6 +354,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_char_array_codes() {
         let char_array = CharArray::new("Az".chars().collect(), 1, 2).unwrap();
@@ -363,12 +368,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_string_rejected() {
         let err = abs_builtin(Value::from("hello")).expect_err("should error");
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -385,13 +392,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn abs_wgpu_matches_cpu_elementwise() {

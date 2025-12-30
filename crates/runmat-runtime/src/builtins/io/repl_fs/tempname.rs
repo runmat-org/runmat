@@ -1,10 +1,12 @@
 //! MATLAB-compatible `tempname` builtin for RunMat.
 
+use runmat_time::system_time_now;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use runmat_builtins::{CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
@@ -12,9 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
 const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
@@ -25,7 +25,14 @@ const ERR_UNABLE_TO_GENERATE: &str = "tempname: unable to generate a unique name
 const MAX_ATTEMPTS: usize = 64;
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "tempname",
+        builtin_path = "crate::builtins::io::repl_fs::tempname"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tempname"
 category: "io/repl_fs"
@@ -171,6 +178,7 @@ No. The builtin is host-only and ignores GPU providers entirely.
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::tempname")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tempname",
     op_kind: GpuOpKind::Custom("io"),
@@ -186,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only path generation. Providers are not expected to supply kernels for temporary name creation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::tempname")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tempname",
     shape: ShapeRequirements::Any,
@@ -198,17 +205,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata is registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tempname", DOC_MD);
-
 #[runtime_builtin(
     name = "tempname",
     category = "io/repl_fs",
     summary = "Return a unique temporary file path.",
     keywords = "tempname,temporary file,unique name,temp directory",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
 fn tempname_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {
@@ -285,7 +288,7 @@ fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
         } else {
             base.join(&token)
         };
-        if !candidate.exists() {
+        if !path_exists(&candidate) {
             return Ok(candidate);
         }
     }
@@ -293,7 +296,7 @@ fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
 }
 
 fn unique_token() -> String {
-    let now = SystemTime::now()
+    let now = system_time_now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let secs = now.as_secs();
@@ -308,16 +311,21 @@ fn path_to_value(path: &Path) -> Value {
     Value::CharArray(CharArray::new_row(&text))
 }
 
+fn path_exists(path: &Path) -> bool {
+    vfs::metadata(path).is_ok()
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::fs::home_directory;
     use runmat_builtins::StringArray;
     use std::convert::TryFrom;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_generates_unique_names() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -329,16 +337,11 @@ mod tests {
             first_str, second_str,
             "tempname should return unique values"
         );
-        assert!(
-            !PathBuf::from(&first_str).exists(),
-            "first path should not exist"
-        );
-        assert!(
-            !PathBuf::from(&second_str).exists(),
-            "second path should not exist"
-        );
+        assert!(!path_exists(Path::new(&first_str)), "first path exists");
+        assert!(!path_exists(Path::new(&second_str)), "second path exists");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_returns_char_row_vector() {
         let value = tempname_builtin(Vec::new()).expect("tempname");
@@ -351,6 +354,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_uses_system_temp_directory_by_default() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -363,6 +367,7 @@ mod tests {
         assert_eq!(parent, std::env::temp_dir().as_path());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_custom_folder_char_array() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -378,9 +383,10 @@ mod tests {
             Some(base),
             "expected tempname to honour the provided folder"
         );
-        assert!(!path.exists(), "generated path should not exist yet");
+        assert!(!path_exists(&path), "generated path should not exist yet");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_custom_folder_string_scalar() {
         let dir = tempdir().expect("tempdir");
@@ -393,6 +399,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_allows_nonexistent_targets() {
         let dir = tempdir().expect("tempdir");
@@ -405,6 +412,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_accepts_string_array_scalar() {
         let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -419,6 +427,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_expands_tilde_prefix() {
         let home = home_directory().expect("home directory");
@@ -431,6 +440,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_preserves_relative_folder() {
         let base = "relative_temp";
@@ -447,18 +457,21 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_too_many_arguments() {
         let err = tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("error");
         assert_eq!(err, ERR_TOO_MANY_INPUTS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_invalid_type() {
         let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");
         assert_eq!(err, ERR_FOLDER_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_empty_folder() {
         let empty = Value::CharArray(CharArray::new_row(""));
@@ -466,8 +479,8 @@ mod tests {
         assert_eq!(err, ERR_FOLDER_EMPTY);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

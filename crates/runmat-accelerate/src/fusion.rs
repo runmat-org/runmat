@@ -1601,9 +1601,14 @@ impl FusionGroupPlan {
         };
         // Helper(s) at module scope
         shader.push_str(&format!(
-            "fn isNanF(x: {scalar}) -> bool {{ return x != x; }}\n\n",
+            "fn isNanF(x: {scalar}) -> bool {{ return x != x; }}\n",
             scalar = scalar_ty
         ));
+        if scalar_ty == "f64" {
+            shader.push_str("fn canonicalNan() -> f64 {\n  var bits: u64 = 0x7ff8000000000000u;\n  return bitcast<f64>(bits);\n}\n\n");
+        } else {
+            shader.push_str("fn canonicalNan() -> f32 {\n  var bits: u32 = 0x7fc00000u;\n  return bitcast<f32>(bits);\n}\n\n");
+        }
         shader.push_str("@compute @workgroup_size(@WG@)\n");
         if axis == 0 {
             // Column-wise: reduce over rows; one output per column (ncols)
@@ -1642,14 +1647,7 @@ impl FusionGroupPlan {
                 shader.push_str(&loop_body);
                 shader.push_str("    r += @WG@u;\n  }\n");
             }
-            if scalar_ty == "f64" {
-                shader.push_str(
-                    "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
-                );
-            } else {
-                shader
-                    .push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
-            }
+            shader.push_str("  if (!OMITNAN && saw_nan) { acc = canonicalNan(); }\n");
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
                 "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
@@ -1694,14 +1692,7 @@ impl FusionGroupPlan {
                 shader.push_str(&loop_body);
                 shader.push_str("    c += @WG@u;\n  }\n");
             }
-            if scalar_ty == "f64" {
-                shader.push_str(
-                    "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
-                );
-            } else {
-                shader
-                    .push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
-            }
+            shader.push_str("  if (!OMITNAN && saw_nan) { acc = canonicalNan(); }\n");
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
                 "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",

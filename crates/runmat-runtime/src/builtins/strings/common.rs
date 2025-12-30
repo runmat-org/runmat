@@ -45,9 +45,10 @@ pub(crate) fn char_row_to_string_slice(data: &[char], cols: usize, row: usize) -
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn detects_missing_strings_case_insensitively() {
         assert!(is_missing_string("<missing>"));
@@ -55,6 +56,7 @@ mod tests {
         assert!(!is_missing_string("<missing value>"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lowercase_preserves_missing() {
         assert_eq!(
@@ -64,6 +66,7 @@ mod tests {
         assert_eq!(lowercase_preserving_missing("RunMat".to_string()), "runmat");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn uppercase_preserves_missing() {
         assert_eq!(
@@ -73,6 +76,7 @@ mod tests {
         assert_eq!(uppercase_preserving_missing("RunMat".to_string()), "RUNMAT");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_row_collection_supports_row_major_storage() {
         let chars: Vec<char> = vec!['A', 'B', 'C', 'D', 'E', 'F'];

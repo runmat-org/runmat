@@ -12,15 +12,19 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fclose",
+        builtin_path = "crate::builtins::io::filetext::fclose"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fclose"
 category: "io/filetext"
@@ -190,6 +194,7 @@ No. It only closes identifiers that the current RunMat process opened via
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fclose",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -206,8 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fclose",
     shape: ShapeRequirements::Any,
@@ -218,17 +222,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is not eligible for fusion; metadata is registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fclose", DOC_MD);
-
 #[runtime_builtin(
     name = "fclose",
     category = "io/filetext",
     summary = "Close one file, multiple files, or all files opened with fopen.",
     keywords = "fclose,file,close,io,identifier",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 fn fclose_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -423,16 +423,17 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fopen, registry};
     use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
-    use std::fs;
+    use runmat_filesystem as fs;
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     static REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -441,7 +442,7 @@ mod tests {
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());
@@ -461,6 +462,7 @@ mod tests {
         (fid, path)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_closes_single_file() {
         let _guard = registry_guard();
@@ -473,6 +475,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_invalid_identifier_returns_error() {
         let _guard = registry_guard();
@@ -482,6 +485,7 @@ mod tests {
         assert_eq!(eval.message(), INVALID_IDENTIFIER_MESSAGE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_all_closes_everything() {
         let _guard = registry_guard();
@@ -495,6 +499,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_no_args_closes_all() {
         let _guard = registry_guard();
@@ -506,6 +511,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_vector_of_fids_closes_each() {
         let _guard = registry_guard();
@@ -533,6 +539,7 @@ mod tests {
         fs::remove_file(path2).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_repeat_returns_error_message() {
         let _guard = registry_guard();
@@ -546,6 +553,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_standard_stream_bool_argument() {
         let _guard = registry_guard();
@@ -558,6 +566,7 @@ mod tests {
         assert!(matches!(outputs[1], Value::CharArray(ref ca) if ca.rows == 1 && ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_logical_array_converts_to_numeric_ids() {
         let _guard = registry_guard();
@@ -568,6 +577,7 @@ mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_cell_array_closes_each_entry() {
         let _guard = registry_guard();
@@ -583,6 +593,7 @@ mod tests {
         fs::remove_file(path2).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_tensor_with_non_integer_entries_errors() {
         let _guard = registry_guard();
@@ -592,6 +603,7 @@ mod tests {
         assert_eq!(err, "fclose: file identifier must be an integer");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_string_array_all_equivalent() {
         let _guard = registry_guard();
@@ -602,6 +614,7 @@ mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_accepts_empty_tensor() {
         let _guard = registry_guard();
@@ -612,6 +625,7 @@ mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_errors_on_non_numeric_input() {
         let _guard = registry_guard();
@@ -620,8 +634,8 @@ mod tests {
         assert_eq!(err, "fclose: file identifier must be numeric or 'all'");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = registry_guard();
         let blocks = crate::builtins::common::test_support::doc_examples(super::DOC_MD);

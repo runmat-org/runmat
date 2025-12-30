@@ -10,11 +10,16 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strcmpi",
+        builtin_path = "crate::builtins::strings::core::strcmpi"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strcmpi"
 category: "strings/core"
@@ -156,6 +161,7 @@ A logical scalar is returned (`true` or `false`). For non-scalar shapes, a logic
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcmpi",
     op_kind: GpuOpKind::Custom("string-compare"),
@@ -171,8 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the CPU; GPU operands are gathered before comparison.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strcmpi",
     shape: ShapeRequirements::Any,
@@ -183,17 +188,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results; not eligible for GPU fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strcmpi", DOC_MD);
-
 #[runtime_builtin(
     name = "strcmpi",
     category = "strings/core",
     summary = "Compare text inputs for equality without considering case.",
     keywords = "strcmpi,string compare,text equality",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
 fn strcmpi_builtin(a: Value, b: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("strcmpi: {e}"))?;
@@ -233,12 +234,12 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> Result<Val
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_scalar_true_ignores_case() {
         let result = strcmpi_builtin(
@@ -249,6 +250,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_scalar_false_when_text_differs() {
         let result = strcmpi_builtin(
@@ -259,6 +261,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_array_broadcast_scalar_case_insensitive() {
         let array = StringArray::new(
@@ -272,6 +275,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_row_compare_casefold() {
         let chars = CharArray::new(vec!['c', 'a', 't', 'D', 'O', 'G'], 2, 3).unwrap();
@@ -281,6 +285,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_to_char_array_casefold() {
         let left = CharArray::new(vec!['A', 'b', 'C', 'd'], 2, 2).unwrap();
@@ -291,6 +296,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_scalar_casefold() {
         let cell = CellArray::new(
@@ -309,6 +315,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_vs_cell_array_broadcast() {
         let left = CellArray::new(vec![Value::from("North"), Value::from("East")], 1, 2).unwrap();
@@ -318,6 +325,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_array_multi_dimensional_broadcast() {
         let left = StringArray::new(vec!["north".into(), "south".into()], vec![2, 1]).unwrap();
@@ -332,6 +340,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_missing_strings_compare_false() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -343,6 +352,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_trailing_space_not_equal() {
         let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
@@ -351,6 +361,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -360,6 +371,7 @@ mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_invalid_argument_type() {
         let err =
@@ -367,6 +379,7 @@ mod tests {
         assert!(err.contains("first argument must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
@@ -375,6 +388,7 @@ mod tests {
         assert!(err.contains("cell array elements must be character vectors or string scalars"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_empty_char_array_returns_empty() {
         let chars = CharArray::new(Vec::<char>::new(), 0, 3).unwrap();
@@ -384,6 +398,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strcmpi_with_wgpu_provider_matches_expected() {
@@ -398,8 +413,8 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

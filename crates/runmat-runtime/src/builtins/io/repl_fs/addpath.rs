@@ -13,13 +13,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
@@ -28,7 +26,14 @@ const ERROR_TOO_FEW_ARGS: &str = "addpath: at least one folder must be specified
 const ERROR_POSITION_REPEATED: &str =
     "addpath: position option must be '-begin' or '-end' and may only appear once";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "addpath",
+        builtin_path = "crate::builtins::io::repl_fs::addpath"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "addpath"
 category: "io/repl_fs"
@@ -170,6 +175,7 @@ Expected behaviour:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "addpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -185,8 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path manipulation is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "addpath",
     shape: ShapeRequirements::Any,
@@ -196,11 +201,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "IO builtins are not eligible for fusion; metadata registered for completeness.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("addpath", DOC_MD);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InsertPosition {
@@ -219,7 +219,8 @@ struct AddPathSpec {
     category = "io/repl_fs",
     summary = "Add folders to the MATLAB search path used by RunMat.",
     keywords = "addpath,search path,matlab path,-begin,-end,-frozen",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 fn addpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -429,7 +430,7 @@ fn normalize_directory(raw: &str) -> Result<String, String> {
     let normalized = normalize_pathbuf(&joined);
 
     let metadata =
-        fs::metadata(&normalized).map_err(|_| format!("addpath: folder '{trimmed}' not found"))?;
+        vfs::metadata(&normalized).map_err(|_| format!("addpath: folder '{trimmed}' not found"))?;
     if !metadata.is_dir() {
         return Err(format!("addpath: '{trimmed}' is not a folder"));
     }
@@ -516,15 +517,15 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use std::convert::TryFrom;
     use std::env;
+    use std::fs;
     use tempfile::tempdir;
 
     struct PathGuard {
@@ -550,6 +551,7 @@ mod tests {
         path_to_string(&normalized)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_prepends_by_default() {
         let _lock = REPL_FS_TEST_LOCK
@@ -575,6 +577,7 @@ mod tests {
         assert_eq!(segments.first().unwrap(), &expected_front);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_removes_duplicates() {
         let _lock = REPL_FS_TEST_LOCK
@@ -603,6 +606,7 @@ mod tests {
         assert_eq!(segments.iter().filter(|p| *p == &first_str).count(), 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_respects_end_option() {
         let _lock = REPL_FS_TEST_LOCK
@@ -624,6 +628,7 @@ mod tests {
         assert_eq!(segments.last().unwrap(), &canonical(second.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_handles_string_array_and_cell_input() {
         let _lock = REPL_FS_TEST_LOCK
@@ -654,6 +659,7 @@ mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_supports_multi_row_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -684,6 +690,7 @@ mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_errors_on_missing_folder() {
         let _lock = REPL_FS_TEST_LOCK
@@ -699,6 +706,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_genpath_string_is_expanded() {
         let _lock = REPL_FS_TEST_LOCK
@@ -725,6 +733,7 @@ mod tests {
         assert_eq!(segments[1], canonical(&sub));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_returns_previous_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -741,6 +750,7 @@ mod tests {
         assert_eq!(returned_str, guard.previous);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_rejects_conflicting_position_flags() {
         let _lock = REPL_FS_TEST_LOCK
@@ -758,6 +768,7 @@ mod tests {
         assert!(err.contains("position option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_handles_dash_begin() {
         let _lock = REPL_FS_TEST_LOCK
@@ -780,6 +791,7 @@ mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_accepts_string_containers() {
         let _lock = REPL_FS_TEST_LOCK
@@ -797,8 +809,8 @@ mod tests {
         assert_eq!(current, canonical(&cwd));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn addpath_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

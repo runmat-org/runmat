@@ -9,6 +9,7 @@ license-file = "../LICENSE.md"
 [dependencies]
 runmat-gc-api = { workspace = true }
 runmat-builtins = { workspace = true }
+runmat-time = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 runmat-accelerate-api = { workspace = true }

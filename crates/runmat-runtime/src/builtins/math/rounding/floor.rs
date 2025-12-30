@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "floor",
+        builtin_path = "crate::builtins::math::rounding::floor"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "floor"
 category: "math/rounding"
@@ -195,6 +198,7 @@ You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::floor")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "floor",
     op_kind: GpuOpKind::Elementwise,
@@ -211,8 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute floor directly on the device; the runtime gathers to the host when unary_floor is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::floor")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "floor",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,17 +235,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `floor` calls; providers can substitute custom kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("floor", DOC_MD);
-
 #[runtime_builtin(
     name = "floor",
     category = "math/rounding",
     summary = "Round values toward negative infinity.",
     keywords = "floor,rounding,integers,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::rounding::floor"
 )]
 fn floor_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = parse_arguments(&rest)?;
@@ -527,12 +526,13 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_scalar_positive_and_negative() {
         let value = Value::Num(-2.7);
@@ -543,6 +543,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_integer_tensor() {
         let tensor = Tensor::new(vec![1.2, 4.7, -3.4, 5.0], vec![2, 2]).unwrap();
@@ -556,6 +557,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_complex_value() {
         let result = floor_builtin(Value::Complex(1.7, -2.3), Vec::new()).expect("floor");
@@ -568,6 +570,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_char_array_to_tensor() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -581,6 +584,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_logical_array_remains_same() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -594,6 +598,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_int_value_passthrough() {
         let result = floor_builtin(Value::Int(IntValue::I32(-4)), Vec::new()).expect("floor");
@@ -603,6 +608,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -619,6 +625,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_decimal_digits() {
         let value = Value::Num(21.456);
@@ -630,6 +637,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_negative_digits() {
         let tensor = Tensor::new(vec![123.4, -987.6], vec![2, 1]).unwrap();
@@ -641,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_significant_digits() {
         let value = Value::Num(98765.4321);
@@ -652,6 +661,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_significant_requires_positive_digits() {
         let args = vec![Value::Int(IntValue::I32(0)), Value::from("significant")];
@@ -659,12 +669,14 @@ mod tests {
         assert!(err.contains("positive integer"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_string_input_errors() {
         let err = floor_builtin(Value::from("hello"), Vec::new()).unwrap_err();
         assert!(err.contains("numeric"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_like_invalid_prototype_errors() {
         let args = vec![Value::from("like"), Value::from("prototype")];
@@ -672,6 +684,7 @@ mod tests {
         assert!(err.contains("unsupported prototype"), "unexpected: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_like_gpu_output() {
         test_support::with_test_provider(|provider| {
@@ -697,6 +710,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_bool_value() {
         let result = floor_builtin(Value::Bool(true), Vec::new()).expect("floor");
@@ -706,13 +720,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn floor_wgpu_matches_cpu() {

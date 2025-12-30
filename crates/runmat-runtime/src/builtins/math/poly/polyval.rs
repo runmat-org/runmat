@@ -11,13 +11,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "polyval",
+        builtin_path = "crate::builtins::math::poly::polyval"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "polyval"
 category: "math/poly"
@@ -213,6 +217,7 @@ once RunMat's sparse infrastructure stabilises.
 - Found an issue or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyval",
     op_kind: GpuOpKind::Custom("polyval"),
@@ -229,8 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider-level Horner kernels for real coefficients/inputs; falls back to host evaluation (with upload) for complex or prediction-interval paths.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyval",
     shape: ShapeRequirements::Any,
@@ -241,18 +245,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion sink; real-valued workloads stay on device, while complex/delta paths gather to the host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyval", DOC_MD);
-
 #[runtime_builtin(
     name = "polyval",
     category = "math/poly",
     summary = "Evaluate a polynomial at given points with MATLAB-compatible options.",
     keywords = "polyval,polynomial,polyfit,delta,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::math::poly::polyval"
 )]
 fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(p, x, &rest, false)?;
@@ -1023,11 +1023,12 @@ fn values_are_real(values: &[Complex64]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::StructValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_scalar() {
         let coeffs = Tensor::new(vec![2.0, -3.0, 5.0], vec![1, 3]).unwrap();
@@ -1039,6 +1040,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_matrix_input() {
         let coeffs = Tensor::new(vec![1.0, 0.0, -2.0, 1.0], vec![1, 4]).unwrap();
@@ -1059,6 +1061,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_complex_inputs() {
         let coeffs =
@@ -1080,6 +1083,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_with_mu() {
         let coeffs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
@@ -1102,6 +1106,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_delta_computation() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
@@ -1128,6 +1133,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_delta_requires_stats() {
         let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -1137,6 +1143,7 @@ mod tests {
         assert!(err.contains("S input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_invalid_mu_length_errors() {
         let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -1152,6 +1159,7 @@ mod tests {
         assert!(err.contains("mu must contain at least two elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_complex_mu_rejected() {
         let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -1168,6 +1176,7 @@ mod tests {
         assert!(err.contains("mu values must be real"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_invalid_stats_missing_r() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
@@ -1181,6 +1190,7 @@ mod tests {
         assert!(err.contains("missing the field 'R'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1214,6 +1224,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn polyval_wgpu_matches_cpu_real_inputs() {
@@ -1266,8 +1277,8 @@ mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

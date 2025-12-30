@@ -23,6 +23,8 @@ mod reduction_meta;
 pub mod simple_provider;
 mod sortrows_host;
 pub mod telemetry;
+#[cfg(feature = "wgpu")]
+use crate::backend::wgpu::provider::WgpuProvider;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
@@ -107,6 +109,7 @@ static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
 static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
     runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
+    runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
 });
 
 pub(crate) fn ensure_residency_hooks() {
@@ -115,6 +118,17 @@ pub(crate) fn ensure_residency_hooks() {
 
 fn sequence_threshold_hint_bridge() -> Option<usize> {
     native_auto::sequence_threshold_hint()
+}
+
+fn workgroup_size_hint_bridge() -> Option<u32> {
+    #[cfg(feature = "wgpu")]
+    {
+        Some(crate::backend::wgpu::config::effective_workgroup_size())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        None
+    }
 }
 
 pub fn configure_auto_offload(options: AutoOffloadOptions) {
@@ -175,7 +189,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
     }
 
     let registered = {
-        #[cfg(feature = "wgpu")]
+        #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
         {
             let mut reg = false;
             if matches!(
@@ -194,21 +208,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                 match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
                     Ok(provider) => {
                         reg = true;
-                        let info = provider.device_info_struct();
-                        let backend = info.backend.as_deref().unwrap_or("unknown");
-                        log::info!(
-                            "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
-                            info.name,
-                            info.vendor,
-                            backend
-                        );
-                        // Warmup to amortize first-dispatch costs
-                        provider.warmup();
-                        let (hits, misses) = provider.fused_cache_counters();
-                        log::info!(
-                            "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
-                            hits, misses
-                        );
+                        announce_wgpu_provider(provider);
                     }
                     Err(err) => {
                         log::warn!(
@@ -218,6 +218,18 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                 }
             }
             reg
+        }
+        #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+        {
+            if matches!(
+                options.provider,
+                AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
+            ) {
+                log::info!(
+                    "RunMat Accelerate: wasm builds require calling initialize_wgpu_provider_async to enable the WGPU backend"
+                );
+            }
+            false
         }
         #[cfg(not(feature = "wgpu"))]
         {
@@ -240,6 +252,88 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
             log::warn!("RunMat Accelerate: no acceleration provider registered");
         }
     }
+}
+
+#[cfg(feature = "wgpu")]
+fn announce_wgpu_provider(provider: &WgpuProvider) {
+    let info = provider.device_info_struct();
+    let backend = info.backend.as_deref().unwrap_or("unknown");
+    log::info!(
+        "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
+        info.name,
+        info.vendor,
+        backend
+    );
+    provider.warmup();
+    let (hits, misses) = provider.fused_cache_counters();
+    log::info!(
+        "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
+        hits,
+        misses
+    );
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+pub async fn initialize_wgpu_provider_async(options: &AccelerateInitOptions) -> anyhow::Result<()> {
+    configure_auto_offload(options.auto_offload.clone());
+
+    if runmat_accelerate_api::provider().is_some() {
+        return Ok(());
+    }
+
+    if !options.enabled {
+        if options.allow_inprocess_fallback
+            || matches!(options.provider, AccelerateProviderPreference::InProcess)
+        {
+            simple_provider::register_inprocess_provider();
+            log::info!(
+                "RunMat Accelerate: acceleration disabled; using in-process acceleration provider"
+            );
+        } else {
+            log::info!("RunMat Accelerate: acceleration disabled; no provider registered");
+        }
+        return Ok(());
+    }
+
+    let mut registered = false;
+    if matches!(
+        options.provider,
+        AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
+    ) {
+        let wgpu_options = backend::wgpu::provider::WgpuProviderOptions {
+            power_preference: match options.wgpu_power_preference {
+                AccelPowerPreference::Auto => PowerPreference::HighPerformance,
+                AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
+                AccelPowerPreference::LowPower => PowerPreference::LowPower,
+            },
+            force_fallback_adapter: options.wgpu_force_fallback_adapter,
+        };
+
+        match backend::wgpu::provider::register_wgpu_provider_async(wgpu_options).await {
+            Ok(provider) => {
+                registered = true;
+                announce_wgpu_provider(provider);
+            }
+            Err(err) => {
+                log::warn!(
+                    "RunMat Accelerate: failed to initialize WGPU provider, falling back: {err}"
+                );
+            }
+        }
+    }
+
+    if !registered {
+        if options.allow_inprocess_fallback
+            || matches!(options.provider, AccelerateProviderPreference::InProcess)
+        {
+            simple_provider::register_inprocess_provider();
+            log::info!("RunMat Accelerate: using in-process acceleration provider");
+        } else {
+            log::warn!("RunMat Accelerate: no acceleration provider registered");
+        }
+    }
+
+    Ok(())
 }
 
 /// Initialize the acceleration provider using default options.

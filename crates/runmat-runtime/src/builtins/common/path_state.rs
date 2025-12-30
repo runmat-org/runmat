@@ -98,9 +98,10 @@ fn split_segments(path: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_and_split_round_trip() {
         let parts = vec!["/tmp/a".to_string(), "/tmp/b".to_string()];

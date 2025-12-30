@@ -21,11 +21,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "union",
+        builtin_path = "crate::builtins::array::sorting_sets::union"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "union"
 category: "array/sorting_sets"
@@ -219,6 +222,7 @@ No. RunMat only implements the modern MATLAB semantics. Passing `'legacy'` or `'
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::union")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "union",
     op_kind: GpuOpKind::Custom("union"),
@@ -234,8 +238,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a dedicated union hook; otherwise tensors are gathered and processed on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::sorting_sets::union")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "union",
     shape: ShapeRequirements::Any,
@@ -246,18 +249,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`union` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered when necessary.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("union", DOC_MD);
-
 #[runtime_builtin(
     name = "union",
     category = "array/sorting_sets",
     summary = "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
     keywords = "union,set,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
 fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())
@@ -1599,12 +1598,13 @@ fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_sorted_default() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
@@ -1625,6 +1625,7 @@ mod tests {
         assert_eq!(ib.shape, vec![1, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_stable_order() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
@@ -1644,6 +1645,7 @@ mod tests {
         assert_eq!(ib.data, vec![1.0, 2.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_sorted_places_nan_last() {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
@@ -1660,6 +1662,7 @@ mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1679,6 +1682,7 @@ mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_rows_stable_preserves_first_occurrence() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1703,6 +1707,7 @@ mod tests {
         assert_eq!(ib_tensor.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
@@ -1722,6 +1727,7 @@ mod tests {
         assert_eq!(ib.data, vec![3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_string_rows_stable() {
         let a = StringArray::new(
@@ -1773,6 +1779,7 @@ mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1803,6 +1810,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_rejects_legacy_option() {
         let tensor =
@@ -1816,6 +1824,7 @@ mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1824,6 +1833,7 @@ mod tests {
         assert!(err.contains("same number of columns"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_requires_matching_types() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1840,6 +1850,7 @@ mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_accepts_scalar_inputs() {
         let eval = evaluate(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("union");
@@ -1856,6 +1867,7 @@ mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn union_wgpu_matches_cpu() {
@@ -1894,8 +1906,8 @@ mod tests {
         assert_eq!(gpu_ib.data, cpu_ib.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

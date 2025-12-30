@@ -9,9 +9,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:assertion:failed";
 const DEFAULT_MESSAGE: &str = "Assertion failed.";
@@ -20,7 +17,14 @@ const INVALID_INPUT_IDENTIFIER: &str = "MATLAB:assertion:invalidInput";
 const MIN_INPUT_IDENTIFIER: &str = "MATLAB:minrhs";
 const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "assert",
+        builtin_path = "crate::builtins::diagnostics::assert"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "assert"
 category: "diagnostics"
@@ -141,6 +145,7 @@ If the dimensions disagree, the assertion stops execution before any costly matr
 - Report issues: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "assert",
     op_kind: GpuOpKind::Custom("control"),
@@ -156,8 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::assert")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "assert",
     shape: ShapeRequirements::Any,
@@ -168,17 +172,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin with no fusion support.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("assert", DOC_MD);
-
 #[runtime_builtin(
     name = "assert",
     category = "diagnostics",
     summary = "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
     keywords = "assert,diagnostics,validation,error",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::diagnostics::assert"
 )]
 fn assert_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -429,29 +429,33 @@ fn string_scalar_opt(value: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_true_passes() {
         let result = assert_builtin(vec![Value::Bool(true)]).expect("assert should pass");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_empty_tensor_passes() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
         assert_builtin(vec![Value::Tensor(tensor)]).expect("assert should pass");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_empty_logical_passes() {
         let logical = LogicalArray::new(Vec::new(), vec![0]).unwrap();
         assert_builtin(vec![Value::LogicalArray(logical)]).expect("assert should pass");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_false_uses_default_message() {
         let err = assert_builtin(vec![Value::Bool(false)]).expect_err("assert should fail");
@@ -459,12 +463,14 @@ mod tests {
         assert!(err.contains(DEFAULT_MESSAGE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_handles_numeric_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         assert_builtin(vec![Value::Tensor(tensor)]).expect("assert should pass");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_detects_zero_in_tensor() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
@@ -472,23 +478,27 @@ mod tests {
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_detects_nan() {
         let err = assert_builtin(vec![Value::Num(f64::NAN)]).expect_err("assert should fail");
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_complex_scalar_passes() {
         assert_builtin(vec![Value::Complex(0.0, 2.0)]).expect("assert should pass");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_complex_scalar_failure() {
         let err = assert_builtin(vec![Value::Complex(0.0, 0.0)]).expect_err("assert should fail");
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_complex_tensor_failure() {
         let tensor = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 0.0)], vec![2, 1]).expect("tensor");
@@ -497,6 +507,7 @@ mod tests {
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_accepts_custom_message() {
         let err = assert_builtin(vec![
@@ -507,6 +518,7 @@ mod tests {
         assert!(err.contains("Vector length must be positive."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_supports_message_formatting() {
         let err = assert_builtin(vec![
@@ -518,6 +530,7 @@ mod tests {
         assert!(err.contains("Expected positive value, got -4."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_supports_custom_identifier() {
         let err = assert_builtin(vec![
@@ -531,6 +544,7 @@ mod tests {
         assert!(err.contains("Failure 3 occurred."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_unqualified_identifier_prefixed() {
         let err = assert_builtin(vec![
@@ -542,12 +556,14 @@ mod tests {
         assert!(err.starts_with("MATLAB:customAssertionFailed"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_rejects_invalid_condition_type() {
         let err = assert_builtin(vec![Value::from("invalid")]).expect_err("assert should error");
         assert!(err.starts_with(INVALID_CONDITION_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_gpu_tensor_passes() {
         test_support::with_test_provider(|provider| {
@@ -562,6 +578,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_invalid_message_type_errors() {
         let err = assert_builtin(vec![Value::Bool(false), Value::Num(5.0)])
@@ -569,6 +586,7 @@ mod tests {
         assert!(err.starts_with(INVALID_INPUT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_formatting_error_propagates() {
         let err = assert_builtin(vec![
@@ -580,6 +598,7 @@ mod tests {
         assert!(err.contains("sprintf"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_gpu_tensor_failure() {
         test_support::with_test_provider(|provider| {
@@ -594,6 +613,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_logical_array_failure() {
         let logical = LogicalArray::new(vec![1, 0], vec![2]).unwrap();
@@ -602,6 +622,7 @@ mod tests {
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_requires_condition_argument() {
         let err = assert_builtin(Vec::new()).expect_err("assert should error");
@@ -609,6 +630,7 @@ mod tests {
         assert!(err.contains(MIN_INPUT_MESSAGE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn assert_wgpu_tensor_failure_matches_cpu() {
@@ -633,8 +655,8 @@ mod tests {
         assert!(err.starts_with(DEFAULT_IDENTIFIER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

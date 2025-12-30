@@ -2,19 +2,19 @@
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
+use runmat_time::Instant;
 use std::convert::TryFrom;
-use std::time::Instant;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::timing::tic::{decode_handle, take_latest_start};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "toc", builtin_path = "crate::builtins::timing::toc")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "toc"
 category: "timing"
@@ -138,7 +138,7 @@ No. The stopwatch uses the host's monotonic clock. GPU acceleration, fusion, and
 change the measured interval.
 
 ### How accurate is the reported time?
-`toc` relies on `std::time::Instant`, typically offering microsecond precision on modern platforms. The actual
+`toc` relies on the same monotonic clock (`runmat_time::Instant`), typically offering microsecond precision on modern platforms. The actual
 resolution depends on your operating system.
 
 ## See Also
@@ -149,6 +149,7 @@ resolution depends on your operating system.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "toc",
     op_kind: GpuOpKind::Custom("timer"),
@@ -164,8 +165,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for toc.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::toc")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "toc",
     shape: ShapeRequirements::Any,
@@ -176,11 +176,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Timing builtins execute eagerly on the host and do not participate in fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("toc", DOC_MD);
-
 const ERR_NO_MATCHING_TIC: &str = "MATLAB:toc:NoMatchingTic";
 const ERR_INVALID_HANDLE: &str = "MATLAB:toc:InvalidTimerHandle";
 const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
@@ -190,7 +185,8 @@ const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
     name = "toc",
     category = "timing",
     summary = "Read the elapsed time since the most recent tic or an explicit handle.",
-    keywords = "toc,timing,profiling,benchmark"
+    keywords = "toc,timing,profiling,benchmark",
+    builtin_path = "crate::builtins::timing::toc"
 )]
 pub fn toc_builtin(args: Vec<Value>) -> Result<f64, String> {
     match args.len() {
@@ -216,18 +212,18 @@ fn elapsed_from_value(value: &Value) -> Result<f64, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::timing::tic::{encode_instant, record_tic, take_latest_start, TEST_GUARD};
     use std::time::Duration;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn clear_tic_stack() {
         while let Ok(Some(_)) = take_latest_start() {}
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_requires_matching_tic() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -236,6 +232,7 @@ mod tests {
         assert_eq!(err, ERR_NO_MATCHING_TIC);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_reports_elapsed_for_latest_start() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -247,6 +244,7 @@ mod tests {
         assert!(take_latest_start().unwrap().is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_with_handle_measures_without_popping_stack() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -260,6 +258,7 @@ mod tests {
         assert!(later >= elapsed);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_invalid_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -268,6 +267,7 @@ mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_future_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -277,6 +277,7 @@ mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_string_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -285,6 +286,7 @@ mod tests {
         assert_eq!(err, ERR_INVALID_HANDLE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_rejects_extra_arguments() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -293,6 +295,7 @@ mod tests {
         assert_eq!(err, ERR_TOO_MANY_INPUTS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn toc_nested_timers() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -308,14 +311,15 @@ mod tests {
         assert!(outer >= inner);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn toc_ignores_wgpu_provider() {

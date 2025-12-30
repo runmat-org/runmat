@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "deconv",
+        builtin_path = "crate::builtins::math::signal::deconv"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "deconv"
 category: "math/signal"
@@ -200,6 +204,7 @@ the quotient.
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::deconv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "deconv",
     op_kind: GpuOpKind::Custom("deconv1d"),
@@ -215,8 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "When providers lack native deconvolution kernels, RunMat gathers inputs to the host and re-uploads real-valued outputs to maintain GPU residency.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::deconv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "deconv",
     shape: ShapeRequirements::Any,
@@ -227,17 +231,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Polynomial division is not part of current fusion pipelines; metadata is present for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("deconv", DOC_MD);
-
 #[runtime_builtin(
     name = "deconv",
     category = "math/signal",
     summary = "Polynomial (1-D sequence) deconvolution returning quotient and remainder.",
     keywords = "deconv,deconvolution,polynomial division,signal,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::math::signal::deconv"
 )]
 fn deconv_builtin(numerator: Value, denominator: Value) -> Result<Value, String> {
     let eval = evaluate(numerator, denominator)?;
@@ -567,13 +567,14 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_exact_division() {
         let numerator = Tensor::new(vec![1.0, 3.0, 3.0, 1.0], vec![1, 4]).unwrap();
@@ -589,6 +590,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_with_remainder() {
         let numerator = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
@@ -601,6 +603,7 @@ mod tests {
         assert_eq!(remainder, vec![3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_denominator_longer() {
         let numerator = Tensor::new(vec![3.0, 5.0], vec![1, 2]).unwrap();
@@ -613,6 +616,7 @@ mod tests {
         assert_eq!(remainder, vec![3.0, 5.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_leading_zeros() {
         let numerator = Tensor::new(vec![0.0, 0.0, 1.0, 2.0], vec![1, 4]).unwrap();
@@ -625,6 +629,7 @@ mod tests {
         assert_eq!(remainder, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_complex_coefficients() {
         let numerator = Value::ComplexTensor(
@@ -652,6 +657,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_reconstructs_original() {
         let numerator = vec![1.0, -3.0, 3.0, -1.0];
@@ -681,6 +687,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_denominator_zero_error() {
         let numerator = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -689,6 +696,7 @@ mod tests {
         assert!(err.contains("denominator"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_rejects_matrix_inputs() {
         let numerator = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -697,6 +705,7 @@ mod tests {
         assert!(err.contains("vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -727,6 +736,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn deconv_wgpu_matches_cpu() {
@@ -772,8 +782,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

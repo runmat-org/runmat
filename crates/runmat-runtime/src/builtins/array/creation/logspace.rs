@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const LN_10: f64 = std::f64::consts::LN_10;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "logspace",
+        builtin_path = "crate::builtins::array::creation::logspace"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "logspace"
 category: "array/creation"
@@ -182,6 +186,7 @@ Yes. `logspace(3, 1, 4)` returns `[1000 464.1589 215.4435 100]`, decreasing loga
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::logspace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logspace",
     op_kind: GpuOpKind::Custom("generator"),
@@ -203,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a dedicated logspace path or compose it from linspace + scalar multiply + unary_exp. The runtime uploads host-generated data when hooks are unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::logspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "logspace",
     shape: ShapeRequirements::Any,
@@ -215,18 +219,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("logspace", DOC_MD);
-
 #[runtime_builtin(
     name = "logspace",
     category = "array/creation",
     summary = "Logarithmically spaced vector.",
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::logspace"
 )]
 fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -508,11 +508,12 @@ fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_default_points() {
         let result =
@@ -527,6 +528,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_custom_points() {
         let result = logspace_builtin(
@@ -547,6 +549,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_zero_points() {
         let result = logspace_builtin(
@@ -564,6 +567,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_zero_points_bool_count() {
         let result = logspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Bool(false)])
@@ -577,6 +581,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_single_point() {
         let result = logspace_builtin(
@@ -594,6 +599,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_complex_points() {
         let result = logspace_builtin(
@@ -616,6 +622,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_tensor_scalar_inputs() {
         let start = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -638,6 +645,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_non_integer_count() {
         let err = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
@@ -645,6 +653,7 @@ mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_negative_count() {
         let err = logspace_builtin(
@@ -656,6 +665,7 @@ mod tests {
         assert!(err.contains(">="));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_infinite_count() {
         let err = logspace_builtin(
@@ -667,6 +677,7 @@ mod tests {
         assert!(err.contains("finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_non_scalar_inputs() {
         let start = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -675,6 +686,7 @@ mod tests {
         assert!(err.contains("scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -705,13 +717,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn logspace_wgpu_matches_cpu() {

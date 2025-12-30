@@ -5,13 +5,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isscalar",
+        builtin_path = "crate::builtins::array::introspection::isscalar"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isscalar"
 category: "array/introspection"
@@ -171,6 +175,9 @@ Yes. The builtin returns a host logical scalar and the fusion planner treats it 
 [isempty](./isempty), [numel](./numel), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::introspection::isscalar"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isscalar",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -186,8 +193,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Inspects tensor metadata; downloads handles only when providers omit shapes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::isscalar"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isscalar",
     shape: ShapeRequirements::Any,
@@ -198,17 +206,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that returns a host logical scalar for fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isscalar", DOC_MD);
-
 #[runtime_builtin(
     name = "isscalar",
     category = "array/introspection",
     summary = "Return true when a value has exactly one element and unit dimensions.",
     keywords = "isscalar,scalar,metadata query,gpu,logical",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 fn isscalar_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_scalar(&value)))
@@ -222,13 +226,14 @@ fn value_is_scalar(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, StructValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_numeric_scalar_returns_true() {
         let result = isscalar_builtin(Value::Num(5.0)).expect("isscalar");
@@ -241,6 +246,7 @@ mod tests {
         assert_eq!(complex_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_vector_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -248,6 +254,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_char_array_obeys_dimensions() {
         let single = CharArray::new(vec!['a'], 1, 1).unwrap();
@@ -258,6 +265,7 @@ mod tests {
         assert_eq!(row_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_string_scalar_true_but_empty_array_false() {
         let scalar = runmat_builtins::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
@@ -273,6 +281,7 @@ mod tests {
         assert_eq!(string_value_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_cell_and_struct_follow_dimensions() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -289,6 +298,7 @@ mod tests {
         assert_eq!(struct_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_gpu_tensor_checks_dimensions() {
         test_support::with_test_provider(|provider| {
@@ -313,6 +323,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isscalar_wgpu_provider_respects_metadata() {
@@ -334,8 +345,8 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

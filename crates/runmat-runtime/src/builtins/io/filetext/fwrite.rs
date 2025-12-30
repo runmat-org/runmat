@@ -9,12 +9,17 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
+use runmat_filesystem::File;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fwrite",
+        builtin_path = "crate::builtins::io::filetext::fwrite"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fwrite"
 category: "io/filetext"
@@ -204,6 +209,7 @@ saturate to the min/max integer representable by the target precision.
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fwrite",
     op_kind: GpuOpKind::Custom("file-io-write"),
@@ -219,8 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only binary file I/O; GPU arguments are gathered to the CPU prior to writing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fwrite",
     shape: ShapeRequirements::Any,
@@ -231,17 +236,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is never fused; metadata recorded for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fwrite", DOC_MD);
-
 #[runtime_builtin(
     name = "fwrite",
     category = "io/filetext",
     summary = "Write binary data to a file identifier.",
     keywords = "fwrite,file,io,binary,precision",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &data, &rest)?;
@@ -613,7 +614,7 @@ fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
 }
 
 fn write_elements(
-    file: &mut std::sync::MutexGuard<'_, std::fs::File>,
+    file: &mut File,
     values: &[f64],
     spec: WriteSpec,
     skip: usize,
@@ -673,7 +674,7 @@ fn write_elements(
     Ok(values.len())
 }
 
-fn write_bytes(file: &mut std::fs::File, bytes: &[u8]) -> Result<(), String> {
+fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes)
         .map_err(|err| format!("fwrite: failed to write to file ({err})"))
 }
@@ -826,7 +827,7 @@ fn parse_input_label(label: &str) -> Result<InputType, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
@@ -837,11 +838,13 @@ mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_default_uint8_bytes() {
         registry::reset_for_tests();
@@ -865,6 +868,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_double_precision_writes_native_endian() {
         registry::reset_for_tests();
@@ -894,6 +898,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_big_endian_uint16() {
         registry::reset_for_tests();
@@ -919,6 +924,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_skip_inserts_padding() {
         registry::reset_for_tests();
@@ -943,6 +949,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_gpu_tensor_gathers_before_write() {
         registry::reset_for_tests();
@@ -988,6 +995,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_precision_errors() {
         registry::reset_for_tests();
@@ -1007,6 +1015,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_negative_skip_errors() {
         registry::reset_for_tests();
@@ -1026,6 +1035,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fwrite_wgpu_tensor_roundtrip() {
@@ -1077,6 +1087,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_invalid_identifier_errors() {
         registry::reset_for_tests();
@@ -1084,15 +1095,15 @@ mod tests {
         assert!(err.contains("file identifier must be non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!(

@@ -15,14 +15,18 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "roots",
+        builtin_path = "crate::builtins::math::poly::roots"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "roots"
 category: "math/poly"
@@ -172,6 +176,7 @@ Small imaginary components (|imag| ≤ 1e-10·(1 + |real|)) are rounded to zero 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "roots",
     op_kind: GpuOpKind::Custom("polynomial-roots"),
@@ -187,8 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Companion matrix eigenvalue solve executes on the host; providers currently fall back to the CPU implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "roots",
     shape: ShapeRequirements::Any,
@@ -199,17 +203,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Non-elementwise builtin that terminates fusion and gathers inputs to the host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("roots", DOC_MD);
-
 #[runtime_builtin(
     name = "roots",
     category = "math/poly",
     summary = "Compute the roots of a polynomial specified by its coefficients.",
     keywords = "roots,polynomial,eigenvalues,companion",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::math::poly::roots"
 )]
 fn roots_builtin(coefficients: Value) -> Result<Value, String> {
     let coeffs = coefficients_to_complex(coefficients)?;
@@ -413,12 +413,13 @@ fn empty_column() -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_quadratic_real() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![3, 1]).unwrap();
@@ -435,6 +436,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_leading_zeros_trimmed() {
         let coeffs = Tensor::new(vec![0.0, 0.0, 1.0, -4.0], vec![4, 1]).unwrap();
@@ -448,6 +450,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_complex_pair() {
         let coeffs = Tensor::new(vec![1.0, 0.0, 1.0], vec![3, 1]).unwrap();
@@ -466,6 +469,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_quartic_all_zero_roots() {
         // p(x) = x^4 => 4 roots at 0
@@ -488,6 +492,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_accepts_complex_coefficients_input() {
         // p(x) = x^2 + 1 with complex coefficients path
@@ -507,6 +512,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_accepts_logical_coefficients() {
         // p(x) = x with logical coefficients [1 0]
@@ -521,6 +527,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_scalar_num_returns_empty() {
         let result = roots_builtin(Value::Num(5.0)).expect("roots scalar num");
@@ -533,6 +540,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_rejects_non_vector_input() {
         let coeffs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -540,6 +548,7 @@ mod tests {
         assert!(err.to_lowercase().contains("vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_all_zero_coefficients_returns_empty() {
         let coeffs = Tensor::new(vec![0.0, 0.0, 0.0], vec![3, 1]).unwrap();
@@ -553,6 +562,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_gpu_input_gathers_to_host() {
         test_support::with_test_provider(|provider| {
@@ -573,6 +583,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn roots_constant_polynomial_returns_empty() {
         let coeffs = Tensor::new(vec![5.0], vec![1, 1]).unwrap();
@@ -585,8 +596,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

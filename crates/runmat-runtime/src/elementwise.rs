@@ -668,6 +668,7 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_mul_scalars() {
         assert_eq!(
@@ -684,6 +685,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_mul_matrix_scalar() {
         let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -698,6 +700,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_mul_matrices() {
         let m1 = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -711,6 +714,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_div_with_zero() {
         let result = elementwise_div(&Value::Num(5.0), &Value::Num(0.0)).unwrap();
@@ -721,6 +725,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_elementwise_pow() {
         let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
@@ -733,6 +738,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_dimension_mismatch() {
         let m1 = Tensor::new_2d(vec![1.0, 2.0], 1, 2).unwrap();

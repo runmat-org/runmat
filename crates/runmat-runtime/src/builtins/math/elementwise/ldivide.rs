@@ -7,18 +7,21 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
-use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ldivide",
+        builtin_path = "crate::builtins::math::elementwise::ldivide"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ldivide"
 category: "math/elementwise"
@@ -203,6 +206,7 @@ Absolutely. Mixed cases return complex doubles with full MATLAB semantics.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ldivide",
     op_kind: GpuOpKind::Elementwise,
@@ -225,8 +229,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses elem_div for B./A when shapes match, scalar_div for tensor ./ scalar cases (B ./ a), and scalar_rdiv for scalar ./ tensor cases (b ./ A); implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ldivide",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -247,17 +250,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a plain quotient; providers can override with specialised kernels when desirable.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ldivide", DOC_MD);
-
 #[runtime_builtin(
     name = "ldivide",
     category = "math/elementwise",
     summary = "Element-wise left division (B ./ A) with MATLAB-compatible implicit expansion.",
     keywords = "ldivide,element-wise left division,gpu,.\\",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::math::elementwise::ldivide"
 )]
 fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -754,7 +753,7 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -763,6 +762,7 @@ mod tests {
     const EPS: f64 = 1e-12;
     const GPU_EPS: f64 = 1e-6;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_scalar_numbers() {
         let result =
@@ -773,6 +773,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_matrix_scalar() {
         let tensor = Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![2, 2]).unwrap();
@@ -790,6 +791,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_row_column_broadcast() {
         let column = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -818,6 +820,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_complex_inputs() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
@@ -840,6 +843,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_division_by_zero() {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.0], vec![3, 1]).unwrap();
@@ -855,6 +859,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_logical_inputs_promote() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -881,6 +886,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_char_array_promotes_to_double() {
         let chars = CharArray::new_row("AB");
@@ -896,6 +902,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -922,6 +929,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_gpu_prototype_keeps_residency() {
         test_support::with_test_provider(|provider| {
@@ -948,6 +956,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_host_gathers_gpu_value() {
         test_support::with_test_provider(|provider| {
@@ -980,6 +989,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_complex_prototype_yields_complex() {
         let lhs = Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap();
@@ -1006,6 +1016,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_missing_prototype_errors() {
         let lhs = Value::Num(2.0);
@@ -1014,6 +1025,7 @@ mod tests {
         assert!(err.contains("prototype"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_keyword_char_array() {
         test_support::with_test_provider(|provider| {
@@ -1041,13 +1053,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ldivide_wgpu_matches_cpu_elementwise() {
@@ -1086,6 +1099,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_int_inputs_promote_to_double() {
         let lhs = Value::Int(IntValue::I32(6));

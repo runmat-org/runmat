@@ -7,13 +7,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isstring",
+        builtin_path = "crate::builtins::introspection::isstring"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isstring"
 category: "introspection"
@@ -200,6 +204,7 @@ No. It only checks the value’s type metadata, so the cost is constant regardle
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isstring",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -215,8 +220,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata-only predicate; gpuArray inputs stay on device while the result is returned on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isstring",
     shape: ShapeRequirements::Any,
@@ -227,17 +231,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Type-check predicate that does not participate in fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isstring", DOC_MD);
-
 #[runtime_builtin(
     name = "isstring",
     category = "introspection",
     summary = "Return true when a value is a MATLAB string array.",
     keywords = "isstring,string array,string scalar,type checking,introspection",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(matches!(
@@ -247,7 +247,7 @@ fn isstring_builtin(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -258,6 +258,7 @@ mod tests {
         StringArray, StructValue, Tensor,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_reports_true() {
         let value = Value::String("RunMat".to_string());
@@ -265,6 +266,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_object_and_handle_variants_report_false() {
         let complex_scalar = Value::Complex(1.25, -3.5);
@@ -299,6 +301,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_reports_true() {
         let array = StringArray::new(vec!["one".to_string(), "two".to_string()], vec![1, 2])
@@ -307,6 +310,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_string_array_reports_true() {
         let array = StringArray::new(vec![], vec![0, 0]).expect("empty string array");
@@ -314,6 +318,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn character_arrays_report_false() {
         let chars = CharArray::new_row("RunMat");
@@ -321,6 +326,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_and_logical_values_report_false() {
         let tensor = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor"));
@@ -343,6 +349,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_and_struct_values_report_false() {
         let empty_cell = CellArray::new(Vec::<Value>::new(), 0, 0).expect("cell");
@@ -357,6 +364,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isstring_gpu_inputs_return_false() {
         test_support::with_test_provider(|provider| {
@@ -371,13 +379,14 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isstring_wgpu_numeric_returns_false() {

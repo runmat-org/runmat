@@ -1,6 +1,5 @@
 use clap::Parser;
 use runmat_builtins::{builtin_docs, builtin_functions, BuiltinFunction, Type, Value};
-use runmat_runtime as _;
 use serde::Serialize;
 use serde_yaml::Value as YamlValue;
 use std::collections::HashMap;

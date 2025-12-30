@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "islogical",
+        builtin_path = "crate::builtins::logical::tests::islogical"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "islogical"
 category: "logical/tests"
@@ -189,6 +192,7 @@ Yes. When residency metadata marks the handle as logical, gathering produces a h
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::islogical")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "islogical",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -205,8 +209,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Reads provider metadata when `logical_islogical` is implemented; otherwise consults runtime residency tracking and, as a last resort, gathers once to the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::islogical")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "islogical",
     shape: ShapeRequirements::Any,
@@ -217,17 +220,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that executes outside of fusion pipelines.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("islogical", DOC_MD);
-
 #[runtime_builtin(
     name = "islogical",
     category = "logical/tests",
     summary = "Return true when a value uses logical storage.",
     keywords = "islogical,logical,bool,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::logical::tests::islogical"
 )]
 fn islogical_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -263,7 +262,7 @@ fn islogical_host(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -271,6 +270,7 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalars_report_true() {
         assert_eq!(
@@ -283,6 +283,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_report_true() {
         let array = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -292,6 +293,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_values_report_false() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -301,6 +303,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_values_report_false() {
         assert_eq!(
@@ -309,6 +312,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_report_false() {
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
@@ -318,6 +322,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn structures_and_cells_report_false() {
         let struct_value = runmat_builtins::StructValue::new();
@@ -332,6 +337,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_handles_use_metadata_when_available() {
         test_support::with_test_provider(|provider| {
@@ -348,6 +354,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_numeric_handles_report_false() {
         test_support::with_test_provider(|provider| {
@@ -363,6 +370,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn islogical_wgpu_elem_eq_sets_metadata() {
@@ -392,6 +400,7 @@ mod tests {
         provider.free(&rhs_handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn islogical_wgpu_numeric_stays_false() {
@@ -410,8 +419,8 @@ mod tests {
         provider.free(&handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

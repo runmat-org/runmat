@@ -15,11 +15,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "meshgrid",
+        builtin_path = "crate::builtins::array::creation::meshgrid"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "meshgrid"
 category: "array/creation"
@@ -227,6 +230,7 @@ RunMat raises the MATLAB-compatible error `meshgrid: at least one input vector i
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::meshgrid")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "meshgrid",
     op_kind: GpuOpKind::Custom("array_construct"),
@@ -242,8 +246,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a dedicated meshgrid hook; until then the runtime builds grids on the host and uploads them when GPU residency is requested.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::meshgrid")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "meshgrid",
     shape: ShapeRequirements::Any,
@@ -255,17 +258,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Meshgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("meshgrid", DOC_MD);
-
 #[runtime_builtin(
     name = "meshgrid",
     category = "array/creation",
     summary = "Generate coordinate matrices for 2-D and 3-D grids.",
     keywords = "meshgrid,grid,gpu,like,3d",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
 fn meshgrid_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&rest)?;
@@ -824,7 +823,7 @@ impl MeshgridEval {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -835,6 +834,7 @@ mod tests {
         Tensor::new(data, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_single_input_duplicates_axis() {
         let x = tensor_from_vec(vec![-1.0, 0.0, 1.0], 1, 3);
@@ -854,6 +854,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_rectangular_inputs() {
         let x = tensor_from_vec(vec![0.0, 0.5, 1.0], 1, 3);
@@ -868,6 +869,7 @@ mod tests {
         assert_eq!(y_out.data, vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_three_inputs_volume() {
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
@@ -890,6 +892,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_keeps_gpu_residency() {
         test_support::with_test_provider(|provider| {
@@ -915,6 +918,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_gpu_inputs_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -937,6 +941,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn meshgrid_wgpu_matches_cpu() {
@@ -981,6 +986,7 @@ mod tests {
         assert_eq!(gathered_y.data, cpu_y.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_complex_inputs_produce_complex_outputs() {
         let complex = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
@@ -995,6 +1001,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_host_prototype() {
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
@@ -1004,8 +1011,8 @@ mod tests {
         assert!(matches!(x_out, Value::Tensor(_) | Value::Num(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

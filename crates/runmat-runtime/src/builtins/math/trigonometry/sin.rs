@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sin",
+        builtin_path = "crate::builtins::math::trigonometry::sin"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sin"
 category: "math/trigonometry"
@@ -163,6 +166,7 @@ Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; compl
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sin",
     op_kind: GpuOpKind::Elementwise,
@@ -179,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sin in-place on the device; runtimes gather to host when unary_sin is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sin",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -197,17 +200,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `sin` calls; providers may override via fused elementwise kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sin", DOC_MD);
-
 #[runtime_builtin(
     name = "sin",
     category = "math/trigonometry",
     summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "sin,sine,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let output = parse_output_template(&rest)?;
@@ -366,13 +365,14 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_scalar() {
         let value = Value::Num(std::f64::consts::PI / 2.0);
@@ -383,6 +383,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
@@ -397,6 +398,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_int_value_promotes() {
         let value = Value::Int(IntValue::I32(1));
@@ -407,6 +409,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_complex_scalar() {
         let result = sin_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("sin");
@@ -419,6 +422,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_char_array_roundtrip() {
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
@@ -435,6 +439,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -452,6 +457,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_missing_prototype_errors() {
         let err =
@@ -459,6 +465,7 @@ mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_complex_prototype_errors() {
         let err = sin_builtin(
@@ -469,6 +476,7 @@ mod tests {
         assert!(err.contains("complex prototypes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -495,6 +503,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_host_with_gpu_input_gathers() {
         test_support::with_test_provider(|provider| {
@@ -522,6 +531,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_rejects_extra_arguments() {
         let err = sin_builtin(
@@ -532,6 +542,7 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_keyword_case_insensitive() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -550,6 +561,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
@@ -564,13 +576,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sin_wgpu_matches_cpu_elementwise() {

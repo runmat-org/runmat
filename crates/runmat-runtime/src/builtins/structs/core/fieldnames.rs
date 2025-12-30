@@ -10,11 +10,14 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use std::collections::BTreeSet;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fieldnames",
+        builtin_path = "crate::builtins::structs::core::fieldnames"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fieldnames"
 category: "structs/core"
@@ -193,6 +196,7 @@ No. Passing anything other than a struct, struct array, or object raises
 - Found a bug or behaviour mismatch? Open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::fieldnames")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fieldnames",
     op_kind: GpuOpKind::Custom("fieldnames"),
@@ -208,8 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only introspection; providers do not participate.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::fieldnames")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fieldnames",
     shape: ShapeRequirements::Any,
@@ -220,16 +223,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fieldnames as a host inspector; it terminates any pending fusion group.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fieldnames", DOC_MD);
-
 #[runtime_builtin(
     name = "fieldnames",
     category = "structs/core",
     summary = "List the field names of scalar structs or struct arrays.",
-    keywords = "fieldnames,struct,introspection,fields"
+    keywords = "fieldnames,struct,introspection,fields",
+    builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 fn fieldnames_builtin(value: Value) -> Result<Value, String> {
     let names = match &value {
@@ -331,16 +330,16 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
         Access, CellArray, ClassDef, HandleRef, ObjectInstance, PropertyDef, StructValue, Value,
     };
     use std::collections::HashMap;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_returns_sorted_names_for_scalar_struct() {
         let mut fields = StructValue::new();
@@ -356,6 +355,7 @@ mod tests {
         assert_eq!(collected, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_struct_array_collects_union() {
         let mut first = StructValue::new();
@@ -395,6 +395,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_errors_for_non_struct_inputs() {
         let err = fieldnames_builtin(Value::Num(1.0)).unwrap_err();
@@ -404,6 +405,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_handles_empty_struct_array() {
         let empty_array = CellArray::new(Vec::new(), 0, 0).expect("empty struct array backing");
@@ -415,6 +417,7 @@ mod tests {
         assert_eq!(cell.cols, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_cell_without_struct_errors() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -425,6 +428,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_preserves_case_distinctions() {
         let mut fields = StructValue::new();
@@ -438,6 +442,7 @@ mod tests {
         assert_eq!(collected, vec!["Name".to_string(), "name".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_object_includes_class_and_dynamic_properties() {
         let class_name = "runmat.unittest.FieldnamesObject";
@@ -482,6 +487,7 @@ mod tests {
         assert_eq!(collected, vec!["Step".to_string(), "Value".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_handle_object_merges_class_and_target() {
         let class_name = "runmat.unittest.FieldnamesHandle";
@@ -527,8 +533,8 @@ mod tests {
         assert_eq!(collected, vec!["Enabled".to_string(), "Status".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

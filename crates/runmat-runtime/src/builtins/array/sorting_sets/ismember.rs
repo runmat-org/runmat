@@ -15,11 +15,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ismember",
+        builtin_path = "crate::builtins::array::sorting_sets::ismember"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ismember"
 category: "array/sorting_sets"
@@ -201,6 +204,7 @@ Otherwise the data is gathered to the host with no behavioural differences.
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::ismember")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismember",
     op_kind: GpuOpKind::Custom("ismember"),
@@ -216,8 +220,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply dedicated membership kernels; until then RunMat gathers GPU tensors to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::ismember"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismember",
     shape: ShapeRequirements::Any,
@@ -228,18 +233,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Membership queries execute via host set lookups; the fusion planner treats ismember as a residency sink.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ismember", DOC_MD);
-
 #[runtime_builtin(
     name = "ismember",
     category = "array/sorting_sets",
     summary = "Identify array elements or rows that appear in another array while returning first-match indices.",
     keywords = "ismember,membership,set,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
 fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_mask_value())
@@ -845,7 +846,7 @@ fn logical_array_into_value(logical: LogicalArray) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
@@ -853,6 +854,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_membership_basic() {
         let a = Tensor::new(vec![5.0, 7.0, 2.0, 7.0], vec![1, 4]).unwrap();
@@ -862,6 +864,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_nan_membership() {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![1, 2]).unwrap();
@@ -871,6 +874,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 0.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_rows_membership() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -881,6 +885,7 @@ mod tests {
         assert_eq!(eval.loc.shape, vec![3, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_membership() {
         let a = ComplexTensor::new(vec![(1.0, 2.0), (0.0, 0.0)], vec![1, 2]).unwrap();
@@ -890,6 +895,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_rows_membership() {
         let a = ComplexTensor::new(
@@ -914,6 +920,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_membership() {
         let a = CharArray::new(vec!['r', 'u', 'n', 'm'], 2, 2).unwrap();
@@ -923,6 +930,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![2.0, 0.0, 4.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rows_membership() {
         let a = CharArray::new(vec!['m', 'a', 't', 'l'], 2, 2).unwrap();
@@ -932,6 +940,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_membership() {
         let a = StringArray::new(
@@ -957,6 +966,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_rows_membership() {
         let a = StringArray::new(
@@ -986,18 +996,21 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn options_reject_legacy() {
         let err = parse_options(&[Value::from("legacy")]).unwrap_err();
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_option() {
         let err = evaluate(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")]).unwrap_err();
         assert!(err.contains("unrecognised option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismember_runtime_numeric() {
         let a = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
@@ -1013,6 +1026,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_inputs_promoted() {
         let a = Value::Bool(true);
@@ -1023,6 +1037,7 @@ mod tests {
         assert_eq!(eval.loc_value(), Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismember_rows_shape_checks() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1033,6 +1048,7 @@ mod tests {
         assert!(err.contains("same number of columns"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismember_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1055,6 +1071,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismember_gpu_rows_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1083,6 +1100,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ismember_wgpu_numeric_matches_cpu() {
@@ -1145,6 +1163,7 @@ mod tests {
         let _ = provider.free(&handle_bank);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_return_is_bool() {
         let a = Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
@@ -1153,12 +1172,14 @@ mod tests {
         assert_eq!(mask, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_rows_option() {
         let opts = parse_options(&[Value::from("rows")]).unwrap();
         assert!(opts.rows);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_rows_with_nan() {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
@@ -1168,7 +1189,7 @@ mod tests {
         assert_eq!(eval.loc.data, vec![1.0, 0.0]);
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

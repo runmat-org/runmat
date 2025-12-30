@@ -4,14 +4,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rmfield",
+        builtin_path = "crate::builtins::structs::core::rmfield"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmfield"
 category: "structs/core"
@@ -167,6 +171,7 @@ the device until another operation decides otherwise.
 [fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [orderfields](./orderfields)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::rmfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmfield",
     op_kind: GpuOpKind::Custom("rmfield"),
@@ -182,8 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only struct metadata update; acceleration providers are not consulted.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::rmfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmfield",
     shape: ShapeRequirements::Any,
@@ -194,16 +198,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata mutation forces fusion planners to flush pending groups on the host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rmfield", DOC_MD);
-
 #[runtime_builtin(
     name = "rmfield",
     category = "structs/core",
     summary = "Remove one or more fields from scalar structs or struct arrays.",
-    keywords = "rmfield,struct,remove field,struct array"
+    keywords = "rmfield,struct,remove field,struct array",
+    builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 fn rmfield_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let names = parse_field_names(&rest)?;
@@ -386,15 +386,15 @@ fn is_struct_array(cell: &CellArray) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_removes_single_field_from_scalar_struct() {
         let mut st = StructValue::new();
@@ -409,6 +409,7 @@ mod tests {
         assert!(updated.fields.contains_key("name"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_accepts_cell_array_of_field_names() {
         let mut st = StructValue::new();
@@ -426,6 +427,7 @@ mod tests {
         assert!(updated.fields.contains_key("right"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_supports_string_array_names() {
         let mut st = StructValue::new();
@@ -443,6 +445,7 @@ mod tests {
         assert!(updated.fields.contains_key("beta"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_errors_when_field_missing() {
         let mut st = StructValue::new();
@@ -454,6 +457,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_struct_array_roundtrip() {
         let mut first = StructValue::new();
@@ -487,6 +491,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_struct_array_missing_field_errors() {
         let mut first = StructValue::new();
@@ -508,6 +513,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_rejects_non_struct_inputs() {
         let err = rmfield_builtin(Value::Num(1.0), vec![Value::from("field")]).unwrap_err();
@@ -517,6 +523,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_produces_error_for_empty_field_name() {
         let mut st = StructValue::new();
@@ -528,6 +535,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_accepts_multiple_argument_forms() {
         let mut st = StructValue::new();
@@ -559,6 +567,7 @@ mod tests {
         assert!(updated.fields.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_ignores_duplicate_field_names() {
         let mut st = StructValue::new();
@@ -576,6 +585,7 @@ mod tests {
         assert!(updated.fields.contains_key("keep"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_returns_original_when_no_names_supplied() {
         let mut st = StructValue::new();
@@ -587,6 +597,7 @@ mod tests {
         assert_eq!(result, Value::Struct(original));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_requires_field_names() {
         let mut st = StructValue::new();
@@ -598,6 +609,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rmfield_preserves_gpu_handles() {
@@ -630,8 +642,8 @@ mod tests {
         assert!(!updated.fields.contains_key("remove"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

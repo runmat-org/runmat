@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
+use runmat_filesystem::File;
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Mutex as StdMutex};
 

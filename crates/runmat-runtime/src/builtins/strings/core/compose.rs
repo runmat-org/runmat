@@ -9,11 +9,16 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "compose",
+        builtin_path = "crate::builtins::strings::core::compose"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "compose"
 category: "strings/core"
@@ -181,6 +186,7 @@ Yes, as long as non-scalar arguments all share the same number of elements or ma
 `string`, `sprintf`, `strcat`, `join`
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::compose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "compose",
     op_kind: GpuOpKind::Custom("format"),
@@ -196,8 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting always executes on the CPU; GPU tensors are gathered before substitution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::compose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "compose",
     shape: ShapeRequirements::Any,
@@ -208,17 +213,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting builtin; not eligible for fusion and materialises host string arrays.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("compose", DOC_MD);
-
 #[runtime_builtin(
     name = "compose",
     category = "strings/core",
     summary = "Format values into MATLAB string arrays using printf-style placeholders.",
     keywords = "compose,format,string array,gpu",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::core::compose"
 )]
 fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let format_value = gather_if_needed(&format_spec).map_err(|e| format!("compose: {e}"))?;
@@ -262,11 +263,12 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> Result<StringArray,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_scalar_numeric() {
         let result = compose_builtin(Value::from("Count %d"), vec![Value::Int(IntValue::I32(7))])
@@ -280,6 +282,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_broadcasts_scalar_spec() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -294,6 +297,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_zero_arguments_returns_spec() {
         let spec = Value::StringArray(
@@ -309,6 +313,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_mismatched_lengths_errors() {
         let spec = Value::StringArray(
@@ -326,6 +331,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compose_gpu_argument() {
         test_support::with_test_provider(|provider| {
@@ -355,13 +361,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn compose_wgpu_numeric_tensor_matches_cpu() {

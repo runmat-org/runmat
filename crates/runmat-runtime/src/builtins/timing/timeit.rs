@@ -3,8 +3,8 @@
 //! Measures the execution time of zero-input function handles by running them
 //! repeatedly and returning the median per-invocation runtime in seconds.
 
+use runmat_time::Instant;
 use std::cmp::Ordering;
-use std::time::Instant;
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -13,9 +13,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
 const MAX_BATCH_SECONDS: f64 = 0.25;
@@ -23,7 +20,14 @@ const LOOP_COUNT_LIMIT: usize = 1 << 20;
 const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "timeit",
+        builtin_path = "crate::builtins::timing::timeit"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "timeit"
 category: "timing"
@@ -129,6 +133,7 @@ t = timeit(makeMatrix);
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::timeit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "timeit",
     op_kind: GpuOpKind::Custom("timer"),
@@ -144,8 +149,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-side helper; GPU kernels execute only if invoked by the timed function.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::timeit")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "timeit",
     shape: ShapeRequirements::Any,
@@ -156,17 +160,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Timing helper; excluded from fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("timeit", DOC_MD);
-
 #[runtime_builtin(
     name = "timeit",
     category = "timing",
     summary = "Measure the execution time of a zero-argument function handle.",
     keywords = "timeit,benchmark,timing,performance,gpu",
-    accel = "helper"
+    accel = "helper",
+    builtin_path = "crate::builtins::timing::timeit"
 )]
 fn timeit_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     let requested_outputs = parse_num_outputs(&rest)?;
@@ -365,12 +365,11 @@ fn parse_handle_string(text: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
@@ -378,25 +377,37 @@ mod tests {
     static COUNTER_INVALID: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_ZERO_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
 
-    #[runtime_builtin(name = "__timeit_helper_counter_default")]
+    #[runtime_builtin(
+        name = "__timeit_helper_counter_default",
+        builtin_path = "crate::builtins::timing::timeit::tests"
+    )]
     fn helper_counter_default() -> Result<Value, String> {
         COUNTER_DEFAULT.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
 
-    #[runtime_builtin(name = "__timeit_helper_counter_outputs")]
+    #[runtime_builtin(
+        name = "__timeit_helper_counter_outputs",
+        builtin_path = "crate::builtins::timing::timeit::tests"
+    )]
     fn helper_counter_outputs() -> Result<Value, String> {
         COUNTER_NUM_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
 
-    #[runtime_builtin(name = "__timeit_helper_counter_invalid")]
+    #[runtime_builtin(
+        name = "__timeit_helper_counter_invalid",
+        builtin_path = "crate::builtins::timing::timeit::tests"
+    )]
     fn helper_counter_invalid() -> Result<Value, String> {
         COUNTER_INVALID.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
 
-    #[runtime_builtin(name = "__timeit_helper_zero_outputs")]
+    #[runtime_builtin(
+        name = "__timeit_helper_zero_outputs",
+        builtin_path = "crate::builtins::timing::timeit::tests"
+    )]
     fn helper_counter_zero_outputs() -> Result<Value, String> {
         COUNTER_ZERO_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(0.0))
@@ -418,6 +429,7 @@ mod tests {
         Value::String("@__timeit_helper_zero_outputs".to_string())
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_measures_time() {
         COUNTER_DEFAULT.store(0, Ordering::SeqCst);
@@ -433,6 +445,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_accepts_num_outputs_argument() {
         COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
@@ -445,6 +458,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_supports_zero_outputs() {
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
@@ -457,6 +471,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn timeit_runs_with_wgpu_provider_registered() {
@@ -470,6 +485,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_non_function_input() {
         let err = timeit_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
@@ -479,6 +495,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_invalid_num_outputs() {
         COUNTER_INVALID.store(0, Ordering::SeqCst);
@@ -487,6 +504,7 @@ mod tests {
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_rejects_extra_arguments() {
         let err =
@@ -494,8 +512,8 @@ mod tests {
         assert!(err.to_ascii_lowercase().contains("too many"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

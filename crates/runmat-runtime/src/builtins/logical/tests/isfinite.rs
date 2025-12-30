@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isfinite",
+        builtin_path = "crate::builtins::logical::tests::isfinite"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isfinite"
 category: "logical/tests"
@@ -157,6 +160,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 [isinf](./isinf), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isfinite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isfinite",
     op_kind: GpuOpKind::Elementwise,
@@ -175,8 +179,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isfinite` hook when available; otherwise the runtime gathers to host and computes the mask on the CPU.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isfinite")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isfinite",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -198,17 +201,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fused kernels emit 0/1 masks; providers can override with native logical-isfinite implementations.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isfinite", DOC_MD);
-
 #[runtime_builtin(
     name = "isfinite",
     category = "logical/tests",
     summary = "Return a logical mask indicating which elements of the input are finite.",
     keywords = "isfinite,finite,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 fn isfinite_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -295,29 +294,33 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_true() {
         let result = isfinite_builtin(Value::Num(42.0)).expect("isfinite");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_false_for_nan() {
         let result = isfinite_builtin(Value::Num(f64::NAN)).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_scalar_false_for_inf() {
         let result = isfinite_builtin(Value::Num(f64::INFINITY)).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_int_and_bool_true() {
         let int_val = isfinite_builtin(Value::Int(IntValue::I32(7))).expect("isfinite");
@@ -326,6 +329,7 @@ mod tests {
         assert_eq!(bool_val, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_complex_requires_both_components_finite() {
         let finite = isfinite_builtin(Value::Complex(1.0, -2.0)).expect("isfinite");
@@ -338,6 +342,7 @@ mod tests {
         assert_eq!(nan_imag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_tensor_mask() {
         let tensor =
@@ -352,6 +357,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
@@ -369,6 +375,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_logical_array_returns_ones() {
         let logical = LogicalArray::new(vec![0, 1, 0], vec![3, 1]).unwrap();
@@ -382,6 +389,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_char_array_returns_ones() {
         let array = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -395,12 +403,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_string_scalar_false() {
         let result = isfinite_builtin(Value::String("42".to_string())).expect("isfinite");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_string_array_returns_zeros() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -414,6 +424,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -427,6 +438,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_rejects_unsupported_types() {
         let err = isfinite_builtin(Value::FunctionHandle("foo".to_string()))
@@ -437,6 +449,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -453,13 +466,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isfinite_wgpu_matches_host_path() {

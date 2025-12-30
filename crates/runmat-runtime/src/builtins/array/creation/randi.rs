@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "randi",
+        builtin_path = "crate::builtins::array::creation::randi"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "randi"
 category: "array/creation"
@@ -203,6 +206,7 @@ Not yet. The `randi` builtin currently supports doubles only. Supplying `'single
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "randi",
     op_kind: GpuOpKind::Custom("generator"),
@@ -221,8 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; the runtime falls back to host sampling and upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
     shape: ShapeRequirements::Any,
@@ -233,17 +236,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Random integer generation is treated as a sink and excluded from fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("randi", DOC_MD);
-
 #[runtime_builtin(
     name = "randi",
     category = "array/creation",
     summary = "Uniform random integers with inclusive bounds.",
     keywords = "randi,random,integer,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::randi"
 )]
 fn randi_builtin(args: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRandi::parse(args)?;
@@ -695,7 +694,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use runmat_builtins::LogicalArray;
@@ -720,6 +719,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
@@ -735,6 +735,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_range_with_dims() {
         let _guard = random::test_lock().lock().unwrap();
@@ -754,6 +755,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_tensor() {
         let _guard = random::test_lock().lock().unwrap();
@@ -772,6 +774,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_output() {
         let _guard = random::test_lock().lock().unwrap();
@@ -797,12 +800,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_logical_requires_binary_bounds() {
         let err = randi_builtin(vec![Value::Num(3.0), Value::from("logical")]).unwrap_err();
         assert!(err.contains("logical output requires"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_logical_prototype() {
         let _guard = random::test_lock().lock().unwrap();
@@ -824,12 +829,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_requires_prototype() {
         let err = randi_builtin(vec![Value::Num(5.0), Value::from("like")]).unwrap_err();
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_duplicate_like_is_error() {
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
@@ -844,6 +851,7 @@ mod tests {
         assert!(err.contains("multiple 'like' specifications"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_logical_conflict_is_error() {
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
@@ -857,6 +865,7 @@ mod tests {
         assert!(err.contains("cannot combine 'like' with 'logical'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -888,6 +897,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_gpu_like_shape_override() {
         let _guard = random::test_lock().lock().unwrap();
@@ -922,12 +932,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_invalid_upper_errors() {
         let err = randi_builtin(vec![Value::Num(0.0)]).unwrap_err();
         assert!(err.contains("upper bound"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randi_wgpu_like_produces_in_range_values() {
@@ -938,7 +950,7 @@ mod tests {
         ) {
             Ok(_) => runmat_accelerate_api::provider().expect("wgpu provider registered"),
             Err(err) => {
-                eprintln!("randi_wgpu_like_produces_in_range_values skipped: {err}");
+                tracing::warn!("randi_wgpu_like_produces_in_range_values skipped: {err}");
                 return;
             }
         };
@@ -973,8 +985,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

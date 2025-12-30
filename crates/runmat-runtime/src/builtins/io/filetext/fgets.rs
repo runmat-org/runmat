@@ -11,15 +11,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
+use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fgets",
+        builtin_path = "crate::builtins::io::filetext::fgets"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fgets"
 category: "io/filetext"
@@ -256,6 +261,7 @@ No. The file must be opened with read permission (for example `'r'`, `'r+'`, or 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fgets",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -271,8 +277,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O; arguments gathered from the GPU when necessary.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fgets",
     shape: ShapeRequirements::Any,
@@ -283,17 +288,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O calls are not eligible for fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fgets", DOC_MD);
-
 #[runtime_builtin(
     name = "fgets",
     category = "io/filetext",
     summary = "Read the next line from a file, including newline characters.",
     keywords = "fgets,file,io,line,newline",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fgets"
 )]
 fn fgets_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &rest)?;
@@ -463,7 +464,7 @@ struct LineRead {
     eof_before_any: bool,
 }
 
-fn read_line(file: &mut std::fs::File, limit: Option<usize>) -> Result<LineRead, String> {
+fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> {
     let mut data = Vec::new();
     let mut terminators = Vec::new();
     let mut eof_before_any = false;
@@ -657,18 +658,19 @@ fn system_default_encoding_label() -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
-    use std::fs;
+    use runmat_filesystem as fs;
+    use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());
@@ -695,6 +697,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_reads_line_with_newline() {
         registry::reset_for_tests();
@@ -723,6 +726,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_returns_minus_one_at_eof() {
         registry::reset_for_tests();
@@ -738,6 +742,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_honours_nchar_limit() {
         registry::reset_for_tests();
@@ -764,6 +769,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_errors_for_write_only_identifier() {
         registry::reset_for_tests();
@@ -781,6 +787,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_respects_limit_before_crlf_sequence() {
         registry::reset_for_tests();
@@ -826,6 +833,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_handles_crlf_newlines() {
         registry::reset_for_tests();
@@ -852,6 +860,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_decodes_latin1() {
         registry::reset_for_tests();
@@ -880,6 +889,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_nchar_zero_returns_empty_char() {
         registry::reset_for_tests();
@@ -904,6 +914,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
         registry::reset_for_tests();
@@ -939,8 +950,8 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -1,6 +1,5 @@
 //! MATLAB-compatible `fopen` builtin exposing host file streams.
 
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -12,12 +11,17 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo, RegisteredFile};
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
+use runmat_filesystem::OpenOptions;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fopen",
+        builtin_path = "crate::builtins::io::filetext::fopen"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fopen"
 category: "io/filetext"
@@ -156,6 +160,7 @@ RunMat relies on the operating system for path resolution, so UNC paths and moun
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fopen")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fopen",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -172,8 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only file I/O. Inputs gathered from GPU when necessary; outputs remain on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fopen")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fopen",
     shape: ShapeRequirements::Any,
@@ -184,17 +188,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is not eligible for fusion; metadata registered for completeness only.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fopen", DOC_MD);
-
 #[runtime_builtin(
     name = "fopen",
     category = "io/filetext",
     summary = "Open a file and obtain a MATLAB-compatible file identifier.",
     keywords = "fopen,file,io,permission,encoding",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fopen"
 )]
 fn fopen_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -770,22 +770,24 @@ fn make_cell_column(values: Vec<Value>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::registry;
-    use std::fs;
+    use runmat_filesystem as fs;
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());
         std::env::temp_dir().join(filename)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_read_existing_file_returns_fid() {
         registry::reset_for_tests();
@@ -804,6 +806,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_missing_file_returns_error() {
         registry::reset_for_tests();
@@ -817,6 +820,7 @@ mod tests {
         assert!(open.encoding.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_query_returns_metadata() {
         registry::reset_for_tests();
@@ -841,6 +845,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_lists_handles() {
         registry::reset_for_tests();
@@ -883,6 +888,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_machinefmt_filters_entries() {
         registry::reset_for_tests();
@@ -915,6 +921,7 @@ mod tests {
         fs::remove_file(&be_path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_binary_default_encoding_binary() {
         registry::reset_for_tests();
@@ -933,6 +940,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_encoding_argument_is_preserved() {
         registry::reset_for_tests();
@@ -953,6 +961,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_permission_canonicalizes_plus_binary_order() {
         registry::reset_for_tests();
@@ -973,6 +982,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_preserves_suffix() {
         registry::reset_for_tests();
@@ -994,6 +1004,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_pc_alias_maps_to_ieee_le() {
         registry::reset_for_tests();
@@ -1015,6 +1026,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_outputs_vector_padding() {
         registry::reset_for_tests();
@@ -1029,6 +1041,7 @@ mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_invalid_fid_returns_empty() {
         registry::reset_for_tests();
@@ -1038,8 +1051,8 @@ mod tests {
         assert!(query.permission.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(super::DOC_MD);
         assert!(!blocks.is_empty());

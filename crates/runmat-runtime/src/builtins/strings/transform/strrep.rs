@@ -8,13 +8,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strrep",
+        builtin_path = "crate::builtins::strings::transform::strrep"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strrep"
 category: "strings/transform"
@@ -188,6 +191,7 @@ and returning a cell array of the same shape.
 [replace](./replace), [regexprep](../../regex/regexprep), [string](../core/string), [char](../core/char), [join](./join)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strrep")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strrep",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -203,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered before replacements are applied.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::strrep")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strrep",
     shape: ShapeRequirements::Any,
@@ -214,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "String transformation builtin; marked as a sink so fusion skips GPU residency.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strrep", DOC_MD);
 
 const ARGUMENT_TYPE_ERROR: &str =
     "strrep: first argument must be a string array, character array, or cell array of character vectors";
@@ -238,7 +236,8 @@ enum PatternKind {
     category = "strings/transform",
     summary = "Replace substring occurrences with MATLAB-compatible semantics.",
     keywords = "strrep,replace,strings,character array,text",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> Result<Value, String> {
     let gathered_str = gather_if_needed(&str_value).map_err(|e| format!("strrep: {e}"))?;
@@ -354,11 +353,11 @@ fn strrep_cell_element(value: &Value, old: &str, new: &str) -> Result<Value, Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_scalar_basic() {
         let result = strrep_builtin(
@@ -370,6 +369,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat Interpreter".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_array_preserves_missing() {
         let array = StringArray::new(
@@ -403,6 +403,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_array_with_char_pattern() {
         let array = StringArray::new(
@@ -425,6 +426,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_char_array_padding() {
         let chars = CharArray::new(vec!['R', 'u', 'n', ' ', 'M', 'a', 't'], 1, 7).unwrap();
@@ -445,6 +447,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_char_array_shrinks_rows_pad_with_spaces() {
         let mut data: Vec<char> = "alpha".chars().collect();
@@ -467,6 +470,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_char_vectors() {
         let cell = CellArray::new(
@@ -501,6 +505,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_string_scalars() {
         let cell = CellArray::new(
@@ -529,6 +534,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -541,6 +547,7 @@ mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_char_matrix_element() {
         let mut chars: Vec<char> = "alpha".chars().collect();
@@ -571,6 +578,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_string_arrays() {
         let element = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
@@ -596,6 +604,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_empty_pattern_inserts_replacement() {
         let result = strrep_builtin(
@@ -607,6 +616,7 @@ mod tests {
         assert_eq!(result, Value::String("-a-b-c-".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_type_mismatch_errors() {
         let err = strrep_builtin(
@@ -618,6 +628,7 @@ mod tests {
         assert!(err.contains("same data type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_invalid_pattern_type_errors() {
         let err = strrep_builtin(
@@ -629,6 +640,7 @@ mod tests {
         assert!(err.contains("string scalars or character vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_first_argument_type_error() {
         let err = strrep_builtin(
@@ -640,6 +652,7 @@ mod tests {
         assert!(err.contains("first argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strrep_wgpu_provider_fallback() {
@@ -660,8 +673,8 @@ mod tests {
         assert_eq!(result, Value::String("Turbine JIT".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_smoke() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

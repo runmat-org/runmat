@@ -10,11 +10,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "str2double",
+        builtin_path = "crate::builtins::strings::core::str2double"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "str2double"
 category: "strings/core"
@@ -182,6 +187,7 @@ Wrap the result with `gpuArray(...)` if you need to move it back to the device.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::str2double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "str2double",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -197,8 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Parses text on the CPU; GPU-resident inputs are gathered before conversion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::str2double")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "str2double",
     shape: ShapeRequirements::Any,
@@ -208,11 +213,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Conversion builtin; not eligible for fusion and materialises host-side doubles.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("str2double", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "str2double: input must be a string array, character array, or cell array of character vectors";
@@ -224,7 +224,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/core",
     summary = "Convert strings, character arrays, or cell arrays of text into doubles.",
     keywords = "str2double,string to double,text conversion,gpu",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::core::str2double"
 )]
 fn str2double_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("str2double: {e}"))?;
@@ -316,17 +317,18 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_scalar() {
         let result = str2double_builtin(Value::String("42.5".into())).expect("str2double");
         assert_eq!(result, Value::Num(42.5));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_scalar_invalid_returns_nan() {
         let result = str2double_builtin(Value::String("abc".into())).expect("str2double");
@@ -336,6 +338,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_array_preserves_shape() {
         let array =
@@ -353,6 +356,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_multiple_rows() {
         let data: Vec<char> = vec!['4', '2', ' ', ' ', '1', '0', '0', ' '];
@@ -368,6 +372,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_empty_rows() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
@@ -381,6 +386,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(
         clippy::approx_constant,
@@ -409,6 +415,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
@@ -419,6 +426,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_supports_d_exponent() {
         let result = str2double_builtin(Value::String("1.5D3".into())).expect("str2double");
@@ -428,6 +436,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_recognises_infinity_forms() {
         let array = StringArray::new(
@@ -446,8 +455,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

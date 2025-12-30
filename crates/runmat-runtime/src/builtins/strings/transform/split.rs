@@ -10,11 +10,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "split",
+        builtin_path = "crate::builtins::strings::transform::split"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "split"
 category: "strings/transform"
@@ -190,6 +195,7 @@ containing string scalars or character vectors.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "split",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -205,8 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered to host memory before splitting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::split")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "split",
     shape: ShapeRequirements::Any,
@@ -216,11 +221,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "String transformation builtin; not eligible for fusion planning and always gathers GPU inputs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("split", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "split: first argument must be a string scalar, string array, character array, or cell array of character vectors";
@@ -238,7 +238,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/transform",
     summary = "Split strings, character arrays, and cell arrays into substrings using delimiters.",
     keywords = "split,strsplit,delimiter,CollapseDelimiters,IncludeDelimiters",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::split"
 )]
 fn split_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("split: {e}"))?;
@@ -714,12 +715,12 @@ fn name_key(value: &Value) -> Option<NameKey> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_whitespace_default() {
         let input = Value::String("RunMat Accelerate Planner".to_string());
@@ -740,6 +741,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_custom_delimiter() {
         let input = Value::String("alpha,beta,gamma".to_string());
@@ -757,6 +759,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_true() {
         let input = Value::String("A+B-C".to_string());
@@ -786,6 +789,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_whitespace_collapse_default() {
         let input = Value::String("A  B".to_string());
@@ -806,6 +810,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_patterns_include_delimiters_collapse_true() {
         let input = Value::String("a,,b".to_string());
@@ -829,6 +834,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_collapse_false_preserves_empty_segments() {
         let input = Value::String("one,,three,".to_string());
@@ -855,6 +861,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_character_array_rows() {
         let mut row1: Vec<char> = "GPU Accelerate".chars().collect();
@@ -884,6 +891,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_array_multiple_columns() {
         let data = vec![
@@ -916,6 +924,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_outputs_string_array() {
         let values = vec![
@@ -941,6 +950,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_multiple_columns() {
         let values = vec![
@@ -972,6 +982,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_missing_string_propagates() {
         let input = Value::String("<missing>".to_string());
@@ -985,6 +996,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_name_value_pair_errors() {
         let input = Value::String("abc".to_string());
@@ -993,12 +1005,14 @@ mod tests {
         assert!(err.contains("name-value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_text_argument_errors() {
         let err = split_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.contains("first argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_delimiter_type_errors() {
         let err =
@@ -1006,6 +1020,7 @@ mod tests {
         assert!(err.contains("delimiter input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_empty_delimiter_errors() {
         let err = split_builtin(
@@ -1016,6 +1031,7 @@ mod tests {
         assert!(err.contains("at least one character"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_unknown_name_argument_errors() {
         let err = split_builtin(
@@ -1029,6 +1045,7 @@ mod tests {
         assert!(err.contains("unrecognized"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_collapse_delimiters_accepts_logical_array() {
         let logical = LogicalArray::new(vec![1u8], vec![1]).unwrap();
@@ -1047,6 +1064,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_include_delimiters_accepts_tensor_scalar() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1068,6 +1086,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_mixed_inputs() {
         let handles: Vec<_> = vec![
@@ -1097,8 +1116,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

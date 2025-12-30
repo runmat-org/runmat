@@ -13,13 +13,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const NAME: &str = "mldivide";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "mldivide",
+        builtin_path = "crate::builtins::math::linalg::ops::mldivide"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "mldivide"
 category: "math/linalg/ops"
@@ -183,6 +187,7 @@ NaNs will typically produce NaNs in the corresponding output entries.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mldivide",
     op_kind: GpuOpKind::Custom("solve"),
@@ -198,8 +203,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider mldivide hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::ops::mldivide"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mldivide",
     shape: ShapeRequirements::Any,
@@ -210,17 +216,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Left-division is a terminal solve and does not fuse with surrounding kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("mldivide", DOC_MD);
-
 #[runtime_builtin(
     name = "mldivide",
     category = "math/linalg/ops",
     summary = "Solve A * X = B using MATLAB-compatible left division.",
     keywords = "mldivide,matrix division,linear algebra,least squares,gpu",
-    accel = "mldivide"
+    accel = "mldivide",
+    builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
 fn mldivide_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     mldivide_eval(&lhs, &rhs)
@@ -544,12 +546,13 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use nalgebra::DMatrix;
     use num_complex::Complex64;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn divides_scalar_by_scalar() {
         let result = mldivide_builtin(Value::Num(2.0), Value::Num(6.0)).expect("mldivide");
@@ -559,6 +562,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn divides_scalar_into_matrix() {
         let tensor = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).expect("tensor");
@@ -569,6 +573,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_square_system() {
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -585,6 +590,7 @@ mod tests {
         assert!(residual.norm() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_least_squares() {
         let a = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
@@ -601,6 +607,7 @@ mod tests {
         assert!(residual.norm() < 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn supports_complex_inputs() {
         let a = ComplexTensor::new(
@@ -642,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reports_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -653,6 +661,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -688,6 +697,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -726,8 +736,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

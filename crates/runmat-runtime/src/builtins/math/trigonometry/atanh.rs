@@ -14,14 +14,18 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const ZERO_EPS: f64 = 1.0e-12;
 const DOMAIN_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "atanh",
+        builtin_path = "crate::builtins::math::trigonometry::atanh"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "atanh"
 category: "math/trigonometry"
@@ -210,6 +214,7 @@ the operation on the GPU.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atanh",
     op_kind: GpuOpKind::Elementwise,
@@ -225,8 +230,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Keeps tensors on the device when the provider exposes unary_atanh and every element satisfies |x| ≤ 1; otherwise gathers to the host for complex promotion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atanh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -243,17 +247,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `atanh` calls; providers can substitute custom kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("atanh", DOC_MD);
-
 #[runtime_builtin(
     name = "atanh",
     category = "math/trigonometry",
     summary = "Inverse hyperbolic tangent with MATLAB-compatible complex promotion.",
     keywords = "atanh,inverse hyperbolic tangent,artanh,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
 fn atanh_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -433,12 +433,13 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex64;
     use runmat_builtins::{CharArray, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_scalar_real() {
         let result = atanh_builtin(Value::Num(0.5)).expect("atanh");
@@ -448,6 +449,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_scalar_boundary() {
         let result = atanh_builtin(Value::Num(1.0)).expect("atanh");
@@ -462,6 +464,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_tensor_real_values() {
         let tensor =
@@ -484,6 +487,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_real_promotes_to_complex() {
         let result = atanh_builtin(Value::Num(2.0)).expect("atanh");
@@ -497,6 +501,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_tensor_complex_output() {
         let tensor =
@@ -521,6 +526,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-0.5, 0.75)];
@@ -540,6 +546,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_array_promotes_to_complex() {
         let chars = CharArray::new(vec!['A'], 1, 1).expect("char array");
@@ -554,12 +561,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_string_input_errors() {
         let err = atanh_builtin(Value::from("hello")).expect_err("expected error");
         assert!(err.contains("numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_arrays() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).expect("chars");
@@ -579,6 +588,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_logical_array() {
         let logical =
@@ -594,6 +604,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -614,6 +625,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_keeps_residency_for_real_inputs() {
         test_support::with_test_provider(|provider| {
@@ -640,6 +652,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_falls_back_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -673,6 +686,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn atanh_wgpu_matches_cpu_elementwise() {
@@ -705,6 +719,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_accepts_int_inputs() {
         let value = Value::Int(IntValue::I8(0));
@@ -715,8 +730,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn atanh_doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

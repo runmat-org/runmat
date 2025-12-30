@@ -21,11 +21,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "setdiff",
+        builtin_path = "crate::builtins::array::sorting_sets::setdiff"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "setdiff"
 category: "array/sorting_sets"
@@ -188,6 +191,7 @@ No. RunMat implements the modern semantics only. Passing `'legacy'` or `'R2012a'
 - Issues / feedback: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::setdiff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "setdiff",
     op_kind: GpuOpKind::Custom("setdiff"),
@@ -203,8 +207,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement `setdiff`; until then tensors are gathered and processed on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::setdiff"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "setdiff",
     shape: ShapeRequirements::Any,
@@ -215,18 +220,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`setdiff` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered if needed.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("setdiff", DOC_MD);
-
 #[runtime_builtin(
     name = "setdiff",
     category = "array/sorting_sets",
     summary = "Return the values that appear in the first input but not the second.",
     keywords = "setdiff,difference,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::setdiff"
 )]
 fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())
@@ -1313,12 +1314,13 @@ fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_numeric_sorted_default() {
         let a = Tensor::new(vec![5.0, 7.0, 5.0, 1.0], vec![4, 1]).unwrap();
@@ -1335,6 +1337,7 @@ mod tests {
         assert_eq!(ia.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_numeric_stable() {
         let a = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 3.0], vec![5, 1]).unwrap();
@@ -1352,6 +1355,7 @@ mod tests {
         assert_eq!(ia.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1369,6 +1373,7 @@ mod tests {
         assert_eq!(ia.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_numeric_removes_nan() {
         let a = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1380,6 +1385,7 @@ mod tests {
         assert_eq!(ia.data, vec![2.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
@@ -1397,6 +1403,7 @@ mod tests {
         assert_eq!(ia.data, vec![3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_string_rows_stable() {
         let a = StringArray::new(
@@ -1436,12 +1443,14 @@ mod tests {
         assert_eq!(ia.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_type_mismatch_errors() {
         let result = evaluate(Value::from(1.0), Value::String("a".into()), &[]);
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_rejects_legacy_option() {
         let result = evaluate(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")]);
@@ -1451,6 +1460,7 @@ mod tests {
             .contains("setdiff: the 'legacy' behaviour is not supported"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1479,6 +1489,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn setdiff_wgpu_matches_cpu() {
@@ -1515,8 +1526,8 @@ mod tests {
         assert_eq!(gpu_ia.shape, cpu_ia.shape);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -12,13 +12,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "filter",
+        builtin_path = "crate::builtins::math::signal::filter"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "filter"
 category: "math/signal"
@@ -196,6 +200,7 @@ The planner leverages the same provider hook under the hood. As long as the oper
 [conv](./conv), [deconv](./deconv), [fft](../fft/fft), [filtfilt](https://www.mathworks.com/help/matlab/ref/filtfilt.html)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter",
     op_kind: GpuOpKind::Custom("iir-filter"),
@@ -211,8 +216,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses the provider hook `iir_filter` when available. Complex filters or missing hooks fall back to the host implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::filter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "filter",
     shape: ShapeRequirements::Any,
@@ -223,17 +227,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filtering is handled via dedicated runtime logic; fusion does not currently optimise IIR/FIR chains.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("filter", DOC_MD);
-
 #[runtime_builtin(
     name = "filter",
     category = "math/signal",
     summary = "Apply an IIR/FIR digital filter to scalars, vectors, or tensors.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::math::signal::filter"
 )]
 fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(b, a, x, &rest).map(|eval| eval.into_value())
@@ -1223,7 +1223,7 @@ fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
@@ -1264,6 +1264,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_fir_basic() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1290,6 +1291,7 @@ mod tests {
         approx_eq_slice(&z_data, &[1.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_iir_impulse() {
         let alpha = 0.8;
@@ -1308,6 +1310,7 @@ mod tests {
         approx_eq_slice(&data, &[0.2, 0.16, 0.128, 0.1024, 0.08192]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_with_initial_conditions() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1357,6 +1360,7 @@ mod tests {
         approx_eq_slice(&zf2_data, &[1.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_accepts_empty_initial_placeholder() {
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
@@ -1403,6 +1407,7 @@ mod tests {
         approx_eq_slice(&z_def, &z_ph);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_rows_with_dimension_argument() {
         let b = Tensor::new(vec![1.0, -1.0], vec![1, 2]).unwrap();
@@ -1438,6 +1443,7 @@ mod tests {
         approx_eq_slice(&state_data, &[-4.0, -1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_complex_signal() {
         let b = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0)], vec![1, 2]).unwrap();
@@ -1479,6 +1485,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_invalid_initial_shape() {
         let b = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -1496,6 +1503,7 @@ mod tests {
         assert!(err.contains("initial conditions"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter_gpu_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -1531,6 +1539,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter_wgpu_matches_cpu() {
@@ -1581,8 +1590,8 @@ mod tests {
         approx_eq_slice(&gathered.data, &cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         assert!(!test_support::doc_examples(DOC_MD).is_empty());
     }

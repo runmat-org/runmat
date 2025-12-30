@@ -1,4 +1,4 @@
-#![cfg(feature = "blas-lapack")]
+#![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
 use runmat_builtins::{CellArray, Tensor as Matrix, Value};
 use runmat_runtime::{blas::*, call_builtin, lapack::*};

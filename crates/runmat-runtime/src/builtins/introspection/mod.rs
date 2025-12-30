@@ -3,9 +3,9 @@
 //! Introspection builtins.
 
 pub mod class;
-mod isa;
-mod ischar;
-mod isstring;
+pub(crate) mod isa;
+pub(crate) mod ischar;
+pub(crate) mod isstring;
 pub mod which;
 pub mod who;
 pub mod whos;

@@ -14,11 +14,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "exp",
+        builtin_path = "crate::builtins::math::elementwise::exp"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "exp"
 category: "math/elementwise"
@@ -177,6 +180,7 @@ single precision when configured, but results are converted back to double.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::exp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exp",
     op_kind: GpuOpKind::Elementwise,
@@ -193,8 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may evaluate exp directly on device buffers; runtimes gather to host when unary_exp is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::exp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exp",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -214,17 +217,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `exp` calls; providers can override with fused elementwise kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("exp", DOC_MD);
-
 #[runtime_builtin(
     name = "exp",
     category = "math/elementwise",
     summary = "Element-wise exponential of scalars, vectors, matrices, or N-D tensors.",
     keywords = "exp,exponential,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::exp"
 )]
 fn exp_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -291,11 +290,12 @@ fn exp_complex_im(re: f64, im: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_scalar() {
         let result = exp_builtin(Value::Num(1.0)).expect("exp");
@@ -305,6 +305,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -325,6 +326,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_int_value_promotes() {
         let value = Value::Int(IntValue::I32(2));
@@ -335,6 +337,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_bool_scalar() {
         let result = exp_builtin(Value::Bool(true)).expect("exp");
@@ -344,6 +347,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_complex_scalar() {
         let result = exp_builtin(Value::Complex(1.0, 2.0)).expect("exp");
@@ -357,6 +361,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_complex_tensor_elements() {
         let tensor = ComplexTensor::new(vec![(0.0, 0.0), (1.0, 1.0)], vec![2, 1]).unwrap();
@@ -377,6 +382,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_char_array_roundtrip() {
         let chars = CharArray::new("Hi".chars().collect(), 1, 2).unwrap();
@@ -393,6 +399,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_logical_array_promotes_to_double() {
         let logical =
@@ -410,6 +417,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_string_rejected() {
         let err = exp_builtin(Value::from("runmat")).unwrap_err();
@@ -419,6 +427,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -438,13 +447,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn exp_wgpu_matches_cpu_elementwise() {

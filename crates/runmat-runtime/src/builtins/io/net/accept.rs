@@ -4,22 +4,19 @@ use once_cell::sync::OnceCell;
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
+use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
-
+use runmat_time::Instant;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const MESSAGE_ID_INVALID_SERVER: &str = "MATLAB:accept:InvalidTcpServer";
 const MESSAGE_ID_TIMEOUT: &str = "MATLAB:accept:Timeout";
@@ -171,7 +168,14 @@ pub(super) fn remove_client_for_test(id: u64) {
     }
 }
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "accept",
+        builtin_path = "crate::builtins::io::net::accept"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "accept"
 category: "io/net"
@@ -326,6 +330,7 @@ Not yet. TLS will be layered on top of the same client identifier once RunMat’
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "accept",
     op_kind: GpuOpKind::Custom("network"),
@@ -341,8 +346,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only networking builtin; GPU inputs are gathered to CPU before accepting clients.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "accept",
     shape: ShapeRequirements::Any,
@@ -353,16 +357,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtin executed eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("accept", DOC_MD);
-
 #[runtime_builtin(
     name = "accept",
     category = "io/net",
     summary = "Accept a pending client connection on a TCP server.",
-    keywords = "accept,tcpserver,tcpclient"
+    keywords = "accept,tcpserver,tcpclient",
+    builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, String> {
     let server = gather_if_needed(&server)?;
@@ -658,12 +658,11 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::tcpserver::{
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpStream;
@@ -696,12 +695,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_non_struct() {
         let err = accept_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.starts_with(MESSAGE_ID_INVALID_SERVER));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_establishes_client_connection() {
         let server_value = tcpserver_builtin(
@@ -742,6 +743,7 @@ mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_times_out_when_no_client_connects() {
         let server_value = tcpserver_builtin(
@@ -759,6 +761,7 @@ mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
         let server_value = tcpserver_builtin(
@@ -776,13 +779,14 @@ mod tests {
         remove_server_for_test(server_id(&server_value));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accept_respects_per_call_timeout_override() {
         let server_value = tcpserver_builtin(

@@ -8,9 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
@@ -135,7 +133,14 @@ pub(super) fn clear_registry_for_test() {
 #[cfg(test)]
 static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "tcpserver",
+        builtin_path = "crate::builtins::io::net::tcpserver"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tcpserver"
 category: "io/net"
@@ -274,6 +279,7 @@ No. `tcpserver` is a host-side operation. RunMat transparently gathers GPU scala
 - Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
     op_kind: GpuOpKind::Custom("network"),
@@ -289,8 +295,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tcpserver",
     shape: ShapeRequirements::Any,
@@ -301,16 +306,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtin executed eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tcpserver", DOC_MD);
-
 #[runtime_builtin(
     name = "tcpserver",
     category = "io/net",
     summary = "Create a TCP server that listens for MATLAB-compatible client connections.",
-    keywords = "tcpserver,tcp,network,server"
+    keywords = "tcpserver,tcp,network,server",
+    builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) fn tcpserver_builtin(
     address: Value,
@@ -597,9 +598,8 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};
     use std::net::TcpStream;
@@ -623,6 +623,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_loopback_connection() {
         let _lock = TCP_TEST_LOCK
@@ -649,6 +650,7 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_applies_timeout_option() {
         let _lock = TCP_TEST_LOCK
@@ -672,6 +674,7 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_supports_custom_name() {
         let _lock = TCP_TEST_LOCK
@@ -695,6 +698,7 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_byte_order_option() {
         let _lock = TCP_TEST_LOCK
@@ -718,6 +722,7 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_byte_order() {
         let err = tcpserver_builtin(
@@ -729,6 +734,7 @@ mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_NAME_VALUE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_accepts_scalar_tensor_port() {
         let _lock = TCP_TEST_LOCK
@@ -753,6 +759,7 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_port() {
         let err = tcpserver_builtin(
@@ -764,6 +771,7 @@ mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_PORT));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_requires_name_value_pairs() {
         let err = tcpserver_builtin(
@@ -775,6 +783,7 @@ mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_NAME_VALUE));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_stores_userdata() {
         let _lock = TCP_TEST_LOCK
@@ -801,13 +810,14 @@ mod tests {
         remove_server_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_times_out_connect_attempt() {
         let _lock = TCP_TEST_LOCK

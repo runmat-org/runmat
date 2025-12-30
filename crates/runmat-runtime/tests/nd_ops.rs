@@ -1,6 +1,9 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::Value;
 use runmat_runtime as rt;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn squeeze_basic() {
     let t = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
@@ -13,6 +16,7 @@ fn squeeze_basic() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn permute_swap_dims() {
     let t = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -26,6 +30,7 @@ fn permute_swap_dims() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cat_dim1() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -42,6 +47,7 @@ fn cat_dim1() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cat_variadic_three_inputs() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -64,6 +70,7 @@ fn cat_variadic_three_inputs() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn repmat_2d() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -79,6 +86,7 @@ fn repmat_2d() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn repmat_nd_vector_form() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -91,6 +99,7 @@ fn repmat_nd_vector_form() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn linspace_basic() {
     let v = rt::call_builtin(
@@ -110,6 +119,7 @@ fn linspace_basic() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn meshgrid_basic() {
     let x = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -123,6 +133,7 @@ fn meshgrid_basic() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn diag_vector_to_matrix_and_back() {
     // Vector -> diag matrix -> extract main diagonal
@@ -140,6 +151,7 @@ fn diag_vector_to_matrix_and_back() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn triu_tril_shapes() {
     let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();

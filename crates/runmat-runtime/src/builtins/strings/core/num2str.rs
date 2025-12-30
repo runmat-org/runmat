@@ -10,14 +10,19 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "num2str",
+        builtin_path = "crate::builtins::strings::core::num2str"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "num2str"
 category: "strings/core"
@@ -170,6 +175,7 @@ numeric form first or use `string` for rich text conversions.
 `sprintf`, `string`, `mat2str`, `str2double`
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::num2str")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "num2str",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -185,8 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Always gathers GPU data to host memory before formatting numeric text.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::num2str")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "num2str",
     shape: ShapeRequirements::Any,
@@ -198,11 +203,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Conversion builtin; not eligible for fusion and always materialises host character arrays.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("num2str", DOC_MD);
-
 #[cfg_attr(
     feature = "doc_export",
     runtime_builtin(
@@ -210,7 +210,8 @@ register_builtin_doc_text!("num2str", DOC_MD);
         category = "strings/core",
         summary = "Format numeric scalars, vectors, and matrices as character arrays.",
         keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink"
+        accel = "sink",
+        builtin_path = "crate::builtins::strings::core::num2str"
     )
 )]
 #[cfg_attr(
@@ -220,7 +221,8 @@ register_builtin_doc_text!("num2str", DOC_MD);
         category = "strings/core",
         summary = "Format numeric scalars, vectors, and matrices as character arrays.",
         keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink"
+        accel = "sink",
+        builtin_path = "crate::builtins::strings::core::num2str"
     )
 )]
 fn num2str_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
@@ -954,11 +956,12 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_scalar_default_precision() {
         let value = Value::Num(std::f64::consts::PI);
@@ -973,6 +976,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_precision_argument() {
         let value = Value::Num(std::f64::consts::PI);
@@ -986,6 +990,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_matrix_alignment() {
         let tensor =
@@ -1007,6 +1012,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_custom_format() {
         let tensor = Tensor::new(vec![1.234, 5.678], vec![1, 2]).expect("tensor");
@@ -1021,6 +1027,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_complex_values() {
         let complex = ComplexTensor::new(vec![(3.0, 4.0), (5.0, -6.0)], vec![1, 2]).expect("cplx");
@@ -1034,6 +1041,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_local_decimal() {
         std::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
@@ -1049,6 +1057,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_logical_array() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).expect("logical");
@@ -1062,6 +1071,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_gpu_tensor_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1083,20 +1093,22 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_input_type() {
         let err = num2str_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_format_string() {
         let err = num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err();
         assert!(err.contains("unsupported format string"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

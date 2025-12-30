@@ -8,16 +8,20 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
 use log::debug;
 use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use std::time::{SystemTime, UNIX_EPOCH};
+use runmat_time::unix_timestamp_ns;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rng",
+        builtin_path = "crate::builtins::stats::random::rng"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rng"
 category: "stats/random"
@@ -209,6 +213,7 @@ consume the current stream but do not reseed it.
 - Found a bug or behavioural gap? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::random::rng")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rng",
     op_kind: GpuOpKind::Custom("state-control"),
@@ -225,8 +230,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Not a numeric kernel; synchronises provider RNG state via set_rng_state when available.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::random::rng")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rng",
     shape: ShapeRequirements::Any,
@@ -237,16 +241,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control builtin; fusion planner never embeds rng in generated kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rng", DOC_MD);
-
 #[runtime_builtin(
     name = "rng",
     category = "stats/random",
     summary = "Seed, shuffle, and query the global random number generator.",
-    keywords = "rng,seed,twister,shuffle,state"
+    keywords = "rng,seed,twister,shuffle,state",
+    builtin_path = "crate::builtins::stats::random::rng"
 )]
 fn rng_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -493,10 +493,7 @@ fn shuffle_seed() -> u64 {
             return parsed;
         }
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let now = unix_timestamp_ns();
     let mut seed = now as u64 ^ (now >> 32) as u64;
     let addr = (&seed as *const u64 as u64).rotate_left(21);
     seed ^= addr ^ (seed << 7);
@@ -516,11 +513,12 @@ fn sync_provider_state(state: u64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_returns_current_state() {
         let _guard = random::test_lock()
@@ -534,6 +532,7 @@ mod tests {
         assert_eq!(snapshot.algorithm, RngAlgorithm::RunMatLcg);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_is_reproducible() {
         let _guard = random::test_lock()
@@ -547,6 +546,7 @@ mod tests {
         assert_eq!(seq1, seq2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_restore_struct_roundtrip() {
         let _guard = random::test_lock()
@@ -561,6 +561,7 @@ mod tests {
         assert_eq!(current.seed, Some(DEFAULT_USER_SEED));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_default_restores_state() {
         let _guard = random::test_lock()
@@ -577,6 +578,7 @@ mod tests {
         assert_ne!(prev_snapshot.state, restored.state);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_with_twister_alias() {
         let _guard = random::test_lock()
@@ -592,6 +594,7 @@ mod tests {
         assert_eq!(host_seq, alias_seq);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_negative_seed() {
         let _guard = random::test_lock()
@@ -605,6 +608,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_unknown_generator() {
         let _guard = random::test_lock()
@@ -619,6 +623,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_state_struct_requires_type() {
         let _guard = random::test_lock()
@@ -633,6 +638,7 @@ mod tests {
         assert!(err.contains("Type"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_syncs_provider_state() {
         let _guard = random::test_lock()
@@ -648,6 +654,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rng_wgpu_uniform_matches_cpu() {
@@ -683,21 +690,22 @@ mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_shuffle_uses_entropy_or_override() {
         let _guard = random::test_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
-        std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345");
+        unsafe { std::env::set_var("RUNMAT_RNG_SHUFFLE_SEED", "12345") };
         rng_builtin(vec![Value::from("shuffle")]).expect("rng shuffle");
-        std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED");
+        unsafe { std::env::remove_var("RUNMAT_RNG_SHUFFLE_SEED") };
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.seed, Some(12345));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn rng_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -15,9 +15,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const PI: f64 = std::f64::consts::PI;
 const SQRT_TWO_PI: f64 = 2.506_628_274_631_000_5;
@@ -35,7 +32,14 @@ const LANCZOS_COEFFS: [f64; 8] = [
     1.5056327351493116e-7,
 ];
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "gamma",
+        builtin_path = "crate::builtins::math::elementwise::gamma"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gamma"
 category: "math/elementwise"
@@ -207,6 +211,7 @@ the host; GPU prototypes must be real.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::gamma")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gamma",
     op_kind: GpuOpKind::Elementwise,
@@ -223,8 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute gamma directly on device buffers via unary_gamma; runtimes gather to the host when the hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::gamma")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gamma",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -235,17 +239,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently falls back to host evaluation; providers may supply specialised kernels in the future.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gamma", DOC_MD);
-
 #[runtime_builtin(
     name = "gamma",
     category = "math/elementwise",
     summary = "Element-wise gamma function for scalars, vectors, matrices, or N-D tensors.",
     keywords = "gamma,factorial,special,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
 fn gamma_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let output = parse_output_template(&rest)?;
@@ -563,7 +563,7 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -573,6 +573,7 @@ mod tests {
         assert!((a - b).abs() <= tol, "expected {b}, got {a} (tol {tol})");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_positive_integer() {
         match gamma_builtin(Value::Num(5.0), Vec::new()).expect("gamma") {
@@ -581,6 +582,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_half_integer() {
         match gamma_builtin(Value::Num(0.5), Vec::new()).expect("gamma") {
@@ -589,6 +591,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_negative_non_integer() {
         match gamma_builtin(Value::Num(-0.5), Vec::new()).expect("gamma") {
@@ -597,6 +600,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_matrix() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -612,6 +616,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_pole_returns_inf() {
         match gamma_builtin(Value::Num(0.0), Vec::new()).expect("gamma") {
@@ -624,6 +629,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_small_negative_not_infinite() {
         match gamma_builtin(Value::Num(-1.0e-10), Vec::new()).expect("gamma") {
@@ -636,6 +642,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_complex_identity() {
         let z = Complex64::new(0.5, 1.0);
@@ -647,6 +654,7 @@ mod tests {
         approx_eq(lhs.im, rhs.im, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_char_array() {
         let chars = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
@@ -660,12 +668,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_string_input_errors() {
         let err = gamma_builtin(Value::from("hello"), Vec::new()).expect_err("expected error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_gpu_provider_fallback() {
         test_support::with_test_provider(|provider| {
@@ -683,6 +693,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gamma_wgpu_matches_cpu() {
@@ -709,6 +720,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -734,6 +746,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_gpu_complex_result_errors() {
         test_support::with_test_provider(|provider| {
@@ -751,6 +764,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_complex_requires_host() {
         let result = gamma_builtin(
@@ -767,6 +781,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_rejects_extra_args() {
         let err = gamma_builtin(
@@ -777,6 +792,7 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_int_promotes() {
         let value = Value::Int(IntValue::I32(4));
@@ -786,8 +802,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn gamma_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -9,12 +9,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:write:InvalidTcpClient";
 const MESSAGE_ID_INVALID_DATA: &str = "MATLAB:write:InvalidData";
@@ -24,7 +21,14 @@ const MESSAGE_ID_TIMEOUT: &str = "MATLAB:write:Timeout";
 const MESSAGE_ID_CONNECTION_CLOSED: &str = "MATLAB:write:ConnectionClosed";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:write:InternalError";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "write",
+        builtin_path = "crate::builtins::io::net::write"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "write"
 category: "io/net"
@@ -156,6 +160,7 @@ timeout and byte-order settings.
   differences from MATLAB.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "write",
     op_kind: GpuOpKind::Custom("network"),
@@ -171,8 +176,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket writes always execute on the host CPU; GPU providers are never consulted.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "write",
     shape: ShapeRequirements::Any,
@@ -183,16 +187,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtin executed eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("write", DOC_MD);
-
 #[runtime_builtin(
     name = "write",
     category = "io/net",
     summary = "Write numeric or text data to a TCP/IP client.",
-    keywords = "write,tcpclient,networking"
+    keywords = "write,tcpclient,networking",
+    builtin_path = "crate::builtins::io::net::write"
 )]
 fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
     let client = gather_if_needed(&client)
@@ -815,9 +815,8 @@ fn is_connection_closed_error(err: &io::Error) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
@@ -851,6 +850,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_default_uint8_sends_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -876,6 +876,7 @@ mod tests {
         assert_eq!(received, vec![1, 2, 3, 4]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_double_big_endian_encodes_correctly() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -910,6 +911,7 @@ mod tests {
         assert_eq!(received.to_vec(), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_char_payload_encodes_ascii() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -939,6 +941,7 @@ mod tests {
         assert_eq!(received, b"RunMat");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_errors_when_client_disconnected() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -973,8 +976,8 @@ mod tests {
         handle.join().expect("join");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

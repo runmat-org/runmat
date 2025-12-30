@@ -1,6 +1,6 @@
 //! MATLAB-compatible `rmdir` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -12,9 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:RMDIR:OSError";
 const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "MATLAB:RMDIR:DirectoryNotFound";
@@ -26,7 +24,14 @@ const ERR_FOLDER_ARG: &str = "rmdir: folder name must be a character vector or s
 const ERR_FLAG_ARG: &str =
     "rmdir: flag must be the character 's' supplied as a char vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rmdir",
+        builtin_path = "crate::builtins::io::repl_fs::rmdir"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rmdir"
 category: "io/repl_fs"
@@ -172,6 +177,7 @@ messageID =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::rmdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmdir",
     op_kind: GpuOpKind::Custom("io"),
@@ -188,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. GPU-resident path and flag arguments are gathered automatically before removal.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::rmdir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rmdir",
     shape: ShapeRequirements::Any,
@@ -200,17 +205,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects materialise immediately; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rmdir", DOC_MD);
-
 #[runtime_builtin(
     name = "rmdir",
     category = "io/repl_fs",
     summary = "Remove folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "rmdir,remove directory,delete folder,filesystem,status,message,messageid,recursive",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
 fn rmdir_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -340,7 +341,7 @@ fn remove_folder(value: &Value, mode: RemoveMode) -> Result<RmdirResult, String>
 fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     let display = path.display().to_string();
 
-    let metadata = match fs::metadata(path) {
+    let metadata = match vfs::metadata(path) {
         Ok(meta) => meta,
         Err(err) => {
             return if err.kind() == io::ErrorKind::NotFound {
@@ -356,7 +357,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     }
 
     match mode {
-        RemoveMode::Recursive => match fs::remove_dir_all(path) {
+        RemoveMode::Recursive => match vfs::remove_dir_all(path) {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -366,7 +367,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
                 }
             }
         },
-        RemoveMode::NonRecursive => match fs::remove_dir(path) {
+        RemoveMode::NonRecursive => match vfs::remove_dir(path) {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -442,13 +443,15 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use std::fs;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_removes_empty_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -465,6 +468,7 @@ mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_requires_string_inputs() {
         let _lock = REPL_FS_TEST_LOCK
@@ -478,6 +482,7 @@ mod tests {
         assert_eq!(err, ERR_FLAG_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_non_recursive_fails_when_not_empty() {
         let _lock = REPL_FS_TEST_LOCK
@@ -500,6 +505,7 @@ mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_recursive_removes_contents() {
         let _lock = REPL_FS_TEST_LOCK
@@ -521,6 +527,7 @@ mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_handles_missing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -536,6 +543,7 @@ mod tests {
         assert!(eval.message().contains("does not exist"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_rejects_files() {
         let _lock = REPL_FS_TEST_LOCK
@@ -553,6 +561,7 @@ mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_accepts_uppercase_flag() {
         let _lock = REPL_FS_TEST_LOCK
@@ -571,6 +580,7 @@ mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_outputs_produce_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -588,8 +598,8 @@ mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

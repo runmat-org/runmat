@@ -3,8 +3,6 @@
 use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
-#[cfg(not(test))]
-use std::io::{self, IsTerminal, Read};
 use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
@@ -14,11 +12,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg(not(test))]
+use crate::interaction;
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pause",
+        builtin_path = "crate::builtins::timing::pause"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pause"
 category: "timing"
@@ -108,6 +111,7 @@ pause([]);   % equivalent to calling pause with no arguments
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::pause")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pause",
     op_kind: GpuOpKind::Custom("timer"),
@@ -123,8 +127,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "pause executes entirely on the host. Acceleration providers are never queried.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::pause")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pause",
     shape: ShapeRequirements::Any,
@@ -134,11 +137,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "pause suspends host execution and is excluded from fusion pipelines.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pause", DOC_MD);
 
 static PAUSE_STATE: Lazy<RwLock<PauseState>> = Lazy::new(|| RwLock::new(PauseState::default()));
 
@@ -182,7 +180,8 @@ enum PauseWait {
     summary = "Suspend execution until a key press or specified duration.",
     keywords = "pause,sleep,wait,delay",
     accel = "metadata",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::timing::pause"
 )]
 fn pause_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {
@@ -227,30 +226,14 @@ fn perform_wait(wait: PauseWait) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
 fn wait_for_key_press() -> Result<(), String> {
-    // During crate-level tests we treat pause as non-interactive so unit tests
-    // never block waiting for a key press on an interactive terminal.
-    Ok(())
-}
-
-#[cfg(not(test))]
-fn wait_for_key_press() -> Result<(), String> {
-    let stdin = io::stdin();
-    if !stdin.is_terminal() {
-        thread::sleep(Duration::from_millis(1));
-        return Ok(());
+    #[cfg(test)]
+    {
+        Ok(())
     }
-
-    let mut handle = stdin.lock();
-    let mut buffer = [0u8; 1];
-    loop {
-        match handle.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(_) => return Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(format!("pause: failed to read from stdin: {err}")),
-        }
+    #[cfg(not(test))]
+    {
+        interaction::wait_for_key("")
     }
 }
 
@@ -374,7 +357,7 @@ fn set_pause_enabled(next: bool) -> Result<bool, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -395,6 +378,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn query_returns_on_by_default() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -403,6 +387,7 @@ mod tests {
         assert_eq!(char_array_to_string(result), "on");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_off_returns_previous_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -412,6 +397,7 @@ mod tests {
         assert!(!pause_enabled().unwrap());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_on_restores_state() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -421,6 +407,7 @@ mod tests {
         assert!(pause_enabled().unwrap());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_default_returns_empty_tensor() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -432,6 +419,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_zero_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -443,6 +431,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -454,6 +443,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_negative_zero_is_treated_as_zero() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -465,6 +455,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn negative_duration_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -473,6 +464,7 @@ mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_scalar_tensor_is_rejected() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
@@ -482,6 +474,7 @@ mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_tensor_behaves_like_default_pause() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -494,6 +487,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalar_is_accepted() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -506,6 +500,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn infinite_duration_behaves_like_default() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -517,6 +512,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pause_gpu_duration_gathered() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -536,6 +532,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pause_wgpu_duration_gathered() {
@@ -560,6 +557,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_command_raises_error() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -568,8 +566,8 @@ mod tests {
         assert_eq!(err, ERR_INVALID_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);

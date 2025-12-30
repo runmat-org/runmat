@@ -1,4 +1,6 @@
-use runmat_parser::{parse_simple as parse, Expr, Stmt};
+use runmat_parser::{
+    parse_simple as parse, parse_with_options, CompatMode, Expr, ParserOptions, Stmt,
+};
 
 #[test]
 fn basic_command_syntax_to_func_call() {
@@ -60,4 +62,41 @@ fn command_syntax_with_numbers_and_strings() {
         }
         _ => panic!("expected command with number and string args"),
     }
+}
+
+#[test]
+fn hold_on_rewrites_to_string_arg() {
+    let program = parse_with_options("hold on", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args), false) => {
+            assert_eq!(name, "hold");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s) if s == "\"on\""));
+        }
+        _ => panic!("expected hold command to become func call"),
+    }
+}
+
+#[test]
+fn colorbar_without_arg_allowed() {
+    let program = parse_with_options("colorbar", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args), false) => {
+            assert_eq!(name, "colorbar");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected colorbar()"),
+    }
+}
+
+#[test]
+fn invalid_keyword_rejected() {
+    let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
+    assert!(err.is_err());
+}
+
+#[test]
+fn strict_mode_rejects_command_syntax() {
+    let err = parse_with_options("hold on", ParserOptions::new(CompatMode::Strict));
+    assert!(err.is_err());
 }

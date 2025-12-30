@@ -21,14 +21,18 @@ where
         base_dir: Option<PathBuf>,
         device_tag: &str,
     ) -> Self {
-        let enabled = std::env::var(var)
-            .map(|v| {
-                matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-            .unwrap_or(false);
+        let enabled = if cfg!(target_arch = "wasm32") {
+            false
+        } else {
+            std::env::var(var)
+                .map(|v| {
+                    matches!(
+                        v.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on"
+                    )
+                })
+                .unwrap_or(false)
+        };
         let json_path = if enabled {
             base_dir.map(|mut dir| {
                 dir.push("autotune");

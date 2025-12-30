@@ -5,16 +5,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
 use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "orderfields",
+        builtin_path = "crate::builtins::structs::core::orderfields"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "orderfields"
 category: "structs/core"
@@ -190,6 +194,7 @@ Only the top-level struct passed to `orderfields` is reordered. Nested structs r
 - Found a behavioural mismatch? Please open an issue at `https://github.com/runmat-org/runmat/issues/new/choose`.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::orderfields")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "orderfields",
     op_kind: GpuOpKind::Custom("orderfields"),
@@ -205,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata manipulation; struct values that live on the GPU remain resident.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::orderfields")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "orderfields",
     shape: ShapeRequirements::Any,
@@ -217,16 +221,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Reordering fields is a metadata operation and does not participate in fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("orderfields", DOC_MD);
-
 #[runtime_builtin(
     name = "orderfields",
     category = "structs/core",
     summary = "Reorder structure field definitions alphabetically or using a supplied order.",
-    keywords = "orderfields,struct,reorder fields,alphabetical,struct array"
+    keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
+    builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 fn orderfields_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_ordered_value())
@@ -566,17 +566,17 @@ fn missing_field(name: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn field_order(struct_value: &StructValue) -> Vec<String> {
         struct_value.field_names().cloned().collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_sorts_alphabetically() {
         let mut st = StructValue::new();
@@ -594,6 +594,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_cell_name_list() {
         let mut st = StructValue::new();
@@ -618,6 +619,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_string_array_names() {
         let mut st = StructValue::new();
@@ -642,6 +644,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_char_array_names() {
         let mut st = StructValue::new();
@@ -663,6 +666,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_reference_struct() {
         let mut source = StructValue::new();
@@ -687,6 +691,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_with_index_vector() {
         let mut st = StructValue::new();
@@ -710,6 +715,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn index_vector_must_be_integers() {
         let mut st = StructValue::new();
@@ -725,6 +731,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permutation_vector_matches_original_positions() {
         let mut st = StructValue::new();
@@ -747,6 +754,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reorder_struct_array() {
         let mut first = StructValue::new();
@@ -776,6 +784,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_array_permutation_reuses_order() {
         let mut first = StructValue::new();
@@ -802,6 +811,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_field() {
         let mut st = StructValue::new();
@@ -821,6 +831,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_field_names_rejected() {
         let mut st = StructValue::new();
@@ -836,6 +847,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reference_struct_mismatch_errors() {
         let mut source = StructValue::new();
@@ -853,6 +865,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_order_argument_type_errors() {
         let mut st = StructValue::new();
@@ -865,6 +878,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_struct_array_nonempty_reference_errors() {
         let empty = CellArray::new(Vec::new(), 0, 0).expect("empty struct array");
@@ -881,8 +895,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

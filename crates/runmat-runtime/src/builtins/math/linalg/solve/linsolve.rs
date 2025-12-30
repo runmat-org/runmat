@@ -17,14 +17,17 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "linsolve";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "linsolve",
+        builtin_path = "crate::builtins::math::linalg::solve::linsolve"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "linsolve"
 category: "math/linalg/solve"
@@ -187,10 +190,7 @@ arrays should be reshaped before calling `linsolve`, just like in MATLAB.
 [mldivide](../../ops/mldivide), [mrdivide](../../ops/mrdivide), [lu](../../factor/lu), [chol](../../factor/chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
 "#;
 
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
-
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::linsolve")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "linsolve",
     op_kind: GpuOpKind::Custom("solve"),
@@ -206,8 +206,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider linsolve hook; WGPU currently gathers to the host solver and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::solve::linsolve"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linsolve",
     shape: ShapeRequirements::Any,
@@ -218,17 +219,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Linear solves are terminal operations and do not fuse with surrounding kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("linsolve", DOC_MD);
-
 #[runtime_builtin(
     name = "linsolve",
     category = "math/linalg/solve",
     summary = "Solve A * X = B with structural hints such as LT, UT, POSDEF, or TRANSA.",
     keywords = "linsolve,linear system,triangular,gpu",
-    accel = "linsolve"
+    accel = "linsolve",
+    builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
 fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate_args(lhs, rhs, &rest)?;
@@ -1041,7 +1038,7 @@ fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, StructValue, Tensor};
@@ -1052,6 +1049,7 @@ mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_basic_square() {
         let a = Tensor::new(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1064,6 +1062,7 @@ mod tests {
         approx_eq(t.data[1], 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_lower_triangular_hint() {
         let a = Tensor::new(
@@ -1087,6 +1086,7 @@ mod tests {
         approx_eq(tensor.data[2], 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_transposed_triangular_hint() {
         let a = Tensor::new(
@@ -1125,6 +1125,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_rcond_enforced() {
         let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0 + 1e-12], vec![2, 2]).unwrap();
@@ -1143,6 +1144,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_recovers_rcond_output() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -1172,6 +1174,7 @@ mod tests {
         approx_eq(rcond_value, 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -1215,6 +1218,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1263,7 +1267,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

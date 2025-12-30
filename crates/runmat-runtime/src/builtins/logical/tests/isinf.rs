@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isinf",
+        builtin_path = "crate::builtins::logical::tests::isinf"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isinf"
 category: "logical/tests"
@@ -159,6 +162,7 @@ Each predicate performs a single elementwise test. Performance is dominated by m
 [isfinite](./isfinite), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isinf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isinf",
     op_kind: GpuOpKind::Elementwise,
@@ -177,8 +181,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_isinf` hook when available; otherwise the runtime gathers to host and builds the logical mask on the CPU.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isinf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isinf",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -200,17 +203,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fused kernels emit 0/1 masks; providers can override with native logical-isinf implementations.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isinf", DOC_MD);
-
 #[runtime_builtin(
     name = "isinf",
     category = "logical/tests",
     summary = "Return a logical mask indicating which elements of the input are ±Inf.",
     keywords = "isinf,infinity,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::tests::isinf"
 )]
 fn isinf_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -305,47 +304,54 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_positive() {
         let result = isinf_builtin(Value::Num(f64::INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_negative() {
         let result = isinf_builtin(Value::Num(f64::NEG_INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_finite() {
         let result = isinf_builtin(Value::Num(42.0)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_nan_false() {
         let result = isinf_builtin(Value::Num(f64::NAN)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_bool_false() {
         let result = isinf_builtin(Value::Bool(true)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_int_false() {
         let result = isinf_builtin(Value::Int(IntValue::I32(7))).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_complex_scalar_detects_infinite_components() {
         let finite = isinf_builtin(Value::Complex(1.0, 2.0)).expect("isinf");
@@ -358,6 +364,7 @@ mod tests {
         assert_eq!(inf_imag, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_tensor_mask() {
         let tensor =
@@ -372,6 +379,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -385,6 +393,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
@@ -402,12 +411,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_string_scalar_false() {
         let result = isinf_builtin(Value::String("Inf".to_string())).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -421,6 +432,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -434,6 +446,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_singleton_tensor_returns_scalar_bool() {
         let tensor = Tensor::new(vec![f64::INFINITY], vec![1, 1]).unwrap();
@@ -445,6 +458,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_rejects_unsupported_types() {
         let err = isinf_builtin(Value::FunctionHandle("foo".to_string()))
@@ -455,6 +469,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_char_array_returns_zeros() {
         let array = CharArray::new("Inf".chars().collect(), 1, 3).unwrap();
@@ -468,6 +483,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -484,13 +500,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isinf_wgpu_matches_host_path() {

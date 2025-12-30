@@ -8,11 +8,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strtrim",
+        builtin_path = "crate::builtins::strings::transform::strtrim"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r###"---
 title: "strtrim"
 category: "strings/transform"
@@ -169,6 +174,7 @@ characters and directional trimming; use it when you need finer control.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "###;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strtrim")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strtrim",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -185,8 +191,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes on the CPU; GPU-resident inputs are gathered to host memory before trimming whitespace.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::transform::strtrim"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strtrim",
     shape: ShapeRequirements::Any,
@@ -196,11 +203,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strtrim", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "strtrim: first argument must be a string array, character array, or cell array of character vectors";
@@ -212,7 +214,8 @@ const CELL_ELEMENT_ERROR: &str =
     category = "strings/transform",
     summary = "Remove leading and trailing whitespace from strings, character arrays, and cell arrays.",
     keywords = "strtrim,trim,whitespace,strings,character array,text",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
 fn strtrim_builtin(value: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strtrim: {e}"))?;
@@ -311,11 +314,11 @@ fn trim_whitespace(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_string_scalar_trims_whitespace() {
         let result =
@@ -323,6 +326,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_string_array_preserves_shape() {
         let array = StringArray::new(
@@ -353,6 +357,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_multiple_rows() {
         let data: Vec<char> = "  cat  ".chars().chain(" dog   ".chars()).collect();
@@ -368,6 +373,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_all_whitespace_yields_zero_width() {
         let array = CharArray::new("   ".chars().collect(), 1, 3).unwrap();
@@ -382,6 +388,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -405,6 +412,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_preserves_missing_strings() {
         let result =
@@ -412,6 +420,7 @@ mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_handles_tabs_and_newlines() {
         let input = Value::String("\tMetrics \n".into());
@@ -419,6 +428,7 @@ mod tests {
         assert_eq!(result, Value::String("Metrics".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_trims_unicode_whitespace() {
         let input = Value::String("\u{00A0}RunMat\u{2003}".into());
@@ -426,6 +436,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_zero_rows_stable() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
@@ -433,6 +444,7 @@ mod tests {
         assert_eq!(result, Value::CharArray(array));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_accepts_string_scalar() {
         let scalar = StringArray::new(vec![" padded ".into()], vec![1, 1]).unwrap();
@@ -447,6 +459,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_rejects_non_text() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
@@ -454,14 +467,15 @@ mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_errors_on_invalid_input() {
         let err = strtrim_builtin(Value::Num(1.0)).unwrap_err();
         assert!(err.contains("strtrim"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

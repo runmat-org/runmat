@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const LN_2: f64 = std::f64::consts::LN_2;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pow2",
+        builtin_path = "crate::builtins::math::elementwise::pow2"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pow2"
 category: "math/elementwise"
@@ -186,6 +190,7 @@ reproduce MATLAB's bit-shift style scaling in floating point.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::pow2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pow2",
     op_kind: GpuOpKind::Elementwise,
@@ -207,8 +212,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_pow2 and pow2_scale to keep tensors on-device; the runtime gathers to host when hooks are unavailable or shapes require implicit expansion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::pow2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pow2",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -228,17 +232,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits `exp(x * ln2)` for unary pow2; binary scaling currently falls back to the host when implicit expansion is required.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pow2", DOC_MD);
-
 #[runtime_builtin(
     name = "pow2",
     category = "math/elementwise",
     summary = "Compute 2.^X or scale mantissas by binary exponents.",
     keywords = "pow2,ldexp,binary scaling,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
 fn pow2_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {
@@ -459,11 +459,12 @@ impl NumericArray {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_scalar_exponent() {
         let result = pow2_builtin(Value::Num(3.0), Vec::new()).expect("pow2");
@@ -473,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_tensor_exponent() {
         let tensor = Tensor::new(vec![-1.0, 0.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -489,6 +491,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_binary_scaling() {
         let mantissa = Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap();
@@ -503,6 +506,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_complex_exponent_scalar() {
         let result = pow2_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("pow2");
@@ -516,6 +520,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_complex_mantissa_real_exponent() {
         let mantissa =
@@ -540,6 +545,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_char_array() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -554,12 +560,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_rejects_strings() {
         let err = pow2_builtin(Value::from("hello"), Vec::new()).unwrap_err();
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -577,6 +585,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_gpu_scale_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -599,6 +608,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_binary_broadcast_host() {
         let mantissa = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -612,6 +622,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pow2_wgpu_matches_cpu_unary() {
@@ -643,6 +654,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pow2_wgpu_scale_matches_cpu() {
@@ -688,8 +700,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

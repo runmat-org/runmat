@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "conv",
+        builtin_path = "crate::builtins::math::signal::conv"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "conv"
 category: "math/signal"
@@ -213,6 +216,7 @@ Not yet. Current providers choose kernel launch parameters automatically; user-f
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv",
     op_kind: GpuOpKind::Custom("conv1d"),
@@ -229,8 +233,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may implement `conv1d` to keep results on the device; when unavailable the runtime gathers inputs and runs on the CPU.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::conv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conv",
     shape: ShapeRequirements::Any,
@@ -241,17 +244,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Convolution boundaries terminate fusion plans; intermediate expressions run on the host today.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("conv", DOC_MD);
-
 #[runtime_builtin(
     name = "conv",
     category = "math/signal",
     summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
     keywords = "conv,convolution,signal processing,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::math::signal::conv"
 )]
 fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mode = parse_mode(&rest)?;
@@ -585,7 +584,7 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> Result<V
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -593,6 +592,7 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_full_row_vectors() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -607,6 +607,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_same_matches_length() {
         let a = Tensor::new(vec![3.0, 4.0, 5.0, 6.0, 7.0], vec![1, 5]).unwrap();
@@ -640,6 +641,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_valid_empty_when_kernel_longer() {
         let a = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -659,6 +661,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_complex_inputs() {
         let a = Value::Complex(1.0, 2.0);
@@ -673,6 +676,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_scalar_times_vector_follows_other_orientation() {
         let scalar = Value::Num(2.0);
@@ -687,6 +691,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_handles_empty_inputs_with_row_orientation() {
         let empty_row = Tensor::new(Vec::<f64>::new(), vec![1, 0]).unwrap();
@@ -702,6 +707,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_handles_empty_inputs_with_column_orientation() {
         let empty_col = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
@@ -717,6 +723,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_promotes_logical_inputs_to_double() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -748,6 +755,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_rejects_invalid_shape_keyword() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -761,12 +769,14 @@ mod tests {
         assert!(err.contains("third argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_rejects_non_numeric_input() {
         let err = conv_builtin(Value::from("hi"), Value::Num(1.0), Vec::new()).unwrap_err();
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -803,6 +813,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn conv_wgpu_matches_cpu_same_mode() {
@@ -842,6 +853,7 @@ mod tests {
         assert_eq!(gathered_gpu.data, gathered_host.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_same_with_integer_dimension_argument() {
         let signal = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -854,8 +866,8 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

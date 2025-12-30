@@ -119,7 +119,7 @@ fn sequence_heuristics_disabled() -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate::simple_provider;
     use std::sync::Mutex;
@@ -131,6 +131,7 @@ mod tests {
         std::env::remove_var("RUNMAT_SEQUENCE_GPU_MIN");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_gpu_short_circuits() {
         let _guard = ENV_LOCK.lock().unwrap();
@@ -140,6 +141,7 @@ mod tests {
         assert_eq!(decision.reason, ResidencyReason::ExplicitGpuInput);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn env_disable_blocks_gpu() {
         let _guard = ENV_LOCK.lock().unwrap();
@@ -150,6 +152,7 @@ mod tests {
         reset_env();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn env_min_len_controls_threshold() {
         let _guard = ENV_LOCK.lock().unwrap();

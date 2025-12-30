@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "conj",
+        builtin_path = "crate::builtins::math::elementwise::conj"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "conj"
 category: "math/elementwise"
@@ -173,6 +176,7 @@ Yes. The fusion planner can fold `conj` into neighbouring elementwise kernels, l
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::conj")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conj",
     op_kind: GpuOpKind::Elementwise,
@@ -189,8 +193,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute conj in-place for real tensors via unary_conj; complex tensors currently gather to the host for conjugation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::conj")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conj",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -211,17 +214,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion kernels treat conj as an identity for real tensors; complex tensors fall back to the CPU path until native complex fusion is available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("conj", DOC_MD);
-
 #[runtime_builtin(
     name = "conj",
     category = "math/elementwise",
     summary = "Compute the complex conjugate of scalars, vectors, matrices, or N-D tensors.",
     keywords = "conj,complex conjugate,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::conj"
 )]
 fn conj_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -307,11 +306,12 @@ fn conj_char_array(ca: CharArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_scalar_real() {
         let result = conj_builtin(Value::Num(-2.5)).expect("conj");
@@ -321,6 +321,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_complex_scalar() {
         let result = conj_builtin(Value::Complex(3.0, 4.0)).expect("conj");
@@ -333,6 +334,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_complex_scalar_zero_imag_returns_real() {
         let result = conj_builtin(Value::Complex(5.0, 0.0)).expect("conj");
@@ -342,6 +344,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_promotes_logical_to_double() {
         let logical =
@@ -356,6 +359,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_int_promotes_to_double() {
         let result = conj_builtin(Value::Int(IntValue::I32(7))).expect("conj");
@@ -365,6 +369,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_complex_tensor_to_complex_tensor() {
         let tensor =
@@ -380,6 +385,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_complex_tensor_realises_real_when_imag_zero() {
         let tensor =
@@ -394,6 +400,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_char_array_returns_double_codes() {
         let chars = CharArray::new("Hi".chars().collect(), 1, 2).expect("char array");
@@ -407,6 +414,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_errors_on_string_input() {
         let err = conj_builtin(Value::from("hello")).unwrap_err();
@@ -416,6 +424,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -432,13 +441,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn conj_wgpu_matches_cpu_for_real() {

@@ -12,11 +12,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "median",
+        builtin_path = "crate::builtins::math::reduction::median"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "median"
 category: "math/reduction"
@@ -186,6 +189,7 @@ Otherwise the runtime gathers to the CPU to guarantee MATLAB-compatible semantic
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "median",
     op_kind: GpuOpKind::Reduction,
@@ -209,8 +213,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute medians entirely on device; runtimes fall back to host when hooks are missing or omitnan is requested.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "median",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -221,11 +224,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Fusion planner gathers to the host; future kernels may expose order-statistic reductions.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("median", DOC_MD);
 
 #[derive(Clone)]
 enum MedianAxes {
@@ -245,7 +243,8 @@ struct ParsedArguments {
     category = "math/reduction",
     summary = "Median of scalars, vectors, matrices, or N-D tensors.",
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::reduction::median"
 )]
 fn median_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_arguments(&rest)?;
@@ -670,17 +669,19 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_scalar_num() {
         let result = median_builtin(Value::Num(5.0), Vec::new()).expect("median");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_vector_odd_length() {
         let tensor = Tensor::new(vec![7.0, 2.0, 9.0, 4.0, 5.0], vec![5, 1]).unwrap();
@@ -688,6 +689,7 @@ mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_vector_even_length() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 10.0], vec![4, 1]).unwrap();
@@ -695,6 +697,7 @@ mod tests {
         assert_eq!(result, Value::Num(6.5));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 7.0, 2.0, 9.0, 5.0, 11.0], vec![3, 2]).expect("tensor");
@@ -708,6 +711,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0], vec![3, 2]).expect("tensor");
@@ -722,6 +726,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_all_across_matrix() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![3, 2]).unwrap();
@@ -733,6 +738,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_vecdim_multiple_axes() {
         let tensor =
@@ -751,6 +757,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_with_omit_nan() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
@@ -759,6 +766,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_with_include_nan_propagates() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
@@ -769,6 +777,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_empty_returns_nan() {
         let tensor = Tensor::new(vec![], vec![0, 1]).unwrap();
@@ -779,6 +788,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_dimension_greater_than_ndims_returns_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -792,6 +802,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_rejects_unknown_keyword() {
         let err = median_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
@@ -801,6 +812,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -817,6 +829,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -834,13 +847,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn median_wgpu_dim_matches_cpu() {

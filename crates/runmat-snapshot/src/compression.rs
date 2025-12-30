@@ -3,11 +3,17 @@
 //! Multi-tier compression system with adaptive algorithm selection.
 //! Optimized for fast decompression during runtime startup.
 
+use runmat_time::Instant;
 use std::collections::HashMap;
-use std::time::Instant;
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
+use std::convert::TryFrom;
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
+use std::io::{Cursor, Read};
 
 use crate::format::{CompressionAlgorithm, CompressionInfo};
 use crate::{SnapshotError, SnapshotResult};
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
+use ruzstd::decoding::StreamingDecoder;
 
 /// Compression engine with adaptive algorithm selection
 pub struct CompressionEngine {
@@ -141,34 +147,25 @@ impl CompressionEngine {
                 let original_size = info
                     .parameters
                     .get("original_size")
-                    .and_then(|s| s.parse::<i32>().ok())
+                    .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or_else(|| {
                         // Fallback: estimate from compressed size
-                        (data.len() * 4) as i32
+                        data.len() * 4
                     });
 
-                lz4::block::decompress(data, Some(original_size)).map_err(|e| {
-                    SnapshotError::Compression {
-                        message: format!("LZ4 decompression failed: {e}"),
-                    }
-                })?
+                decompress_lz4_block(data, original_size)?
             }
 
             #[cfg(feature = "compression")]
             CompressionAlgorithm::Zstd { dictionary } => {
-                if let Some(ref _dict) = dictionary {
-                    // Dictionary decompression not supported by this zstd version, fall back to standard
+                if dictionary.is_some() {
+                    // Dictionary decompression not supported by current backend, fall back to standard
                     log::debug!(
                         "Dictionary decompression not available, using standard decompression"
                     );
-                    zstd::decode_all(data).map_err(|e| SnapshotError::Compression {
-                        message: format!("ZSTD decompression failed: {e}"),
-                    })?
-                } else {
-                    zstd::decode_all(data).map_err(|e| SnapshotError::Compression {
-                        message: format!("ZSTD decompression failed: {e}"),
-                    })?
                 }
+
+                decompress_zstd_block(data)?
             }
 
             #[cfg(not(feature = "compression"))]
@@ -226,20 +223,7 @@ impl CompressionEngine {
 
             #[cfg(feature = "compression")]
             CompressionAlgorithm::Lz4 { fast } => {
-                let result = if fast {
-                    lz4::block::compress(data, None, false)
-                } else {
-                    lz4::block::compress(
-                        data,
-                        Some(lz4::block::CompressionMode::HIGHCOMPRESSION(12)),
-                        false,
-                    )
-                };
-
-                let compressed = result.map_err(|e| SnapshotError::Compression {
-                    message: format!("LZ4 compression failed: {e}"),
-                })?;
-
+                let compressed = compress_lz4_block(data, fast)?;
                 (compressed, CompressionAlgorithm::Lz4 { fast })
             }
 
@@ -251,17 +235,12 @@ impl CompressionEngine {
                     self.config.default_level as i32
                 };
 
-                let compressed = if let Some(ref _dict) = dictionary {
-                    // Dictionary compression not supported by this zstd version, fall back to standard
+                if dictionary.is_some() {
+                    // Dictionary compression not supported by current backend, fall back to standard
                     log::debug!("Dictionary compression not available, using standard compression");
-                    zstd::encode_all(data, level)
-                } else {
-                    zstd::encode_all(data, level)
-                };
+                }
 
-                let compressed = compressed.map_err(|e| SnapshotError::Compression {
-                    message: format!("ZSTD compression failed: {e}"),
-                })?;
+                let compressed = compress_zstd_block(data, level)?;
 
                 (compressed, CompressionAlgorithm::Zstd { dictionary })
             }
@@ -511,6 +490,93 @@ impl CompressionStats {
     }
 }
 
+#[cfg(feature = "compression")]
+fn decompress_lz4_block(data: &[u8], original_size: usize) -> SnapshotResult<Vec<u8>> {
+    let size_hint = original_size.max(1);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let min_uncompressed = size_hint.max(data.len().saturating_mul(4));
+        lz4_flex::block::decompress(data, min_uncompressed).map_err(|e| {
+            SnapshotError::Compression {
+                message: format!("LZ4 decompression failed: {e}"),
+            }
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let clamped = size_hint.min(i32::MAX as usize);
+        let size_i32 = i32::try_from(clamped).unwrap_or(i32::MAX);
+        lz4::block::decompress(data, Some(size_i32)).map_err(|e| SnapshotError::Compression {
+            message: format!("LZ4 decompression failed: {e}"),
+        })
+    }
+}
+
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
+fn decompress_zstd_block(data: &[u8]) -> SnapshotResult<Vec<u8>> {
+    let cursor = Cursor::new(data);
+    let mut decoder = StreamingDecoder::new(cursor).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD decompression failed: {e}"),
+    })?;
+    let mut output = Vec::new();
+    decoder
+        .read_to_end(&mut output)
+        .map_err(|e| SnapshotError::Compression {
+            message: format!("ZSTD decompression failed: {e}"),
+        })?;
+    Ok(output)
+}
+
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
+fn decompress_zstd_block(data: &[u8]) -> SnapshotResult<Vec<u8>> {
+    zstd::decode_all(data).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD decompression failed: {e}"),
+    })
+}
+
+#[cfg(feature = "compression")]
+fn compress_lz4_block(data: &[u8], fast: bool) -> SnapshotResult<Vec<u8>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let compressed = lz4_flex::block::compress(data);
+        if !fast {
+            log::trace!("High-compression LZ4 mode not available on wasm; using fast path");
+        }
+        Ok(compressed)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let result = if fast {
+            lz4::block::compress(data, None, false)
+        } else {
+            lz4::block::compress(
+                data,
+                Some(lz4::block::CompressionMode::HIGHCOMPRESSION(12)),
+                false,
+            )
+        };
+
+        result.map_err(|e| SnapshotError::Compression {
+            message: format!("LZ4 compression failed: {e}"),
+        })
+    }
+}
+
+#[cfg(all(feature = "compression", target_arch = "wasm32"))]
+fn compress_zstd_block(_data: &[u8], _level: i32) -> SnapshotResult<Vec<u8>> {
+    Err(SnapshotError::Configuration {
+        message: "ZSTD compression is not supported on wasm targets".to_string(),
+    })
+}
+
+#[cfg(all(feature = "compression", not(target_arch = "wasm32")))]
+fn compress_zstd_block(data: &[u8], level: i32) -> SnapshotResult<Vec<u8>> {
+    zstd::encode_all(data, level).map_err(|e| SnapshotError::Compression {
+        message: format!("ZSTD compression failed: {e}"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,11 +619,9 @@ mod tests {
         let data = b"Hello, World! This is a longer test string for LZ4 compression.".repeat(50);
         let result = engine.compress(&data).unwrap();
 
-        println!(
-            "Original size: {}, Compressed size: {}, Algorithm: {:?}",
-            data.len(),
-            result.data.len(),
-            result.info.algorithm
+        assert!(
+            result.data.len() <= data.len(),
+            "Compression did not reduce size"
         );
 
         // Check that compression was attempted (either compressed or fell back to None if not effective)
@@ -572,8 +636,6 @@ mod tests {
                 assert_eq!(decompressed, data);
             }
             Err(e) => {
-                println!("Decompression error: {e:?}");
-                println!("This is expected if compression fell back to None due to ineffective compression ratio");
                 // If decompression fails, ensure we're dealing with uncompressed data
                 if matches!(result.info.algorithm, CompressionAlgorithm::None) {
                     assert_eq!(result.data, data);

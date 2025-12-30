@@ -11,14 +11,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "det";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::solve::det"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "det"
 category: "math/linalg/solve"
@@ -174,10 +177,6 @@ No. The LU factorization works in floating-point, so the result is subject to ro
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
-
 #[derive(Debug, Clone, Copy)]
 enum Determinant {
     Real(f64),
@@ -200,6 +199,7 @@ impl Determinant {
     }
 }
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("det"),
@@ -215,8 +215,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real inputs re-upload their determinant to preserve residency; complex inputs currently return host scalars when LU hooks are available.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -227,17 +226,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Determinant evaluation is a terminal scalar operation and does not participate in fusion plans.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
-
 #[runtime_builtin(
     name = "det",
     category = "math/linalg/solve",
     summary = "Compute the determinant of a square matrix.",
     keywords = "det,determinant,linear algebra,matrix,gpu",
-    accel = "det"
+    accel = "det",
+    builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
 fn det_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -562,11 +557,12 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_basic_2x2() {
         let tensor = Tensor::new(vec![4.0, 1.0, -2.0, 3.0], vec![2, 2]).unwrap();
@@ -577,6 +573,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -584,6 +581,7 @@ mod tests {
         assert!(err.contains("det: input must be a square matrix."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_complex_matrix() {
         let data = vec![(1.0, 2.0), (0.0, 0.0), (0.0, 3.0), (4.0, -1.0)];
@@ -598,6 +596,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_complex_scalar_input() {
         let value = det_builtin(Value::Complex(3.0, -2.0)).expect("det");
@@ -610,6 +609,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_logical_matrix_promotes() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -620,6 +620,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_singular_returns_zero() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -630,6 +631,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_empty_matrix_returns_one() {
         let tensor = Tensor::new(vec![], vec![0, 0]).unwrap();
@@ -640,6 +642,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -663,6 +666,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_gpu_permutation_sign() {
         test_support::with_test_provider(|provider| {
@@ -682,6 +686,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_rejects_higher_rank_arrays() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -689,13 +694,14 @@ mod tests {
         assert!(err.contains("det: input must be a square matrix."));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn det_wgpu_matches_cpu() {

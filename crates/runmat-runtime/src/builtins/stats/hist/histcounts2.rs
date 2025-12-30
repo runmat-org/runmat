@@ -11,15 +11,19 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const NAME: &str = "histcounts2";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "histcounts2",
+        builtin_path = "crate::builtins::stats::hist::histcounts2"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "histcounts2"
 category: "stats/hist"
@@ -186,6 +190,7 @@ ensures the resulting edges align with integer boundaries, respecting any suppli
 - Found a discrepancy? Please open an issue with a minimal reproduction example.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::hist::histcounts2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histcounts2",
     op_kind: GpuOpKind::Custom("histcounts2"),
@@ -202,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may install a custom 2-D histogram kernel; current builds gather to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::hist::histcounts2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "histcounts2",
     shape: ShapeRequirements::Any,
@@ -214,18 +218,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Histogram binning terminates fusion chains and materialises host-resident outputs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("histcounts2", DOC_MD);
-
 #[runtime_builtin(
     name = "histcounts2",
     category = "stats/hist",
     summary = "Count paired observations into two-dimensional histogram bins.",
     keywords = "histcounts2,2d histogram,joint distribution,binning,probability,gpu",
     accel = "reduction",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::stats::hist::histcounts2"
 )]
 fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(x, y, &rest).map(|eval| eval.into_counts_value())
@@ -1302,7 +1302,7 @@ fn parse_normalization(text: &str) -> Result<HistogramNormalization, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
@@ -1314,6 +1314,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_basic_counts() {
         let x = Tensor::new(vec![0.5, 1.5, 2.5, 3.5], vec![4, 1]).unwrap();
@@ -1350,6 +1351,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_probability_normalization() {
         let x = Tensor::new(vec![0.2, 0.4, 1.1, 1.5], vec![4, 1]).unwrap();
@@ -1370,6 +1372,7 @@ mod tests {
         assert_eq!(counts.data, vec![0.5, 0.0, 0.0, 0.5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_nan_pairs_excluded() {
         let x = Tensor::new(vec![1.0, 2.0, f64::NAN, 3.0], vec![4, 1]).unwrap();
@@ -1387,6 +1390,7 @@ mod tests {
         assert_eq!(counts.data.iter().sum::<f64>(), 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_num_bins_vector() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -1405,6 +1409,7 @@ mod tests {
         assert_eq!(counts.data.iter().sum::<f64>(), 4.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_bin_width_and_limits() {
         let x_tensor = Tensor::new(vec![0.2, 1.2, 2.4, 2.6], vec![4, 1]).unwrap();
@@ -1458,6 +1463,7 @@ mod tests {
         assert_eq!(density.data[0], 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_cdf_normalization() {
         let x = Tensor::new(vec![0.1, 0.9, 1.2, 1.8], vec![4, 1]).unwrap();
@@ -1479,6 +1485,7 @@ mod tests {
         assert!(cdf.data.windows(2).all(|w| w[0] <= w[1] + 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_integer_bin_method() {
         let x = Tensor::new(vec![0.2, 1.7, 2.1], vec![3, 1]).unwrap();
@@ -1509,6 +1516,7 @@ mod tests {
             .all(|w| (w[1] - w[0] - 1.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_num_bins_zero_errors() {
         let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1521,6 +1529,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_binmethod_conflict_errors() {
         let x = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
@@ -1538,6 +1547,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1575,6 +1585,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn histcounts2_wgpu_roundtrip() {
@@ -1628,8 +1639,8 @@ mod tests {
         assert_eq!(count(1, 1), 0.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

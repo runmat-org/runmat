@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ne",
+        builtin_path = "crate::builtins::logical::rel::ne"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ne"
 category: "logical/rel"
@@ -172,6 +175,7 @@ Yes. You can use the operator form `A ~= B`, which maps directly to this builtin
 [`eq`](./eq), [`lt`](./lt), [`gt`](./gt), [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::ne")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ne",
     op_kind: GpuOpKind::Elementwise,
@@ -191,8 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Prefers provider elem_ne kernels when available; otherwise inputs gather to host tensors automatically.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::ne")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ne",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -215,17 +218,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits comparison kernels that write 1 when operands differ; providers may override with specialised shaders.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ne", DOC_MD);
-
 #[runtime_builtin(
     name = "ne",
     category = "logical/rel",
     summary = "Element-wise inequality comparison for scalars, arrays, and gpuArray inputs.",
     keywords = "ne,not equal,comparison,logical,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::rel::ne"
 )]
 fn ne_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
@@ -566,7 +565,7 @@ fn promote_numeric_to_complex(buffer: &NumericBuffer) -> ComplexBuffer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -574,18 +573,21 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::HandleRef;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_scalar_true() {
         let result = ne_builtin(Value::Num(5.0), Value::Num(4.0)).expect("ne");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_scalar_false() {
         let result = ne_builtin(Value::Num(5.0), Value::Num(5.0)).expect("ne");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_vector_broadcast() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 2.0], vec![1, 4]).unwrap();
@@ -599,6 +601,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_char_array_against_numeric() {
         let char_array = CharArray::new(vec!['A', 'B', 'A'], 1, 3).unwrap();
@@ -613,6 +616,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_string_array_broadcast() {
         let sa = StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap();
@@ -626,6 +630,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_identity() {
         unsafe {
@@ -643,6 +648,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_difference() {
         unsafe {
@@ -664,12 +670,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_mixed_numeric_string_error() {
         let err = ne_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.contains("ne: mixing numeric and string inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -692,6 +700,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_gpu_falls_back_to_host_when_only_one_tensor() {
         test_support::with_test_provider(|provider| {
@@ -711,13 +720,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ne_wgpu_matches_host() {

@@ -13,10 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
 const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
@@ -24,8 +21,11 @@ const INF_NAN_ERROR: &str = "jsonencode: ConvertInfAndNaN must be true to encode
 const UNSUPPORTED_TYPE_ERROR: &str =
     "jsonencode: unsupported input type; expected numeric, logical, string, struct, cell, or object data";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(
+    name = "jsonencode",
+    builtin_path = "crate::builtins::io::json::jsonencode"
+)]
 pub const DOC_MD: &str = r#"---
 title: "jsonencode"
 category: "io/json"
@@ -211,6 +211,7 @@ standard JSON escape sequences.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsonencode",
     op_kind: GpuOpKind::Custom("serialization"),
@@ -227,6 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
 
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsonencode",
     shape: ShapeRequirements::Any,
@@ -236,12 +238,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "jsonencode is a residency sink and never participates in fusion planning.",
 };
-
-register_builtin_gpu_spec!(GPU_SPEC);
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("jsonencode", DOC_MD);
 
 #[derive(Debug, Clone)]
 struct JsonEncodeOptions {
@@ -280,7 +276,8 @@ enum JsonNumber {
     category = "io/json",
     summary = "Serialize MATLAB values to UTF-8 JSON text.",
     keywords = "jsonencode,json,serialization,struct,gpu",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let host_value = gather_if_needed(&value)?;
@@ -905,7 +902,7 @@ fn format_number(value: f64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
@@ -920,12 +917,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_scalar_double() {
         let encoded = jsonencode_builtin(Value::Num(5.0), Vec::new()).expect("jsonencode");
         assert_eq!(as_string(encoded), "5");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_matrix_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).expect("tensor");
@@ -935,6 +934,7 @@ mod tests {
         assert_eq!(as_string(encoded), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_struct_round_trip() {
         let mut fields = StructValue::new();
@@ -948,6 +948,7 @@ mod tests {
         assert_eq!(as_string(encoded), "{\"name\":\"RunMat\",\"year\":2025}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_struct_options_enable_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
@@ -960,6 +961,7 @@ mod tests {
         assert_eq!(as_string(encoded), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_accept_scalar_tensor_bool() {
         let tensor_value = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
@@ -968,6 +970,7 @@ mod tests {
         assert_eq!(as_string(encoded), "42");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_reject_non_scalar_tensor_bool() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
@@ -979,6 +982,7 @@ mod tests {
         assert_eq!(err, OPTION_VALUE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_accept_scalar_logical_array() {
         let logical = LogicalArray::new(vec![1], vec![1]).expect("logical");
@@ -987,6 +991,7 @@ mod tests {
         assert_eq!(as_string(encoded), "7");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_convert_inf_and_nan_controls_null_output() {
         let tensor = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).expect("tensor");
@@ -1002,6 +1007,7 @@ mod tests {
         assert_eq!(err, INF_NAN_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_cell_array() {
         let elements = vec![Value::from(1.0), Value::from("two")];
@@ -1010,6 +1016,7 @@ mod tests {
         assert_eq!(as_string(encoded), "[1,\"two\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_char_array_zero_rows_is_empty_array() {
         let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
@@ -1017,6 +1024,7 @@ mod tests {
         assert_eq!(as_string(encoded), "[]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_char_array_empty_strings_per_row() {
         let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
@@ -1025,6 +1033,7 @@ mod tests {
         assert_eq!(encoded_str, "[\"\",\"\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_string_array_matrix() {
         let sa = StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![2, 1])
@@ -1033,6 +1042,7 @@ mod tests {
         assert_eq!(as_string(encoded), "[\"alpha\",\"beta\"]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_complex_tensor_outputs_objects() {
         let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
@@ -1043,6 +1053,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_gpu_tensor_gathers_host_data() {
         test_support::with_test_provider(|provider| {
@@ -1058,6 +1069,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn jsonencode_gpu_tensor_wgpu_gathers_host_data() {
@@ -1077,8 +1089,8 @@ mod tests {
         assert_eq!(as_string(encoded), "[1,2,3]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

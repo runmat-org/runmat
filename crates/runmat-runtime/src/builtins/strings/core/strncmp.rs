@@ -10,13 +10,18 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const FN_NAME: &str = "strncmp";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strncmp",
+        builtin_path = "crate::builtins::strings::core::strncmp"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strncmp"
 category: "strings/core"
@@ -152,6 +157,7 @@ Yes. Scalar comparisons yield logical scalars; array inputs produce logical arra
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
     op_kind: GpuOpKind::Custom("string-prefix-compare"),
@@ -167,8 +173,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs host-side prefix comparisons; GPU inputs are gathered before evaluation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strncmp",
     shape: ShapeRequirements::Any,
@@ -179,17 +184,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results and is not eligible for GPU fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strncmp", DOC_MD);
-
 #[runtime_builtin(
     name = "strncmp",
     category = "strings/core",
     summary = "Compare text inputs for equality up to N leading characters (case-sensitive).",
     keywords = "strncmp,string compare,prefix,text equality",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 fn strncmp_builtin(a: Value, b: Value, n: Value) -> Result<Value, String> {
     let a = gather_if_needed(&a).map_err(|e| format!("{FN_NAME}: {e}"))?;
@@ -325,14 +326,14 @@ fn parse_prefix_length_from_float(value: f64) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_exact_prefix_true() {
         let result = strncmp_builtin(
@@ -344,6 +345,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_mismatch_within_prefix_false() {
         let result = strncmp_builtin(
@@ -355,6 +357,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_longer_string_after_prefix_false() {
         let result = strncmp_builtin(
@@ -366,6 +369,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_zero_length_always_true() {
         let result = strncmp_builtin(
@@ -377,6 +381,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_bool_true_compares_first_character() {
         let result = strncmp_builtin(
@@ -388,6 +393,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_bool_false_treated_as_zero() {
         let result = strncmp_builtin(
@@ -399,6 +405,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_logical_array_scalar() {
         let logical = LogicalArray::new(vec![1], vec![1]).unwrap();
@@ -411,6 +418,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_tensor_scalar_double() {
         let limit = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -423,6 +431,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_char_array_rows() {
         let chars = CharArray::new(
@@ -443,6 +452,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_cell_arrays_broadcast() {
         let left = CellArray::new(
@@ -475,6 +485,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_string_array_broadcast_scalar() {
         let strings = StringArray::new(
@@ -492,6 +503,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_missing_string_false_when_prefix_positive() {
         let strings =
@@ -506,6 +518,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_missing_zero_length_true() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -518,6 +531,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -531,6 +545,7 @@ mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_invalid_length_type_errors() {
         let err = strncmp_builtin(
@@ -542,6 +557,7 @@ mod tests {
         assert!(err.contains("prefix length"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_negative_length_errors() {
         let err = strncmp_builtin(
@@ -553,6 +569,7 @@ mod tests {
         assert!(err.to_ascii_lowercase().contains("nonnegative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strncmp_prefix_length_from_gpu_tensor() {
@@ -581,8 +598,8 @@ mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

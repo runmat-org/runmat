@@ -19,11 +19,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "intersect",
+        builtin_path = "crate::builtins::array::sorting_sets::intersect"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "intersect"
 category: "array/sorting_sets"
@@ -190,6 +193,9 @@ gathers automatically, so explicit residency management is rarely needed. Explic
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "intersect",
     op_kind: GpuOpKind::Custom("intersect"),
@@ -206,8 +212,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose a dedicated intersect hook; otherwise tensors are gathered and processed on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "intersect",
     shape: ShapeRequirements::Any,
@@ -218,18 +225,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`intersect` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered when necessary.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("intersect", DOC_MD);
-
 #[runtime_builtin(
     name = "intersect",
     category = "array/sorting_sets",
     summary = "Return common elements or rows across arrays with MATLAB-compatible ordering and index outputs.",
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(a, b, &rest).map(|eval| eval.into_values_value())
@@ -1398,11 +1401,12 @@ fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_sorted() {
         let a = Tensor::new(vec![5.0, 7.0, 5.0, 1.0], vec![4, 1]).unwrap();
@@ -1424,6 +1428,7 @@ mod tests {
         assert_eq!(ib.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_stable() {
         let a = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 3.0], vec![5, 1]).unwrap();
@@ -1445,6 +1450,7 @@ mod tests {
         assert_eq!(ib.data, vec![2.0, 4.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_handles_nan() {
         let a = Tensor::new(vec![f64::NAN, 1.0, f64::NAN], vec![3, 1]).unwrap();
@@ -1467,6 +1473,7 @@ mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_complex_with_real_inputs() {
         let complex =
@@ -1494,6 +1501,7 @@ mod tests {
         assert_eq!(ib.data, vec![3.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_numeric_rows_default() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1516,6 +1524,7 @@ mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_char_elements_basic() {
         let a = CharArray::new("cab".chars().collect(), 1, 3).unwrap();
@@ -1546,6 +1555,7 @@ mod tests {
         assert_eq!(ib.data, vec![1.0, 2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_string_elements_stable() {
         let a = StringArray::new(
@@ -1580,6 +1590,7 @@ mod tests {
         assert_eq!(ib.data, vec![3.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1592,6 +1603,7 @@ mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1608,6 +1620,7 @@ mod tests {
         assert!(err.contains("same number of columns"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_mixed_types_error() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1624,6 +1637,7 @@ mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1650,6 +1664,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn intersect_two_outputs_from_evaluate() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1673,6 +1688,7 @@ mod tests {
         assert_eq!(ib_tensor2.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn intersect_wgpu_matches_cpu() {
@@ -1719,8 +1735,8 @@ mod tests {
         assert_eq!(gpu_ib.data, cpu_ib.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

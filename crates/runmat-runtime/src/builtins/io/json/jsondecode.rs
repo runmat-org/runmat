@@ -11,16 +11,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
 
-#[cfg(feature = "doc_export")]
 #[allow(clippy::too_many_lines)]
+#[runmat_macros::register_doc_text(
+    name = "jsondecode",
+    builtin_path = "crate::builtins::io::json::jsondecode"
+)]
 pub const DOC_MD: &str = r#"---
 title: "jsondecode"
 category: "io/json"
@@ -194,6 +194,7 @@ remains valid JSON.
 [jsonencode](./jsonencode), [struct](../../structs/constructors/struct), [cell](../../array/constructors/cell), [fileread](../filetext/fileread)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsondecode",
     op_kind: GpuOpKind::Custom("parse"),
@@ -209,8 +210,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "jsondecode",
     shape: ShapeRequirements::Any,
@@ -221,17 +221,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "jsondecode is a residency sink; it always runs on the CPU and breaks fusion graphs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("jsondecode", DOC_MD);
-
 #[runtime_builtin(
     name = "jsondecode",
     category = "io/json",
     summary = "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
     keywords = "jsondecode,json,parse json,struct,gpu",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::io::json::jsondecode"
 )]
 fn jsondecode_builtin(text: Value) -> Result<Value, String> {
     let gathered = gather_if_needed(&text).map_err(|e| format!("jsondecode: {e}"))?;
@@ -596,23 +592,24 @@ fn parse_rectangular_cell_array(values: &[JsonValue]) -> Result<Option<Value>, S
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, Tensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn char_row(text: &str) -> Value {
         Value::CharArray(CharArray::new_row(text))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_scalar_number() {
         let result = jsondecode_builtin(char_row("42")).expect("jsondecode");
         assert_eq!(result, Value::Num(42.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_boolean_array() {
         let result = jsondecode_builtin(char_row("[true,false,true]")).expect("jsondecode");
@@ -625,6 +622,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_matrix_to_tensor() {
         let result = jsondecode_builtin(char_row("[[1,2,3],[4,5,6]]")).expect("jsondecode matrix");
@@ -637,6 +635,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_numeric_tensor_3d() {
         let json = "[[[1,2],[3,4]],[[5,6],[7,8]]]";
@@ -650,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_numeric_singleton_array_retains_tensor() {
         let result =
@@ -665,6 +665,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_object_to_struct() {
         let result = jsondecode_builtin(char_row("{\"name\":\"RunMat\",\"year\":2025}"))
@@ -685,6 +686,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_string_array() {
         let result = jsondecode_builtin(char_row("[\"alpha\",\"beta\",\"gamma\"]"))
@@ -707,6 +709,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_mixed_array_returns_cell() {
         let result =
@@ -726,6 +729,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_rectangular_cell_array_preserves_layout() {
         let text = "[[1,true],[false,null]]";
@@ -750,6 +754,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_array_of_objects_returns_cell() {
         let text = "[{\"id\":1,\"name\":\"Ada\"},{\"id\":2,\"name\":\"Charles\"}]";
@@ -787,6 +792,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_null_returns_empty_double() {
         let result = jsondecode_builtin(char_row("null")).expect("jsondecode null");
@@ -799,6 +805,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_invalid_text_reports_error() {
         let err = jsondecode_builtin(char_row("{not json}")).expect_err("expected failure");
@@ -808,6 +815,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_rejects_multirow_char_input() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
@@ -815,6 +823,7 @@ mod tests {
         assert_eq!(err, INPUT_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_accepts_string_input() {
         let result = jsondecode_builtin(Value::String("[1,2]".to_string())).expect("jsondecode");
@@ -827,6 +836,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_accepts_string_array_scalar_input() {
         let array = StringArray::new(vec!["[1,2]".to_string()], vec![1, 1]).expect("string scalar");
@@ -840,13 +850,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn jsondecode_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_round_trip_with_jsonencode() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");

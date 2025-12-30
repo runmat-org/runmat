@@ -8,15 +8,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "strfind",
+        builtin_path = "crate::builtins::strings::search::strfind"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "strfind"
 category: "strings/search"
@@ -174,6 +179,7 @@ expression functions when you need case-insensitive searches.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::strfind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strfind",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -190,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Executes entirely on the host; GPU-resident inputs are gathered before substring matching.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::strfind")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "strfind",
     shape: ShapeRequirements::Any,
@@ -202,17 +207,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Text operation; not eligible for fusion and materialises host-side numeric or cell outputs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("strfind", DOC_MD);
-
 #[runtime_builtin(
     name = "strfind",
     category = "strings/search",
     summary = "Return the starting indices of pattern matches in text inputs.",
     keywords = "strfind,substring,index,positions,string search",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::search::strfind"
 )]
 fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("strfind: {e}"))?;
@@ -423,12 +424,12 @@ fn parse_bool_like(value: &Value) -> Result<bool, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_single_match_returns_row_vector() {
         let result = strfind_builtin(
@@ -446,6 +447,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_char_vector_matches() {
         let result = strfind_builtin(
@@ -463,6 +465,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_overlapping_matches() {
         let result = strfind_builtin(
@@ -480,6 +483,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_empty_pattern_returns_boundaries() {
         let result = strfind_builtin(
@@ -497,6 +501,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_string_array_returns_cell() {
         let strings = StringArray::new(
@@ -534,6 +539,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_pattern_array_returns_cell() {
         let patterns =
@@ -568,6 +574,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_name_value() {
         let result = strfind_builtin(
@@ -589,6 +596,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_numeric_value() {
         let result = strfind_builtin(
@@ -610,6 +618,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_off_string() {
         let result = strfind_builtin(
@@ -630,6 +639,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_non_scalar_error() {
         let option_value =
@@ -649,6 +659,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_missing_value_error() {
         let err = strfind_builtin(
@@ -663,6 +674,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_subject_cell_scalar_returns_cell() {
         let subject = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
@@ -685,6 +697,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_pattern_cell_scalar_returns_cell() {
         let pattern = CellArray::new(vec![Value::from("needle")], 1, 1).expect("cell construction");
@@ -707,6 +720,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_missing_subject_returns_empty() {
         let result = strfind_builtin(
@@ -724,6 +738,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_missing_pattern_returns_empty_vector() {
         let patterns =
@@ -743,6 +758,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_char_matrix_rows() {
         let data = vec!['c', 'a', 't', 'a', 'd', 'a', 'd', 'o', 'g'];
@@ -774,6 +790,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_invalid_option_name_errors() {
         let err = strfind_builtin(
@@ -788,8 +805,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

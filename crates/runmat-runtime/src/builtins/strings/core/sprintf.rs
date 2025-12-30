@@ -11,11 +11,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sprintf",
+        builtin_path = "crate::builtins::strings::core::sprintf"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sprintf"
 category: "strings/core"
@@ -204,6 +209,7 @@ arrays raise `sprintf: formatSpec must be a character row vector or string scala
 [compose](./compose), [string](./string), [num2str](./num2str), [strlength](./strlength)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sprintf",
     op_kind: GpuOpKind::Custom("format"),
@@ -219,8 +225,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Formatting runs on the CPU; GPU tensors are gathered before substitution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sprintf",
     shape: ShapeRequirements::Any,
@@ -231,18 +236,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting is a residency sink and is not fused; callers should treat sprintf as a CPU-only builtin.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sprintf", DOC_MD);
-
 #[runtime_builtin(
     name = "sprintf",
     category = "strings/core",
     summary = "Format data into a character vector using printf-style placeholders.",
     keywords = "sprintf,format,printf,text",
     accel = "format",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;
@@ -282,7 +283,7 @@ fn char_row_value(text: &str) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
@@ -294,6 +295,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_basic_integer() {
         let result = sprintf_builtin(
@@ -304,6 +306,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "Value: 42");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_float_precision() {
         let result = sprintf_builtin(
@@ -314,6 +317,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "pi ~= 3.142");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_array_repeat() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -325,6 +329,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "1 2 3 ");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_star_width() {
         let args = vec![
@@ -336,6 +341,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), " 12.35");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_literal_percent() {
         let result =
@@ -343,6 +349,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "% complete");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_gpu_numeric() {
         test_support::with_test_provider(|provider| {
@@ -359,6 +366,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_matrix_column_major() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -370,6 +378,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "1 3 2 4 ");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_not_enough_arguments_error() {
         let err = sprintf_builtin(
@@ -383,6 +392,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_extra_arguments_error() {
         let err = sprintf_builtin(
@@ -396,6 +406,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_format_spec_multirow_error() {
         let chars = CharArray::new("hi!".chars().collect(), 3, 1).unwrap();
@@ -406,6 +417,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_percent_c_from_numeric() {
         let result = sprintf_builtin(
@@ -416,6 +428,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "A");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_cell_arguments() {
         let cell = make_cell(
@@ -433,6 +446,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "1 two 3");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_string_array_column_major() {
         let data = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
@@ -446,6 +460,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "alpha beta gamma ");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_complex_s_conversion() {
         let result = sprintf_builtin(
@@ -456,6 +471,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "1.5-2i");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_escape_sequences() {
         let result = sprintf_builtin(
@@ -466,6 +482,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "Line 1\nLine 2\t(tab)");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_hex_and_octal_escapes() {
         let result =
@@ -473,6 +490,7 @@ mod tests {
         assert_eq!(char_value_to_string(result), "AA");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_unknown_escape_preserved() {
         let result =
@@ -480,8 +498,8 @@ mod tests {
         assert_eq!(char_value_to_string(result), "Value\\q");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

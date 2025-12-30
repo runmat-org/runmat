@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{CharArray, NumericDType, Value};
 
 fn mean_variance(samples: &[f64]) -> (f64, f64) {
@@ -14,6 +16,7 @@ fn mean_variance(samples: &[f64]) -> (f64, f64) {
     (mean, variance)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn randn_single_stats_are_unit() {
     let count = 50_000.0;
@@ -40,6 +43,7 @@ fn randn_single_stats_are_unit() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn randn_double_stats_are_unit() {
     let count = 50_000.0;

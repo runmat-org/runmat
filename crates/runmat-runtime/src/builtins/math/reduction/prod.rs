@@ -9,18 +9,21 @@ const NAME: &str = "prod";
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
-use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "prod",
+        builtin_path = "crate::builtins::math::reduction::prod"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "prod"
 category: "math/reduction"
@@ -177,6 +180,7 @@ Only when you explicitly request `'native'` or `'like'`. Otherwise, integers are
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::prod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "prod",
     op_kind: GpuOpKind::Reduction,
@@ -200,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_prod_dim / reduce_prod. Requests using 'omitnan', multi-axis reductions, or class coercions fall back to the host implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::prod")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "prod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -221,17 +224,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits multiplicative reductions; providers can override with custom kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("prod", DOC_MD);
-
 #[runtime_builtin(
     name = "prod",
     category = "math/reduction",
     summary = "Multiply elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "prod,product,reduction,gpu,omitnan",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::reduction::prod"
 )]
 fn prod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input_meta = InputMeta::from_value(&value);
@@ -965,18 +964,20 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_scalar_num() {
         let result = prod_builtin(Value::Num(5.0), Vec::new()).expect("prod");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -990,6 +991,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1004,6 +1006,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_all_dimension() {
         let tensor =
@@ -1012,6 +1015,7 @@ mod tests {
         assert_eq!(result, Value::Num(720.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_vecdim_multiple_axes() {
         let tensor = Tensor::new(
@@ -1030,6 +1034,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_with_omit_nan_default_dimension() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
@@ -1038,6 +1043,7 @@ mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_with_include_nan_propagates() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
@@ -1048,6 +1054,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_dimension_greater_than_ndims_returns_input() {
         let tensor = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -1060,6 +1067,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_native_integer_scalar() {
         let value = Value::Int(IntValue::I16(4));
@@ -1067,6 +1075,7 @@ mod tests {
         assert_eq!(result, Value::Int(IntValue::I16(4)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_like_complex_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1085,6 +1094,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_like_without_prototype_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1092,12 +1102,14 @@ mod tests {
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_rejects_complex_input() {
         let err = prod_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
         assert!(err.contains("complex inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1114,6 +1126,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_all_reduction() {
         test_support::with_test_provider(|provider| {
@@ -1130,6 +1143,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_like_prototype() {
         test_support::with_test_provider(|provider| {
@@ -1155,6 +1169,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -1172,13 +1187,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn prod_wgpu_dim1_matches_cpu() {

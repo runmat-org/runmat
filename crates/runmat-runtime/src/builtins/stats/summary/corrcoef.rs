@@ -12,11 +12,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "corrcoef",
+        builtin_path = "crate::builtins::stats::summary::corrcoef"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "corrcoef"
 category: "stats/summary"
@@ -180,6 +183,7 @@ Yes. Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "corrcoef",
     op_kind: GpuOpKind::Custom("summary-stats"),
@@ -195,8 +199,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side corrcoef kernels when rows='all'; other cases fall back to host execution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "corrcoef",
     shape: ShapeRequirements::Any,
@@ -207,17 +210,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats corrcoef as a non-fusible boundary; GPU execution is provided via a custom provider hook.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("corrcoef", DOC_MD);
-
 #[runtime_builtin(
     name = "corrcoef",
     category = "stats/summary",
     summary = "Compute Pearson correlation coefficients for the columns of matrices or paired data sets.",
     keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let args = CorrcoefArgs::parse(value, rest)?;
@@ -754,7 +753,7 @@ fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor, Value};
@@ -777,6 +776,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_matrix_basic() {
         let tensor = Tensor::new(
@@ -808,6 +808,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_two_inputs_matches_concatenation() {
         let left = Tensor::new(
@@ -848,6 +849,7 @@ mod tests {
         assert_tensor_close(&actual_tensor, &expected_tensor.data, 1.0e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_rows_complete_ignores_missing() {
         let tensor = Tensor::new(
@@ -881,6 +883,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_rows_pairwise_staggered_missing() {
         let tensor = Tensor::new(
@@ -919,6 +922,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_flag_one_accepted() {
         let tensor = Tensor::new(
@@ -945,6 +949,7 @@ mod tests {
         assert_tensor_close(&a, &b.data, 1.0e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -979,6 +984,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_mismatched_rows_errors() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -991,6 +997,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_invalid_flag_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1002,8 +1009,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(
@@ -1012,6 +1019,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn corrcoef_wgpu_matches_cpu() {

@@ -6,14 +6,18 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "nnz",
+        builtin_path = "crate::builtins::math::reduction::nnz"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "nnz"
 category: "math/reduction"
@@ -179,6 +183,7 @@ finite double.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "nnz",
     op_kind: GpuOpKind::Reduction,
@@ -201,8 +206,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "nnz",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -229,17 +233,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion reductions treat NaN values as nonzero, mirroring MATLAB `nnz` semantics.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("nnz", DOC_MD);
-
 #[runtime_builtin(
     name = "nnz",
     category = "math/reduction",
     summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 fn nnz_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let dim = parse_dimension_arg(&rest)?;
@@ -536,29 +536,33 @@ fn describe_value_kind(value: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_zero() {
         let result = nnz_host_value(Value::Num(0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_negative_zero_is_zero() {
         let result = nnz_host_value(Value::Num(-0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_nonzero() {
         let result = nnz_host_value(Value::Int(IntValue::I32(-5)), None).expect("nnz");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_tensor_counts_entries() {
         let tensor = Tensor::new(vec![1.0, 0.0, -3.0, f64::NAN], vec![2, 2]).unwrap();
@@ -566,6 +570,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_matrix_dimension_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -579,6 +584,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -592,6 +598,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_empty_matrix_dimension_returns_zero_counts() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -605,6 +612,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_scalar_with_dimension_returns_scalar() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -612,6 +620,7 @@ mod tests {
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_three_dimensional_reduction_counts_per_slice() {
         let data = vec![1.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 4.0];
@@ -626,6 +635,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_dimension_greater_than_ndims_returns_mask() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -639,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_empty_tensor_is_zero() {
         let tensor = Tensor::new(vec![], vec![0, 3]).unwrap();
@@ -646,6 +657,7 @@ mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_complex_tensor_counts() {
         let data = vec![(0.0, 0.0), (2.0, 0.0), (0.0, -4.0), (0.0, 0.0)];
@@ -654,6 +666,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_logical_array_counts_true() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![4]).unwrap();
@@ -661,6 +674,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_char_array_counts_nonzero_codepoints() {
         let chars = CharArray::new(vec!['a', '\0', 'c'], 1, 3).unwrap();
@@ -668,12 +682,14 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_complex_scalar_nan_counts() {
         let result = nnz_host_value(Value::Complex(f64::NAN, 0.0), None).expect("nnz");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -688,6 +704,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn nnz_wgpu_dim_matches_cpu() {
@@ -712,6 +729,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
@@ -722,8 +740,8 @@ mod tests {
         assert!(err.contains("string scalar"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

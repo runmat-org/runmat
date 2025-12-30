@@ -13,11 +13,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "randn",
+        builtin_path = "crate::builtins::array::creation::randn"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "randn"
 category: "array/creation"
@@ -195,6 +198,7 @@ No. Random generation is treated as a sink operation and excluded from fusion pl
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "randn",
     op_kind: GpuOpKind::Custom("generator"),
@@ -213,8 +217,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Leverages provider normal RNG hooks when available; otherwise falls back to host sampling followed by a single upload to preserve GPU residency.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randn",
     shape: ShapeRequirements::Any,
@@ -225,17 +228,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Random generation is treated as a sink and excluded from fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("randn", DOC_MD);
-
 #[runtime_builtin(
     name = "randn",
     category = "array/creation",
     summary = "Standard normal random numbers.",
     keywords = "randn,random,normal,gaussian,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::randn"
 )]
 fn randn_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedRandn::parse(rest)?;
@@ -422,7 +421,7 @@ fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, St
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 
@@ -431,6 +430,7 @@ mod tests {
         random::reset_rng();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
@@ -443,6 +443,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
@@ -461,6 +462,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_size_vector_argument() {
         let _guard = random::test_lock().lock().unwrap();
@@ -480,6 +482,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_zero_dimension_returns_empty() {
         let _guard = random::test_lock().lock().unwrap();
@@ -494,6 +497,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_single_precision_produces_f32() {
         let _guard = random::test_lock().lock().unwrap();
@@ -511,6 +515,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
@@ -530,6 +535,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
@@ -554,6 +560,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -581,13 +588,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randn_wgpu_like_and_gather() {
@@ -614,6 +622,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randn_wgpu_provider_random_normal() {

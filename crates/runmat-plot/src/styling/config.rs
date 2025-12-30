@@ -309,6 +309,7 @@ pub trait PlotTheme {
     fn get_grid_color(&self) -> Vec4;
     fn get_axis_color(&self) -> Vec4;
     fn get_data_color(&self, index: usize) -> Vec4;
+    #[cfg(feature = "gui")]
     fn apply_to_egui(&self, ctx: &egui::Context);
 }
 
@@ -331,6 +332,7 @@ impl PlotTheme for ModernDarkTheme {
     fn get_data_color(&self, index: usize) -> Vec4 {
         self.get_data_color(index)
     }
+    #[cfg(feature = "gui")]
     fn apply_to_egui(&self, ctx: &egui::Context) {
         self.apply_to_egui(ctx)
     }
@@ -387,6 +389,7 @@ impl PlotTheme for ClassicLightTheme {
     fn get_data_color(&self, index: usize) -> Vec4 {
         self.data_colors[index % self.data_colors.len()]
     }
+    #[cfg(feature = "gui")]
     fn apply_to_egui(&self, ctx: &egui::Context) {
         ctx.set_visuals(egui::Visuals::light());
     }
@@ -442,6 +445,7 @@ impl PlotTheme for HighContrastTheme {
     fn get_data_color(&self, index: usize) -> Vec4 {
         self.data_colors[index % self.data_colors.len()]
     }
+    #[cfg(feature = "gui")]
     fn apply_to_egui(&self, ctx: &egui::Context) {
         let mut visuals = egui::Visuals::dark();
         visuals.extreme_bg_color = egui::Color32::BLACK;
@@ -505,6 +509,7 @@ impl PlotTheme for CustomTheme {
             self.data_colors[index % self.data_colors.len()]
         }
     }
+    #[cfg(feature = "gui")]
     fn apply_to_egui(&self, ctx: &egui::Context) {
         let mut visuals =
             if self.background_color.x + self.background_color.y + self.background_color.z < 1.5 {

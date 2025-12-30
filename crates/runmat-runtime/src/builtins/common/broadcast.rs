@@ -231,33 +231,38 @@ impl<'a> Iterator for BroadcastIter<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_equal_shapes() {
         let out = broadcast_shapes("test", &[2, 3], &[2, 3]).unwrap();
         assert_eq!(out, vec![2, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_scalar() {
         let out = broadcast_shapes("test", &[1, 1], &[4, 5]).unwrap();
         assert_eq!(out, vec![4, 5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_mismatched_dimension_errors() {
         let err = broadcast_shapes("test", &[2, 3], &[4, 3]).unwrap_err();
         assert!(err.contains("dimension 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compute_strides_column_major() {
         let strides = compute_strides(&[2, 3, 4]);
         assert_eq!(strides, vec![1, 2, 6]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_index_maps_scalar_inputs() {
         let strides = compute_strides(&[1, 1]);
@@ -265,6 +270,7 @@ mod tests {
         assert_eq!(idx, 0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_same_shape() {
         let plan = BroadcastPlan::new(&[2, 3], &[2, 3]).unwrap();
@@ -284,6 +290,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_scalar_expansion() {
         let plan = BroadcastPlan::new(&[1, 3], &[1, 1]).unwrap();
@@ -293,6 +300,7 @@ mod tests {
         assert_eq!(indices, vec![(0, 0, 0), (1, 1, 0), (2, 2, 0)]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn broadcast_zero_sized_dimension() {
         let plan = BroadcastPlan::new(&[0, 3], &[1, 3]).unwrap();

@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "and",
+        builtin_path = "crate::builtins::logical::bit::and"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "and"
 category: "logical/bit"
@@ -164,6 +167,7 @@ RunMat promotes the other input to the GPU before dispatch when the auto-offload
 [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::and")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "and",
     op_kind: GpuOpKind::Elementwise,
@@ -182,8 +186,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to host execution when the provider does not implement logical_and; non-zero (including NaN) inputs map to true.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::and")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "and",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -208,17 +211,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion generates WGSL kernels that treat non-zero inputs as true and write 0/1 outputs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("and", DOC_MD);
-
 #[runtime_builtin(
     name = "and",
     category = "logical/bit",
     summary = "Element-wise logical AND for scalars, arrays, and gpuArray values.",
     keywords = "logical,and,elementwise,boolean,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::bit::and"
 )]
 fn and_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
@@ -366,7 +365,7 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -374,6 +373,7 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_of_booleans() {
         assert_eq!(
@@ -386,6 +386,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -400,6 +401,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
@@ -413,6 +415,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_char_arrays() {
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -428,12 +431,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_treats_nan_as_true() {
         let result = and_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_complex_inputs() {
         let result = and_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
@@ -443,6 +448,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -451,6 +457,7 @@ mod tests {
         assert!(err.contains("size mismatch"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_rejects_unsupported_types() {
         let err = and_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
@@ -460,6 +467,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -477,6 +485,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_gpu_supports_broadcast() {
         test_support::with_test_provider(|provider| {
@@ -503,6 +512,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn and_wgpu_matches_host_path() {
@@ -551,8 +561,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

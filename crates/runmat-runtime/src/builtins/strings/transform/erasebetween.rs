@@ -4,21 +4,23 @@ use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "eraseBetween",
+        builtin_path = "crate::builtins::strings::transform::erasebetween"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "eraseBetween"
 category: "strings/transform"
@@ -195,6 +197,9 @@ the string length, and start positions that lie beyond the text leave the elemen
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::strings::transform::erasebetween"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eraseBetween",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -210,8 +215,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; GPU-resident inputs are gathered before deletion and outputs remain on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::transform::erasebetween"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "eraseBetween",
     shape: ShapeRequirements::Any,
@@ -221,11 +227,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Pure string manipulation builtin; excluded from fusion plans and gathers GPU inputs immediately.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("eraseBetween", DOC_MD);
 
 const FN_NAME: &str = "eraseBetween";
 const ARG_TYPE_ERROR: &str = "eraseBetween: first argument must be a string array, character array, or cell array of character vectors";
@@ -252,7 +253,8 @@ enum BoundariesMode {
     category = "strings/transform",
     summary = "Delete text between boundary markers with MATLAB-compatible semantics.",
     keywords = "eraseBetween,delete,boundaries,strings",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::erasebetween"
 )]
 fn erase_between_builtin(
     text: Value,
@@ -859,14 +861,14 @@ fn parse_position_int(value: IntValue) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_text_default_exclusive() {
         let result = erase_between_builtin(
@@ -879,6 +881,7 @@ mod tests {
         assert_eq!(result, Value::String("The quick fox".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_text_inclusive_option() {
         let result = erase_between_builtin(
@@ -894,6 +897,7 @@ mod tests {
         assert_eq!(result, Value::String("The quick dog".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_numeric_positions_default_inclusive() {
         let result = erase_between_builtin(
@@ -906,6 +910,7 @@ mod tests {
         assert_eq!(result, Value::String("Edgar Poe".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_numeric_positions_int_inputs() {
         let result = erase_between_builtin(
@@ -918,6 +923,7 @@ mod tests {
         assert_eq!(result, Value::String("af".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_numeric_positions_exclusive_option() {
         let result = erase_between_builtin(
@@ -933,6 +939,7 @@ mod tests {
         assert_eq!(result, Value::String("small||large".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_start_not_found_returns_original() {
         let result = erase_between_builtin(
@@ -945,6 +952,7 @@ mod tests {
         assert_eq!(result, Value::String("RunMat Accelerate".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_stop_not_found_returns_original() {
         let result = erase_between_builtin(
@@ -957,6 +965,7 @@ mod tests {
         assert_eq!(result, Value::String("Device<GPU>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_missing_string_propagates() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -973,6 +982,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_zero_sized_broadcast_produces_empty_array() {
         let start = StringArray::new(Vec::new(), vec![0, 1]).unwrap();
@@ -993,6 +1003,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_numeric_positions_array() {
         let text = StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap();
@@ -1014,6 +1025,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_cell_array_preserves_types() {
         let cell = CellArray::new(
@@ -1058,6 +1070,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_char_array_default_and_inclusive() {
         let chars =
@@ -1096,6 +1109,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_option_with_char_arrays_case_insensitive() {
         let result = erase_between_builtin(
@@ -1111,6 +1125,7 @@ mod tests {
         assert_eq!(result, Value::String("AB".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_text_scalar_broadcast() {
         let text =
@@ -1130,6 +1145,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_option_invalid_value() {
         let err = erase_between_builtin(
@@ -1145,6 +1161,7 @@ mod tests {
         assert_eq!(err, OPTION_VALUE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_option_name_error() {
         let err = erase_between_builtin(
@@ -1160,6 +1177,7 @@ mod tests {
         assert_eq!(err, OPTION_NAME_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_option_pair_error() {
         let err = erase_between_builtin(
@@ -1172,6 +1190,7 @@ mod tests {
         assert_eq!(err, OPTION_PAIR_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_position_type_error() {
         let err = erase_between_builtin(
@@ -1184,6 +1203,7 @@ mod tests {
         assert_eq!(err, POSITION_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_mixed_boundary_error() {
         let err = erase_between_builtin(
@@ -1196,8 +1216,8 @@ mod tests {
         assert_eq!(err, BOUNDARY_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn eraseBetween_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

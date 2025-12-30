@@ -42,22 +42,22 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 
 ## Global options
 
-- `--debug` (env: `RUSTMAT_DEBUG`): enable debug logging.
-- `--log-level <error|warn|info|debug|trace>` (env: `RUSTMAT_LOG_LEVEL`, default: `info`).
-- `--timeout <secs>` (env: `RUSTMAT_TIMEOUT`, default: `300`): execution timeout.
-- `--config <path>` (env: `RUSTMAT_CONFIG`): load configuration file.
-- `--no-jit` (env: `RUSTMAT_JIT_DISABLE`): disable JIT (interpreter only).
-- `--jit-threshold <n>` (env: `RUSTMAT_JIT_THRESHOLD`, default: `10`): hotspot threshold.
-- `--jit-opt-level <none|size|speed|aggressive>` (env: `RUSTMAT_JIT_OPT_LEVEL`, default: `speed`).
-- `--gc-preset <low-latency|high-throughput|low-memory|debug>` (env: `RUSTMAT_GC_PRESET`).
-- `--gc-young-size <MB>` (env: `RUSTMAT_GC_YOUNG_SIZE`): young generation size.
-- `--gc-threads <n>` (env: `RUSTMAT_GC_THREADS`): max GC threads.
-- `--gc-stats` (env: `RUSTMAT_GC_STATS`): collect and display GC statistics.
+- `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
+- `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `info`).
+- `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
+- `--config <path>` (env: `RUNMAT_CONFIG`): load configuration file.
+- `--no-jit` (env: `RUNMAT_JIT_DISABLE`): disable JIT (interpreter only).
+- `--jit-threshold <n>` (env: `RUNMAT_JIT_THRESHOLD`, default: `10`): hotspot threshold.
+- `--jit-opt-level <none|size|speed|aggressive>` (env: `RUNMAT_JIT_OPT_LEVEL`, default: `speed`).
+- `--gc-preset <low-latency|high-throughput|low-memory|debug>` (env: `RUNMAT_GC_PRESET`).
+- `--gc-young-size <MB>` (env: `RUNMAT_GC_YOUNG_SIZE`): young generation size.
+- `--gc-threads <n>` (env: `RUNMAT_GC_THREADS`): max GC threads.
+- `--gc-stats` (env: `RUNMAT_GC_STATS`): collect and display GC statistics.
 - `--verbose`: verbose REPL/execution output.
-- `--snapshot <path>` (env: `RUSTMAT_SNAPSHOT_PATH`): preload snapshot.
-- `--plot-mode <auto|gui|headless|jupyter>` (env: `RUSTMAT_PLOT_MODE`).
-- `--plot-headless` (env: `RUSTMAT_PLOT_HEADLESS`): force headless.
-- `--plot-backend <auto|wgpu|static|web>` (env: `RUSTMAT_PLOT_BACKEND`).
+- `--snapshot <path>` (env: `RUNMAT_SNAPSHOT_PATH`): preload snapshot.
+- `--plot-mode <auto|gui|headless|jupyter>` (env: `RUNMAT_PLOT_MODE`).
+- `--plot-headless` (env: `RUNMAT_PLOT_HEADLESS`): force headless.
+- `--plot-backend <auto|wgpu|static|web>` (env: `RUNMAT_PLOT_BACKEND`).
 - `--generate-config`: print a sample config to stdout.
 - `--install-kernel`: install the Jupyter kernel.
 
@@ -118,9 +118,9 @@ runmat kernel \
   [--connection-file <path>] 
 ```
 
-Env vars: `RUSTMAT_KERNEL_IP`, `RUSTMAT_KERNEL_KEY`, and optional port vars
-`RUSTMAT_SHELL_PORT`, `RUSTMAT_IOPUB_PORT`, `RUSTMAT_STDIN_PORT`,
-`RUSTMAT_CONTROL_PORT`, `RUSTMAT_HB_PORT`.
+Env vars: `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`, and optional port vars
+`RUNMAT_SHELL_PORT`, `RUNMAT_IOPUB_PORT`, `RUNMAT_STDIN_PORT`,
+`RUNMAT_CONTROL_PORT`, `RUNMAT_HB_PORT`.
 
 - `kernel-connection <connection.json>`: start with an existing connection file.
 
@@ -246,32 +246,32 @@ runmat config paths
 ## Environment variables (reference)
 
 - Logging and control:
-  - `RUSTMAT_DEBUG` (bool)
-  - `RUSTMAT_LOG_LEVEL` = `error|warn|info|debug|trace`
-  - `RUSTMAT_TIMEOUT` (seconds)
-  - `RUSTMAT_CONFIG` (config file path)
-  - `RUSTMAT_SNAPSHOT_PATH` (snapshot to preload)
+  - `RUNMAT_DEBUG` (bool)
+  - `RUNMAT_LOG_LEVEL` = `error|warn|info|debug|trace`
+  - `RUNMAT_TIMEOUT` (seconds)
+  - `RUNMAT_CONFIG` (config file path)
+  - `RUNMAT_SNAPSHOT_PATH` (snapshot to preload)
 
 - JIT:
-  - `RUSTMAT_JIT_ENABLE` (bool, default true)
-  - `RUSTMAT_JIT_DISABLE` (bool, if true overrides enable)
-  - `RUSTMAT_JIT_THRESHOLD` (integer)
-  - `RUSTMAT_JIT_OPT_LEVEL` = `none|size|speed|aggressive`
+  - `RUNMAT_JIT_ENABLE` (bool, default true)
+  - `RUNMAT_JIT_DISABLE` (bool, if true overrides enable)
+  - `RUNMAT_JIT_THRESHOLD` (integer)
+  - `RUNMAT_JIT_OPT_LEVEL` = `none|size|speed|aggressive`
 
 - GC:
-  - `RUSTMAT_GC_PRESET` = `low-latency|high-throughput|low-memory|debug`
-  - `RUSTMAT_GC_YOUNG_SIZE` (MB)
-  - `RUSTMAT_GC_THREADS` (integer)
-  - `RUSTMAT_GC_STATS` (bool)
+  - `RUNMAT_GC_PRESET` = `low-latency|high-throughput|low-memory|debug`
+  - `RUNMAT_GC_YOUNG_SIZE` (MB)
+  - `RUNMAT_GC_THREADS` (integer)
+  - `RUNMAT_GC_STATS` (bool)
 
 - Plotting:
-  - `RUSTMAT_PLOT_MODE` = `auto|gui|headless|jupyter`
-  - `RUSTMAT_PLOT_HEADLESS` (bool)
-  - `RUSTMAT_PLOT_BACKEND` = `auto|wgpu|static|web`
+  - `RUNMAT_PLOT_MODE` = `auto|gui|headless|jupyter`
+  - `RUNMAT_PLOT_HEADLESS` (bool)
+  - `RUNMAT_PLOT_BACKEND` = `auto|wgpu|static|web`
 
 - Kernel:
-  - `RUSTMAT_KERNEL_IP`, `RUSTMAT_KERNEL_KEY`
-  - Optional ports: `RUSTMAT_SHELL_PORT`, `RUSTMAT_IOPUB_PORT`, `RUSTMAT_STDIN_PORT`, `RUSTMAT_CONTROL_PORT`, `RUSTMAT_HB_PORT`
+  - `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`
+  - Optional ports: `RUNMAT_SHELL_PORT`, `RUNMAT_IOPUB_PORT`, `RUNMAT_STDIN_PORT`, `RUNMAT_CONTROL_PORT`, `RUNMAT_HB_PORT`
 
 ### Acceleration provider (RunMat Accelerate)
 
@@ -314,21 +314,21 @@ non-interactive environments:
 
 - CI/CD: set headless plotting and deterministic JIT options.
   - Env hints: `CI`, `GITHUB_ACTIONS`, `HEADLESS`, `NO_GUI` — presence is enough (any value).
-  - To force via config var: set `RUSTMAT_PLOT_MODE=headless` (must be exactly `headless`).
+  - To force via config var: set `RUNMAT_PLOT_MODE=headless` (must be exactly `headless`).
   - Example (GitHub Actions):
     ```sh
-    RUSTMAT_PLOT_MODE=headless RUSTMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
+    RUNMAT_PLOT_MODE=headless RUNMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
     ```
 - Docker/containers: no display required; headless by default when `NO_GUI` or `HEADLESS` is set.
   ```Dockerfile
   FROM debian:stable-slim
   # install runmat binary (copy or package) and dependencies
-  ENV NO_GUI=1 RUSTMAT_PLOT_MODE=headless
+  ENV NO_GUI=1 RUNMAT_PLOT_MODE=headless
   CMD ["runmat", "info"]
   ```
 - Headless servers/HPC: disable GUI and tune GC/JIT:
   ```sh
-  RUSTMAT_PLOT_MODE=headless RUSTMAT_GC_PRESET=high-throughput runmat benchmark perf.m --iterations 10 --jit
+  RUNMAT_PLOT_MODE=headless RUNMAT_GC_PRESET=high-throughput runmat benchmark perf.m --iterations 10 --jit
   ```
 
 RunMat also auto-detects headless contexts and falls back to safe defaults.
@@ -337,7 +337,7 @@ RunMat also auto-detects headless contexts and falls back to safe defaults.
 
 ### Run a simple script with JIT disabled
 ```sh
-RUSTMAT_JIT_DISABLE=1 runmat my_script.m
+RUNMAT_JIT_DISABLE=1 runmat my_script.m
 ```
 
 ### Create a minimal config and run with it

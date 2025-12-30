@@ -14,13 +14,17 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const ZERO_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "acosh",
+        builtin_path = "crate::builtins::math::trigonometry::acosh"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "acosh"
 category: "math/trigonometry"
@@ -208,6 +212,7 @@ metadata to generate gradients.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "acosh",
     op_kind: GpuOpKind::Elementwise,
@@ -223,8 +228,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acosh directly on device buffers when inputs stay within the real domain (x ≥ 1); otherwise the runtime gathers to the host for complex promotion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acosh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -241,17 +245,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `acosh` calls; providers can substitute custom kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("acosh", DOC_MD);
-
 #[runtime_builtin(
     name = "acosh",
     category = "math/trigonometry",
     summary = "Inverse hyperbolic cosine with MATLAB-compatible complex promotion.",
     keywords = "acosh,inverse hyperbolic cosine,arccosh,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
 fn acosh_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -413,12 +413,13 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex64;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_scalar_real() {
         let value = Value::Num(1.5);
@@ -429,6 +430,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_scalar_complex() {
         let result = acosh_builtin(Value::Num(0.5)).expect("acosh");
@@ -441,6 +443,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_tensor_mixed() {
         let tensor = Tensor::new(vec![0.5, 1.0, 2.0], vec![3, 1]).expect("tensor construction");
@@ -462,6 +465,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_logical_array_promotes() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).expect("logical array");
@@ -484,6 +488,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_roundtrip() {
         let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
@@ -512,6 +517,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_promotes_to_complex() {
         let chars = CharArray::new(vec!['\0'], 1, 1).expect("char array");
@@ -531,6 +537,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-2.0, 0.5)];
@@ -550,6 +557,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_integer_input() {
         let result = acosh_builtin(Value::Int(IntValue::I32(4))).expect("acosh");
@@ -559,6 +567,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_bool_inputs() {
         let true_result = acosh_builtin(Value::Bool(true)).expect("acosh");
@@ -576,6 +585,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_infinity_inputs() {
         let pos = acosh_builtin(Value::Num(f64::INFINITY)).expect("acosh");
@@ -594,6 +604,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_nan_propagates() {
         let result = acosh_builtin(Value::Num(f64::NAN)).expect("acosh");
@@ -603,12 +614,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_string_errors() {
         let err = acosh_builtin(Value::from("oops")).expect_err("expected error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -629,6 +642,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_gpu_falls_back_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -656,13 +670,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn acosh_wgpu_matches_cpu_when_real() {

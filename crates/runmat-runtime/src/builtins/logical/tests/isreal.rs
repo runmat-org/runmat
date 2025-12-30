@@ -12,11 +12,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isreal",
+        builtin_path = "crate::builtins::logical::tests::isreal"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isreal"
 category: "logical/tests"
@@ -181,6 +184,7 @@ Use elementwise predicates such as `imag`/`real` combined with comparison (`imag
 [isfinite](./isfinite), [isinf](./isinf), [isnan](./isnan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isreal")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isreal",
     op_kind: GpuOpKind::Custom("storage-check"),
@@ -196,8 +200,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Queries provider metadata when `logical_isreal` is available; otherwise gathers once and inspects host storage.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isreal")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isreal",
     shape: ShapeRequirements::Any,
@@ -208,17 +211,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Scalar metadata predicate that remains outside fusion graphs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isreal", DOC_MD);
-
 #[runtime_builtin(
     name = "isreal",
     category = "logical/tests",
     summary = "Return true when a value uses real storage without an imaginary component.",
     keywords = "isreal,real,complex,gpu,logical",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 fn isreal_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -266,7 +265,7 @@ fn isreal_host(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
@@ -275,6 +274,7 @@ mod tests {
     };
     use runmat_gc_api::GcPtr;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_reports_true_for_real_scalars() {
         let real = isreal_builtin(Value::Num(42.0)).expect("isreal");
@@ -285,6 +285,7 @@ mod tests {
         assert_eq!(boolean, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_rejects_complex_storage_even_with_zero_imaginary_part() {
         let complex = isreal_builtin(Value::Complex(3.0, 4.0)).expect("isreal");
@@ -296,6 +297,7 @@ mod tests {
         assert_eq!(tensor_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_handles_array_and_container_types() {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5], vec![3, 1]).unwrap();
@@ -328,6 +330,7 @@ mod tests {
         assert_eq!(object_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_handles_function_and_handle_like_types() {
         let function_flag =
@@ -368,6 +371,7 @@ mod tests {
         assert_eq!(mex_flag, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isreal_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -382,13 +386,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isreal_wgpu_provider_reports_true() {

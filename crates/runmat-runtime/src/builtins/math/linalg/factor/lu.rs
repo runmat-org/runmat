@@ -5,16 +5,20 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "lu",
+        builtin_path = "crate::builtins::math::linalg::factor::lu"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "lu"
 category: "math/linalg/factor"
@@ -203,6 +207,7 @@ Yes. The combined matrix returned by `lu(A)` stores `L` in the strictly lower-tr
 - Found an issue or missing behaviour? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "lu",
     op_kind: GpuOpKind::Custom("lu-factor"),
@@ -218,8 +223,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `lu` hook; automatically gathers and falls back to the CPU implementation when no provider support is registered.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "lu",
     shape: ShapeRequirements::Any,
@@ -230,18 +234,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "LU decomposition is not part of expression fusion; calls execute eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("lu", DOC_MD);
-
 #[runtime_builtin(
     name = "lu",
     category = "math/linalg/factor",
     summary = "LU decomposition with partial pivoting.",
     keywords = "lu,factorization,decomposition,permutation",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
 fn lu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;
@@ -645,7 +645,7 @@ impl RowMajorMatrix {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor as CMatrix, Tensor as Matrix};
@@ -708,6 +708,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_single_output_produces_combined_matrix() {
         let a = Matrix::new(
@@ -722,6 +723,7 @@ mod tests {
         assert_tensor_close(&lu, &expected, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_three_outputs_matches_factorization() {
         let data = vec![2.0, 4.0, -2.0, 1.0, -6.0, 7.0, 1.0, 0.0, 2.0];
@@ -736,6 +738,7 @@ mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_complex_matrix_factorization() {
         let data = vec![(1.0, 2.0), (3.0, -1.0), (2.0, -1.0), (4.0, 2.0)];
@@ -752,6 +755,7 @@ mod tests {
         assert_row_major_close(&pa, &lu, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_handles_singular_matrix() {
         let a = Matrix::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
@@ -767,6 +771,7 @@ mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_vector_option_returns_pivot_vector() {
         let a = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -778,6 +783,7 @@ mod tests {
         assert_eq!(pivot.data, vec![2.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_vector_option_case_insensitive() {
         let a = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -786,6 +792,7 @@ mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_matrix_option_returns_permutation_matrix() {
         let a = Matrix::new(vec![2.0, 1.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -798,6 +805,7 @@ mod tests {
         assert_tensor_close(&perm_selected, &perm_matrix, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_handles_rectangular_matrices() {
         let a = Matrix::new(vec![3.0, 6.0, 1.0, 3.0, 2.0, 4.0], vec![2, 3]).unwrap();
@@ -814,6 +822,7 @@ mod tests {
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_unknown_option() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -824,6 +833,7 @@ mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_non_string_option() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -834,6 +844,7 @@ mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_rejects_multiple_options() {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
@@ -847,6 +858,7 @@ mod tests {
         assert!(err.contains("too many option arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -872,6 +884,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_gpu_vector_option_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -892,6 +905,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lu_accepts_scalar_inputs() {
         let eval = evaluate(Value::Num(5.0), &[]).expect("evaluate scalar");
@@ -903,6 +917,7 @@ mod tests {
         assert_eq!(p.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn lu_wgpu_matches_cpu() {
@@ -950,8 +965,8 @@ mod tests {
         assert_tensor_close(&pivot_cpu, &pivot_vector, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

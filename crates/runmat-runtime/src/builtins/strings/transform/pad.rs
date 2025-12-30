@@ -8,11 +8,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pad",
+        builtin_path = "crate::builtins::strings::transform::pad"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pad"
 category: "strings/transform"
@@ -186,6 +191,7 @@ and the behaviour documented here will remain the reference.
 - Found an issue? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::pad")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pad",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -201,8 +207,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the CPU; GPU-resident inputs are gathered before padding to preserve MATLAB semantics.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::pad")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pad",
     shape: ShapeRequirements::Any,
@@ -212,11 +217,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "String transformation builtin; always gathers inputs and is not eligible for fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pad", DOC_MD);
 
 const ARG_TYPE_ERROR: &str =
     "pad: first argument must be a string array, character array, or cell array of character vectors";
@@ -272,7 +272,8 @@ impl PadOptions {
     category = "strings/transform",
     summary = "Pad strings, character arrays, and cell arrays to a target length.",
     keywords = "pad,align,strings,character array",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::pad"
 )]
 fn pad_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_arguments(&rest)?;
@@ -637,18 +638,18 @@ fn apply_padding_owned(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_length_right() {
         let result = pad_builtin(Value::String("GPU".into()), vec![Value::Num(5.0)]).expect("pad");
         assert_eq!(result, Value::String("GPU  ".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_left_with_custom_char() {
         let result = pad_builtin(
@@ -663,6 +664,7 @@ mod tests {
         assert_eq!(result, Value::String("0042".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_both_with_odd_count() {
         let result = pad_builtin(
@@ -677,6 +679,7 @@ mod tests {
         assert_eq!(result, Value::String("**core***".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_auto_uses_longest_element() {
         let strings =
@@ -691,6 +694,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_pad_character_only() {
         let strings = StringArray::new(vec!["A".into(), "Run".into()], vec![2, 1]).unwrap();
@@ -705,6 +709,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_length_with_pad_character() {
         let strings = StringArray::new(vec!["7".into(), "512".into()], vec![2, 1]).unwrap();
@@ -722,6 +727,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_string_array_direction_only() {
         let strings =
@@ -740,6 +746,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_single_string_pad_character_only_leaves_length() {
         let result =
@@ -747,6 +754,7 @@ mod tests {
         assert_eq!(result, Value::String("GPU".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_char_array_resizes_columns() {
         let chars: Vec<char> = "GPUrun".chars().collect();
@@ -763,6 +771,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -795,6 +804,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_preserves_missing_string() {
         let result =
@@ -802,18 +812,21 @@ mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_input_type() {
         let err = pad_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_negative_length() {
         let err = pad_builtin(Value::String("data".into()), vec![Value::Num(-1.0)]).unwrap_err();
         assert_eq!(err, LENGTH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_direction() {
         let err = pad_builtin(
@@ -824,6 +837,7 @@ mod tests {
         assert_eq!(err, DIRECTION_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_invalid_pad_character() {
         let err = pad_builtin(
@@ -834,6 +848,7 @@ mod tests {
         assert_eq!(err, PAD_CHAR_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pad_works_with_wgpu_provider_active() {
@@ -844,8 +859,8 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

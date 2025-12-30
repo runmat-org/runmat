@@ -3,12 +3,13 @@
 //! High-performance binary format optimized for fast loading and validation.
 //! Uses a structured layout with versioning and integrity checks.
 
+use runmat_time::system_time_now;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
 /// Snapshot file format magic number
-pub const SNAPSHOT_MAGIC: &[u8; 8] = b"RUSTMAT\x01";
+pub const SNAPSHOT_MAGIC: &[u8; 7] = b"RUNMAT\0";
 
 /// Current snapshot format version
 pub const SNAPSHOT_VERSION: u32 = 1;
@@ -30,7 +31,7 @@ pub struct SnapshotFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotHeader {
     /// Magic number for format identification
-    pub magic: [u8; 8],
+    pub magic: [u8; 7],
 
     /// Format version
     pub version: u32,
@@ -99,22 +100,22 @@ pub struct PerformanceMetrics {
     pub creation_time: Duration,
 
     /// Number of builtins captured
-    pub builtin_count: usize,
+    pub builtin_count: u64,
 
     /// HIR cache entries
-    pub hir_cache_entries: usize,
+    pub hir_cache_entries: u64,
 
     /// Bytecode cache entries
-    pub bytecode_cache_entries: usize,
+    pub bytecode_cache_entries: u64,
 
     /// Total uncompressed size
-    pub uncompressed_size: usize,
+    pub uncompressed_size: u64,
 
     /// Compression ratio achieved
     pub compression_ratio: f64,
 
     /// Memory usage during creation
-    pub peak_memory_usage: usize,
+    pub peak_memory_usage: u64,
 }
 
 /// Target platform information
@@ -153,10 +154,10 @@ pub struct DataSectionInfo {
     pub compression: CompressionInfo,
 
     /// Uncompressed data size
-    pub uncompressed_size: usize,
+    pub uncompressed_size: u64,
 
     /// Compressed data size
-    pub compressed_size: usize,
+    pub compressed_size: u64,
 
     /// Data section offset in file
     pub data_offset: u64,
@@ -262,7 +263,7 @@ impl SnapshotHeader {
         // Estimate based on data size and compression
         let base_time = Duration::from_millis(10); // Base overhead
         let data_time = Duration::from_nanos(
-            (self.data_info.compressed_size as u64 * 10) / 1024, // ~10ns per KB
+            (self.data_info.compressed_size * 10) / 1024, // ~10ns per KB
         );
 
         match self.data_info.compression.algorithm {
@@ -277,7 +278,7 @@ impl SnapshotMetadata {
     /// Create metadata for current environment
     pub fn current() -> Self {
         Self {
-            created_at: SystemTime::now(),
+            created_at: system_time_now(),
             runmat_version: env!("CARGO_PKG_VERSION").to_string(),
             tool_version: env!("CARGO_PKG_VERSION").to_string(),
             build_config: BuildConfig::current(),
@@ -316,7 +317,7 @@ impl SnapshotMetadata {
 
     /// Get human-readable age of snapshot
     pub fn age(&self) -> Duration {
-        SystemTime::now()
+        system_time_now()
             .duration_since(self.created_at)
             .unwrap_or(Duration::ZERO)
     }
@@ -374,6 +375,7 @@ impl PlatformInfo {
     }
 
     /// Detect available CPU features
+    #[allow(unused_mut)]
     fn detect_cpu_features() -> Vec<String> {
         let mut features = Vec::new();
 
@@ -504,11 +506,11 @@ impl SnapshotFormat {
 
     /// Get total file size
     pub fn total_size(&self) -> usize {
-        let header_size = bincode::serialized_size(&self.header).unwrap_or(0) as usize;
-        let data_size = self.data.len();
-        let checksum_size = self.checksum.as_ref().map_or(0, |c| c.len());
+        let header_size = bincode::serialized_size(&self.header).unwrap_or(0) as u64;
+        let data_size = self.data.len() as u64;
+        let checksum_size = self.checksum.as_ref().map_or(0, |c| c.len()) as u64;
 
-        header_size + data_size + checksum_size
+        (header_size + data_size + checksum_size) as usize
     }
 }
 

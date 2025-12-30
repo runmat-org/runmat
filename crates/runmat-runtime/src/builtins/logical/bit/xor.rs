@@ -13,11 +13,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "xor",
+        builtin_path = "crate::builtins::logical::bit::xor"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "xor"
 category: "logical/bit"
@@ -165,6 +168,7 @@ RunMat promotes the other input to the GPU before dispatch when the auto-offload
 [and](./and), [or](./or), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::xor")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "xor",
     op_kind: GpuOpKind::Elementwise,
@@ -183,8 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to host execution when the provider does not implement logical_xor; non-zero (including NaN) inputs map to true.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::xor")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "xor",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -214,17 +217,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion generates WGSL kernels that treat non-zero inputs as true and write 0/1 outputs for exclusive OR.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("xor", DOC_MD);
-
 #[runtime_builtin(
     name = "xor",
     category = "logical/bit",
     summary = "Element-wise logical XOR for scalars, arrays, and gpuArray values.",
     keywords = "logical,xor,exclusive,boolean,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::bit::xor"
 )]
 fn xor_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
@@ -373,7 +372,7 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -381,6 +380,7 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_of_booleans() {
         assert_eq!(
@@ -397,6 +397,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -411,6 +412,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_logical_array_inputs() {
         let left = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -426,6 +428,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_empty_inputs() {
         let lhs = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -440,6 +443,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
@@ -453,6 +457,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_char_arrays() {
         let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
@@ -468,6 +473,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_treats_nan_as_true() {
         let result = xor_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
@@ -476,6 +482,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_complex_inputs() {
         let result = xor_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
@@ -485,6 +492,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -493,6 +501,7 @@ mod tests {
         assert!(err.contains("size mismatch"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_rejects_unsupported_types() {
         let err = xor_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
@@ -502,6 +511,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -524,6 +534,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_gpu_supports_broadcast() {
         test_support::with_test_provider(|provider| {
@@ -550,6 +561,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn xor_wgpu_matches_host_path() {
@@ -598,8 +610,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

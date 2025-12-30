@@ -2,7 +2,6 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -10,6 +9,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use glob::glob;
 use runmat_builtins::{StructValue, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -19,11 +19,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "dir",
+        builtin_path = "crate::builtins::io::repl_fs::dir"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dir"
 category: "io/repl_fs"
@@ -180,6 +185,7 @@ No cache files found.
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::dir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dir",
     op_kind: GpuOpKind::Custom("io"),
@@ -195,8 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only filesystem builtin. Providers do not participate; GPU-resident inputs are gathered to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::dir")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dir",
     shape: ShapeRequirements::Any,
@@ -207,17 +212,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins do not participate in fusion plans; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("dir", DOC_MD);
-
 #[runtime_builtin(
     name = "dir",
     category = "io/repl_fs",
     summary = "Return file and folder information in a MATLAB-compatible struct array.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
 fn dir_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;
@@ -322,7 +323,7 @@ fn list_from_text(text: &str) -> Result<Vec<DirRecord>, String> {
 
 fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
     let path = PathBuf::from(expanded);
-    match fs::metadata(&path) {
+    match vfs::metadata(&path) {
         Ok(metadata) => {
             if metadata.is_dir() {
                 let mut records = list_directory(&path, true)?;
@@ -338,7 +339,7 @@ fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path_to_string(&path));
-                let (date, datenum) = timestamp_fields(metadata.modified().ok());
+                let (date, datenum) = timestamp_fields(metadata.modified());
                 let record = DirRecord {
                     name,
                     folder,
@@ -363,7 +364,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
     for item in matcher {
         match item {
             Ok(path) => {
-                let metadata = fs::symlink_metadata(&path).ok();
+                let metadata = vfs::symlink_metadata(&path).ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let folder_path = path
                     .parent()
@@ -375,7 +376,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
                     .map(|os| os.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path_to_string(&path));
                 let (date, datenum) =
-                    timestamp_fields(metadata.as_ref().and_then(|m| m.modified().ok()));
+                    timestamp_fields(metadata.as_ref().and_then(|m| m.modified()));
                 let bytes = if is_dir {
                     0.0
                 } else {
@@ -403,7 +404,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
 
 fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, String> {
     let folder = absolute_folder_string(dir)?;
-    let dir_metadata = fs::metadata(dir).ok();
+    let dir_metadata = vfs::metadata(dir).ok();
     let mut records = Vec::new();
 
     if include_special {
@@ -412,20 +413,18 @@ fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, S
     }
 
     let dir_display = folder.clone();
-    let read_dir = fs::read_dir(dir)
+    let read_dir = vfs::read_dir(dir)
         .map_err(|err| format!("dir: unable to access '{dir_display}' ({err})"))?;
     for entry in read_dir {
-        let entry = entry.map_err(|err| format!("dir: unable to list '{dir_display}' ({err})"))?;
-        let name_os: OsString = entry.file_name();
+        let name_os: &OsString = entry.file_name();
         let name = name_os.to_string_lossy().into_owned();
         if name == "." || name == ".." {
             continue;
         }
 
-        let path = entry.path();
-        let metadata = entry
-            .metadata()
-            .or_else(|_| fs::symlink_metadata(&path))
+        let path = entry.path().to_path_buf();
+        let metadata = vfs::metadata(&path)
+            .or_else(|_| vfs::symlink_metadata(&path))
             .map_err(|err| format!("dir: unable to read metadata for '{}' ({err})", name))?;
         records.push(record_from_metadata(&folder, name, &metadata));
     }
@@ -481,13 +480,13 @@ fn absolute_folder_string(path: &Path) -> Result<String, String> {
             .map_err(|err| format!("dir: unable to determine current directory ({err})"))?
             .join(path)
     };
-    let normalized = joined.canonicalize().unwrap_or(joined);
+    let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
     Ok(path_to_string(&normalized))
 }
 
-fn record_from_metadata(folder: &str, name: String, metadata: &fs::Metadata) -> DirRecord {
+fn record_from_metadata(folder: &str, name: String, metadata: &vfs::FsMetadata) -> DirRecord {
     let is_dir = metadata.is_dir();
-    let (date, datenum) = timestamp_fields(metadata.modified().ok());
+    let (date, datenum) = timestamp_fields(metadata.modified());
     DirRecord {
         name,
         folder: folder.to_string(),
@@ -498,8 +497,8 @@ fn record_from_metadata(folder: &str, name: String, metadata: &fs::Metadata) -> 
     }
 }
 
-fn make_special(name: &str, folder: &str, metadata: Option<&fs::Metadata>) -> DirRecord {
-    let (date, datenum) = timestamp_fields(metadata.and_then(|m| m.modified().ok()));
+fn make_special(name: &str, folder: &str, metadata: Option<&vfs::FsMetadata>) -> DirRecord {
+    let (date, datenum) = timestamp_fields(metadata.and_then(|m| m.modified()));
     DirRecord {
         name: name.to_string(),
         folder: folder.to_string(),
@@ -546,11 +545,11 @@ fn sort_records(records: &mut [DirRecord]) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
 
     struct DirGuard {
@@ -648,6 +647,7 @@ mod tests {
             })
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_lists_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -697,6 +697,7 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_handles_wildcard_patterns() {
         let _lock = REPL_FS_TEST_LOCK
@@ -719,6 +720,7 @@ mod tests {
         assert_eq!(field_bool(&entries[0], "isdir"), Some(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_lists_specific_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -744,6 +746,7 @@ mod tests {
         assert!(names.contains(&"nested".to_string()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_folder_and_pattern_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -764,6 +767,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_returns_single_file_entry() {
         let _lock = REPL_FS_TEST_LOCK
@@ -784,6 +788,7 @@ mod tests {
         assert_eq!(field_bool(&entries[0], "isdir"), Some(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_accepts_char_array_input() {
         let _lock = REPL_FS_TEST_LOCK
@@ -799,6 +804,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_rejects_numeric_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -808,6 +814,7 @@ mod tests {
         assert_eq!(err, "dir: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_rejects_multi_element_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -819,6 +826,7 @@ mod tests {
         assert_eq!(err, "dir: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_no_matches_returns_empty_struct_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -836,6 +844,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_errors_on_wildcard_folder_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -850,6 +859,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_expands_tilde_to_home_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -872,8 +882,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -9,12 +9,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:read:InvalidTcpClient";
 const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:read:NotConnected";
@@ -24,7 +21,14 @@ const MESSAGE_ID_INVALID_COUNT: &str = "MATLAB:read:InvalidCount";
 const MESSAGE_ID_INVALID_DATATYPE: &str = "MATLAB:read:InvalidDataType";
 const MESSAGE_ID_INTERNAL: &str = "MATLAB:read:InternalError";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "read",
+        builtin_path = "crate::builtins::io::net::read"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "read"
 category: "io/net"
@@ -174,6 +178,7 @@ assuming UTF-8 (non-UTF-8 sequences fall back to byte-wise decoding).
 - Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with repro steps if you observe a behavioural difference from MATLAB.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "read",
     op_kind: GpuOpKind::Custom("network"),
@@ -189,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "read",
     shape: ShapeRequirements::Any,
@@ -201,16 +205,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtin executed eagerly on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("read", DOC_MD);
-
 #[runtime_builtin(
     name = "read",
     category = "io/net",
     summary = "Read numeric or text data from a TCP/IP client.",
-    keywords = "read,tcpclient,networking"
+    keywords = "read,tcpclient,networking",
+    builtin_path = "crate::builtins::io::net::read"
 )]
 fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     let client = gather_if_needed(&client)?;
@@ -742,9 +742,8 @@ impl Drop for NonBlockingGuard {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
@@ -778,6 +777,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_reads_requested_uint8_values() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -803,6 +803,7 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_without_count_drains_available_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -829,6 +830,7 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_respects_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -850,8 +852,8 @@ mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

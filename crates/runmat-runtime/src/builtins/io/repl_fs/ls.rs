@@ -2,12 +2,12 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
 use runmat_builtins::{CharArray, StringArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -17,11 +17,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ls",
+        builtin_path = "crate::builtins::io::repl_fs::ls"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ls"
 category: "io/repl_fs"
@@ -162,6 +167,7 @@ plot_surface.m
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::ls")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ls",
     op_kind: GpuOpKind::Custom("io"),
@@ -178,8 +184,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. Providers do not participate; any GPU-resident argument is gathered before path expansion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::ls")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ls",
     shape: ShapeRequirements::Any,
@@ -190,17 +195,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are excluded from fusion plans; metadata registered for introspection completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ls", DOC_MD);
-
 #[runtime_builtin(
     name = "ls",
     category = "io/repl_fs",
     summary = "List files and folders in the current directory or matching a wildcard pattern.",
     keywords = "ls,list files,folder contents,wildcard listing,dir",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
 fn ls_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;
@@ -263,24 +264,16 @@ fn list_for_pattern(raw: &str) -> Result<Vec<String>, String> {
 fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
     let mut entries = Vec::new();
     let dir_str = path_to_string(dir);
-    let read_dir = std::fs::read_dir(dir)
-        .map_err(|err| format!("ls: unable to access '{dir_str}' ({err})"))?;
+    let read_dir =
+        vfs::read_dir(dir).map_err(|err| format!("ls: unable to access '{dir_str}' ({err})"))?;
 
     for entry in read_dir {
-        let entry = entry.map_err(|err| format!("ls: unable to list '{dir_str}' ({err})"))?;
-        let name_os: OsString = entry.file_name();
-        let name = name_os.to_string_lossy();
+        let name = entry.file_name().to_string_lossy();
         if name == "." || name == ".." {
             continue;
         }
-
-        let file_type = entry.file_type().ok();
-        let is_dir = file_type
-            .map(|ft| ft.is_dir())
-            .unwrap_or_else(|| entry.metadata().map(|m| m.is_dir()).unwrap_or(false));
-
         let mut display = name.into_owned();
-        append_directory_suffix(&mut display, is_dir);
+        append_directory_suffix(&mut display, entry.is_dir());
         entries.push(display);
     }
 
@@ -290,7 +283,7 @@ fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
 
 fn list_path(expanded: &str, original: &str) -> Result<Vec<String>, String> {
     let path = PathBuf::from(expanded);
-    match std::fs::metadata(&path) {
+    match vfs::metadata(&path) {
         Ok(metadata) => {
             if metadata.is_dir() {
                 list_directory(&path)
@@ -313,8 +306,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<String>, Stri
     for item in matcher {
         match item {
             Ok(path) => {
-                let meta = path.symlink_metadata().ok();
-                let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let is_dir = vfs::symlink_metadata(&path)
+                    .map(|meta| meta.is_dir())
+                    .unwrap_or(false);
                 let mut name = path_to_string(&path);
                 append_directory_suffix(&mut name, is_dir);
                 entries.push(name);
@@ -397,11 +391,11 @@ fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::CharArray;
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
 
     struct DirGuard {
@@ -438,6 +432,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_lists_current_directory_when_no_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -462,6 +457,7 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_lists_specific_directory_contents() {
         let dir = tempdir().expect("tempdir");
@@ -477,6 +473,7 @@ mod tests {
         assert_eq!(rows, vec!["data.csv".to_string(), format!("nested{sep}")]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_handles_wildcard_patterns() {
         let _lock = REPL_FS_TEST_LOCK
@@ -500,6 +497,7 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_returns_path_for_single_file() {
         let dir = tempdir().expect("tempdir");
@@ -512,6 +510,7 @@ mod tests {
         assert_eq!(rows, vec![file_path.to_string_lossy().to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_returns_empty_for_missing_matches() {
         let dir = tempdir().expect("tempdir");
@@ -528,6 +527,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_accepts_string_scalar_input() {
         let dir = tempdir().expect("tempdir");
@@ -540,14 +540,15 @@ mod tests {
         assert!(rows.iter().any(|row| row.contains("file.dat")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_rejects_numeric_argument() {
         let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err, "ls: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

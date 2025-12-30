@@ -9,17 +9,21 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pagefun",
+        builtin_path = "crate::builtins::acceleration::gpu::pagefun"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pagefun"
 category: "acceleration/gpu"
@@ -157,6 +161,7 @@ barrier. Upstream expressions are evaluated before entering `pagefun`.
 [gpuArray](./gpuarray), [arrayfun](./arrayfun), [gather](./gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pagefun",
     op_kind: GpuOpKind::Custom("pagefun"),
@@ -172,8 +177,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "WGPU provider accelerates batched @mtimes; runtimes gather to host when no provider hook is available.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pagefun",
     shape: ShapeRequirements::Any,
@@ -184,17 +188,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because pagefun can invoke arbitrary MATLAB operators.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pagefun", DOC_MD);
-
 #[runtime_builtin(
     name = "pagefun",
     category = "acceleration/gpu",
     summary = "Apply MATLAB operators page-by-page across higher-dimensional arrays.",
     keywords = "pagefun,gpuArray,mtimes,pages,batch",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
 fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value, String> {
     let operation = PageOperation::from_callable(func)?;
@@ -973,11 +973,12 @@ impl TypeName for Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_single_page() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -997,6 +998,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_multiple_pages() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 2.0, 1.0, 0.0, 3.0], vec![2, 2, 2]).unwrap();
@@ -1016,6 +1018,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_broadcast_rhs() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0], vec![2, 2, 2]).unwrap();
@@ -1039,6 +1042,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_empty_pages() {
         let lhs = Tensor::new(Vec::new(), vec![2, 2, 0]).unwrap();
@@ -1058,6 +1062,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_char_array_handle() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -1078,6 +1083,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_string_array_handle() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -1098,6 +1104,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_char_array_multirow_error() {
         let chars = CharArray::new("@mtimes@".chars().collect(), 2, 4).unwrap();
@@ -1115,6 +1122,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_string_array_multi_value_error() {
         let strings =
@@ -1133,6 +1141,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_page_dimension_mismatch() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]).unwrap();
@@ -1155,6 +1164,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_dim_mismatch() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1171,6 +1181,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_gpu_roundtrip_mtimes() {
         test_support::with_test_provider(|provider| {
@@ -1206,6 +1217,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pagefun_wgpu_mtimes_batches() {
@@ -1280,8 +1292,8 @@ mod tests {
         assert_eq!(builtin_tensor.data, expected_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

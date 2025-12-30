@@ -16,13 +16,17 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::gather_if_needed;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DOT_NAME: &str = "dot";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "dot",
+        builtin_path = "crate::builtins::math::linalg::ops::dot"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "dot"
 category: "math/linalg/ops"
@@ -174,6 +178,7 @@ No. MATLAB's `dot` is fixed to conjugate the first argument. Use `sum(A .* conj(
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::dot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dot",
     op_kind: GpuOpKind::Reduction,
@@ -189,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Dispatches to a provider-side dot implementation when available; otherwise gathers operands and re-uploads real outputs.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::dot")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "dot",
     shape: ShapeRequirements::Any,
@@ -201,17 +205,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Higher-level fusion currently delegates to dedicated dot kernels or host fallbacks.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("dot", DOC_MD);
-
 #[runtime_builtin(
     name = "dot",
     category = "math/linalg/ops",
     summary = "Dot product (inner product) of matching tensors along a specified dimension.",
     keywords = "dot,inner product,gpu,linear algebra",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -503,11 +503,12 @@ fn promote_result_to_gpu(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_row_vectors() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -519,6 +520,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_column_vectors() {
         let lhs = Tensor::new(vec![1.0, 3.0, 5.0], vec![3, 1]).unwrap();
@@ -530,6 +532,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_with_dimension_argument() {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -562,6 +565,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_with_dimension() {
         let lhs = ComplexTensor::new(
@@ -603,6 +607,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_uses_conjugate_first_argument() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
@@ -622,6 +627,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_complex_and_real_inputs() {
         let lhs = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
@@ -637,6 +643,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_empty_reduction_returns_zero() {
         let lhs = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -651,6 +658,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_mismatched_shapes_error() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -659,6 +667,7 @@ mod tests {
         assert!(err.contains("A and B must be the same size"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_zero_errors() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -672,6 +681,7 @@ mod tests {
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_non_integer_errors() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -685,6 +695,7 @@ mod tests {
         assert!(err.contains("dimension must be an integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_promotes_logical_inputs() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -704,6 +715,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -736,6 +748,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_mixed_gpu_and_host_returns_gpu() {
         test_support::with_test_provider(|provider| {
@@ -764,6 +777,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_dimension_exceeds_rank_returns_product() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -783,6 +797,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn dot_wgpu_matches_cpu() {
@@ -814,8 +829,8 @@ mod tests {
         assert_eq!(gathered.data, cpu.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

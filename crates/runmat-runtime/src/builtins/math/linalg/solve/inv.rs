@@ -11,14 +11,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "inv";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::solve::inv"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "inv"
 category: "math/linalg/solve"
@@ -173,10 +176,7 @@ gathers, computes on the host, and re-uploads so the caller still receives a GPU
 [pinv](./pinv), [linsolve](./linsolve), [mldivide](../ops/mldivide), [det](../ops/det), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
-
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("inv"),
@@ -192,8 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native inverse; the reference WGPU backend gathers to the host implementation and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -204,17 +203,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Matrix inversion is a terminal operation and does not participate in fusion pipelines.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
-
 #[runtime_builtin(
     name = "inv",
     category = "math/linalg/solve",
     summary = "Compute the inverse of a square matrix.",
     keywords = "inv,matrix inverse,linear solve,gpu",
-    accel = "inv"
+    accel = "inv",
+    builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
 fn inv_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -360,7 +355,7 @@ pub fn inv_host_real_for_provider(matrix: &Tensor) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use nalgebra::DMatrix;
@@ -370,6 +365,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_scalar_num() {
         let result = inv_builtin(Value::Num(4.0)).expect("inv");
@@ -379,6 +375,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_square_matrix() {
         let data = vec![4.0, 1.0, -2.0, 3.0];
@@ -401,6 +398,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_empty_matrix_returns_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -414,6 +412,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_trailing_singleton_dimension_preserved() {
         let tensor =
@@ -429,6 +428,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_complex_scalar() {
         let result = inv_builtin(Value::Complex(2.0, -1.0)).expect("inv");
@@ -442,6 +442,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_complex_matrix() {
         let raw = vec![(1.0, 2.0), (0.0, 3.0), (0.0, 0.0), (4.0, -1.0)];
@@ -476,6 +477,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_rejects_higher_rank_tensor() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -483,6 +485,7 @@ mod tests {
         assert!(err.contains("2-D"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -490,6 +493,7 @@ mod tests {
         assert!(err.contains("square matrix"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_singular_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -497,6 +501,7 @@ mod tests {
         assert!(err.contains("singular"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -516,6 +521,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_scalar_int_promotes() {
         let result = inv_builtin(Value::Int(IntValue::I32(2))).expect("inv");
@@ -525,13 +531,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn inv_wgpu_matches_cpu() {

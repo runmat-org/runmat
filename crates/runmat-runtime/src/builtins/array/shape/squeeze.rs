@@ -5,15 +5,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::register_builtin_fusion_spec;
-use crate::register_builtin_gpu_spec;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "squeeze",
+        builtin_path = "crate::builtins::array::shape::squeeze"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "squeeze"
 category: "array/shape"
@@ -167,6 +170,7 @@ Use `reshape` with the original size vector (for example, captured via `size(A)`
 - [`gather`](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "squeeze",
     op_kind: GpuOpKind::Custom("squeeze"),
@@ -187,8 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider reshape hook to drop singleton metadata without moving device buffers.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "squeeze",
     shape: ShapeRequirements::Any,
@@ -200,17 +203,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Squeeze only mutates metadata; fusion planner treats it as a no-op for kernel generation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("squeeze", DOC_MD);
-
 #[runtime_builtin(
     name = "squeeze",
     category = "array/shape",
     summary = "Remove singleton dimensions while preserving MATLAB row/column semantics.",
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
-    accel = "shape"
+    accel = "shape",
+    builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 fn squeeze_builtin(value: Value) -> Result<Value, String> {
     squeeze_value(value)
@@ -328,11 +327,12 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_removes_middle_singletons() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
@@ -343,6 +343,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_preserves_row_vector() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -353,6 +354,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_single_dimension_becomes_column_vector() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 1, 4, 1]).unwrap();
@@ -363,6 +365,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_on_logical_array_respects_zero_dims() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![1, 4, 1]).unwrap();
@@ -373,6 +376,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_on_string_array() {
         let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 1, 2]).unwrap();
@@ -383,6 +387,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_preserves_zero_length_dimensions() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![1, 0, 3]).unwrap();
@@ -393,6 +398,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -408,12 +414,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_scalar_inputs_passthrough() {
         let result = squeeze_builtin(Value::Int(IntValue::I32(42))).expect("squeeze ok for scalar");
         assert_eq!(result, Value::Int(IntValue::I32(42)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn squeeze_wgpu_updates_shape_metadata() {
@@ -448,8 +456,8 @@ mod tests {
         assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

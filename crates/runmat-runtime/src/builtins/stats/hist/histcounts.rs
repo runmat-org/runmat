@@ -12,14 +12,18 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "histcounts",
+        builtin_path = "crate::builtins::stats::hist::histcounts"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "histcounts"
 category: "stats/hist"
@@ -182,6 +186,7 @@ already in host memory.
 - Found a discrepancy? Please open an issue with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::hist::histcounts")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histcounts",
     op_kind: GpuOpKind::Custom("histcounts"),
@@ -197,8 +202,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement device-side histogramming via the custom hook; current builds gather to host memory.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::hist::histcounts")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "histcounts",
     shape: ShapeRequirements::Any,
@@ -209,18 +213,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Histogram binning materialises counts on the host and terminates fusion chains.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("histcounts", DOC_MD);
-
 #[runtime_builtin(
     name = "histcounts",
     category = "stats/hist",
     summary = "Count observations in numeric arrays using configurable histogram bins.",
     keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
     accel = "reduction",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 fn histcounts_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(data, &rest).map(|eval| eval.into_counts_value())
@@ -1069,7 +1069,7 @@ fn parse_normalization(text: &str) -> Result<HistogramNormalization, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor, Value};
@@ -1082,6 +1082,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_basic_numbins() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 5.0, 7.0], vec![6, 1]).unwrap();
@@ -1092,6 +1093,7 @@ mod tests {
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_binwidth_and_limits() {
         let tensor = Tensor::new(vec![5.0, 7.0, 8.0, 10.0, 12.0], vec![5, 1]).unwrap();
@@ -1113,6 +1115,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_probability_normalization() {
         let data = Tensor::new(vec![0.2, 0.4, 1.1, 1.4, 1.8, 2.5], vec![6, 1]).unwrap();
@@ -1132,6 +1135,7 @@ mod tests {
         assert!((counts[2] - 0.1667).abs() < 5e-4);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_cdf_normalization() {
         let data = Tensor::new(vec![1.0, 2.0, 2.0, 3.0], vec![4, 1]).unwrap();
@@ -1149,6 +1153,7 @@ mod tests {
         assert_eq!(counts, vec![0.0, 0.25, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_handles_nan() {
         let data = Tensor::new(vec![1.0, f64::NAN, 2.0, f64::NAN, 3.0], vec![5, 1]).unwrap();
@@ -1158,6 +1163,7 @@ mod tests {
         assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_constant_data_single_bin() {
         let data = Tensor::new(vec![4.0, 4.0, 4.0], vec![3, 1]).unwrap();
@@ -1167,6 +1173,7 @@ mod tests {
         assert_eq!(values_from_tensor(edges_val), vec![3.5, 4.5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_binmethod_sqrt() {
         let data: Vec<f64> = (1..=16).map(|v| v as f64).collect();
@@ -1181,6 +1188,7 @@ mod tests {
         assert_eq!(values_from_tensor(edges_val).len(), 5);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_binmethod_integers_with_limits() {
         let tensor = Tensor::new(vec![2.2, 2.8, 3.4, 3.9], vec![4, 1]).unwrap();
@@ -1201,6 +1209,7 @@ mod tests {
         assert_eq!(edges, vec![2.0, 3.0, 4.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_binmethod_conflict_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1216,6 +1225,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_invalid_binwidth_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1226,6 +1236,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1248,6 +1259,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn histcounts_wgpu_roundtrip() {
@@ -1273,8 +1285,8 @@ mod tests {
         assert_eq!(values_from_tensor(edges_val), vec![0.0, 1.0, 2.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

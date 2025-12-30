@@ -4,11 +4,11 @@
 //! its terse API for numeric CSV imports. This implementation mirrors MATLAB's
 //! zero-based range semantics while integrating with the modern builtin template.
 
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -16,11 +16,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "csvread",
+        builtin_path = "crate::builtins::io::tabular::csvread"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "csvread"
 category: "io/tabular"
@@ -216,6 +221,7 @@ No. Relative paths are resolved against the current working directory and do not
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "csvread",
     op_kind: GpuOpKind::Custom("io-csvread"),
@@ -231,8 +237,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "csvread",
     shape: ShapeRequirements::Any,
@@ -243,17 +248,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; executes as a standalone host operation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("csvread", DOC_MD);
-
 #[runtime_builtin(
     name = "csvread",
     category = "io/tabular",
     summary = "Read numeric data from a comma-separated text file.",
     keywords = "csvread,csv,dlmread,numeric import,range",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::tabular::csvread"
 )]
 fn csvread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("csvread: {e}"))?;
@@ -766,24 +767,20 @@ fn rows_to_tensor(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ns;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nanos = unix_timestamp_ns();
         let seq = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(
@@ -802,6 +799,7 @@ mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_basic_csv_roundtrip() {
         let path = write_temp_file(&["1,2,3", "4,5,6"]);
@@ -817,6 +815,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_offsets() {
         let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
@@ -833,6 +832,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_numeric_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -853,6 +853,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_string_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
@@ -873,6 +874,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_empty_fields_become_zero() {
         let path = write_temp_file(&["1,,3", ",5,", "7,8,"]);
@@ -888,6 +890,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_errors_on_text() {
         let path = write_temp_file(&["1,2,3", "4,error,6"]);
@@ -900,6 +903,7 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_accepts_char_array_filename() {
         let path = write_temp_file(&["1,2"]);
@@ -918,8 +922,8 @@ mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -1,7 +1,6 @@
 //! MATLAB-compatible `fread` builtin for RunMat.
 
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
-use std::sync::MutexGuard;
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
@@ -12,15 +11,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
+use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fread",
+        builtin_path = "crate::builtins::io::filetext::fread"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fread"
 category: "io/filetext"
@@ -222,6 +226,7 @@ explicitly with `fopen` before calling `fread`.
 - Found a behavioural mismatch? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fread",
     op_kind: GpuOpKind::Custom("file-io-read"),
@@ -238,8 +243,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that reads from the shared file registry; GPU arguments are gathered to the CPU before I/O.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fread",
     shape: ShapeRequirements::Any,
@@ -250,17 +254,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O cannot participate in fusion; metadata is registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fread", DOC_MD);
-
 #[runtime_builtin(
     name = "fread",
     category = "io/filetext",
     summary = "Read binary data from a file identifier.",
     keywords = "fread,file,io,binary,precision",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::fread"
 )]
 fn fread_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&fid, &rest)?;
@@ -887,7 +887,7 @@ fn value_to_scalar(value: &Value, err: &str) -> Result<f64, String> {
 }
 
 fn read_from_handle(
-    file: &mut MutexGuard<'_, std::fs::File>,
+    file: &mut File,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,
@@ -898,15 +898,14 @@ fn read_from_handle(
         OutputKind::Double => {
             let limit = size_spec.element_limit();
             let (values, count) =
-                read_numeric_values(&mut **file, precision.input, limit, skip, endianness)?;
+                read_numeric_values(file, precision.input, limit, skip, endianness)?;
             let (data, rows, cols) = finalize_numeric(size_spec, count, values);
             let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fread: {e}"))?;
             Ok(FreadEval::new(Value::Tensor(tensor), count))
         }
         OutputKind::Char => {
             let limit = size_spec.element_limit();
-            let (values, count) =
-                read_char_values(&mut **file, precision.input, limit, skip, endianness)?;
+            let (values, count) = read_char_values(file, precision.input, limit, skip, endianness)?;
             let (row_major, rows, cols) = finalize_char(size_spec, count, values);
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
@@ -1274,16 +1273,18 @@ fn column_to_row_major(data: &[char], rows: usize, cols: usize) -> Vec<char> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_reads_default_double() {
         registry::reset_for_tests();
@@ -1313,6 +1314,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_vector_with_count() {
         registry::reset_for_tests();
@@ -1343,6 +1345,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_matrix_with_padding() {
         registry::reset_for_tests();
@@ -1374,6 +1377,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_char_output() {
         registry::reset_for_tests();
@@ -1405,6 +1409,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_logical_output() {
         registry::reset_for_tests();
@@ -1441,6 +1446,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_requires_prototype() {
         registry::reset_for_tests();
@@ -1464,6 +1470,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_char_requires_precision() {
         registry::reset_for_tests();
@@ -1492,6 +1499,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_gpu_provider_roundtrip() {
         registry::reset_for_tests();
@@ -1537,6 +1545,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fread_wgpu_like_uploads_gpu() {
@@ -1580,6 +1589,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_skip_bytes() {
         registry::reset_for_tests();
@@ -1609,6 +1619,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_big_endian_machine_format() {
         registry::reset_for_tests();
@@ -1640,6 +1651,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_invalid_fid_errors() {
         registry::reset_for_tests();
@@ -1647,15 +1659,15 @@ mod tests {
         assert!(err.contains("Invalid file identifier"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards");
         let filename = format!(

@@ -9,18 +9,21 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
-use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "min",
+        builtin_path = "crate::builtins::math::reduction::min"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "min"
 category: "math/reduction"
@@ -163,6 +166,7 @@ Yes. Logical arrays are promoted to double precision, and integer inputs are con
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "min",
     op_kind: GpuOpKind::Reduction,
@@ -186,8 +190,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_min_dim / reduce_min. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "min",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -208,11 +211,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Fusion planner emits canonical reduction kernels; providers may substitute custom WGSL via reduce_min_dim hooks.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("min", DOC_MD);
 
 /// Evaluation artifact returned by `min` that carries both values and indices.
 #[derive(Debug, Clone)]
@@ -243,7 +241,8 @@ impl MinEvaluation {
     category = "math/reduction",
     summary = "Return the minimum elements of scalars, vectors, matrices, or N-D tensors.",
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
-    accel = "reduction"
+    accel = "reduction",
+    builtin_path = "crate::builtins::math::reduction::min"
 )]
 fn min_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_value())
@@ -1655,9 +1654,8 @@ fn choose_complex_elementwise(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -1668,12 +1666,14 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_scalar_returns_input() {
         let result = min_builtin(Value::Num(5.0), Vec::new()).expect("min");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_vector_with_indices() {
         let tensor = Tensor::new(vec![3.0, 1.0, 5.0], vec![3, 1]).unwrap();
@@ -1683,6 +1683,7 @@ mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_matrix_default_dimension() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -1703,6 +1704,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_all_linear_index() {
         let tensor =
@@ -1724,6 +1726,7 @@ mod tests {
         assert_eq!(indices, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_with_omitnan() {
         let tensor = Tensor::new(vec![f64::NAN, 4.0, 2.0], vec![3, 1]).unwrap();
@@ -1734,6 +1737,7 @@ mod tests {
         assert_eq!(indices, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_omitnan_all_nan_slice() {
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN], vec![2, 1]).unwrap();
@@ -1750,6 +1754,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_reduction_abs_comparison() {
         let tensor = Tensor::new(vec![1.0, -3.0, -2.0, 4.0], vec![2, 2]).unwrap();
@@ -1775,6 +1780,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_reduction_complex_real_comparison() {
         let tensor = ComplexTensor::new(vec![(1.0, 2.0), (0.5, 5.0)], vec![2, 1]).expect("tensor");
@@ -1795,6 +1801,7 @@ mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_broadcast() {
         let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
@@ -1821,6 +1828,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_abs_comparison() {
         let lhs = Tensor::new(vec![-2.0, 1.0], vec![2, 1]).unwrap();
@@ -1846,6 +1854,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_elementwise_rejects_reduction_only_keywords() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1858,6 +1867,7 @@ mod tests {
         assert!(err.contains("only supported for reduction"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_complex_real_comparison() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
@@ -1873,6 +1883,7 @@ mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_argument_parsing() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1884,6 +1895,7 @@ mod tests {
         assert_eq!(indices, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_vecdim_duplicate_entries() {
         let tensor = Tensor::new(vec![5.0, 2.0, 7.0, 1.0], vec![2, 2]).unwrap();
@@ -1895,6 +1907,7 @@ mod tests {
         assert_eq!(indices, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_gpu_argument_errors() {
         let tensor = Tensor::new(vec![3.0, 1.0], vec![2, 1]).unwrap();
@@ -1908,6 +1921,7 @@ mod tests {
         assert!(err.contains("dimension arguments must reside on the host"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_invalid_comparison_method_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1920,13 +1934,14 @@ mod tests {
         assert!(err.contains("unsupported ComparisonMethod"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn min_doc_examples_present() {
         let blocks = test_support::doc_examples(super::DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn min_gpu_dim1_matches_cpu() {
@@ -1963,6 +1978,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_dimension_numeric_argument() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1984,6 +2000,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_complex_auto_comparison() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
@@ -1995,6 +2012,7 @@ mod tests {
         assert_eq!(indices, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_scalar_pair_arguments() {
         let args = vec![Value::Num(2.0)];
@@ -2002,6 +2020,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_rejects_invalid_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();

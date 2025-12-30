@@ -340,9 +340,24 @@ fn is_nan64(x: f64) -> bool {
     return x != x;
 }
 
+fn pos_inf_f64() -> f64 {
+    var bits: u64 = 0x7ff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn neg_inf_f64() -> f64 {
+    var bits: u64 = 0xfff0000000000000u;
+    return bitcast<f64>(bits);
+}
+
+fn nan_f64() -> f64 {
+    var bits: u64 = 0x7ff8000000000000u;
+    return bitcast<f64>(bits);
+}
+
 fn is_inf64(x: f64) -> bool {
-    let inf = f64(1.0) / f64(0.0);
-    let neg_inf = -inf;
+    let inf = pos_inf_f64();
+    let neg_inf = neg_inf_f64();
     return x == inf || x == neg_inf;
 }
 
@@ -352,17 +367,17 @@ fn gamma_real(a: f64) -> f64 {
     }
     if (is_inf64(a)) {
         if (a > 0.0) {
-            return f64(1.0) / f64(0.0);
+            return pos_inf_f64();
         }
-        return f64(0.0) / f64(0.0);
+        return nan_f64();
     }
     if (is_non_positive_integer(a)) {
-        return f64(1.0) / f64(0.0);
+        return pos_inf_f64();
     }
     if (a < 0.5) {
         let sin_term = sin(PI * a);
         if (abs(sin_term) <= EPSILON) {
-            return f64(1.0) / f64(0.0);
+            return pos_inf_f64();
         }
         let gamma_one_minus = lanczos_gamma(1.0 - a);
         return PI / (sin_term * gamma_one_minus);
@@ -379,22 +394,22 @@ fn factorial_real(a: f64) -> f64 {
     }
     if (is_inf64(a)) {
         if (a > 0.0) {
-            return f64(1.0) / f64(0.0);
+            return pos_inf_f64();
         }
-        return f64(0.0) / f64(0.0);
+        return nan_f64();
     }
     if (a < 0.0) {
-        return f64(0.0) / f64(0.0);
+        return nan_f64();
     }
     let rounded = round(a);
     if (abs(a - rounded) > FACTORIAL_INT_TOL) {
-        return f64(0.0) / f64(0.0);
+        return nan_f64();
     }
     if (rounded < 0.0) {
-        return f64(0.0) / f64(0.0);
+        return nan_f64();
     }
     if (rounded > f64(FACTORIAL_MAX)) {
-        return f64(1.0) / f64(0.0);
+        return pos_inf_f64();
     }
     let n = i32(rounded);
     if (n <= 1) {
@@ -555,9 +570,24 @@ fn is_nan32(x: f32) -> bool {
     return x != x;
 }
 
+fn pos_inf_f32() -> f32 {
+    var bits: u32 = 0x7f800000u;
+    return bitcast<f32>(bits);
+}
+
+fn neg_inf_f32() -> f32 {
+    var bits: u32 = 0xff800000u;
+    return bitcast<f32>(bits);
+}
+
+fn nan_f32() -> f32 {
+    var bits: u32 = 0x7fc00000u;
+    return bitcast<f32>(bits);
+}
+
 fn is_inf32(x: f32) -> bool {
-    let inf = f32(1.0) / f32(0.0);
-    let neg_inf = -inf;
+    let inf = pos_inf_f32();
+    let neg_inf = neg_inf_f32();
     return x == inf || x == neg_inf;
 }
 
@@ -567,17 +597,17 @@ fn gamma_real(a: f32) -> f32 {
     }
     if (is_inf32(a)) {
         if (a > 0.0) {
-            return f32(1.0) / f32(0.0);
+            return pos_inf_f32();
         }
-        return f32(0.0) / f32(0.0);
+        return nan_f32();
     }
     if (is_non_positive_integer(a)) {
-        return f32(1.0) / f32(0.0);
+        return pos_inf_f32();
     }
     if (a < 0.5) {
         let sin_term = sin(PI * a);
         if (abs(sin_term) <= EPSILON) {
-            return f32(1.0) / f32(0.0);
+            return pos_inf_f32();
         }
         let gamma_one_minus = lanczos_gamma(1.0 - a);
         return PI / (sin_term * gamma_one_minus);
@@ -594,22 +624,22 @@ fn factorial_real(a: f32) -> f32 {
     }
     if (is_inf32(a)) {
         if (a > 0.0) {
-            return f32(1.0) / f32(0.0);
+            return pos_inf_f32();
         }
-        return f32(0.0) / f32(0.0);
+        return nan_f32();
     }
     if (a < 0.0) {
-        return f32(0.0) / f32(0.0);
+        return nan_f32();
     }
     let rounded = round(a);
     if (abs(a - rounded) > FACTORIAL_INT_TOL_F32) {
-        return f32(0.0) / f32(0.0);
+        return nan_f32();
     }
     if (rounded < 0.0) {
-        return f32(0.0) / f32(0.0);
+        return nan_f32();
     }
     if (rounded > f32(FACTORIAL_MAX_F32)) {
-        return f32(1.0) / f32(0.0);
+        return pos_inf_f32();
     }
     let n = i32(rounded);
     if (n <= 1) {

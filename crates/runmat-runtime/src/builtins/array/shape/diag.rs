@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "diag",
+        builtin_path = "crate::builtins::array::shape::diag"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "diag"
 category: "array/shape"
@@ -267,6 +270,7 @@ once single-precision support lands.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "diag",
     op_kind: GpuOpKind::Custom("diag"),
@@ -285,8 +289,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement custom diag hooks; runtimes fall back to a host gather + upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diag",
     shape: ShapeRequirements::Any,
@@ -296,11 +299,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "diag is currently not fused; fusion plans gather to host before invoking the builtin.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("diag", DOC_MD);
 
 #[derive(Clone, Copy, Debug)]
 struct MatrixDims {
@@ -561,7 +559,8 @@ fn checked_total_len(dims: MatrixDims) -> Result<usize, String> {
     category = "array/shape",
     summary = "Create diagonal matrices from vectors or extract diagonals from matrices.",
     keywords = "diag,diagonal,matrix,extraction,gpu",
-    accel = "shape"
+    accel = "shape",
+    builtin_path = "crate::builtins::array::shape::diag"
 )]
 fn diag_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = DiagOptions::parse(rest)?;
@@ -1182,7 +1181,7 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -1197,18 +1196,21 @@ mod tests {
             .expect("tensor conversion")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_scalar_returns_scalar() {
         let result = diag_builtin(Value::Num(7.0), Vec::new()).expect("diag");
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_complex_scalar_roundtrip() {
         let result = diag_builtin(Value::Complex(1.5, -2.25), Vec::new()).expect("diag");
         assert_eq!(result, Value::Complex(1.5, -2.25));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_vector_positive_offset() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1225,6 +1227,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_matrix_single_element_returns_scalar() {
         let tensor = Tensor::new(vec![42.0], vec![1, 1]).unwrap();
@@ -1232,6 +1235,7 @@ mod tests {
         assert_eq!(result, Value::Num(42.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_vector_main_diagonal() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1254,6 +1258,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_empty_vector_returns_empty_matrix() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
@@ -1267,6 +1272,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_empty_vector_with_offset_expands() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 1]).unwrap();
@@ -1281,6 +1287,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_matrix_negative_offset() {
         let tensor = Tensor::new(
@@ -1299,6 +1306,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_tensor_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
@@ -1306,6 +1314,7 @@ mod tests {
         assert!(err.contains("input must be 2-D"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_offset_out_of_range_returns_empty() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1320,6 +1329,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_offset_non_integer_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1327,6 +1337,7 @@ mod tests {
         assert!(err.contains("offset must be an integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_offset_nan_errors() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1335,6 +1346,7 @@ mod tests {
         assert!(err.contains("offset must be finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_logical_vector_creates_square_matrix() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -1357,6 +1369,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_logical_matrix_extracts_column() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
@@ -1374,6 +1387,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_char_matrix_extracts_column() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -1388,6 +1402,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_char_vector_yields_square_matrix() {
         let chars = CharArray::new_row("az");
@@ -1402,6 +1417,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1427,6 +1443,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_requires_numeric_offset() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1435,6 +1452,7 @@ mod tests {
         assert!(err.contains("unrecognised option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_offset_from_scalar_tensor() {
         let vector = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1449,6 +1467,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_vector_option_returns_column() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1463,6 +1482,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_size_vector_allocates_rectangular() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1478,6 +1498,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_size_too_small_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1487,6 +1508,7 @@ mod tests {
         assert!(err.contains("size arguments are too small"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_vector_option_disallows_size_override() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1499,6 +1521,7 @@ mod tests {
         assert!(err.contains("not compatible with the 'vector' option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_class_logical_yields_logical_output() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
@@ -1513,6 +1536,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_class_double_from_logical() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -1527,6 +1551,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_single_option_not_supported() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1535,6 +1560,7 @@ mod tests {
         assert!(err.contains("single precision"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_like_logical_matches_class() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
@@ -1547,6 +1573,7 @@ mod tests {
         assert!(matches!(result, Value::LogicalArray(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_like_char_errors() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1559,6 +1586,7 @@ mod tests {
         assert!(err.contains("character prototypes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_like_gpu_returns_gpu_value() {
         test_support::with_test_provider(|provider| {
@@ -1586,6 +1614,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn diag_wgpu_vector_matches_cpu() {
@@ -1612,6 +1641,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn diag_wgpu_extract_matches_cpu() {
@@ -1645,8 +1675,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

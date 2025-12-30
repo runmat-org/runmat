@@ -8,15 +8,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "endsWith",
+        builtin_path = "crate::builtins::strings::search::endswith"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "endsWith"
 category: "strings/search"
@@ -190,6 +195,7 @@ contains exactly one element, the builtin returns a logical scalar.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::endswith")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "endsWith",
     op_kind: GpuOpKind::Custom("string-search"),
@@ -205,8 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes entirely on the host; inputs are gathered from the GPU before evaluating suffix checks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::endswith")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "endsWith",
     shape: ShapeRequirements::Any,
@@ -217,17 +222,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Text operation; not eligible for fusion and materialises host logical results.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("endsWith", DOC_MD);
-
 #[runtime_builtin(
     name = "endsWith",
     category = "strings/search",
     summary = "Return logical values indicating whether text inputs end with specific patterns.",
     keywords = "endswith,suffix,text,ignorecase,search",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::search::endswith"
 )]
 fn endswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
     let text = gather_if_needed(&text).map_err(|e| format!("endsWith: {e}"))?;
@@ -300,12 +301,13 @@ fn evaluate_endswith(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_string_scalar_true() {
         let result = endswith_builtin(
@@ -317,6 +319,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_string_scalar_false() {
         let result = endswith_builtin(
@@ -328,6 +331,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_option() {
         let result = endswith_builtin(
@@ -339,6 +343,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_string_array_scalar_pattern() {
         let array = StringArray::new(
@@ -356,6 +361,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_elementwise_patterns() {
         let subjects = StringArray::new(
@@ -375,6 +381,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_broadcast_pattern_column_vector() {
         let patterns = CharArray::new(vec!['n', 'x', 'r'], 3, 1).unwrap();
@@ -388,6 +395,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_cell_array_patterns() {
         let cell = CellArray::new(
@@ -406,6 +414,7 @@ mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_missing_strings_false() {
         let array = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -418,6 +427,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_empty_pattern_true() {
         let result = endswith_builtin(
@@ -429,6 +439,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_invalid_option_name() {
         let err = endswith_builtin(
@@ -440,6 +451,7 @@ mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_string_flag() {
         let result = endswith_builtin(
@@ -454,6 +466,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_numeric_flag() {
         let result = endswith_builtin(
@@ -468,6 +481,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_positional_value() {
         let result = endswith_builtin(
@@ -479,6 +493,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_logical_array_value() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
@@ -494,6 +509,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_tensor_value() {
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
@@ -506,6 +522,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_gpu_tensor_flag() {
         test_support::with_test_provider(|provider| {
@@ -532,6 +549,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_gpu_tensor_flag_wgpu() {
         use runmat_accelerate::backend::wgpu::provider::{
@@ -566,6 +584,7 @@ mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_invalid_value() {
         let err = endswith_builtin(
@@ -580,6 +599,7 @@ mod tests {
         assert!(err.contains("invalid value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_logical_array_invalid_size() {
         let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -595,6 +615,7 @@ mod tests {
         assert!(err.contains("scalar logicals"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_numeric_nan_invalid() {
         let err = endswith_builtin(
@@ -606,6 +627,7 @@ mod tests {
         assert!(err.contains("finite scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_ignore_case_missing_value() {
         let err = endswith_builtin(
@@ -617,6 +639,7 @@ mod tests {
         assert!(err.contains("expected a value after 'IgnoreCase'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_mismatched_shapes_error() {
         let text = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -631,6 +654,7 @@ mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_invalid_subject_type() {
         let err =
@@ -638,6 +662,7 @@ mod tests {
         assert!(err.contains("first argument must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_invalid_pattern_type() {
         let err =
@@ -648,6 +673,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_cell_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -656,6 +682,7 @@ mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_zero_sized_inputs() {
         let subjects = StringArray::new(Vec::<String>::new(), vec![0, 1]).unwrap();
@@ -674,6 +701,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_missing_pattern_false() {
         let result = endswith_builtin(
@@ -685,8 +713,8 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -3,16 +3,41 @@ name = "runmat-lsp"
 version = "0.2.8"
 edition = "2021"
 
+[lib]
+name = "runmat_lsp"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "runmat-lsp"
+path = "src/main.rs"
+required-features = ["native"]
+
+[features]
+default = ["native"]
+native = ["tokio", "tower-lsp", "env_logger"]
+wasm = ["wasm-bindgen"]
+
 [dependencies]
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+env_logger = { workspace = true, optional = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
+runmat-core = { workspace = true }
+runmat-config = { workspace = true }
+runmat-runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
-tower-lsp = { workspace = true }
+tokio = { workspace = true, optional = true }
+tower-lsp = { workspace = true, optional = true }
 once_cell = { workspace = true }
+wasm-bindgen = { version = "0.2", optional = true, features = ["serde-serialize"] }
+lsp-types = "0.94"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+runmat-core = { workspace = true }
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+runmat-runtime = { workspace = true, features = ["plot-web"] }

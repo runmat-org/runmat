@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "rem",
+        builtin_path = "crate::builtins::math::rounding::rem"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "rem"
 category: "math/rounding"
@@ -171,6 +174,7 @@ It stays on-device when the provider implements `elem_div`, `unary_fix`, `elem_m
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::rem")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rem",
     op_kind: GpuOpKind::Elementwise,
@@ -201,8 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers can compose rem from elem_div → unary_fix → elem_mul → elem_sub. Kernels fall back to host when any hook is missing or shapes differ.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::rem")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rem",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -223,17 +226,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion expands rem as trunc(a / b) followed by a - b * q; providers may override with specialised kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("rem", DOC_MD);
-
 #[runtime_builtin(
     name = "rem",
     category = "math/rounding",
     summary = "MATLAB-compatible remainder a - b .* fix(a./b) with support for complex values and broadcasting.",
     keywords = "rem,remainder,truncate,gpu",
-    accel = "binary"
+    accel = "binary",
+    builtin_path = "crate::builtins::math::rounding::rem"
 )]
 fn rem_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
     match (lhs, rhs) {
@@ -460,11 +459,12 @@ fn into_complex(name: &str, input: NumericArray) -> Result<ComplexTensor, String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_positive_values() {
         let result = rem_builtin(Value::Num(17.0), Value::Num(5.0)).expect("rem");
@@ -474,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_negative_dividend_keeps_sign() {
         let result = rem_builtin(Value::Num(-7.0), Value::Num(4.0)).expect("rem");
@@ -483,6 +484,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_negative_divisor_retains_dividend_sign() {
         let result = rem_builtin(Value::Num(7.0), Value::Num(-4.0)).expect("rem");
@@ -492,6 +494,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_zero_divisor_returns_nan() {
         let result = rem_builtin(Value::Num(3.0), Value::Num(0.0)).expect("rem");
@@ -501,6 +504,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_infinite_divisor_returns_dividend() {
         let result = rem_builtin(Value::Num(4.5), Value::Num(f64::INFINITY)).expect("rem");
@@ -510,6 +514,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_infinite_dividend_returns_nan() {
         let result = rem_builtin(Value::Num(f64::INFINITY), Value::Num(3.0)).expect("rem");
@@ -519,6 +524,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_matrix_scalar_broadcast() {
         let matrix = Tensor::new(vec![4.5, 7.1, -2.3, 0.4], vec![2, 2]).unwrap();
@@ -538,6 +544,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_complex_support() {
         let lhs = ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).unwrap();
@@ -553,6 +560,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_char_array_support() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -572,6 +580,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_logical_array_support() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -583,6 +592,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_broadcasting_between_vectors() {
         let lhs = Tensor::new(vec![1.0, -2.0], vec![2, 1]).unwrap();
@@ -597,6 +607,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -623,6 +634,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_int_inputs_promote() {
         let result =
@@ -633,6 +645,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_string_input_errors() {
         let err = rem_builtin(Value::from("abc"), Value::Num(3.0))
@@ -640,6 +653,7 @@ mod tests {
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rem_wgpu_matches_cpu() {
@@ -687,8 +701,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

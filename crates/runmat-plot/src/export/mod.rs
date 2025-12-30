@@ -8,4 +8,5 @@ pub mod web;
 
 pub use image::*;
 pub use vector::*;
+#[allow(unused_imports)]
 pub use web::*;

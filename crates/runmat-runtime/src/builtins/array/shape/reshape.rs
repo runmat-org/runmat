@@ -6,15 +6,19 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "reshape",
+        builtin_path = "crate::builtins::array::shape::reshape"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "reshape"
 category: "array/shape"
@@ -157,6 +161,7 @@ Yes. Complex scalars become complex tensors when the target shape has more than 
 - Found a bug or behavioral difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "reshape",
     op_kind: GpuOpKind::Custom("reshape"),
@@ -178,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers update residency metadata via custom reshape hook; no kernel launches required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "reshape",
     shape: ShapeRequirements::Any,
@@ -190,17 +194,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Reshape influences fusion layout but emits no kernels; fusion planner treats it as a metadata op.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("reshape", DOC_MD);
-
 #[runtime_builtin(
     name = "reshape",
     category = "array/shape",
     summary = "Rearrange the dimensions of an array without changing its data.",
     keywords = "reshape,resize,dimensions,gpu,auto",
-    accel = "shape"
+    accel = "shape",
+    builtin_path = "crate::builtins::array::shape::reshape"
 )]
 fn reshape_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -532,7 +532,7 @@ fn is_vector(t: &Tensor) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
@@ -541,6 +541,7 @@ mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_vector_to_matrix() {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
@@ -559,6 +560,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_with_auto_dimension() {
         let data: Vec<f64> = (1..=18).map(|v| v as f64).collect();
@@ -574,6 +576,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_logical_array_preserves_type() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0, 1, 0], vec![6, 1]).expect("logical");
@@ -591,6 +594,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_char_array_single_dimension_becomes_column() {
         let chars = CharArray::new("abcd".chars().collect(), 1, 4).expect("char array");
@@ -607,6 +611,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_cell_array_two_dimensional() {
         let cell = CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).expect("cell");
@@ -625,6 +630,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_string_scalar_high_rank() {
         let result = reshape_builtin(
@@ -641,6 +647,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_gpu_preserves_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -666,6 +673,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn reshape_wgpu_updates_provider_shape() {
@@ -695,6 +703,7 @@ mod tests {
         assert_eq!(host.data, tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_mismatched_elements_errors() {
         let data: Vec<f64> = (1..=6).map(|v| v as f64).collect();
@@ -707,6 +716,7 @@ mod tests {
         assert!(err.contains("product of dimensions"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_multiple_auto_errors() {
         let data: Vec<f64> = (1..=6).map(|v| v as f64).collect();
@@ -720,6 +730,7 @@ mod tests {
         assert!(err.contains("single []"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_accepts_zero_sized_dimension() {
         let tensor = tensor_from_slice(&[], &[0, 1]);
@@ -734,6 +745,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_int_scalar_to_vector() {
         let value = Value::Int(IntValue::I32(5));
@@ -745,6 +757,7 @@ mod tests {
         assert!(matches!(ok, Value::Int(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_complex_scalar_high_rank() {
         let result = reshape_builtin(
@@ -761,6 +774,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_auto_dimension_mismatch_reports_product() {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
@@ -777,8 +791,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

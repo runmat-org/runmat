@@ -15,14 +15,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 const NAME: &str = "pinv";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "pinv",
+        builtin_path = "crate::builtins::math::linalg::solve::pinv"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "pinv"
 category: "math/linalg/solve"
@@ -176,10 +179,7 @@ remains useful for ill-conditioned or rank-deficient problems where the pseudoin
   with a minimal reproduction.
 "#;
 
-#[cfg(not(feature = "doc_export"))]
-#[allow(dead_code)]
-const DOC_MD: &str = "";
-
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pinv",
     op_kind: GpuOpKind::Custom("pinv"),
@@ -195,8 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pinv",
     shape: ShapeRequirements::Any,
@@ -207,17 +206,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Pseudoinverses are standalone solves and do not participate in fusion plans.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("pinv", DOC_MD);
-
 #[runtime_builtin(
     name = "pinv",
     category = "math/linalg/solve",
     summary = "Compute the Moore–Penrose pseudoinverse of a matrix using SVD.",
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
-    accel = "pinv"
+    accel = "pinv",
+    builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 fn pinv_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let tol = parse_tolerance_arg(NAME, &rest)?;
@@ -342,7 +337,7 @@ pub fn pinv_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, Tensor, Value};
@@ -357,6 +352,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_scalar_real() {
         let result = pinv_builtin(Value::Num(4.0), Vec::new()).expect("pinv");
@@ -366,6 +362,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rank_deficient_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -379,6 +376,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rectangular() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0], vec![3, 2]).unwrap();
@@ -392,6 +390,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_custom_tolerance_zeroes_small_singular_values() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-12], vec![2, 2]).unwrap();
@@ -405,6 +404,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_complex_diagonal() {
         let tensor = ComplexTensor::new(
@@ -431,6 +431,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -447,6 +448,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn pinv_wgpu_matches_cpu() {
@@ -479,6 +481,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rejects_negative_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -487,6 +490,7 @@ mod tests {
         assert!(err.contains("tolerance"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_accepts_boolean() {
         let result =
@@ -497,6 +501,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_rejects_non_scalar_tensor() {
         let tol_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -505,6 +510,7 @@ mod tests {
         assert!(err.contains("tolerance must be a real scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_rejects_char_array() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -513,8 +519,8 @@ mod tests {
         assert!(err.contains("tolerance must be a real scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

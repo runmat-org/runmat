@@ -8,9 +8,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 /// Error used when no acceleration provider is registered.
 pub(crate) const ERR_NO_PROVIDER: &str = "gpuDevice: no acceleration provider registered";
@@ -19,7 +16,14 @@ const ERR_UNSUPPORTED_ARGUMENT: &str = "gpuDevice: unsupported input argument";
 const ERR_RESET_NOT_SUPPORTED: &str = "gpuDevice: reset is not supported by the active provider";
 const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive integer";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "gpuDevice",
+        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gpuDevice"
 category: "acceleration/gpu"
@@ -166,6 +170,7 @@ string that is convenient for logging or display.
 [gpuArray](./gpuArray), [gather](./gather), [gpuInfo](./gpuInfo)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpudevice")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuDevice",
     op_kind: GpuOpKind::Custom("device-info"),
@@ -181,8 +186,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Pure metadata query; does not enqueue GPU kernels. Returns an error when no provider is registered.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuDevice",
     shape: ShapeRequirements::Any,
@@ -193,11 +199,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; the builtin returns a host-resident struct.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gpuDevice", DOC_MD);
-
 /// Query the active provider and return a metadata struct describing the GPU device.
 #[cfg_attr(
     feature = "doc_export",
@@ -205,7 +206,8 @@ register_builtin_doc_text!("gpuDevice", DOC_MD);
         name = "gpuDevice",
         category = "acceleration/gpu",
         summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate"
+        keywords = "gpu,device,info,accelerate",
+        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
     )
 )]
 #[cfg_attr(
@@ -214,7 +216,8 @@ register_builtin_doc_text!("gpuDevice", DOC_MD);
         name = "gpuDevice",
         category = "acceleration/gpu",
         summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate"
+        keywords = "gpu,device,info,accelerate",
+        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
     )
 )]
 fn gpu_device_builtin(args: Vec<Value>) -> Result<Value, String> {
@@ -387,10 +390,11 @@ fn num_to_index(raw: f64) -> Result<Option<u32>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_returns_struct() {
         test_support::with_test_provider(|_| {
@@ -409,6 +413,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_accepts_current_index() {
         test_support::with_test_provider(|_| {
@@ -429,6 +434,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_out_of_range_index_errors() {
         test_support::with_test_provider(|_| {
@@ -440,6 +446,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
@@ -448,6 +455,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -456,6 +464,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -465,6 +474,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -474,6 +484,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_invalid_index_rejected() {
         test_support::with_test_provider(|_| {
@@ -495,6 +506,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_device_wgpu_reports_metadata() {
@@ -545,8 +557,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn gpu_device_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(blocks.len() >= 5, "expected at least five doc examples");

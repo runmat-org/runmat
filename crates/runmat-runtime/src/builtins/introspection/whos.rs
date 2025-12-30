@@ -15,12 +15,16 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::io::mat::load::read_mat_file;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "whos",
+        builtin_path = "crate::builtins::introspection::whos"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "whos"
 category: "introspection"
@@ -145,6 +149,7 @@ ans =
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::whos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "whos",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -160,8 +165,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; gpuArray metadata is derived from provider precision without launching kernels.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::whos")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "whos",
     shape: ShapeRequirements::Any,
@@ -172,17 +176,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Introspection builtin; not eligible for fusion. Registration is for diagnostics only.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("whos", DOC_MD);
-
 #[runtime_builtin(
     name = "whos",
     category = "introspection",
     summary = "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
     keywords = "whos,workspace variables,memory usage,struct array",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::introspection::whos"
 )]
 fn whos_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut gathered = Vec::with_capacity(args.len());
@@ -775,6 +775,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_lists_workspace_variables() {
         ensure_test_resolver();
@@ -805,6 +806,7 @@ pub(crate) mod tests {
         assert_eq!(field_bool(second, "complex"), Some(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_with_wildcard() {
         ensure_test_resolver();
@@ -819,6 +821,7 @@ pub(crate) mod tests {
         assert_eq!(field_string(&entries[0], "name").unwrap(), "alpha");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_with_regex() {
         ensure_test_resolver();
@@ -840,6 +843,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["bar", "baz"]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_filters_global_only() {
         ensure_test_resolver();
@@ -856,6 +860,7 @@ pub(crate) mod tests {
         assert_eq!(field_bool(entry, "global"), Some(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_accepts_char_array_arguments() {
         ensure_test_resolver();
@@ -878,6 +883,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_accepts_cell_array_arguments() {
         ensure_test_resolver();
@@ -900,6 +906,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "gamma".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_numeric_selection() {
         ensure_test_resolver();
@@ -911,6 +918,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_unknown_option() {
         ensure_test_resolver();
@@ -922,6 +930,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_requires_filename_for_file_option() {
         ensure_test_resolver();
@@ -930,6 +939,7 @@ pub(crate) mod tests {
         assert!(err.contains("'-file' requires a filename"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_requires_pattern_for_regexp() {
         ensure_test_resolver();
@@ -941,6 +951,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_rejects_invalid_regex() {
         ensure_test_resolver();
@@ -950,6 +961,7 @@ pub(crate) mod tests {
         assert!(err.contains("invalid regular expression"), "error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_file_option_reads_mat_file() {
         ensure_test_resolver();
@@ -985,6 +997,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_reports_gpu_bytes() {
         ensure_test_resolver();
@@ -1006,6 +1019,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn whos_reports_gpu_logical_bytes() {
         ensure_test_resolver();
@@ -1030,6 +1044,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn whos_reports_gpu_bytes_with_wgpu_provider() {
@@ -1056,8 +1071,8 @@ pub(crate) mod tests {
         assert!((bytes - expected).abs() < 1e-6);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

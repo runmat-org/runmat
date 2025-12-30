@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "real",
+        builtin_path = "crate::builtins::math::elementwise::real"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "real"
 category: "math/elementwise"
@@ -169,6 +172,7 @@ Yes. The fusion planner can fold `real` into neighbouring elementwise kernels, k
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "real",
     op_kind: GpuOpKind::Elementwise,
@@ -185,8 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute real in-place via unary_real; the runtime gathers to the host when the hook is absent or when host-only conversions (e.g. complex tensors) are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "real",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -206,17 +209,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels treat real as an identity transform for real tensors; providers can override via fused pipelines when advantageous.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("real", DOC_MD);
-
 #[runtime_builtin(
     name = "real",
     category = "math/elementwise",
     summary = "Extract the real part of scalars, vectors, matrices, or N-D tensors.",
     keywords = "real,real part,complex,elementwise,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::real"
 )]
 fn real_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -273,11 +272,12 @@ fn real_char_array(ca: CharArray) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_scalar_num() {
         let result = real_builtin(Value::Num(-2.5)).expect("real");
@@ -287,6 +287,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_complex_scalar() {
         let result = real_builtin(Value::Complex(3.0, 4.0)).expect("real");
@@ -296,6 +297,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_int_promotes_to_double() {
         let result = real_builtin(Value::Int(IntValue::I32(7))).expect("real");
@@ -305,6 +307,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_complex_tensor_to_real_tensor() {
         let complex =
@@ -320,6 +323,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_logical_array_to_numeric() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical array");
@@ -333,6 +337,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_char_array_codes() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).expect("char array");
@@ -346,12 +351,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_string_error() {
         let err = real_builtin(Value::from("hello")).expect_err("real should error");
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -368,13 +375,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn real_wgpu_matches_cpu_identity() {

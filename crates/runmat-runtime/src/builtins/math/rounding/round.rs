@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "round",
+        builtin_path = "crate::builtins::math::rounding::round"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "round"
 category: "math/rounding"
@@ -156,6 +159,7 @@ Yes. Logical values are converted to doubles (`0` or `1`) and characters are rou
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::round")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "round",
     op_kind: GpuOpKind::Elementwise,
@@ -171,8 +175,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute round directly on the device; digit-aware rounding currently gathers to the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "round",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -188,11 +191,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner emits WGSL `round` calls; providers can substitute custom kernels.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("round", DOC_MD);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RoundStrategy {
@@ -212,7 +210,8 @@ impl RoundStrategy {
     category = "math/rounding",
     summary = "Round values to the nearest integers, decimal places, or significant digits.",
     keywords = "round,rounding,significant,decimals,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::rounding::round"
 )]
 fn round_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let strategy = parse_arguments(&rest)?;
@@ -401,11 +400,12 @@ fn parse_mode(value: &Value) -> Result<RoundMode, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_defaults() {
         let result = round_builtin(Value::Num(1.7), Vec::new()).expect("round");
@@ -415,6 +415,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_negative_half() {
         let result = round_builtin(Value::Num(-2.5), Vec::new()).expect("round");
@@ -424,6 +425,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_tensor_decimals() {
         let tensor = Tensor::new(vec![1.2345, 2.499, 3.5001], vec![3, 1]).unwrap();
@@ -441,6 +443,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_tensor_negative_decimals() {
         let tensor = Tensor::new(vec![123.0, 149.9, 150.0], vec![3, 1]).unwrap();
@@ -454,6 +457,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_scalar_significant() {
         let result = round_builtin(
@@ -467,6 +471,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_complex_value() {
         let result = round_builtin(Value::Complex(1.2, -3.6), Vec::new()).expect("round");
@@ -479,6 +484,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_invalid_mode_errors() {
         let err = round_builtin(
@@ -489,6 +495,7 @@ mod tests {
         assert!(err.contains("unknown rounding mode"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -505,8 +512,8 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

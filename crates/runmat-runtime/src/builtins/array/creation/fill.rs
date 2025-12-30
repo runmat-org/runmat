@@ -13,11 +13,14 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fill",
+        builtin_path = "crate::builtins::array::creation::fill"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fill"
 category: "array/creation"
@@ -239,6 +242,7 @@ host tensor, ensuring identical results.
 - Issues or questions: [RunMat GitHub issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::fill")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fill",
     op_kind: GpuOpKind::Custom("generator"),
@@ -257,8 +261,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs dedicated constant-fill kernels; falls back to host upload when the provider reports an error.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::fill")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fill",
     shape: ShapeRequirements::Any,
@@ -278,17 +281,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fill as a constant generator backed by a uniform parameter.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fill", DOC_MD);
-
 #[runtime_builtin(
     name = "fill",
     category = "array/creation",
     summary = "Create arrays filled with a constant value.",
     keywords = "fill,constant,array,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::fill"
 )]
 fn fill_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_value =
@@ -633,7 +632,7 @@ fn make_logical_array(fill: &FillScalar, shape: &[usize]) -> Result<LogicalArray
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -641,12 +640,14 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_scalar_defaults() {
         let result = fill_builtin(Value::Num(5.0), Vec::new()).expect("fill");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
@@ -660,6 +661,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rectangular_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -673,6 +675,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_size_vector() {
         let sz = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -686,6 +689,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_logical_option() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
@@ -699,6 +703,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_tensor_infers_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -716,6 +721,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_complex() {
         let result = fill_builtin(
@@ -735,6 +741,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rejects_non_scalar_value() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -742,6 +749,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_real_for_double_output() {
         let result = fill_builtin(
@@ -751,6 +759,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_double_option_generates_real_array() {
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::from("double")];
@@ -764,6 +773,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_infers_shape_without_dims() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -778,6 +788,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_logical_prototype() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
@@ -792,6 +803,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_rejects_single_precision_option() {
         let result = fill_builtin(
@@ -801,6 +813,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_like_logical_conflict_errors() {
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -814,6 +827,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
@@ -841,6 +855,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fill_wgpu_like_matches_cpu() {
@@ -852,20 +867,20 @@ mod tests {
                     if let Some(p) = runmat_accelerate_api::provider() {
                         p
                     } else {
-                        eprintln!(
+                        tracing::warn!(
                         "skipping fill_wgpu_like_matches_cpu: provider not registered after init"
                     );
                         return;
                     }
                 }
                 Ok(Err(err)) => {
-                    eprintln!(
+                    tracing::warn!(
                         "skipping fill_wgpu_like_matches_cpu: wgpu provider unavailable ({err})"
                     );
                     return;
                 }
                 Err(_) => {
-                    eprintln!(
+                    tracing::warn!(
                     "skipping fill_wgpu_like_matches_cpu: wgpu provider initialisation panicked"
                 );
                     return;
@@ -892,8 +907,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -4,7 +4,9 @@
 //! handles platform-specific requirements (especially macOS EventLoop main thread requirement)
 //! while maintaining high performance and reliability.
 
+use crate::gui::lifecycle::CloseSignal;
 use crate::plots::Figure;
+use runmat_time::Instant;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread::{self, ThreadId};
 
@@ -13,8 +15,9 @@ use std::thread::{self, ThreadId};
 pub enum GuiThreadMessage {
     /// Request to show an interactive plot with response channel
     ShowPlot {
-        figure: Figure,
+        figure: Box<Figure>,
         response: mpsc::Sender<GuiOperationResult>,
+        close_signal: Option<CloseSignal>,
     },
     /// Request to close all GUI windows
     CloseAll {
@@ -118,9 +121,22 @@ impl MainThreadDetector {
     /// Check if the current thread is the main thread
     pub fn is_main_thread(&self) -> bool {
         if let Some(main_id) = self.main_thread_id.get() {
-            thread::current().id() == *main_id
-        } else {
-            // If not registered, assume current thread is main and register it
+            return thread::current().id() == *main_id;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if is_macos_main_thread() {
+                self.register_main_thread();
+                true
+            } else {
+                false
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Other platforms do not require the GUI to live on the OS main thread.
             self.register_main_thread();
             true
         }
@@ -130,6 +146,11 @@ impl MainThreadDetector {
     pub fn main_thread_id(&self) -> Option<ThreadId> {
         self.main_thread_id.get().copied()
     }
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_main_thread() -> bool {
+    unsafe { libc::pthread_main_np() != 0 }
 }
 
 /// Global main thread detector instance
@@ -158,7 +179,7 @@ pub struct GuiThreadManager {
 /// GUI thread health monitoring
 #[derive(Debug, Clone)]
 struct GuiHealthState {
-    last_response: std::time::Instant,
+    last_response: Instant,
     response_count: u64,
     error_count: u64,
     is_healthy: bool,
@@ -181,7 +202,7 @@ impl GuiThreadManager {
 
         let (sender, receiver) = mpsc::channel();
         let health_state = Arc::new(Mutex::new(GuiHealthState {
-            last_response: std::time::Instant::now(),
+            last_response: Instant::now(),
             response_count: 0,
             error_count: 0,
             is_healthy: true,
@@ -224,7 +245,7 @@ impl GuiThreadManager {
 
                     // Update health state
                     if let Ok(mut health) = health_state.lock() {
-                        health.last_response = std::time::Instant::now();
+                        health.last_response = Instant::now();
                         health.response_count += 1;
 
                         if let Some(GuiOperationResult::Error { .. }) = &result {
@@ -277,8 +298,12 @@ impl GuiThreadManager {
         gui_context: &GuiContext,
     ) -> Option<GuiOperationResult> {
         match message {
-            GuiThreadMessage::ShowPlot { figure, response } => {
-                let result = Self::handle_show_plot(figure, gui_context);
+            GuiThreadMessage::ShowPlot {
+                figure,
+                response,
+                close_signal,
+            } => {
+                let result = Self::handle_show_plot(figure, close_signal, gui_context);
                 let _ = response.send(result.clone());
                 Some(result)
             }
@@ -301,7 +326,11 @@ impl GuiThreadManager {
 
     /// Handle show plot request
     #[cfg(feature = "gui")]
-    fn handle_show_plot(figure: Figure, _gui_context: &GuiContext) -> GuiOperationResult {
+    fn handle_show_plot(
+        figure: Box<Figure>,
+        close_signal: Option<CloseSignal>,
+        _gui_context: &GuiContext,
+    ) -> GuiOperationResult {
         use crate::gui::{window::WindowConfig, PlotWindow};
 
         // Create a new runtime for this async operation
@@ -329,8 +358,12 @@ impl GuiThreadManager {
                 }
             };
 
+            if let Some(sig) = close_signal {
+                window.install_close_signal(sig);
+            }
+
             // Set the figure data
-            window.set_figure(figure);
+            window.set_figure(*figure);
 
             // Run the window (this will block until the window is closed)
             match window.run().await {
@@ -345,7 +378,11 @@ impl GuiThreadManager {
     }
 
     #[cfg(not(feature = "gui"))]
-    fn handle_show_plot(_figure: Figure, _gui_context: &GuiContext) -> GuiOperationResult {
+    fn handle_show_plot(
+        _figure: Box<Figure>,
+        _close_signal: Option<CloseSignal>,
+        _gui_context: &GuiContext,
+    ) -> GuiOperationResult {
         GuiOperationResult::Error {
             message: "GUI feature not enabled".to_string(),
             error_code: GuiErrorCode::InvalidState,
@@ -361,11 +398,20 @@ impl GuiThreadManager {
 
     /// Show a plot using the GUI thread manager
     pub fn show_plot(&self, figure: Figure) -> Result<GuiOperationResult, GuiOperationResult> {
+        self.show_plot_with_signal(figure, None)
+    }
+
+    pub fn show_plot_with_signal(
+        &self,
+        figure: Figure,
+        close_signal: Option<CloseSignal>,
+    ) -> Result<GuiOperationResult, GuiOperationResult> {
         let (response_tx, response_rx) = mpsc::channel();
 
         let message = GuiThreadMessage::ShowPlot {
-            figure,
+            figure: Box::new(figure),
             response: response_tx,
+            close_signal,
         };
 
         // Send message to GUI thread
@@ -515,6 +561,13 @@ pub fn get_gui_manager() -> Result<Arc<Mutex<Option<GuiThreadManager>>>, GuiOper
 
 /// Show a plot using the global GUI manager
 pub fn show_plot_global(figure: Figure) -> Result<GuiOperationResult, GuiOperationResult> {
+    show_plot_global_with_signal(figure, None)
+}
+
+pub fn show_plot_global_with_signal(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+) -> Result<GuiOperationResult, GuiOperationResult> {
     let manager_mutex = get_gui_manager()?;
     let manager_guard = manager_mutex
         .lock()
@@ -525,7 +578,7 @@ pub fn show_plot_global(figure: Figure) -> Result<GuiOperationResult, GuiOperati
         })?;
 
     match manager_guard.as_ref() {
-        Some(manager) => manager.show_plot(figure),
+        Some(manager) => manager.show_plot_with_signal(figure, close_signal),
         None => Err(GuiOperationResult::Error {
             message: "GUI manager not initialized".to_string(),
             error_code: GuiErrorCode::InvalidState,

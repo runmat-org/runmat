@@ -1,7 +1,6 @@
 //! MATLAB-compatible `load` builtin for RunMat.
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 
@@ -9,6 +8,7 @@ use regex::Regex;
 use runmat_builtins::{
     CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use super::format::{
@@ -19,12 +19,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "load",
+        builtin_path = "crate::builtins::io::mat::load"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "load"
 category: "io/mat"
@@ -149,6 +153,7 @@ Use the struct form: `info = load(filename);` and then inspect `fieldnames(info)
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "load",
     op_kind: GpuOpKind::Custom("io-load"),
@@ -164,8 +169,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Reads MAT-files on the host and produces CPU-resident values. Providers are not involved until accelerated code later promotes the results.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "load",
     shape: ShapeRequirements::Any,
@@ -176,18 +180,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is not eligible for fusion. Registration exists for documentation completeness only.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("load", DOC_MD);
-
 #[runtime_builtin(
     name = "load",
     category = "io/mat",
     summary = "Load variables from a MAT-file.",
     keywords = "load,mat,workspace",
     accel = "cpu",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::io::mat::load"
 )]
 fn load_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -891,7 +891,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> Result<Option<Tagged
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::workspace::WorkspaceResolver;
     use once_cell::sync::OnceCell;
@@ -930,6 +930,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_roundtrip_numeric() {
         ensure_test_resolver();
@@ -959,6 +960,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_selected_variables() {
         ensure_test_resolver();
@@ -979,6 +981,7 @@ mod tests {
         assert!(matches!(vars[0].1, Value::Num(42.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_regex_selection() {
         ensure_test_resolver();
@@ -1003,6 +1006,7 @@ mod tests {
         assert_eq!(names, vec!["w1".to_string(), "w2".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_missing_variable_errors() {
         ensure_test_resolver();
@@ -1020,6 +1024,7 @@ mod tests {
         assert!(err.contains("variable 'missing' was not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_string_array_roundtrip() {
         ensure_test_resolver();
@@ -1051,6 +1056,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_option_before_filename() {
         ensure_test_resolver();
@@ -1072,6 +1078,7 @@ mod tests {
         assert!(matches!(vars[0].1, Value::Num(2.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_char_array_names_trimmed() {
         ensure_test_resolver();
@@ -1105,6 +1112,7 @@ mod tests {
         assert!(matches!(vars[1].1, Value::Num(9.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_duplicate_names_last_wins() {
         ensure_test_resolver();
@@ -1126,6 +1134,7 @@ mod tests {
         assert!(matches!(vars[0].1, Value::Num(11.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn load_wgpu_tensor_roundtrip() {
@@ -1174,8 +1183,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -7,11 +7,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "char",
+        builtin_path = "crate::builtins::strings::core::char"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "char"
 category: "strings/core"
@@ -174,6 +179,7 @@ need to move the result back to the device.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::char")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "char",
     op_kind: GpuOpKind::Custom("conversion"),
@@ -190,8 +196,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Conversion always runs on the CPU; GPU tensors are gathered before building the result.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::char")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "char",
     shape: ShapeRequirements::Any,
@@ -202,17 +207,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Character materialisation runs outside of fusion; results always live on the host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("char", DOC_MD);
-
 #[runtime_builtin(
     name = "char",
     category = "strings/core",
     summary = "Convert numeric codes, strings, and cell contents into a character array.",
     keywords = "char,character,string,gpu",
-    accel = "conversion"
+    accel = "conversion",
+    builtin_path = "crate::builtins::strings::core::char"
 )]
 fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -435,11 +436,12 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::StringArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_no_arguments_returns_empty() {
         let result = char_builtin(Vec::new()).expect("char");
@@ -453,6 +455,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_scalar() {
         let value = Value::String("RunMat".to_string());
@@ -467,6 +470,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_numeric_tensor() {
         let tensor =
@@ -482,6 +486,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_array_with_padding() {
         let data = vec!["cat".to_string(), "giraffe".to_string()];
@@ -500,6 +505,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_cell_array_of_strings() {
         let cell = CellArray::new(
@@ -526,6 +532,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_numeric_and_text_arguments_concatenate() {
         let text = Value::String("hi".to_string());
@@ -541,6 +548,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_gpu_tensor_round_trip() {
         test_support::with_test_provider(|provider| {
@@ -562,19 +570,21 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_non_integer_numeric() {
         let err = char_builtin(vec![Value::Num(65.5)]).expect_err("non-integer numeric");
         assert!(err.contains("integers"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_high_dimension_tensor() {
         let tensor =
@@ -583,6 +593,7 @@ mod tests {
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_string_array_column_major_order() {
         let data = vec![
@@ -603,6 +614,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_high_dimension_string_array() {
         let sa = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 1, 2])
@@ -612,6 +624,7 @@ mod tests {
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_complex_input() {
         let err = char_builtin(vec![Value::Complex(1.0, 2.0)]).expect_err("complex input");
@@ -621,6 +634,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn char_wgpu_numeric_codes_matches_cpu() {

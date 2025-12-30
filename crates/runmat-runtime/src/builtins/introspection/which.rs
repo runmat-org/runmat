@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use runmat_builtins::{builtin_functions, CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::path_to_string;
@@ -19,19 +20,21 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    dispatcher::gather_if_needed, make_cell, register_builtin_fusion_spec,
-    register_builtin_gpu_spec,
-};
+use crate::{dispatcher::gather_if_needed, make_cell};
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
 const ERROR_NAME_ARG: &str = "which: name must be a character vector or string scalar";
 const ERROR_OPTION_ARG: &str = "which: option must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "which",
+        builtin_path = "crate::builtins::introspection::which"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "which"
 category: "introspection"
@@ -160,6 +163,7 @@ Expected output (example):
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "which",
     op_kind: GpuOpKind::Custom("io"),
@@ -176,8 +180,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "which",
     shape: ShapeRequirements::Any,
@@ -188,17 +191,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O lookup; not eligible for fusion. Metadata registered for diagnostics.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("which", DOC_MD);
-
 #[runtime_builtin(
     name = "which",
     category = "introspection",
     summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::introspection::which"
 )]
 fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -444,7 +443,10 @@ fn file_matches(name: &str) -> Result<Vec<String>, String> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for file in find_all_files_with_extensions(name, GENERAL_FILE_EXTENSIONS, "which")? {
-        if file.is_file() {
+        if vfs::metadata(&file)
+            .map(|meta| meta.is_file())
+            .unwrap_or(false)
+        {
             push_unique(&mut results, &mut seen, canonical_path(&file));
         }
     }
@@ -455,7 +457,10 @@ fn directory_matches(name: &str) -> Result<Vec<String>, String> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for dir in directory_candidates(name, "which")? {
-        if dir.is_dir() {
+        if vfs::metadata(&dir)
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false)
+        {
             push_unique(&mut results, &mut seen, canonical_path(&dir));
         }
     }
@@ -463,7 +468,7 @@ fn directory_matches(name: &str) -> Result<Vec<String>, String> {
 }
 
 fn canonical_path(path: &Path) -> String {
-    std::fs::canonicalize(path)
+    vfs::canonicalize(path)
         .map(|p| path_to_string(&p))
         .unwrap_or_else(|_| path_to_string(path))
 }
@@ -488,7 +493,7 @@ fn push_unique(results: &mut Vec<String>, seen: &mut HashSet<String>, entry: Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use once_cell::sync::{Lazy, OnceCell};
     use runmat_builtins::{CharArray, StringArray, Value};
@@ -532,6 +537,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_reports_builtin() {
         let _lock = WHICH_TEST_LOCK
@@ -545,6 +551,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_variable_search_respects_workspace() {
         let _lock = WHICH_TEST_LOCK
@@ -557,6 +564,7 @@ mod tests {
         assert_eq!(String::try_from(&value).unwrap(), "'answer' is a variable.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_finds_files() {
         let _lock = WHICH_TEST_LOCK
@@ -581,6 +589,7 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_all_returns_cell_array() {
         let _lock = WHICH_TEST_LOCK
@@ -593,6 +602,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_not_found_message() {
         let _lock = WHICH_TEST_LOCK
@@ -603,6 +613,7 @@ mod tests {
         assert_eq!(text, "'definitely_missing' not found.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_parses_leading_option() {
         let _lock = WHICH_TEST_LOCK
@@ -615,6 +626,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_allows_uppercase_and_repeated_flags() {
         let _lock = WHICH_TEST_LOCK
@@ -633,6 +645,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_conflicting_flags_error() {
         let _lock = WHICH_TEST_LOCK
@@ -650,6 +663,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_invalid_flag_error() {
         let _lock = WHICH_TEST_LOCK
@@ -662,6 +676,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_requires_name_argument() {
         let _lock = WHICH_TEST_LOCK
@@ -671,6 +686,7 @@ mod tests {
         assert_eq!(err, ERROR_NOT_ENOUGH_ARGS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_non_string_name() {
         let _lock = WHICH_TEST_LOCK
@@ -680,6 +696,7 @@ mod tests {
         assert_eq!(err, ERROR_NAME_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_errors_on_too_many_arguments() {
         let _lock = WHICH_TEST_LOCK
@@ -694,6 +711,7 @@ mod tests {
         assert_eq!(err, ERROR_TOO_MANY_ARGS);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_accepts_char_and_string_array_inputs() {
         let _lock = WHICH_TEST_LOCK
@@ -717,6 +735,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn which_file_option_finds_directories() {
         let _lock = WHICH_TEST_LOCK
@@ -739,8 +758,8 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

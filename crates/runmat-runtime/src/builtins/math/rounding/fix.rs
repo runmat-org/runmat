@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fix",
+        builtin_path = "crate::builtins::math::rounding::fix"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fix"
 category: "math/rounding"
@@ -149,6 +152,7 @@ Yes, when the active provider implements `unary_fix`. Otherwise, RunMat gathers 
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::fix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fix",
     op_kind: GpuOpKind::Elementwise,
@@ -164,8 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement unary_fix to keep fix on device; otherwise the runtime gathers to host and applies CPU truncation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::fix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fix",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -191,17 +194,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL truncation; providers can substitute custom kernels when unary_fix is available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fix", DOC_MD);
-
 #[runtime_builtin(
     name = "fix",
     category = "math/rounding",
     summary = "Round scalars, vectors, matrices, or N-D tensors toward zero.",
     keywords = "fix,truncate,rounding,toward zero,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::rounding::fix"
 )]
 fn fix_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -283,11 +282,12 @@ fn fix_scalar(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_scalar_positive_and_negative() {
         let input = Value::Tensor(
@@ -302,6 +302,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_tensor_matrix() {
         let tensor = Tensor::new(vec![1.9, 4.1, -2.8, 0.5], vec![2, 2]).unwrap();
@@ -315,6 +316,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_complex_number() {
         let result = fix_builtin(Value::Complex(1.9, -2.2)).expect("fix");
@@ -327,6 +329,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_char_array_returns_numeric_tensor() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -340,6 +343,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_logical_array() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -350,6 +354,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_bool_promotes_to_numeric() {
         let result = fix_builtin(Value::Bool(true)).expect("fix");
@@ -359,6 +364,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_int_value_promotes() {
         let value = Value::Int(IntValue::I32(-42));
@@ -369,6 +375,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_string_errors() {
         let err = fix_builtin(Value::from("abc")).unwrap_err();
@@ -378,6 +385,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_preserves_special_values_and_canonicalizes_negative_zero() {
         let tensor = Tensor::new(
@@ -399,6 +407,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_complex_tensor_rounds_components() {
         let tensor = ComplexTensor::new(vec![(1.9, -2.6), (-3.4, 0.2)], vec![2, 1]).unwrap();
@@ -410,6 +419,7 @@ mod tests {
         assert_eq!(out.data, vec![(1.0, -2.0), (-3.0, 0.0)]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -425,13 +435,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fix_wgpu_matches_cpu() {

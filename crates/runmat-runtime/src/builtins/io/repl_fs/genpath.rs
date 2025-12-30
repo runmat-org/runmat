@@ -8,19 +8,24 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";
 const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "genpath",
+        builtin_path = "crate::builtins::io::repl_fs::genpath"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "genpath"
 category: "io/repl_fs"
@@ -162,6 +167,7 @@ savepath();
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "genpath",
     op_kind: GpuOpKind::Custom("io"),
@@ -177,8 +183,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem traversal is a host-only operation; inputs are gathered before processing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "genpath",
     shape: ShapeRequirements::Any,
@@ -190,17 +195,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "I/O-oriented builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("genpath", DOC_MD);
-
 #[runtime_builtin(
     name = "genpath",
     category = "io/repl_fs",
     summary = "Generate a MATLAB-style search path string for a folder tree.",
     keywords = "genpath,recursive path,search path,addpath",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 fn genpath_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(args)?;
@@ -287,7 +288,7 @@ fn normalize_root(text: &str) -> Result<RootInfo, String> {
 
 fn canonicalize_existing(path: &Path, display: &str) -> Result<(PathBuf, String), String> {
     let canonical =
-        fs::canonicalize(path).map_err(|_| format!("genpath: folder '{display}' not found"))?;
+        vfs::canonicalize(path).map_err(|_| format!("genpath: folder '{display}' not found"))?;
     let canonical_str = canonical_string_from_path(&canonical);
     Ok((canonical, canonical_str))
 }
@@ -338,33 +339,25 @@ fn traverse(
 
     segments.push(canonical.clone());
 
-    let read_dir = match fs::read_dir(path) {
-        Ok(dir) => dir,
+    let mut children = Vec::new();
+    let entries = match vfs::read_dir(path) {
+        Ok(listing) => listing,
         Err(_) => return Ok(()),
     };
-
-    let mut children = Vec::new();
-    for entry_result in read_dir {
-        let entry = match entry_result {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        let metadata = match entry.metadata() {
+    for entry in entries {
+        let source_path = entry.path().to_path_buf();
+        let metadata = match vfs::metadata(&source_path) {
             Ok(meta) => meta,
             Err(_) => continue,
         };
-
         if !metadata.is_dir() {
             continue;
         }
-
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_matlab_reserved_folder(&name) {
             continue;
         }
-
-        let child_path = match fs::canonicalize(entry.path()) {
+        let child_path = match vfs::canonicalize(&source_path) {
             Ok(path) => path,
             Err(_) => continue,
         };
@@ -564,14 +557,14 @@ fn tensor_to_string(tensor: &Tensor, type_error: &str) -> Result<String, String>
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
+    use std::fs;
     use tempfile::tempdir;
 
     struct DirGuard {
@@ -600,6 +593,7 @@ mod tests {
         canonical_str
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_returns_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -618,6 +612,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_without_arguments_uses_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -655,6 +650,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_char_array_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -672,6 +668,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_string_array_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -689,6 +686,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_accepts_tensor_char_codes_root_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -708,6 +706,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_excludes_relative_entries() {
         let _lock = REPL_FS_TEST_LOCK
@@ -745,6 +744,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_errors_on_invalid_argument_type() {
         let _lock = REPL_FS_TEST_LOCK
@@ -755,6 +755,7 @@ mod tests {
         assert_eq!(err, ERROR_FOLDER_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_excludes_specified_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -797,6 +798,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_skips_matlab_reserved_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -857,6 +859,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(unix)]
     fn genpath_deduplicates_symlink_targets() {
@@ -900,6 +903,7 @@ mod tests {
         assert_eq!(count, 1, "expected canonical alpha path to appear once");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn genpath_errors_on_missing_root() {
         let _lock = REPL_FS_TEST_LOCK
@@ -911,8 +915,8 @@ mod tests {
         assert!(err.contains("not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

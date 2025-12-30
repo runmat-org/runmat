@@ -12,11 +12,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "imfilter",
+        builtin_path = "crate::builtins::image::filters::imfilter"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "imfilter"
 category: "image/filters"
@@ -168,6 +171,7 @@ Yes. Logical arrays are promoted to double precision (0.0/1.0) during filtering,
 - Report issues or differences at https://github.com/runmat-org/runmat/issues/new/choose
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imfilter",
     op_kind: GpuOpKind::Custom("imfilter"),
@@ -183,8 +187,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider-side filtering when available; otherwise gathers to host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "imfilter",
     shape: ShapeRequirements::Any,
@@ -195,17 +198,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not a fusion candidate; emits standalone correlation kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("imfilter", DOC_MD);
-
 #[runtime_builtin(
     name = "imfilter",
     category = "image/filters",
     summary = "Apply linear filters with MATLAB-compatible padding semantics.",
     keywords = "imfilter,image,filter,convolution,correlation,padding",
-    accel = "custom-imfilter"
+    accel = "custom-imfilter",
+    builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_imfilter_options(&rest)?;
@@ -728,7 +727,7 @@ fn reflect_index(coord: isize, len: isize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};
@@ -737,6 +736,7 @@ mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn same_padding_default_zero() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -747,6 +747,7 @@ mod tests {
         assert!(result.data.iter().all(|&v| (v - 10.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn replicate_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -763,6 +764,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn full_output_matches_expected_size() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -779,6 +781,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_output_respects_kernel_size() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -792,6 +795,7 @@ mod tests {
         assert!((result.data[0] - 10.0).abs() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn convolution_matches_correlation_with_flipped_kernel() {
         let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 3, 2);
@@ -817,6 +821,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circular_padding_wraps_indices() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -832,6 +837,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_fallback_uses_provider_upload() {
         test_support::with_test_provider(|provider| {
@@ -862,6 +868,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_example_average_filter_matches_expected() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -874,6 +881,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_example_convolution_same_matches_expected() {
         let image = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
@@ -890,6 +898,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn specifying_numeric_pad_value_matches_manual_options() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -915,6 +924,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_option_string_raises_error() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -928,6 +938,7 @@ mod tests {
         assert!(err.contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_scalar_value() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -942,6 +953,7 @@ mod tests {
         assert!(err.contains("scalar value"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_with_larger_kernel_returns_empty_tensor() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -961,6 +973,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_without_value_defaults_to_zero_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
@@ -980,13 +993,14 @@ mod tests {
         assert_eq!(fill_only, default);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let sections = test_support::doc_examples(DOC_MD);
         assert!(!sections.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn imfilter_wgpu_matches_cpu_same_padding() {

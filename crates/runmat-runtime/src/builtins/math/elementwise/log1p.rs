@@ -15,13 +15,17 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const IMAG_EPS: f64 = 1e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "log1p",
+        builtin_path = "crate::builtins::math::elementwise::log1p"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "log1p"
 category: "math/elementwise"
@@ -183,6 +187,7 @@ kernels can materialize `log(1 + x)` directly in generated WGSL.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::log1p")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "log1p",
     op_kind: GpuOpKind::Elementwise,
@@ -199,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should supply unary_log1p and reduce_min; runtimes gather to host when complex outputs are required or either hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::log1p")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log1p",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -225,17 +229,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `log(x + 1)` sequences; providers may substitute fused kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("log1p", DOC_MD);
-
 #[runtime_builtin(
     name = "log1p",
     category = "math/elementwise",
     summary = "Accurate element-wise computation of log(1 + x).",
     keywords = "log1p,log(1+x),natural logarithm,elementwise,gpu,precision",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
 fn log1p_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -379,12 +379,13 @@ fn log1p_complex_parts(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{LogicalArray, Tensor};
     use std::f64::consts::PI;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_zero() {
         let result = log1p_builtin(Value::Num(0.0)).expect("log1p");
@@ -394,6 +395,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_negative_one() {
         let result = log1p_builtin(Value::Num(-1.0)).expect("log1p");
@@ -403,6 +405,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_scalar_less_than_negative_one_complex() {
         let result = log1p_builtin(Value::Num(-2.0)).expect("log1p");
@@ -415,6 +418,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_tensor_mixed_values() {
         let tensor = Tensor::new(vec![0.0, -0.5, -2.0, 3.0], vec![2, 2]).unwrap();
@@ -437,6 +441,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_complex_input() {
         let result = log1p_builtin(Value::Complex(0.5, 1.0)).expect("log1p");
@@ -450,6 +455,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_char_array_roundtrip() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -466,6 +472,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_string_rejects() {
         let err = log1p_builtin(Value::from("not numeric")).expect_err("should fail");
@@ -475,6 +482,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -494,6 +502,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_bool_promotes() {
         let result = log1p_builtin(Value::Bool(true)).expect("log1p");
@@ -503,6 +512,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_logical_array_converts() {
         let logical = LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap();
@@ -517,6 +527,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log1p_gpu_complex_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -541,13 +552,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn log1p_wgpu_matches_cpu() {

@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "angle",
+        builtin_path = "crate::builtins::math::elementwise::angle"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "angle"
 category: "math/elementwise"
@@ -179,6 +182,7 @@ Yes for double-precision providers. Single-precision backends may exhibit minor 
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "angle",
     op_kind: GpuOpKind::Elementwise,
@@ -194,8 +198,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers implement unary_angle to evaluate atan2(imag(x), real(x)) on device; the runtime gathers to host whenever the hook is unavailable or when complex tensors need host conversion.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "angle",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -220,17 +223,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion assumes real-valued inputs (imaginary part zero). Complex tensors are gathered to the host until GPU complex storage lands.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("angle", DOC_MD);
-
 #[runtime_builtin(
     name = "angle",
     category = "math/elementwise",
     summary = "Phase angle of scalars, vectors, matrices, or N-D tensors.",
     keywords = "angle,phase,argument,complex,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::angle"
 )]
 fn angle_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -292,12 +291,13 @@ fn angle_scalar(re: f64, im: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
     use std::f64::consts::PI;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_real_positive_negative() {
         let pos = angle_builtin(Value::Num(5.0)).expect("angle");
@@ -314,6 +314,7 @@ mod tests {
         assert_eq!(zero, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_complex_scalar_matches_atan2() {
         let value = Value::Complex(3.0, -4.0);
@@ -325,6 +326,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_tensor_values() {
         let tensor = Tensor::new(vec![1.0, -1.0, 0.0, 2.0], vec![2, 2]).unwrap();
@@ -341,6 +343,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_logical_and_char_inputs() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -359,6 +362,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_complex_tensor() {
         let data = vec![(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)];
@@ -380,6 +384,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -399,6 +404,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_dimensionless_int_input() {
         let result = angle_builtin(Value::Int(IntValue::I32(-10))).expect("angle");
@@ -409,6 +415,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_nan_propagates() {
         let result = angle_builtin(Value::Num(f64::NAN)).expect("angle");
@@ -418,6 +425,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_rejects_strings() {
         let err = angle_builtin(Value::from("hello")).unwrap_err();
@@ -427,6 +435,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_rejects_string_arrays() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2]).unwrap();
@@ -437,13 +446,14 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn angle_wgpu_matches_cpu() {

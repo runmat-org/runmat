@@ -10,16 +10,20 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "gpuArray",
+        builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gpuArray"
 category: "acceleration/gpu"
@@ -212,6 +216,7 @@ numeric or logical types.
 - Found a bug or behavior mismatch? Please open an issue with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuarray")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuArray",
     op_kind: GpuOpKind::Custom("upload"),
@@ -227,8 +232,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Invokes the provider `upload` hook, reuploading gpuArray inputs when dtype conversion is requested. Handles class strings, size vectors, and `'like'` prototypes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gpuArray",
     shape: ShapeRequirements::Any,
@@ -240,18 +246,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Acts as a residency boundary; fusion graphs never cross explicit host↔device transfers.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gpuArray", DOC_MD);
-
 #[runtime_builtin(
     name = "gpuArray",
     category = "acceleration/gpu",
     summary = "Move data to the GPU and return a gpuArray handle.",
     keywords = "gpuArray,gpu,accelerate,upload,dtype,like",
     examples = "G = gpuArray([1 2 3], 'single');",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
 fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_options(&rest)?;
@@ -746,7 +748,7 @@ fn char_array_to_tensor(ca: &CharArray) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -756,6 +758,7 @@ mod tests {
         gpu_array_builtin(value, rest)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_transfers_numeric_tensor() {
         test_support::with_test_provider(|_| {
@@ -772,6 +775,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_marks_logical_inputs() {
         test_support::with_test_provider(|_| {
@@ -790,6 +794,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_handles_scalar_bool() {
         test_support::with_test_provider(|_| {
@@ -805,6 +810,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_supports_char_arrays() {
         test_support::with_test_provider(|_| {
@@ -832,6 +838,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_converts_strings() {
         test_support::with_test_provider(|_| {
@@ -847,6 +854,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_passthrough_existing_handle() {
         test_support::with_test_provider(|provider| {
@@ -867,6 +875,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_casts_to_int32() {
         test_support::with_test_provider(|_| {
@@ -882,6 +891,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_casts_to_uint8() {
         test_support::with_test_provider(|_| {
@@ -897,6 +907,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_single_precision_rounds() {
         test_support::with_test_provider(|_| {
@@ -915,6 +926,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_like_infers_logical() {
         test_support::with_test_provider(|_| {
@@ -935,6 +947,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_like_requires_argument() {
         test_support::with_test_provider(|_| {
@@ -944,6 +957,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_unknown_option_errors() {
         test_support::with_test_provider(|_| {
@@ -953,6 +967,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_to_logical_reuploads() {
         test_support::with_test_provider(|provider| {
@@ -979,6 +994,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_logical_to_double_clears_flag() {
         test_support::with_test_provider(|provider| {
@@ -1003,6 +1019,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_applies_size_arguments() {
         test_support::with_test_provider(|_| {
@@ -1019,6 +1036,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_gpu_size_arguments_update_shape() {
         test_support::with_test_provider(|provider| {
@@ -1042,6 +1060,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_size_mismatch_errors() {
         test_support::with_test_provider(|_| {
@@ -1055,6 +1074,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_roundtrip() {
@@ -1077,19 +1097,20 @@ mod tests {
                 provider.free(&handle).ok();
             }
             Err(err) => {
-                eprintln!("Skipping gpu_array_wgpu_roundtrip: {err}");
+                tracing::warn!("Skipping gpu_array_wgpu_roundtrip: {err}");
             }
         }
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_array_accepts_int_scalars() {
         test_support::with_test_provider(|_| {

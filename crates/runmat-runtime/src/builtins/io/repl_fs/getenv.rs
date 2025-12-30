@@ -14,16 +14,21 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{gather_if_needed, make_cell};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
 const ERR_CHAR_MATRIX_CELL: &str =
     "getenv: cell array elements must be character vectors or string scalars";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "getenv",
+        builtin_path = "crate::builtins::io::repl_fs::getenv"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "getenv"
 category: "io/repl_fs"
@@ -203,6 +208,7 @@ Yes. The builtin reports every variable visible to the RunMat process, including
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::getenv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "getenv",
     op_kind: GpuOpKind::Custom("io"),
@@ -218,8 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host environment query with no GPU participation; providers do not implement hooks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::getenv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "getenv",
     shape: ShapeRequirements::Any,
@@ -230,17 +235,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Environment lookups break fusion graphs and always execute on the CPU.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("getenv", DOC_MD);
-
 #[runtime_builtin(
     name = "getenv",
     category = "io/repl_fs",
     summary = "Query environment variables as character vectors, strings, or structures.",
     keywords = "getenv,environment variable,env,system variable,process environment",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
 fn getenv_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.len() {
@@ -370,11 +371,12 @@ fn char_array_from_rows(rows: &[String]) -> Result<CharArray, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_existing_variable() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -391,6 +393,7 @@ mod tests {
         env::remove_var("RUNMAT_TEST_GETENV_CHAR");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_string_missing_variable_returns_empty_string() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -403,6 +406,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_string_array_preserves_shape() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -425,6 +429,7 @@ mod tests {
         env::remove_var("RUNMAT_TEST_GETENV_B");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_matrix_handles_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -448,6 +453,7 @@ mod tests {
         env::remove_var("RUN2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_input_missing_variable_returns_empty_char_vector() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -463,6 +469,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_matrix_trims_trailing_spaces() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -487,6 +494,7 @@ mod tests {
         env::remove_var("RUNMAT_TEST_TRIM2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_cell_array_preserves_element_types() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -526,6 +534,7 @@ mod tests {
         env::remove_var("RUNMAT_TEST_CELL2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_cell_array_rejects_invalid_entries() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -545,6 +554,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_returns_struct_with_all_variables() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -569,6 +579,7 @@ mod tests {
         env::remove_var("RUNMAT_TEST_STRUCT");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_invalid_input_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -580,6 +591,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_too_many_arguments_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -594,8 +606,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let examples = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());

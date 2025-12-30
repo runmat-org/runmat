@@ -335,9 +335,10 @@ impl JupyterPlottingManager {
                         20
                     };
 
-                    let histogram = runmat_plot::plots::Histogram::new(data, bins)
+                    let (labels, counts) = self.build_histogram_series(&data, bins)?;
+                    let histogram = runmat_plot::plots::BarChart::new(labels, counts)
                         .map_err(KernelError::Execution)?;
-                    figure.add_histogram(histogram);
+                    figure.add_bar_chart(histogram);
                 }
             }
             _ => {
@@ -380,6 +381,57 @@ impl JupyterPlottingManager {
                 "Expected array or number".to_string(),
             )),
         }
+    }
+
+    fn build_histogram_series(&self, data: &[f64], bins: usize) -> Result<(Vec<String>, Vec<f64>)> {
+        if data.is_empty() {
+            return Err(KernelError::Execution(
+                "Histogram requires at least one data point".to_string(),
+            ));
+        }
+        let bins = bins.max(1);
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+        for &value in data {
+            if value.is_finite() {
+                if value < min_val {
+                    min_val = value;
+                }
+                if value > max_val {
+                    max_val = value;
+                }
+            }
+        }
+        if !min_val.is_finite() || !max_val.is_finite() {
+            return Err(KernelError::Execution(
+                "Histogram data must be finite".to_string(),
+            ));
+        }
+        let span = (max_val - min_val).max(1e-9);
+        let bucket_width = span / bins as f64;
+        let mut counts = vec![0f64; bins];
+        for &value in data {
+            if !value.is_finite() {
+                continue;
+            }
+            let mut idx = ((value - min_val) / bucket_width).floor() as isize;
+            if idx < 0 {
+                idx = 0;
+            }
+            let idx = idx as usize;
+            if idx >= bins {
+                counts[bins - 1] += 1.0;
+            } else {
+                counts[idx] += 1.0;
+            }
+        }
+        let mut labels = Vec::with_capacity(bins);
+        for i in 0..bins {
+            let start = min_val + bucket_width * i as f64;
+            let end = start + bucket_width;
+            labels.push(format!("{start:.3}-{end:.3}"));
+        }
+        Ok((labels, counts))
     }
 
     /// Extract single number from JSON value

@@ -9,11 +9,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "not",
+        builtin_path = "crate::builtins::logical::bit::not"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "not"
 category: "logical/bit"
@@ -157,6 +160,7 @@ No. It returns a new logical value. When operating on gpuArrays, the provider wr
 [and](./and), [or](./or), [xor](./xor), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::not")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "not",
     op_kind: GpuOpKind::Elementwise,
@@ -175,8 +179,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Dispatches to the provider `logical_not` hook when available; otherwise the runtime gathers to host and performs the negation on the CPU.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::not")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "not",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -199,17 +202,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels treat any non-zero input as true and write 0/1 outputs, matching MATLAB logical semantics.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("not", DOC_MD);
-
 #[runtime_builtin(
     name = "not",
     category = "logical/bit",
     summary = "Element-wise logical negation for scalars, arrays, and gpuArray values.",
     keywords = "logical,not,boolean,gpu",
-    accel = "elementwise"
+    accel = "elementwise",
+    builtin_path = "crate::builtins::logical::bit::not"
 )]
 fn not_builtin(value: Value) -> Result<Value, String> {
     if let Value::GpuTensor(ref handle) = value {
@@ -342,7 +341,7 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::tensor;
@@ -352,12 +351,14 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_of_booleans() {
         assert_eq!(not_builtin(Value::Bool(true)).unwrap(), Value::Bool(false));
         assert_eq!(not_builtin(Value::Bool(false)).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_numeric_array() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -371,6 +372,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_complex_scalar() {
         let result =
@@ -382,12 +384,14 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_nan_yields_false() {
         let result = not_builtin(Value::Num(f64::NAN)).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_char_array() {
         let chars = CharArray::new_row("A\0C");
@@ -401,6 +405,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -417,12 +422,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_accepts_int_inputs() {
         let value = Value::Int(IntValue::I32(0));
         assert_eq!(not_builtin(value).unwrap(), Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_tensor_scalar_returns_bool() {
         let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -438,6 +445,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -451,6 +459,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_complex_tensor() {
         let tensor =
@@ -465,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_logical_array_flips_bits() {
         let array = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
@@ -478,6 +488,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn not_rejects_string_input() {
         let err = not_builtin(Value::String("abc".into())).unwrap_err();
@@ -487,6 +498,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn not_wgpu_matches_host_path() {
@@ -516,8 +528,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

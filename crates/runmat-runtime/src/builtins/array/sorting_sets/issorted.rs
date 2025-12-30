@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "issorted",
+        builtin_path = "crate::builtins::array::sorting_sets::issorted"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "issorted"
 category: "array/sorting_sets"
@@ -200,6 +203,7 @@ Empty slices are considered sorted. Passing a dimension larger than `ndims(A)` a
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::issorted")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "issorted",
     op_kind: GpuOpKind::Custom("predicate"),
@@ -215,8 +219,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "GPU inputs gather to the host until providers implement dedicated predicate kernels.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::issorted"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "issorted",
     shape: ShapeRequirements::Any,
@@ -227,18 +232,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("issorted", DOC_MD);
-
 #[runtime_builtin(
     name = "issorted",
     category = "array/sorting_sets",
     summary = "Determine whether an array is already sorted.",
     keywords = "issorted,sorted,monotonic,rows",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 fn issorted_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let input = normalize_input(value)?;
@@ -1217,11 +1218,12 @@ fn char_array_to_tensor(array: &CharArray) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_numeric_vector_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1229,6 +1231,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_numeric_vector_false() {
         let tensor = Tensor::new(vec![3.0, 2.0, 1.0], vec![3, 1]).unwrap();
@@ -1236,6 +1239,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_logical_vector() {
         let logical = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
@@ -1244,6 +1248,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 3.0], vec![2, 2]).unwrap();
@@ -1252,6 +1257,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictascend_rejects_duplicates() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1260,6 +1266,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictmonotonic_true_with_descend() {
         let tensor = Tensor::new(vec![9.0, 4.0, 1.0], vec![3, 1]).unwrap();
@@ -1268,6 +1275,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictmonotonic_rejects_plateaus() {
         let tensor = Tensor::new(vec![4.0, 4.0, 2.0, 1.0], vec![4, 1]).unwrap();
@@ -1276,6 +1284,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_monotonic_accepts_descending() {
         let tensor = Tensor::new(vec![5.0, 4.0, 4.0, 1.0], vec![4, 1]).unwrap();
@@ -1284,6 +1293,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_monotonic_rejects_unsorted_data() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0], vec![3, 1]).unwrap();
@@ -1292,6 +1302,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_first() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1300,6 +1311,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_first_violation() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
@@ -1308,6 +1320,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_missingplacement_auto_descend_prefers_front() {
         let tensor = Tensor::new(vec![f64::NAN, 5.0, 3.0], vec![3, 1]).unwrap();
@@ -1316,6 +1329,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_comparison_abs() {
         let tensor = Tensor::new(vec![-1.0, 1.5, -2.0], vec![3, 1]).unwrap();
@@ -1324,6 +1338,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_complex_abs_method() {
         let tensor =
@@ -1333,6 +1348,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_complex_real_method() {
         let tensor =
@@ -1346,6 +1362,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_true() {
         let tensor = Tensor::new(vec![1.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
@@ -1354,6 +1371,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_dimension_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).unwrap();
@@ -1361,6 +1379,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_rows_descend_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 4.0, 0.0], vec![2, 2]).unwrap();
@@ -1369,6 +1388,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_dimension() {
         let array = StringArray::new(
@@ -1387,6 +1407,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last() {
         let array = StringArray::new(
@@ -1400,6 +1421,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last_violation() {
         let array = StringArray::new(vec!["<missing>".into(), "apple".into()], vec![2, 1]).unwrap();
@@ -1409,6 +1431,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_comparison_method_error() {
         let array = StringArray::new(vec!["apple".into(), "berry".into()], vec![2, 1]).unwrap();
@@ -1417,6 +1440,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_char_array_input() {
         let chars = CharArray::new(vec!['a', 'c', 'e'], 1, 3).unwrap();
@@ -1424,6 +1448,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_duplicate_direction_error() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1432,6 +1457,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1446,6 +1472,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn issorted_wgpu_matches_cpu() {
@@ -1466,8 +1493,8 @@ mod tests {
         assert_eq!(gpu, cpu);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn issorted_doc_examples() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

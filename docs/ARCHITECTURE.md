@@ -121,6 +121,15 @@ graph TD
     -   Wrappers for the plotting library.
     -   **BLAS/LAPACK Integration**: Through the optional `blas-lapack` feature, this crate provides high-performance linear algebra operations by linking against native libraries like Apple's Accelerate framework or OpenBLAS.
 
+## Host-Agnostic Execution (`runmat-core`)
+
+To make the CLI, tests, and upcoming WebAssembly host share the same interpreter stack, the project routes all frontend + execution orchestration through the `runmat-core` crate.
+
+-   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, Ignition interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
+-   **Feature gating**: The crate exposes a `jit` feature (on by default). Desktop builds keep Turbine enabled, while wasm targets or lightweight embeds can disable it and run interpreter-only without dragging in Cranelift.
+-   **Embedding surface**: `RunMatSession` provides ergonomic helpers (`execute`, `reset_stats`, `show_system_info`, etc.) so consumers can drive the runtime without depending on CLI plumbing or OS-specific services (filesystems, sockets, threads).
+-   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the Jupyter kernel, integration tests, and future browser bindings all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
+
 ---
 
 ## Fast Startup: `runmat-snapshot`

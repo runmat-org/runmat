@@ -8,13 +8,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const LABEL: &str = "string.empty";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "string.empty",
+        builtin_path = "crate::builtins::strings::core::string_empty"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "string.empty"
 category: "strings/core"
@@ -192,6 +197,7 @@ guessing.
 `string`, `strings`, `char`, `zeros`, `ones`
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string_empty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "string.empty",
     op_kind: GpuOpKind::Custom("constructor"),
@@ -207,8 +213,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only constructor that returns a new empty string array without contacting GPU providers.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::core::string_empty"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "string.empty",
     shape: ShapeRequirements::Any,
@@ -219,17 +226,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Pure constructor; fusion planner treats calls as non-fusable sinks.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("string.empty", DOC_MD);
-
 #[runtime_builtin(
     name = "string.empty",
     category = "strings/core",
     summary = "Construct an empty string array with MATLAB-compatible dimensions.",
     keywords = "string.empty,empty,string array,preallocate",
-    accel = "none"
+    accel = "none",
+    builtin_path = "crate::builtins::strings::core::string_empty"
 )]
 fn string_empty_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let shape = parse_shape(&rest)?;
@@ -348,12 +351,13 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_is_zero_by_zero() {
         let result = string_empty_builtin(Vec::new()).expect("string.empty");
@@ -366,6 +370,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_dimension_creates_zero_by_n() {
         let result = string_empty_builtin(vec![Value::from(5)]).expect("string.empty");
@@ -378,6 +383,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn multiple_dimensions_respect_trailing_sizes() {
         let args = vec![Value::from(3), Value::from(4), Value::from(2)];
@@ -391,6 +397,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_vector_argument_supported() {
         let tensor = Tensor::new(vec![0.0, 5.0, 3.0], vec![1, 3]).unwrap();
@@ -404,6 +411,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_vector_from_nonempty_array_drops_leading_extent() {
         let tensor = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
@@ -417,6 +425,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_zero_in_any_position() {
         let args = vec![Value::from(3), Value::from(4), Value::from(0)];
@@ -427,6 +436,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_prototype_without_explicit_dims() {
         let proto = StringArray::new(vec!["alpha".to_string(); 6], vec![2, 3]).unwrap();
@@ -441,6 +451,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_prototype_with_scalar_shape() {
         let proto = StringArray::new(vec!["foo".to_string()], vec![1, 1]).unwrap();
@@ -455,6 +466,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_with_numeric_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -469,6 +481,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_with_explicit_dims_prefers_dimensions() {
         let proto = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -488,6 +501,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn missing_like_prototype_errors() {
         let err = string_empty_builtin(vec![Value::from("like")]).expect_err("expected error");
@@ -497,6 +511,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_like_errors() {
         let proto = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -510,6 +525,7 @@ mod tests {
         assert!(err.contains("multiple 'like'"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_dimension_inputs() {
         let err =
@@ -520,6 +536,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_gathers_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -544,6 +561,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_dimension_arguments_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -566,6 +584,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_dimension() {
         let err = string_empty_builtin(vec![Value::from(-1.0)]).expect_err("expected error");
@@ -575,8 +594,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

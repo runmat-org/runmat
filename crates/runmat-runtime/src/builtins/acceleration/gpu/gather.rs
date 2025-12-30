@@ -4,13 +4,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::make_cell;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "gather",
+        builtin_path = "crate::builtins::acceleration::gpu::gather"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "gather"
 category: "acceleration/gpu"
@@ -198,6 +203,7 @@ no longer need it.
 - Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gather",
     op_kind: GpuOpKind::Custom("gather"),
@@ -213,8 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Downloads gpuArray handles via the provider's `download` hook and clears residency metadata; host inputs pass through unchanged.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gather",
     shape: ShapeRequirements::Any,
@@ -225,17 +230,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a residency sink for fusion planning; always materialises host data and clears gpuArray residency tracking.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("gather", DOC_MD);
-
 #[runtime_builtin(
     name = "gather",
     category = "acceleration/gpu",
     summary = "Bring gpuArray data back to host memory.",
     keywords = "gather,gpuArray,accelerate,download",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 fn gather_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -313,12 +314,13 @@ fn gather_argument(value: &Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, StructValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_passes_through_host_values() {
         let value = Value::Num(42.0);
@@ -326,6 +328,7 @@ mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_downloads_gpu_tensor() {
         test_support::with_test_provider(|provider| {
@@ -346,6 +349,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_preserves_logical_gpu_tensors() {
         test_support::with_test_provider(|provider| {
@@ -368,6 +372,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_cells() {
         test_support::with_test_provider(|provider| {
@@ -396,6 +401,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_structs() {
         test_support::with_test_provider(|provider| {
@@ -425,6 +431,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_returns_cell_for_multiple_inputs() {
         let result =
@@ -438,6 +445,7 @@ mod tests {
         assert_eq!(cell.get(0, 1).unwrap(), Value::from("two"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn evaluate_returns_outputs_in_order() {
         let eval =
@@ -448,12 +456,14 @@ mod tests {
         assert_eq!(eval.outputs()[2], Value::from("hello"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_requires_at_least_one_argument() {
         let err = gather_builtin(Vec::new()).expect_err("expected error");
         assert_eq!(err, "gather: not enough input arguments");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gather_wgpu_provider_roundtrip() {
@@ -482,15 +492,15 @@ mod tests {
                 let _ = provider.free(&handle);
             }
             Err(err) => {
-                eprintln!("Skipping gather_wgpu_provider_roundtrip: {err}");
+                tracing::warn!("Skipping gather_wgpu_provider_roundtrip: {err}");
             }
         }
         // Restore the simple provider so subsequent tests see a predictable backend.
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

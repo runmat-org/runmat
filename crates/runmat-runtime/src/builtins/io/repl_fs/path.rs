@@ -11,13 +11,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "path",
+        builtin_path = "crate::builtins::io::repl_fs::path"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "path"
 category: "io/repl_fs"
@@ -131,6 +136,7 @@ Expected output:
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "path",
     op_kind: GpuOpKind::Custom("io"),
@@ -146,8 +152,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Search-path management is a host-only operation; GPU inputs are gathered before processing.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "path",
     shape: ShapeRequirements::Any,
@@ -158,17 +163,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("path", DOC_MD);
-
 #[runtime_builtin(
     name = "path",
     category = "io/repl_fs",
     summary = "Query or replace the MATLAB search path used by RunMat.",
     keywords = "path,search path,matlab path,addpath,rmpath",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::path"
 )]
 fn path_builtin(args: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_arguments(&args)?;
@@ -280,7 +281,7 @@ fn char_array_value(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_search::search_directories;
@@ -306,6 +307,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_returns_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -320,6 +322,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_sets_new_value_and_returns_previous() {
         let _lock = REPL_FS_TEST_LOCK
@@ -340,6 +343,7 @@ mod tests {
         assert_eq!(current, dir_str);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_accepts_string_scalar() {
         let _lock = REPL_FS_TEST_LOCK
@@ -358,6 +362,7 @@ mod tests {
         assert_eq!(current, "runmat/path/string");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_accepts_tensor_codes() {
         let _lock = REPL_FS_TEST_LOCK
@@ -378,6 +383,7 @@ mod tests {
         assert_eq!(current, text);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_combines_two_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -404,6 +410,7 @@ mod tests {
         assert_eq!(current, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_multi_row_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -416,6 +423,7 @@ mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_multi_element_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -428,6 +436,7 @@ mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_invalid_argument_types() {
         let _lock = REPL_FS_TEST_LOCK
@@ -439,6 +448,7 @@ mod tests {
         assert!(err.contains("path: arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_updates_search_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -461,8 +471,8 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

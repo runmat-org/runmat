@@ -7,10 +7,6 @@ use runmat_builtins::{ComplexTensor, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
 use crate::dispatcher;
 
 use crate::builtins::common::spec::{
@@ -21,7 +17,14 @@ use crate::builtins::common::spec::{
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "polyfit",
+        builtin_path = "crate::builtins::math::poly::polyfit"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "polyfit"
 category: "math/poly"
@@ -201,6 +204,7 @@ raising an error unless the degree is zero.
 - Found an issue? [Open a RunMat issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyfit",
     op_kind: GpuOpKind::Custom("polyfit"),
@@ -217,8 +221,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyfit",
     shape: ShapeRequirements::Any,
@@ -229,18 +232,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a sink node—polynomial fitting materialises results eagerly and terminates fusion graphs.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("polyfit", DOC_MD);
-
 #[runtime_builtin(
     name = "polyfit",
     category = "math/poly",
     summary = "Fit an n-th degree polynomial to data points with MATLAB-compatible outputs.",
     keywords = "polyfit,polynomial,least-squares,gpu",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(x, y, degree, &rest)?;
@@ -938,10 +937,11 @@ pub fn polyfit_host_real_for_provider(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fits_linear_data() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
@@ -967,6 +967,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn returns_struct_and_mu() {
         let x = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
@@ -996,6 +997,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weighted_fit_matches_unweighted_when_weights_equal() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1018,6 +1020,7 @@ mod tests {
         assert_eq!(eval_unweighted.coefficients(), eval_weighted.coefficients());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_logical_degree_scalar() {
         let x = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -1033,6 +1036,7 @@ mod tests {
         assert!(matches!(eval.coefficients(), Value::Tensor(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_integer_degree() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1042,6 +1046,7 @@ mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_infinite_weights() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1057,6 +1062,7 @@ mod tests {
         assert!(err.contains("weight at position 2"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_inputs_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -1083,6 +1089,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_weights_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -1133,6 +1140,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyfit_wgpu_matches_cpu() {
         let options = runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default();
@@ -1140,7 +1148,7 @@ mod tests {
             match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(options) {
                 Ok(p) => p,
                 Err(err) => {
-                    eprintln!("polyfit_wgpu_matches_cpu: skipping test ({err})");
+                    warn!("polyfit_wgpu_matches_cpu: skipping test ({err})");
                     return;
                 }
             };
@@ -1244,6 +1252,7 @@ mod tests {
         assert!((cpu_normr - gpu_normr).abs() < 1e-9);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_mismatched_lengths() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1258,6 +1267,7 @@ mod tests {
         assert!(err.contains("same length"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_vector_inputs() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -1272,6 +1282,7 @@ mod tests {
         assert!(err.contains("vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_weight_length_mismatch() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1287,6 +1298,7 @@ mod tests {
         assert!(err.contains("weight vector must match"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_weights() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1302,6 +1314,7 @@ mod tests {
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fits_complex_data() {
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -1322,9 +1335,9 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
-        #[cfg(feature = "doc_export")]
         {
             let blocks = test_support::doc_examples(DOC_MD);
             assert!(!blocks.is_empty());

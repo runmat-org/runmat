@@ -12,8 +12,8 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::gather_if_needed;
+use runmat_time::Instant;
 use std::sync::OnceLock;
-use std::time::Instant;
 
 struct PreparedInput {
     handle: GpuTensorHandle,

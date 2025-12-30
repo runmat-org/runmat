@@ -7,10 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 use super::accept::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
@@ -20,7 +17,14 @@ use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
 const MESSAGE_ID_INVALID_ARGUMENT: &str = "MATLAB:close:InvalidArgument";
 const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:close:InvalidHandle";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "close",
+        builtin_path = "crate::builtins::io::net::close"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "close"
 category: "io/net"
@@ -176,6 +180,7 @@ Yes. The second call simply returns `0`, indicating that nothing needed to be cl
 - Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::close")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "close",
     op_kind: GpuOpKind::Custom("network"),
@@ -192,8 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Networking resources are host-only; the builtin gathers GPU values before closing handles.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::close")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "close",
     shape: ShapeRequirements::Any,
@@ -204,16 +208,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtins execute eagerly on the CPU; close participates only in host bookkeeping.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("close", DOC_MD);
-
 #[runtime_builtin(
     name = "close",
     category = "io/net",
     summary = "Close TCP clients or servers created by tcpclient, tcpserver, or accept.",
-    keywords = "close,tcpclient,tcpserver,networking"
+    keywords = "close,tcpclient,tcpserver,networking",
+    builtin_path = "crate::builtins::io::net::close"
 )]
 fn close_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -348,9 +348,8 @@ fn runtime_error(id: &'static str, message: impl Into<String>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{accept_builtin, client_handle};
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
@@ -444,6 +443,7 @@ mod tests {
         accepted
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpclient_releases_handle() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -459,6 +459,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpserver_releases_listener_and_clients() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -477,6 +478,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_multiple_handles_in_single_call() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -505,6 +507,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_returns_zero_when_no_resources() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -514,6 +517,7 @@ mod tests {
         assert_eq!(status, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_clients_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -532,6 +536,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_servers_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -547,6 +552,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_all_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -569,6 +575,7 @@ mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_char_array_command() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -581,6 +588,7 @@ mod tests {
         assert!(client_handle(cid).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_cell_array_arguments() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -601,6 +609,7 @@ mod tests {
         assert!(server_handle(server_id_value).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_argument_errors() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -627,6 +636,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_struct_errors() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -639,6 +649,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_empty_array_argument_returns_zero() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -648,6 +659,7 @@ mod tests {
         assert_eq!(status, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn close_with_wgpu_provider_active() {
@@ -665,8 +677,8 @@ mod tests {
         assert!(client_handle(cid).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

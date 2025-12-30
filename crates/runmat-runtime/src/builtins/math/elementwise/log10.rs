@@ -9,22 +9,25 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use super::log::{detect_gpu_requires_complex, log_complex_parts};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-use super::log::{detect_gpu_requires_complex, log_complex_parts};
 
 const IMAG_EPS: f64 = 1e-12;
 const LOG10_E: f64 = std::f64::consts::LOG10_E;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "log10",
+        builtin_path = "crate::builtins::math::elementwise::log10"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "log10"
 category: "math/elementwise"
@@ -172,6 +175,7 @@ zero, mirroring MATLAB's behavior for well-conditioned inputs.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::log10")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "log10",
     op_kind: GpuOpKind::Elementwise,
@@ -187,8 +191,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute log10 directly on device buffers; runtimes fall back to the host when complex outputs are required or the hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::log10")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log10",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -218,17 +221,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `log` multiplied by log10(e); providers can override with fused kernels when available.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("log10", DOC_MD);
-
 #[runtime_builtin(
     name = "log10",
     category = "math/elementwise",
     summary = "Base-10 logarithm of scalars, vectors, matrices, or N-D tensors.",
     keywords = "log10,base-10 logarithm,elementwise,magnitude,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::log10"
 )]
 fn log10_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -347,11 +346,12 @@ fn log10_complex_parts(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_scalar_one() {
         let result = log10_builtin(Value::Num(1.0)).expect("log10");
@@ -361,6 +361,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_scalar_ten() {
         let result = log10_builtin(Value::Num(10.0)).expect("log10");
@@ -370,6 +371,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_scalar_zero() {
         let result = log10_builtin(Value::Num(0.0)).expect("log10");
@@ -379,6 +381,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_scalar_negative() {
         let result = log10_builtin(Value::Num(-10.0)).expect("log10");
@@ -392,6 +395,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_bool_true() {
         let result = log10_builtin(Value::Bool(true)).expect("log10");
@@ -401,6 +405,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_tensor_with_negatives() {
         let tensor = Tensor::new(vec![-10.0, 10.0], vec![1, 2]).unwrap();
@@ -418,6 +423,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_complex_scalar() {
         let result = log10_builtin(Value::Complex(1.0, 2.0)).expect("log10");
@@ -431,6 +437,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_logical_array_inputs() {
         let logical = LogicalArray::new(vec![1u8, 0u8], vec![2, 1]).expect("logical");
@@ -445,6 +452,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_char_array_inputs() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
@@ -459,6 +467,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -478,12 +487,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_input_errors() {
         let err = log10_builtin(Value::from("hello"));
         assert!(matches!(err, Err(msg) if msg.contains("expected numeric input")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_array_errors() {
         let array = StringArray::new(vec!["hello".to_string()], vec![1, 1]).unwrap();
@@ -491,6 +502,7 @@ mod tests {
         assert!(matches!(err, Err(msg) if msg.contains("expected numeric input")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_gpu_negative_falls_back_to_complex() {
         test_support::with_test_provider(|provider| {
@@ -512,6 +524,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_with_integer_argument() {
         let result = log10_builtin(Value::Int(IntValue::I32(100))).expect("log10");
@@ -521,13 +534,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn log10_wgpu_matches_cpu_elementwise() {

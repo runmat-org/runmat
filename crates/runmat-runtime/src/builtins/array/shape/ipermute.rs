@@ -14,14 +14,18 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ipermute",
+        builtin_path = "crate::builtins::array::shape::ipermute"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ipermute"
 category: "array/shape"
@@ -175,6 +179,7 @@ ans = logical 1
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ipermute",
     op_kind: GpuOpKind::Custom("permute"),
@@ -196,8 +201,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the same provider permute hook as `permute`; falls back to gather→permute→upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ipermute",
     shape: ShapeRequirements::Any,
@@ -208,17 +212,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ipermute", DOC_MD);
-
 #[runtime_builtin(
     name = "ipermute",
     category = "array/shape",
     summary = "Reorder array dimensions using the inverse of a permutation vector.",
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 fn ipermute_builtin(value: Value, order: Value) -> Result<Value, String> {
     let order_vec = parse_order_argument(order).map_err(map_perm_error)?;
@@ -306,7 +306,7 @@ fn map_perm_error(err: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::array::shape::permute::{
         parse_order_argument, permute_char_array, permute_gpu, permute_logical_array,
@@ -319,6 +319,7 @@ mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_inverts_permute() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
@@ -337,6 +338,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_rejects_invalid_order() {
         let order = make_tensor(&[1.0, 1.0], &[1, 2]);
@@ -348,6 +350,7 @@ mod tests {
         assert!(err.contains("duplicate"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_requires_vector_order() {
         let order = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -362,6 +365,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_char_array_roundtrip() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -380,6 +384,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -400,6 +405,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_numeric_scalar() {
         let value = Value::Num(42.0);
@@ -408,6 +414,7 @@ mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_logical_array_roundtrip() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -425,7 +432,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -433,6 +440,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_wgpu_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -466,6 +474,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_string_array_roundtrip() {
         let data = vec![
@@ -490,6 +499,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_extends_missing_dimensions() {
         let row = make_tensor(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1, 5]);
@@ -510,6 +520,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_errors_when_order_too_short() {
         let matrix = make_tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);

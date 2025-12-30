@@ -3,24 +3,25 @@ use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::{debug, info, warn};
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
+#[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows,
-    CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions,
-    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
-    ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode,
-    ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
-    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
-    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
-    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
-    ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
-    ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions,
-    UniqueResult,
+    AccelContextHandle, AccelContextKind, AccelProvider, ApiDeviceInfo, CorrcoefNormalization,
+    CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows, CovarianceOptions, FindDirection,
+    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions,
+    ImfilterPadding, IsMemberOptions, IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest,
+    ProviderBandwidth, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind,
+    ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult,
+    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult,
+    UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -45,15 +46,21 @@ use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matri
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_time::Instant;
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::{fs, path::Path, path::PathBuf};
+use std::time::Duration;
+use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -105,8 +112,10 @@ type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    instance: Arc<wgpu::Instance>,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    adapter: Arc<wgpu::Adapter>,
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
     workgroup_config: WorkgroupConfig,
@@ -140,6 +149,11 @@ pub struct WgpuProvider {
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
 }
+
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for WgpuProvider {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for WgpuProvider {}
 
 #[derive(Clone)]
 struct BufferEntry {
@@ -1950,7 +1964,7 @@ impl WgpuProvider {
         }
         let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
-            eprintln!(
+            log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
                 label,
                 usage,
@@ -2128,10 +2142,6 @@ impl WgpuProvider {
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
             tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
         );
-        eprintln!(
-            "[runmat] Compiling image_normalize pipeline: batch_tile={} values_per_thread={} lane_count={} spatial_tile={}",
-            tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
-        );
         let template = match self.precision {
             NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
             NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
@@ -2170,10 +2180,10 @@ impl WgpuProvider {
     }
 
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
-        &self.device
+        self.device.as_ref()
     }
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
-        &self.queue
+        self.queue.as_ref()
     }
 
     fn warmup_from_disk(&self) {
@@ -2422,9 +2432,9 @@ impl WgpuProvider {
         }
     }
 
-    pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
+    pub async fn new_async(opts: WgpuProviderOptions) -> Result<Self> {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
-        #[cfg(target_os = "windows")]
+        #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
         {
             instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
                 .unwrap_or(wgpu::Dx12Compiler::Dxc {
@@ -2432,21 +2442,29 @@ impl WgpuProvider {
                     dxc_path: None,
                 });
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
         {
             if let Some(compiler) = wgpu::util::dx12_shader_compiler_from_env() {
                 instance_desc.dx12_shader_compiler = compiler;
             }
         }
-        let instance = wgpu::Instance::new(instance_desc);
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: opts.power_preference,
-            force_fallback_adapter: opts.force_fallback_adapter,
-            compatible_surface: None,
-        }))
-        .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
+        }
+
+        let instance = Arc::new(wgpu::Instance::new(instance_desc));
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: opts.power_preference,
+                force_fallback_adapter: opts.force_fallback_adapter,
+                compatible_surface: None,
+            })
+            .await
+            .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
 
         let adapter_info = adapter.get_info();
+        #[cfg(not(target_arch = "wasm32"))]
         let adapter_features = adapter.features();
         let forced_precision = std::env::var("RUNMAT_WGPU_FORCE_PRECISION")
             .ok()
@@ -2456,27 +2474,38 @@ impl WgpuProvider {
                 _ => None,
             });
 
-        let mut precision = NumericPrecision::F32;
+        #[cfg(target_arch = "wasm32")]
+        let precision = {
+            if forced_precision == Some(NumericPrecision::F64) {
+                warn!("RunMat Accelerate: f64 precision is unavailable on WebGPU/wasm builds; using f32");
+            }
+            NumericPrecision::F32
+        };
 
-        if let Some(requested) = forced_precision {
-            if requested == NumericPrecision::F64
-                && !adapter_features.contains(wgpu::Features::SHADER_F64)
+        #[cfg(not(target_arch = "wasm32"))]
+        let precision = {
+            let mut p = forced_precision.unwrap_or(NumericPrecision::F32);
+            if p == NumericPrecision::F64 && !adapter_features.contains(wgpu::Features::SHADER_F64)
             {
                 warn!(
                     "RunMat Accelerate: requested f64 precision but adapter lacks SHADER_F64; falling back to f32"
                 );
-                precision = NumericPrecision::F32;
-            } else {
-                precision = requested;
+                p = NumericPrecision::F32;
             }
-        } else {
+            p
+        };
+
+        if forced_precision.is_none() {
             info!(
-                "RunMat Accelerate: defaulting to f32 kernels for adapter '{}'",
+                "RunMat Accelerate: defaulting to {} kernels for adapter '{}'",
+                match precision {
+                    NumericPrecision::F64 => "f64",
+                    NumericPrecision::F32 => "f32",
+                },
                 adapter_info.name
             );
         }
 
-        // Tunables with env overrides
         let two_pass_threshold = std::env::var("RUNMAT_TWO_PASS_THRESHOLD")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -2505,14 +2534,32 @@ impl WgpuProvider {
         };
         let limits = adapter.limits();
 
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("RunMat WGPU Device"),
-                required_features,
-                required_limits: limits.clone(),
-            },
-            None,
-        ))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let (device_raw, queue_raw) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("RunMat WGPU Device"),
+                    required_features,
+                    required_limits: limits.clone(),
+                },
+                None,
+            )
+            .await?;
+        #[cfg(target_arch = "wasm32")]
+        let (device_raw, queue_raw) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("RunMat WGPU Device"),
+                    required_features,
+                    required_limits: limits.clone(),
+                },
+                None,
+            )
+            .await
+            .map_err(|err| anyhow!(err.to_string()))?;
+        let device = Arc::new(device_raw);
+        let queue = Arc::new(queue_raw);
+        let adapter = Arc::new(adapter);
         let satisfied_limits = device.limits();
 
         let workgroup_config = WorkgroupConfig::new(
@@ -2521,65 +2568,25 @@ impl WgpuProvider {
             requested_reduction_wg,
             requested_matmul_tile,
         );
-        config::set_effective_workgroup_size(workgroup_config.scalar);
-        config::set_effective_matmul_tile(workgroup_config.matmul_tile);
-        let reduction_wg_default = workgroup_config.reduction_default;
-
+        crate::backend::wgpu::config::set_effective_workgroup_size(workgroup_config.scalar);
+        crate::backend::wgpu::config::set_effective_matmul_tile(workgroup_config.matmul_tile);
         info!(
-            "Adapter '{}' compute limits: invocations={} max_wg=({}, {}, {}) -> wg={} reduction_wg={} matmul_tile={}",
+            "WGPU adapter '{}' ready: scalar_wg={} reduction_wg={} matmul_tile={} precision={} wg_limits=({}, {}, {}) max_invocations={}",
             adapter_info.name,
-            workgroup_config.adapter_max_invocations,
+            workgroup_config.scalar,
+            workgroup_config.reduction_default,
+            workgroup_config.matmul_tile,
+            match precision {
+                NumericPrecision::F64 => "f64",
+                NumericPrecision::F32 => "f32",
+            },
             workgroup_config.max_x,
             workgroup_config.max_y,
             workgroup_config.max_z,
-            workgroup_config.scalar,
-            reduction_wg_default,
-            workgroup_config.matmul_tile
+            workgroup_config.adapter_max_invocations
         );
-        if workgroup_config.scalar != requested_scalar_wg {
-            info!(
-                "Adjusted RUNMAT_WG from {} to {} to satisfy adapter limits",
-                requested_scalar_wg, workgroup_config.scalar
-            );
-        }
-        if workgroup_config.reduction_default != requested_reduction_wg {
-            info!(
-                "Adjusted RUNMAT_REDUCTION_WG from {} to {} to satisfy adapter limits",
-                requested_reduction_wg, workgroup_config.reduction_default
-            );
-        }
-        if workgroup_config.matmul_tile != requested_matmul_tile {
-            info!(
-                "Adjusted RUNMAT_MATMUL_TILE from {} to {} to satisfy adapter limits",
-                requested_matmul_tile, workgroup_config.matmul_tile
-            );
-        }
 
-        let bootstrap_tuning = ImageNormalizeTuning {
-            batch_tile: 32,
-            values_per_thread: 4,
-            lane_count: 256,
-            spatial_tile: 4,
-        };
-        let bootstrap_tuning =
-            workgroup_config.sanitize_image_normalize_tuning(bootstrap_tuning, 32);
-        debug!(
-            "Bootstrap image_normalize tuning lane={} spatial={} vpt={} batch_tile={}",
-            bootstrap_tuning.lane_count,
-            bootstrap_tuning.spatial_tile,
-            bootstrap_tuning.values_per_thread,
-            bootstrap_tuning.batch_tile
-        );
-        let pipelines = WgpuPipelines::new(
-            &device,
-            precision,
-            ImageNormalizeBootstrap {
-                batch_tile: bootstrap_tuning.batch_tile,
-                values_per_thread: bootstrap_tuning.values_per_thread,
-                lane_count: bootstrap_tuning.lane_count,
-                spatial_tile: bootstrap_tuning.spatial_tile,
-            },
-        );
+        let reduction_wg_default = workgroup_config.reduction_default;
         let cache_device_id = adapter_info.device;
         let runtime_device_id = runmat_accelerate_api::next_device_id();
         let element_size = match precision {
@@ -2597,20 +2604,25 @@ impl WgpuProvider {
             }
         }
 
-        // Choose a cache dir: prefer RUNMAT_PIPELINE_CACHE_DIR, else OS cache dir
-        let cache_dir = if let Ok(custom) = std::env::var("RUNMAT_PIPELINE_CACHE_DIR") {
-            std::path::PathBuf::from(custom)
-        } else if let Some(base) = dirs::cache_dir() {
-            base.join("runmat")
-                .join("pipelines")
-                .join(format!("device-{}", cache_device_id))
-        } else {
-            // Fallback to local target/tmp
-            std::path::PathBuf::from("target")
-                .join("tmp")
-                .join(format!("wgpu-pipeline-cache-{}", cache_device_id))
+        #[cfg(not(target_arch = "wasm32"))]
+        let pipeline_cache_dir = {
+            let dir = if let Ok(custom) = std::env::var("RUNMAT_PIPELINE_CACHE_DIR") {
+                PathBuf::from(custom)
+            } else if let Some(base) = dirs::cache_dir() {
+                base.join("runmat")
+                    .join("pipelines")
+                    .join(format!("device-{}", cache_device_id))
+            } else {
+                PathBuf::from("target")
+                    .join("tmp")
+                    .join(format!("wgpu-pipeline-cache-{}", cache_device_id))
+            };
+            Some(dir)
         };
+        #[cfg(target_arch = "wasm32")]
+        let pipeline_cache_dir: Option<PathBuf> = None;
 
+        #[cfg(not(target_arch = "wasm32"))]
         let autotune_base_dir = std::env::var("RUNMAT_AUTOTUNE_DIR")
             .ok()
             .map(PathBuf::from)
@@ -2620,7 +2632,10 @@ impl WgpuProvider {
                     dir
                 })
             })
-            .or_else(|| Some(cache_dir.clone()));
+            .or_else(|| pipeline_cache_dir.clone());
+        #[cfg(target_arch = "wasm32")]
+        let autotune_base_dir: Option<PathBuf> = None;
+
         let autotune_device_tag = format!(
             "{}-{:08x}",
             canonical_vendor_name(&adapter_info),
@@ -2660,11 +2675,30 @@ impl WgpuProvider {
             reduction_wg_default
         );
 
+        let bootstrap_tuning = ImageNormalizeTuning {
+            batch_tile: 1,
+            values_per_thread: 1,
+            lane_count: 32,
+            spatial_tile: 1,
+        };
+        let sanitized_bootstrap =
+            workgroup_config.sanitize_image_normalize_tuning(bootstrap_tuning, 1);
+        let image_norm_bootstrap = ImageNormalizeBootstrap {
+            batch_tile: sanitized_bootstrap.batch_tile,
+            values_per_thread: sanitized_bootstrap.values_per_thread,
+            lane_count: sanitized_bootstrap.lane_count,
+            spatial_tile: sanitized_bootstrap.spatial_tile,
+        };
+        let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
+
         Ok(Self {
+            instance,
             device,
             queue,
+            adapter,
             adapter_info,
-            adapter_limits: satisfied_limits.clone(),
+            adapter_limits: satisfied_limits,
+            workgroup_config,
             buffers: Mutex::new(HashMap::new()),
             buffer_residency: BufferResidency::new(Self::BUFFER_RESIDENCY_MAX_PER_KEY),
             next_id: AtomicU64::new(1),
@@ -2676,15 +2710,14 @@ impl WgpuProvider {
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
             bind_group_layout_tags: Mutex::new(HashMap::new()),
-            bind_group_cache: BindGroupCache::new(),
-            kernel_resources: KernelResourceRegistry::new(),
-            metrics: crate::backend::wgpu::metrics::WgpuMetrics::new(),
-            telemetry: AccelTelemetry::new(),
+            bind_group_cache: BindGroupCache::default(),
+            kernel_resources: KernelResourceRegistry::default(),
+            metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
+            telemetry: AccelTelemetry::default(),
             reduction_two_pass_mode,
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
-            workgroup_config,
-            pipeline_cache_dir: Some(cache_dir),
+            pipeline_cache_dir,
             reduction_autotune,
             image_norm_autotune,
             image_norm_pipeline_cache: Mutex::new(HashMap::new()),
@@ -2693,6 +2726,19 @@ impl WgpuProvider {
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
         })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
+        block_on(Self::new_async(opts))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
+        Err(anyhow!(
+            "RunMat Accelerate: synchronous WGPU initialization is unavailable on wasm targets. Use new_async instead (opts: {:?}).",
+            opts
+        ))
     }
 
     fn register_existing_buffer(
@@ -3195,6 +3241,7 @@ impl WgpuProvider {
     }
 
     fn submit(&self, encoder: wgpu::CommandEncoder) {
+        let _span = info_span!("gpu.dispatch", label = "runmat-wgpu-submit").entered();
         self.queue.submit(Some(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
     }
@@ -3859,25 +3906,28 @@ impl WgpuProvider {
         let groups = (num_slices as u32).max(1);
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             for (i, buf) in input_bufs.iter().enumerate() {
-                eprintln!(
+                log::debug!(
                     "[fused-reduction] binding={} role=read ptr={:p}",
                     i,
                     buf.0.as_ref()
                 );
             }
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] binding={} role=read_write ptr={:p}",
                 inputs.len(),
                 out_buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] binding={} role=uniform ptr={:p}",
                 inputs.len() + 1,
                 params_buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
-                reduce_len, num_slices, workgroup_size, groups
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                groups
             );
         }
         let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
@@ -3911,7 +3961,7 @@ impl WgpuProvider {
             groups,
         );
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            eprintln!("[fused-reduction] single-pass dispatch complete");
+            log::debug!("[fused-reduction] single-pass dispatch complete");
         }
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
     }
@@ -7268,14 +7318,20 @@ impl WgpuProvider {
         let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
         let debug_matmul_dump = std::env::var("RUNMAT_DEBUG_MATMUL_DUMP").is_ok();
         if debug_matmul {
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] ptr_a={:p} ptr_b={:p}",
                 entry_a.buffer.as_ref(),
                 entry_b.buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
-                m, n, k, view_a.lda, view_b.lda, view_a.transpose, view_b.transpose
+                m,
+                n,
+                k,
+                view_a.lda,
+                view_b.lda,
+                view_a.transpose,
+                view_b.transpose
             );
             if debug_matmul_dump {
                 if let Ok(lhs_host) = self.download(a) {
@@ -7283,14 +7339,14 @@ impl WgpuProvider {
                         .data
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    eprintln!("[matmul_debug] lhs max_abs={:.6e}", max_a);
+                    log::debug!("[matmul_debug] lhs max_abs={:.6e}", max_a);
                 }
                 if let Ok(rhs_host) = self.download(b) {
                     let max_b = rhs_host
                         .data
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    eprintln!("[matmul_debug] rhs max_abs={:.6e}", max_b);
+                    log::debug!("[matmul_debug] rhs max_abs={:.6e}", max_b);
                 }
             }
         }
@@ -7324,13 +7380,16 @@ impl WgpuProvider {
         let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
         let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
         if debug_matmul {
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
-                can_vec4, use_vec4, enable_chunk, out_usage
+                can_vec4,
+                use_vec4,
+                enable_chunk,
+                out_usage
             );
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         if enable_chunk {
             self.prepare_matmul_pipeline();
@@ -7551,7 +7610,7 @@ impl WgpuProvider {
         let handle =
             self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
         if debug_matmul {
-            eprintln!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
+            log::debug!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
             if debug_matmul_dump {
                 if let Ok(out_host) = self.download(&handle) {
                     let max_out = out_host
@@ -7559,8 +7618,8 @@ impl WgpuProvider {
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
                     let sample_len = out_host.data.len().min(8);
-                    eprintln!("[matmul_debug] out max_abs={:.6e}", max_out);
-                    eprintln!(
+                    log::debug!("[matmul_debug] out max_abs={:.6e}", max_out);
+                    log::debug!(
                         "[matmul_debug] out sample {:?}",
                         &out_host.data[0..sample_len]
                     );
@@ -7669,7 +7728,7 @@ impl WgpuProvider {
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let mut multi_index = vec![0usize; rank];
         for page_idx in 0..page_volume {
@@ -9825,7 +9884,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = product_checked(&state.shape)
             .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let state_entry = self.get_entry(state)?;
         let out_buffer =
             self.create_storage_buffer_checked(total_len, "runmat-stochastic-evolution-out")?;
@@ -11196,7 +11255,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -11393,7 +11452,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -11858,7 +11917,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -11958,7 +12017,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -12052,7 +12111,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            eprintln!(
+            log::debug!(
                 "[reduce-global] in ptr={:p} len={} op={}",
                 entry.buffer.as_ref(),
                 entry.len,
@@ -13199,6 +13258,34 @@ impl WgpuProvider {
     }
 }
 impl AccelProvider for WgpuProvider {
+    fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
+        match kind {
+            AccelContextKind::Plotting => Some(AccelContextHandle::Wgpu(WgpuContextHandle {
+                instance: self.instance.clone(),
+                device: self.device.clone(),
+                queue: self.queue.clone(),
+                adapter: self.adapter.clone(),
+                adapter_info: self.adapter_info.clone(),
+                limits: self.adapter_limits.clone(),
+                features: self.device.features(),
+            })),
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn export_wgpu_buffer(&self, handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+        self.get_entry(handle).ok().map(|entry| WgpuBufferRef {
+            buffer: entry.buffer,
+            len: entry.len,
+            shape: entry.shape,
+            element_size: self.element_size,
+            precision: match entry.precision {
+                NumericPrecision::F32 => ProviderPrecision::F32,
+                NumericPrecision::F64 => ProviderPrecision::F64,
+            },
+        })
+    }
+
     fn device_id(&self) -> u32 {
         self.runtime_device_id
     }
@@ -14271,30 +14358,37 @@ impl AccelProvider for WgpuProvider {
                     max_val
                 );
                 if max_val == 0.0 {
-                    let q_download = self.download(q_handle);
-                    if let Ok(lhs_dump) = self.download(lhs_handle) {
-                        if let Ok(ref q_dump) = q_download {
-                            let dump_dir = Path::new("target/matmul_zero");
-                            let _ = fs::create_dir_all(dump_dir);
-                            let lhs_path = dump_dir.join(format!(
-                                "lhs_{}_{}.bin",
-                                product.buffer_id,
-                                lhs_dump.data.len()
-                            ));
-                            let rhs_path = dump_dir.join(format!(
-                                "rhs_{}_{}.bin",
-                                product.buffer_id,
-                                q_dump.data.len()
-                            ));
-                            let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
-                            let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
-                            log::warn!(
-                                "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
-                                product.buffer_id,
-                                lhs_path.display(),
-                                rhs_path.display()
-                            );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let q_download = self.download(q_handle);
+                        if let Ok(lhs_dump) = self.download(lhs_handle) {
+                            if let Ok(ref q_dump) = q_download {
+                                let dump_dir = Path::new("target/matmul_zero");
+                                let _ = fs::create_dir_all(dump_dir);
+                                let lhs_path = dump_dir.join(format!(
+                                    "lhs_{}_{}.bin",
+                                    product.buffer_id,
+                                    lhs_dump.data.len()
+                                ));
+                                let rhs_path = dump_dir.join(format!(
+                                    "rhs_{}_{}.bin",
+                                    product.buffer_id,
+                                    q_dump.data.len()
+                                ));
+                                let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
+                                let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
+                                log::warn!(
+                                    "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
+                                    product.buffer_id,
+                                    lhs_path.display(),
+                                    rhs_path.display()
+                                );
+                            }
                         }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        log::warn!("qr_power_iter: skipping matmul dump because filesystem APIs are unavailable on wasm");
                     }
                     log::warn!(
                         "qr_power_iter: recomputed product is still zero; falling back to host QR"
@@ -14435,7 +14529,7 @@ impl AccelProvider for WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let m_u32 =
             u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
@@ -15724,7 +15818,7 @@ impl AccelProvider for WgpuProvider {
         output_shape: &[usize],
         len: usize,
     ) -> Result<GpuTensorHandle> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = self.fused_elementwise_exec(shader, inputs, output_shape, len);
         if result.is_ok() {
             let elapsed = start.elapsed();
@@ -15778,7 +15872,7 @@ impl AccelProvider for WgpuProvider {
         workgroup_size: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = self.fused_reduction_exec(
             shader,
             inputs,
@@ -15838,7 +15932,7 @@ impl AccelProvider for WgpuProvider {
             return;
         }
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         self.warmup_from_disk();
         // Proactively warm common pipelines used by normalization and reduction chains
         let pl = &self.pipelines;
@@ -15986,6 +16080,12 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
+        let _span = info_span!(
+            "gpu.transfer.upload",
+            shape = ?host.shape,
+            len = host.data.len()
+        )
+        .entered();
         let len = host.data.len();
         let shape = host.shape.to_vec();
         let buffer =
@@ -16025,6 +16125,12 @@ impl AccelProvider for WgpuProvider {
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
     fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
+        let _span = info_span!(
+            "gpu.transfer.download",
+            shape = ?h.shape,
+            buffer_id = h.buffer_id
+        )
+        .entered();
         log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
         let entry = self.get_entry(h)?;
         if entry.len == 0 {

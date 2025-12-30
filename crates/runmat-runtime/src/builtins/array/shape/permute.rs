@@ -9,14 +9,18 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "permute",
+        builtin_path = "crate::builtins::array::shape::permute"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "permute"
 category: "array/shape"
@@ -166,6 +170,7 @@ ans = logical 1
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::permute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "permute",
     op_kind: GpuOpKind::Custom("permute"),
@@ -187,8 +192,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement a custom permute hook; the runtime falls back to gather→permute→upload when unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::permute")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "permute",
     shape: ShapeRequirements::Any,
@@ -199,17 +203,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("permute", DOC_MD);
-
 #[runtime_builtin(
     name = "permute",
     category = "array/shape",
     summary = "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
     keywords = "permute,dimension reorder,swap axes,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::array::shape::permute"
 )]
 fn permute_builtin(value: Value, order: Value) -> Result<Value, String> {
     let order_vec = parse_order_argument(order)?;
@@ -510,7 +510,7 @@ fn is_vector(tensor: &Tensor) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
@@ -518,6 +518,7 @@ mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_swaps_dims() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
@@ -533,6 +534,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_adds_trailing_dimension() {
         let row = tensor(&[1.0, 2.0, 3.0], &[1, 3]);
@@ -546,6 +548,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_duplicates() {
         let data: Vec<f64> = (1..=6).map(|n| n as f64).collect();
@@ -555,6 +558,7 @@ mod tests {
         assert!(err.contains("duplicate dimension index"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_requires_vector_order() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -563,6 +567,7 @@ mod tests {
         assert!(err.contains("order must be a row or column vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_zero_index() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -571,6 +576,7 @@ mod tests {
         assert!(err.contains("indices must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_non_integer_order() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -579,6 +585,7 @@ mod tests {
         assert!(err.contains("indices must be integers"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_order_length_must_cover_rank() {
         let data: Vec<f64> = (1..=8).map(|n| n as f64).collect();
@@ -588,6 +595,7 @@ mod tests {
         assert!(err.contains("order length (2) must be at least ndims(A) (3)"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_logical_preserves_type() {
         let la = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -603,6 +611,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_complex_tensor() {
         let ct = ComplexTensor::new(
@@ -622,6 +631,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_string_array() {
         let sa = StringArray::new(
@@ -641,6 +651,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_transpose() {
         let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -656,6 +667,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_requires_two_dims() {
         let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -665,6 +677,7 @@ mod tests {
         assert!(err.contains("order length (1) must be at least ndims(A) (2)"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -688,7 +701,7 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -696,6 +709,7 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_wgpu_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(

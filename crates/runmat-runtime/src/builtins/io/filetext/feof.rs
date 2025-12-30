@@ -14,16 +14,20 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
+use crate::gather_if_needed;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 const IDENTIFIER_TYPE_ERROR: &str = "feof: file identifier must be a numeric scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "feof",
+        builtin_path = "crate::builtins::io::filetext::feof"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "feof"
 category: "io/filetext"
@@ -162,6 +166,7 @@ array, the runtime gathers it before performing the host-only check.
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::feof")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "feof",
     op_kind: GpuOpKind::Custom("file-io"),
@@ -177,8 +182,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O query; providers are not involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::feof")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "feof",
     shape: ShapeRequirements::Any,
@@ -189,17 +193,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O queries are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("feof", DOC_MD);
-
 #[runtime_builtin(
     name = "feof",
     category = "io/filetext",
     summary = "Query whether a file identifier is positioned at end-of-file.",
     keywords = "feof,end of file,io,file identifier",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::filetext::feof"
 )]
 fn feof_builtin(fid: Value) -> Result<Value, String> {
     let at_end = evaluate(&fid)?;
@@ -284,16 +284,18 @@ fn parse_scalar_fid(value: f64) -> Result<i32, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_false_before_reading() {
         registry::reset_for_tests();
@@ -317,6 +319,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_returns_true_after_reading_to_end() {
         registry::reset_for_tests();
@@ -343,6 +346,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_empty_file_is_true() {
         registry::reset_for_tests();
@@ -363,6 +367,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_invalid_identifier_errors() {
         registry::reset_for_tests();
@@ -370,6 +375,7 @@ mod tests {
         assert!(err.contains("Invalid file identifier"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_integer_identifier() {
         registry::reset_for_tests();
@@ -377,6 +383,7 @@ mod tests {
         assert_eq!(err, "feof: file identifier must be an integer");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_nan_identifier() {
         registry::reset_for_tests();
@@ -384,6 +391,7 @@ mod tests {
         assert_eq!(err, "feof: file identifier must be finite");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_negative_identifier() {
         registry::reset_for_tests();
@@ -391,6 +399,7 @@ mod tests {
         assert_eq!(err, "feof: file identifier must be non-negative");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_rejects_non_numeric_inputs() {
         registry::reset_for_tests();
@@ -398,6 +407,7 @@ mod tests {
         assert_eq!(err, IDENTIFIER_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_scalar_tensor_identifier() {
         registry::reset_for_tests();
@@ -422,6 +432,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_errors_on_closed_identifier() {
         registry::reset_for_tests();
@@ -446,6 +457,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_accepts_gpu_identifier_via_gather() {
         registry::reset_for_tests();
@@ -482,6 +494,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn feof_standard_identifier_returns_false() {
         registry::reset_for_tests();
@@ -489,15 +502,15 @@ mod tests {
         assert!(!result);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
+        let now = system_time_now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();

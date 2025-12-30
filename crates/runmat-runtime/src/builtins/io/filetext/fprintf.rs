@@ -14,15 +14,22 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::console::{record_console_output, ConsoleStream};
+use crate::gather_if_needed;
+use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
 const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "fprintf",
+        builtin_path = "crate::builtins::io::filetext::fprintf"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "fprintf"
 category: "io/filetext"
@@ -211,6 +218,7 @@ Ignore it, just as in MATLAB. Omitting the output argument does not change the w
   with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fprintf",
     op_kind: GpuOpKind::Custom("io-file-write"),
@@ -226,8 +234,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fprintf",
     shape: ShapeRequirements::Any,
@@ -237,11 +244,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Formatting is a side-effecting sink and never participates in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("fprintf", DOC_MD);
 
 /// Result of evaluating `fprintf`.
 #[derive(Debug)]
@@ -405,7 +407,8 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     summary = "Write formatted text to files or standard streams.",
     keywords = "fprintf,format,printf,io",
     accel = "cpu",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
 fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut args = Vec::with_capacity(rest.len() + 1);
@@ -425,7 +428,7 @@ enum OutputTarget {
     Stdout,
     Stderr,
     File {
-        handle: Arc<StdMutex<std::fs::File>>,
+        handle: Arc<StdMutex<File>>,
         encoding: String,
     },
 }
@@ -444,13 +447,17 @@ impl OutputTarget {
                 let mut stdout = io::stdout().lock();
                 stdout
                     .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))
+                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))?;
+                record_console_chunk(ConsoleStream::Stdout, bytes);
+                Ok(())
             }
             OutputTarget::Stderr => {
                 let mut stderr = io::stderr().lock();
                 stderr
                     .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))
+                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))?;
+                record_console_chunk(ConsoleStream::Stderr, bytes);
+                Ok(())
             }
             OutputTarget::File { handle, .. } => {
                 let mut guard = handle.lock().map_err(|_| {
@@ -462,6 +469,14 @@ impl OutputTarget {
             }
         }
     }
+}
+
+fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let text = String::from_utf8_lossy(bytes).to_string();
+    record_console_output(stream, text);
 }
 
 fn gather_value(value: &Value) -> Result<Value, String> {
@@ -690,17 +705,19 @@ fn encode_latin1(text: &str, label: &str) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
+    use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_matrix_column_major() {
         registry::reset_for_tests();
@@ -728,6 +745,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_ascii_encoding_errors() {
         registry::reset_for_tests();
@@ -753,6 +771,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_gpu_gathers_values() {
         registry::reset_for_tests();
@@ -791,12 +810,14 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_missing_format_errors() {
         let err = evaluate(&[Value::Num(1.0)]).expect_err("fprintf should require format");
         assert!(err.contains("missing format string"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_literal_with_extra_args_errors() {
         let err = evaluate(&[
@@ -807,6 +828,7 @@ mod tests {
         assert!(err.contains("contains no conversion specifiers"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_invalid_identifier_errors() {
         let err = evaluate(&[Value::Num(99.0), Value::String("value".to_string())])
@@ -814,6 +836,7 @@ mod tests {
         assert!(err.contains("Invalid file identifier"), "{err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_read_only_error() {
         registry::reset_for_tests();
@@ -832,15 +855,15 @@ mod tests {
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn fprintf_doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
+        let nanos = system_time_now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();

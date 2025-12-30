@@ -7,16 +7,20 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "cat",
+        builtin_path = "crate::builtins::array::shape::cat"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cat"
 category: "array/shape"
@@ -229,6 +233,7 @@ dimension.
 - Found a bug or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose).
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::cat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cat",
     op_kind: GpuOpKind::Custom("cat"),
@@ -244,8 +249,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to gather + upload when providers lack a native concatenation kernel.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::cat")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cat",
     shape: ShapeRequirements::Any,
@@ -255,11 +259,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Concatenation is a sink and terminates fusion pipelines.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cat", DOC_MD);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CatCategory {
@@ -356,7 +355,8 @@ fn extract_like(mut inputs: Vec<Value>) -> Result<(Vec<Value>, LikeSpec), String
     category = "array/shape",
     summary = "Concatenate arrays along a specified dimension while preserving MATLAB semantics.",
     keywords = "cat,concatenate,array,dimension,gpu",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::shape::cat"
 )]
 fn cat_builtin(dim: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() < 2 {
@@ -967,12 +967,13 @@ fn finalize_gpu_value(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_numeric_rows() {
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -991,6 +992,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_dimension_mismatch_errors() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1003,6 +1005,7 @@ mod tests {
         assert!(err.contains("dimension 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_char_columns() {
         let left = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -1023,6 +1026,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_logical_preserves_type() {
         let top = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -1041,6 +1045,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1067,6 +1072,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
@@ -1095,6 +1101,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_like_logical_mismatch_errors() {
         let proto = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
@@ -1111,6 +1118,7 @@ mod tests {
         assert!(err.contains("logical"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cat_wgpu_matches_cpu() {
@@ -1151,8 +1159,8 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

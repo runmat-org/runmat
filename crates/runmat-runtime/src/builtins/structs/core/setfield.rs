@@ -10,9 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::call_builtin;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
     StructValue, Tensor, Value,
@@ -21,7 +19,14 @@ use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 use std::convert::TryFrom;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "setfield",
+        builtin_path = "crate::builtins::structs::core::setfield"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "setfield"
 category: "structs/core"
@@ -183,6 +188,7 @@ subsequent GPU-aware operations; `setfield` itself never launches kernels.
 [getfield](./getfield), [fieldnames](./fieldnames), [struct](./struct), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::setfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "setfield",
     op_kind: GpuOpKind::Custom("setfield"),
@@ -198,8 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only metadata mutation; GPU tensors are gathered before assignment.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::setfield")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "setfield",
     shape: ShapeRequirements::Any,
@@ -210,16 +215,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Assignments terminate fusion and gather device data back to the host.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("setfield", DOC_MD);
-
 #[runtime_builtin(
     name = "setfield",
     category = "structs/core",
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
-    keywords = "setfield,struct,assignment,object property"
+    keywords = "setfield,struct,assignment,object property",
+    builtin_path = "crate::builtins::structs::core::setfield"
 )]
 fn setfield_builtin(base: Value, rest: Vec<Value>) -> Result<Value, String> {
     let parsed = parse_arguments(rest)?;
@@ -1228,16 +1229,16 @@ fn is_struct_array(cell: &CellArray) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
         Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
     };
     use runmat_gc::gc_allocate;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_creates_scalar_field() {
         let struct_value = StructValue::new();
@@ -1258,6 +1259,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_creates_nested_structs() {
         let struct_value = StructValue::new();
@@ -1288,6 +1290,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_struct_array_element() {
         let mut a = StructValue::new();
@@ -1323,6 +1326,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_assigns_into_cell_then_struct() {
         let mut inner1 = StructValue::new();
@@ -1370,6 +1374,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_struct_array_with_end_index() {
         let mut first = StructValue::new();
@@ -1409,6 +1414,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_assigns_object_property() {
         let mut class_def = ClassDef {
@@ -1444,6 +1450,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_errors_when_indexing_missing_field() {
         let struct_value = StructValue::new();
@@ -1464,6 +1471,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_errors_on_static_property_assignment() {
         let mut class_def = ClassDef {
@@ -1497,6 +1505,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_handle_target() {
         let mut inner = StructValue::new();
@@ -1529,6 +1538,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn setfield_gpu_tensor_indexing_gathers_to_host() {
@@ -1587,8 +1597,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

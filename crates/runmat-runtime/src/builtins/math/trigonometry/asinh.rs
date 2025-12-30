@@ -14,11 +14,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "asinh",
+        builtin_path = "crate::builtins::math::trigonometry::asinh"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "asinh"
 category: "math/trigonometry"
@@ -198,6 +201,7 @@ infrastructure can reuse the same kernel hooks.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "asinh",
     op_kind: GpuOpKind::Elementwise,
@@ -214,8 +218,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute asinh directly on device buffers; runtimes gather to host when unary_asinh is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "asinh",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -232,17 +235,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `asinh` calls; providers may override via fused elementwise kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("asinh", DOC_MD);
-
 #[runtime_builtin(
     name = "asinh",
     category = "math/trigonometry",
     summary = "Inverse hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "asinh,arcsinh,inverse hyperbolic sine,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
 fn asinh_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -306,12 +305,13 @@ fn complex_asinh_scalar(re: f64, im: f64) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use num_complex::Complex64;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_scalar() {
         let value = Value::Num(0.5);
@@ -322,6 +322,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_tensor_values() {
         let tensor =
@@ -344,6 +345,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-0.5, 0.75)];
@@ -363,6 +365,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_char_array_roundtrip() {
         let chars = CharArray::new("az".chars().collect(), 1, 2).expect("char array");
@@ -379,6 +382,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -399,6 +403,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_logical_array_promotes() {
         let logical =
@@ -421,6 +426,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_string_errors() {
         let err = asinh_builtin(Value::from("not numeric")).expect_err("expected error");
@@ -430,13 +436,14 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn asinh_wgpu_matches_cpu() {

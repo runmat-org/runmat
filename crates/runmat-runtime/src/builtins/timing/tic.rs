@@ -2,18 +2,19 @@
 
 use once_cell::sync::Lazy;
 use runmat_macros::runtime_builtin;
+use runmat_time::Instant;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(name = "tic", builtin_path = "crate::builtins::timing::tic")
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "tic"
 category: "timing"
@@ -129,7 +130,7 @@ Yes. Each thread shares the same stopwatch stack. Nested `tic`/`toc` pairs remai
 serialise access at the script level to avoid interleaving unrelated timings.
 
 ### How accurate is the measurement?
-`tic` relies on `std::time::Instant`, typically providing microsecond or better precision. The actual resolution
+`tic` relies on a monotonic clock (via `runmat_time::Instant`), typically providing microsecond or better precision. The actual resolution
 depends on your operating system. There is no artificial jitter or throttling introduced by RunMat.
 
 ### Does `tic` participate in GPU fusion?
@@ -144,6 +145,7 @@ any GPU-resident tensors are gathered automatically by surrounding code when nec
 - Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::tic")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tic",
     op_kind: GpuOpKind::Custom("timer"),
@@ -159,8 +161,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Stopwatch state lives on the host. Providers are never consulted for tic/toc.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::timing::tic")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tic",
     shape: ShapeRequirements::Any,
@@ -170,11 +171,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Timing builtins are executed eagerly on the host and do not participate in fusion.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("tic", DOC_MD);
 
 static MONOTONIC_ORIGIN: Lazy<Instant> = Lazy::new(Instant::now);
 static STOPWATCH: Lazy<Mutex<StopwatchState>> = Lazy::new(|| Mutex::new(StopwatchState::default()));
@@ -205,7 +201,8 @@ const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
     category = "timing",
     summary = "Start a stopwatch timer and optionally return a handle for toc.",
     keywords = "tic,timing,profiling,benchmark",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::timing::tic"
 )]
 pub fn tic_builtin() -> Result<f64, String> {
     record_tic()
@@ -242,12 +239,11 @@ pub(crate) fn decode_handle(handle: f64) -> Result<Instant, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::thread;
     use std::time::Duration;
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
 
     fn reset_stopwatch() {
@@ -255,6 +251,7 @@ mod tests {
         guard.stack.clear();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tic_returns_monotonic_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -264,6 +261,7 @@ mod tests {
         assert!(take_latest_start().expect("take").is_some());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tic_handles_increase_over_time() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -274,6 +272,7 @@ mod tests {
         assert!(second > first);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_roundtrip_matches_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -285,6 +284,7 @@ mod tests {
         assert!(delta < 1e-9, "delta {delta}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn take_latest_start_pops_stack() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -294,6 +294,7 @@ mod tests {
         assert!(take_latest_start().expect("second take").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_handle_rejects_invalid_values() {
         let _guard = TEST_GUARD.lock().unwrap();
@@ -301,8 +302,8 @@ mod tests {
         assert!(decode_handle(-1.0).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let _guard = TEST_GUARD.lock().unwrap();
         let blocks = test_support::doc_examples(DOC_MD);

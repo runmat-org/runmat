@@ -1,0 +1,62 @@
+{
+  "name": "runmat",
+  "version": "0.2.7",
+  "description": "Browser-ready WebAssembly bindings for the RunMat runtime",
+  "type": "module",
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "homepage": "https://runmat.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/runmat-org/runmat"
+  },
+  "bugs": {
+    "url": "https://github.com/runmat-org/runmat/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "pkg",
+    "artifacts",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "rimraf dist pkg pkg-web ../../crates/runmat-wasm/pkg ../../crates/runmat-wasm/pkg-web",
+    "build:registry": "RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown",
+    "build:wasm": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release",
+    "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
+    "build:types": "tsc -p tsconfig.json",
+    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:types",
+    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fs": {
+      "types": "./dist/fs/index.d.ts",
+      "import": "./dist/fs/index.js"
+    },
+    "./fs/*": {
+      "types": "./dist/fs/*.d.ts",
+      "import": "./dist/fs/*.js"
+    },
+    "./pkg/*": "./pkg/*"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "fake-indexeddb": "^6.0.1",
+    "rimraf": "^5.0.7",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

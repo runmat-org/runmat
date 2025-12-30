@@ -3,9 +3,10 @@
 //! Provides seamless integration with Jupyter notebooks, enabling interactive
 //! plotting output directly in notebook cells with full GPU acceleration.
 
+use runmat_time::unix_timestamp_us;
 use std::collections::HashMap;
 // use std::path::Path; // Not currently used
-use crate::plots::{Figure, LinePlot, PointCloudPlot, ScatterPlot, SurfacePlot};
+use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot};
 
 /// Jupyter notebook output handler
 #[derive(Debug)]
@@ -172,11 +173,7 @@ impl JupyterBackend {
         Ok("<div>3D Surface Plot (not yet integrated with Figure)</div>".to_string())
     }
 
-    /// Display a point cloud
-    pub fn display_point_cloud(&mut self, _plot: &PointCloudPlot) -> Result<String, String> {
-        // TODO: Implement once Figure supports 3D plots
-        Ok("<div>3D Point Cloud (not yet integrated with Figure)</div>".to_string())
-    }
+    // Scatter3 display not yet implemented for the new renderer
 
     // Session IDs removed as not currently used
 
@@ -299,11 +296,7 @@ impl JupyterBackend {
 
     /// Generate unique plot ID
     fn generate_plot_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
+        let timestamp = unix_timestamp_us();
         format!("{timestamp}")
     }
 

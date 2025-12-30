@@ -5,13 +5,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ndims",
+        builtin_path = "crate::builtins::array::introspection::ndims"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ndims"
 category: "array/introspection"
@@ -169,6 +173,7 @@ use inside expressions that also run on the GPU because it does not allocate dev
 [size](./size), [length](./length), [numel](./numel), [MathWorks ndims reference](https://www.mathworks.com/help/matlab/ref/ndims.html)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ndims",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -184,8 +189,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata-only query; relies on tensor handle shapes and gathers only when provider metadata is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::ndims"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ndims",
     shape: ShapeRequirements::Any,
@@ -196,17 +202,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner bypasses this builtin and emits a host scalar.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ndims", DOC_MD);
-
 #[runtime_builtin(
     name = "ndims",
     category = "array/introspection",
     summary = "Return the number of dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::array::introspection::ndims"
 )]
 fn ndims_builtin(value: Value) -> Result<Value, String> {
     let rank = value_ndims(&value) as f64;
@@ -214,19 +216,21 @@ fn ndims_builtin(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_scalar_returns_two() {
         let result = ndims_builtin(Value::Num(std::f64::consts::PI)).expect("ndims");
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_row_vector_returns_two() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -234,6 +238,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_three_dimensional_tensor_returns_three() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -241,6 +246,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_trailing_singletons_preserved() {
         let tensor = Tensor::new(vec![0.0; 40], vec![5, 1, 1, 8]).unwrap();
@@ -248,6 +254,7 @@ mod tests {
         assert_eq!(result, Value::Num(4.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_cell_array_returns_two() {
         let cells = CellArray::new(
@@ -265,6 +272,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_string_array_returns_two() {
         let sa = StringArray::new(vec!["a".into(), "bb".into(), "ccc".into()], vec![3, 1]).unwrap();
@@ -272,6 +280,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_char_array_returns_two() {
         let chars = CharArray::new_row("RunMat");
@@ -279,6 +288,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_complex_tensor_uses_shape() {
         let complex = ComplexTensor::new(vec![(0.0, 0.0); 18], vec![3, 3, 2]).unwrap();
@@ -286,6 +296,7 @@ mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_logical_array_returns_two() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -293,6 +304,7 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_gpu_tensor_reads_shape() {
         test_support::with_test_provider(|provider| {
@@ -307,6 +319,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndims_gpu_tensor_without_metadata_defaults_correctly() {
         // Simulate a provider that does not populate shape metadata.
@@ -319,13 +332,14 @@ mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ndims_wgpu_tensor_reads_shape() {

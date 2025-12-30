@@ -10,14 +10,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "cellfun",
+        builtin_path = "crate::builtins::cells::core::cellfun"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "cellfun"
 category: "cells/core"
@@ -220,6 +222,7 @@ Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write
 - Issue tracker: [RunMat GitHub Issues](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cellfun",
     op_kind: GpuOpKind::Custom("host-cell-map"),
@@ -235,8 +238,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Executes on the host and gathers GPU-resident inputs before evaluating callbacks.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::cells::core::cellfun")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cellfun",
     shape: ShapeRequirements::Any,
@@ -247,17 +249,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Callback execution happens on the host; fusion planners should treat cellfun as a fusion barrier.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("cellfun", DOC_MD);
-
 #[runtime_builtin(
     name = "cellfun",
     category = "cells/core",
     summary = "Apply a function to the contents of each cell array element.",
     keywords = "cellfun,cell,array,functional",
-    accel = "host"
+    accel = "host",
+    builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -817,13 +815,14 @@ fn classify_value(value: &Value) -> Result<ClassifiedValue, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray};
     use std::convert::TryInto;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_length_uniform_default() {
         let cell = crate::make_cell(
@@ -847,6 +846,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_multiple_cells_plus() {
         let left = crate::make_cell(
@@ -871,6 +871,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_false_returns_cells() {
         let cell = crate::make_cell(
@@ -906,6 +907,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_error_handler_recovers() {
         let cells = crate::make_cell(
@@ -931,6 +933,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_string_identifier() {
         let cells = crate::make_cell(
@@ -957,6 +960,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_string_array_identifier() {
         let cells = crate::make_cell(
@@ -977,6 +981,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_true_non_scalar_errors() {
         let cells = crate::make_cell(
@@ -994,6 +999,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_promotes_logical_to_double() {
         let cells = crate::make_cell(vec![Value::Bool(true), Value::Num(2.5)], 1, 2).unwrap();
@@ -1008,6 +1014,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_promotes_double_to_complex() {
         let cells =
@@ -1023,6 +1030,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_errors_on_mismatched_cell_sizes() {
         let first = crate::make_cell(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap();
@@ -1038,6 +1046,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniformoutput_accepts_char_flags() {
         let strings =
@@ -1057,6 +1066,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_isclass_special_case() {
         let ints = crate::make_cell(
@@ -1082,6 +1092,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_passes_additional_arguments() {
         let matrices = crate::make_cell(
@@ -1104,6 +1115,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_handles_string_array_uniform_false() {
         let sa = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -1130,6 +1142,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_gathers_gpu_inputs() {
         test_support::with_test_provider(|provider| {
@@ -1150,6 +1163,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cellfun_with_wgpu_provider_handles_gpu_cells() {
@@ -1174,26 +1188,35 @@ mod tests {
         assert!((gathered.data[0] - expected).abs() < 1e-12);
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_test_handler")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_test_handler",
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
         let _ = rest;
         Ok(seed)
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_add")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_add",
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_add(lhs: Value, rhs: Value) -> Result<Value, String> {
         let a: f64 = (&lhs).try_into()?;
         let b: f64 = (&rhs).try_into()?;
         Ok(Value::Num(a + b))
     }
 
-    #[runmat_macros::runtime_builtin(name = "__cellfun_identity")]
+    #[runmat_macros::runtime_builtin(
+        name = "__cellfun_identity",
+        builtin_path = "crate::builtins::cells::core::cellfun::tests"
+    )]
     fn cellfun_identity(value: Value) -> Result<Value, String> {
         Ok(value)
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

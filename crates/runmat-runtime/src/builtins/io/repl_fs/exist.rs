@@ -11,25 +11,28 @@ use crate::builtins::common::path_search::{
     class_file_exists as path_class_file_exists,
     class_folder_candidates as path_class_folder_candidates,
     directory_candidates as path_directory_candidates,
-    find_file_with_extensions as path_find_file_with_extensions, CLASS_M_FILE_EXTENSIONS,
-    GENERAL_FILE_EXTENSIONS, LIB_EXTENSIONS, MEX_EXTENSIONS, PCODE_EXTENSIONS, SIMULINK_EXTENSIONS,
-    THUNK_EXTENSIONS,
+    find_file_with_extensions as path_find_file_with_extensions, path_is_directory,
+    CLASS_M_FILE_EXTENSIONS, GENERAL_FILE_EXTENSIONS, LIB_EXTENSIONS, MEX_EXTENSIONS,
+    PCODE_EXTENSIONS, SIMULINK_EXTENSIONS, THUNK_EXTENSIONS,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{
-    dispatcher::gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::dispatcher::gather_if_needed;
 
 const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
 const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "exist",
+        builtin_path = "crate::builtins::io::repl_fs::exist"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "exist"
 category: "io/repl_fs"
@@ -170,6 +173,7 @@ No. `exist` gathers any GPU-resident string inputs transparently. The lookup, fi
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "exist",
     op_kind: GpuOpKind::Custom("io"),
@@ -185,8 +189,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Filesystem and workspace lookup run on the host; arguments are gathered from the GPU when necessary.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exist",
     shape: ShapeRequirements::Any,
@@ -197,17 +200,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("exist", DOC_MD);
-
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
     summary = "Determine whether a variable, file, folder, built-in, or class exists.",
     keywords = "exist,file,dir,var,builtin,class",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -444,7 +443,7 @@ fn class_exists(name: &str) -> Result<bool, String> {
 fn class_folder_exists(name: &str) -> Result<bool, String> {
     Ok(path_class_folder_candidates(name, "exist")?
         .into_iter()
-        .any(|path| path.is_dir()))
+        .any(|path| path_is_directory(&path)))
 }
 
 fn class_file_exists(name: &str) -> Result<bool, String> {
@@ -462,7 +461,7 @@ fn method_exists(name: &str) -> bool {
 fn directory_exists(name: &str) -> Result<bool, String> {
     Ok(path_directory_candidates(name, "exist")?
         .into_iter()
-        .any(|path| path.is_dir()))
+        .any(|path| path_is_directory(&path)))
 }
 
 fn detect_file_kind(name: &str) -> Result<Option<ExistResultKind>, String> {
@@ -507,15 +506,16 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
+    use runmat_filesystem as vfs;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;
-    use std::fs::{self, File};
+    use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -567,6 +567,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_workspace_variables() {
         let _lock = REPL_FS_TEST_LOCK
@@ -579,6 +580,7 @@ mod tests {
         assert_eq!(value, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_builtins() {
         let _lock = REPL_FS_TEST_LOCK
@@ -593,6 +595,7 @@ mod tests {
         assert_eq!(builtin, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_files_and_mex() {
         let _lock = REPL_FS_TEST_LOCK
@@ -619,6 +622,7 @@ mod tests {
         assert_eq!(mex_specific, Value::Num(3.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -628,7 +632,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
         env::set_current_dir(temp.path()).expect("set temp");
-        fs::create_dir("data").expect("mkdir data");
+        vfs::create_dir("data").expect("mkdir data");
 
         let dir = exist_builtin(Value::from("data"), vec![Value::from("dir")]).expect("exist");
         assert_eq!(dir, Value::Num(7.0));
@@ -637,6 +641,7 @@ mod tests {
         assert_eq!(any, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_detects_class_files_and_packages() {
         let _lock = REPL_FS_TEST_LOCK
@@ -654,7 +659,7 @@ mod tests {
         )
         .expect("write classdef");
 
-        fs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
+        vfs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
 
         let widget =
             exist_builtin(Value::from("Widget"), vec![Value::from("class")]).expect("exist");
@@ -665,6 +670,7 @@ mod tests {
         assert_eq!(gizmo, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_invalid_type_raises_error() {
         let _lock = REPL_FS_TEST_LOCK
@@ -676,6 +682,7 @@ mod tests {
         assert_eq!(err, ERROR_INVALID_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_errors_on_non_text_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -686,6 +693,7 @@ mod tests {
         assert_eq!(err, ERROR_NAME_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_handle_returns_zero_for_non_handle() {
         let _lock = REPL_FS_TEST_LOCK
@@ -697,8 +705,8 @@ mod tests {
         assert_eq!(value, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

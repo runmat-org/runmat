@@ -10,9 +10,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
 const MAX_RATIO_TOL: f64 = 1e-9;
@@ -32,7 +29,14 @@ struct ParsedScalar {
     origin: ScalarOrigin,
 }
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "colon",
+        builtin_path = "crate::builtins::array::creation::colon"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "colon"
 category: "array/creation"
@@ -204,6 +208,7 @@ nudging the final value.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::colon")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "colon",
     op_kind: GpuOpKind::Custom("generator"),
@@ -219,8 +224,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Falls back to uploading the host-generated vector when provider linspace kernels are unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::colon")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "colon",
     shape: ShapeRequirements::Any,
@@ -231,17 +235,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("colon", DOC_MD);
-
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
     summary = "Arithmetic progression that mirrors MATLAB's colon operator.",
     keywords = "colon,sequence,range,step,gpu",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::colon"
 )]
 fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
@@ -592,11 +592,12 @@ fn build_char_sequence(data: Vec<f64>) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_basic_increasing() {
         let result = colon_builtin(Value::Num(1.0), Value::Num(5.0), Vec::new()).expect("colon");
@@ -609,6 +610,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_basic_descending() {
         let result = colon_builtin(Value::Num(5.0), Value::Num(1.0), Vec::new()).expect("colon");
@@ -621,6 +623,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_custom_step_reaches_stop() {
         let result =
@@ -634,6 +637,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_custom_step_stops_before_bound() {
         let result =
@@ -647,6 +651,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_sign_mismatch_returns_empty() {
         let result =
@@ -660,6 +665,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_zero_increment_errors() {
         let err = colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)])
@@ -667,6 +673,7 @@ mod tests {
         assert!(err.contains("increment must be nonzero"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_accepts_scalar_tensors() {
         let start = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -681,6 +688,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -709,13 +717,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn colon_wgpu_matches_cpu() {
@@ -759,6 +768,7 @@ mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_bool_inputs_promote() {
         let result =
@@ -771,6 +781,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_increasing() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -787,6 +798,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_with_step() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -804,6 +816,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_equal_endpoints_singleton() {
         let result = colon_builtin(Value::Num(3.0), Value::Num(3.0), Vec::new()).expect("colon");
@@ -816,6 +829,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_complex_imaginary_errors() {
         let err = colon_builtin(Value::Complex(1.0, 1e-2), Value::Num(2.0), Vec::new())
@@ -826,6 +840,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_string_input_errors() {
         let err = colon_builtin(Value::from("hello"), Value::Num(2.0), Vec::new())
@@ -836,6 +851,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_descending() {
         let start = Value::CharArray(CharArray::new_row("f"));
@@ -852,6 +868,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_fractional_step_errors() {
         let start = Value::CharArray(CharArray::new_row("a"));
@@ -864,6 +881,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_gpu_step_scalar_residency() {
         test_support::with_test_provider(|provider| {

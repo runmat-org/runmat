@@ -5,13 +5,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isempty",
+        builtin_path = "crate::builtins::array::introspection::isempty"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isempty"
 category: "array/introspection"
@@ -169,6 +173,7 @@ They behave like any other scalar and return `false`.
 [numel](./numel), [size](./size), [length](./length), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isempty",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -184,8 +189,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Queries tensor metadata; gathers only when the provider fails to expose shapes.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::isempty"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isempty",
     shape: ShapeRequirements::Any,
@@ -196,17 +202,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that returns a host logical scalar for fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isempty", DOC_MD);
-
 #[runtime_builtin(
     name = "isempty",
     category = "array/introspection",
     summary = "Return true when an array has zero elements, matching MATLAB semantics.",
     keywords = "isempty,empty array,metadata query,gpu,logical",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 fn isempty_builtin(value: Value) -> Result<Value, String> {
     let is_empty = value_is_empty(&value);
@@ -218,13 +220,14 @@ fn value_is_empty(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_empty_tensor_returns_true() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -232,12 +235,14 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_scalar_returns_false() {
         let result = isempty_builtin(Value::Num(5.0)).expect("isempty");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_char_array_behaves_like_matlab() {
         let empty_chars = CharArray::new_row("");
@@ -248,6 +253,7 @@ mod tests {
         assert_eq!(non_empty, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_cell_array_uses_dimensions() {
         let empty_cell = CellArray::new(Vec::new(), 0, 2).unwrap();
@@ -258,12 +264,14 @@ mod tests {
         assert_eq!(populated, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_scalar_is_false_even_if_empty_text() {
         let result = isempty_builtin(Value::String(String::new())).expect("isempty");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_array_zero_rows_is_true() {
         let array = runmat_builtins::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -271,6 +279,7 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_gpu_tensor_respects_shape() {
         test_support::with_test_provider(|provider| {
@@ -299,6 +308,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isempty_wgpu_provider_uses_handle_shape() {
@@ -322,8 +332,8 @@ mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

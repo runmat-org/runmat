@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "error",
+        builtin_path = "crate::builtins::diagnostics::error"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "error"
 category: "diagnostics"
@@ -123,6 +127,7 @@ end
 8. **Does formatting follow MATLAB rules?** Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `MATLAB:error` if the format string is invalid or under-specified.
 #"#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "error",
     op_kind: GpuOpKind::Custom("control"),
@@ -138,8 +143,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Control-flow builtin; never dispatched to GPU backends.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "error",
     shape: ShapeRequirements::Any,
@@ -150,17 +154,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("error", DOC_MD);
-
 #[runtime_builtin(
     name = "error",
     category = "diagnostics",
     summary = "Throw an exception with an identifier and a formatted diagnostic message.",
     keywords = "error,exception,diagnostics,throw",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::diagnostics::error"
 )]
 fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
     if args.is_empty() {
@@ -297,22 +297,25 @@ fn looks_like_unqualified_identifier(text: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, MException};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_requires_message() {
         let err = error_builtin(Vec::new()).expect_err("should error");
         assert!(err.contains("missing message"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_identifier_is_applied() {
         let err = error_builtin(vec![Value::from("Failure!")]).expect_err("should error");
         assert_eq!(err, "MATLAB:error: Failure!");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn custom_identifier_is_preserved() {
         let err = error_builtin(vec![
@@ -324,6 +327,7 @@ mod tests {
         assert_eq!(err, "runmat:tests:badValue: Value 5 is not allowed.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn identifier_is_normalised_when_namespace_missing() {
         let err = error_builtin(vec![
@@ -334,6 +338,7 @@ mod tests {
         assert_eq!(err, "MATLAB:missingNamespace: Message");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn format_string_with_colon_not_treated_as_identifier() {
         let err = error_builtin(vec![
@@ -344,6 +349,7 @@ mod tests {
         assert_eq!(err, "MATLAB:error: Value: 7.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
@@ -351,6 +357,7 @@ mod tests {
         assert_eq!(err, "MATLAB:demo:test: broken");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_rejects_extra_args_after_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
@@ -359,6 +366,7 @@ mod tests {
         assert!(err.contains("additional arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_message_struct() {
         let mut st = StructValue::new();
@@ -370,6 +378,7 @@ mod tests {
         assert_eq!(err, "pkg:demo:failure: Struct message.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_struct_requires_message_field() {
         let mut st = StructValue::new();
@@ -379,8 +388,8 @@ mod tests {
         assert!(err.contains("message struct must contain a 'message' field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;
         let blocks = test_support::doc_examples(DOC_MD);

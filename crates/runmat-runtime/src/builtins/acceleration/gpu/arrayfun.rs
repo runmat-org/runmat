@@ -10,17 +10,19 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "arrayfun",
+        builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "arrayfun"
 category: "acceleration/gpu"
@@ -185,6 +187,7 @@ back into a logical array automatically.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::arrayfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "arrayfun",
     op_kind: GpuOpKind::Elementwise,
@@ -223,8 +226,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement the listed kernels can run supported callbacks entirely on the GPU; unsupported callbacks fall back to the host path with re-upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "arrayfun",
     shape: ShapeRequirements::Any,
@@ -235,17 +239,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because the callback can run arbitrary MATLAB code.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("arrayfun", DOC_MD);
-
 #[runtime_builtin(
     name = "arrayfun",
     category = "acceleration/gpu",
     summary = "Apply a function element-wise to array inputs.",
     keywords = "arrayfun,gpu,array,map,functional",
-    accel = "host"
+    accel = "host",
+    builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> {
     let callable = Callable::from_function(func)?;
@@ -1097,12 +1097,13 @@ fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_basic_sin() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1121,6 +1122,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_additional_scalar_argument() {
         let tensor = Tensor::new(vec![0.5, 1.0, -1.0], vec![3, 1]).unwrap();
@@ -1138,6 +1140,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_false_returns_cell() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1161,6 +1164,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_size_mismatch_errors() {
         let taller = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1176,6 +1180,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_error_handler_recovers() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1201,6 +1206,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_error_without_handler_propagates_identifier() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1215,6 +1221,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_logical_result() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 0.0, f64::INFINITY], vec![4, 1]).unwrap();
@@ -1232,6 +1239,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_character_result() {
         let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
@@ -1250,6 +1258,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_uniform_false_gpu_returns_cell() {
         test_support::with_test_provider(|provider| {
@@ -1287,6 +1296,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1313,6 +1323,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn arrayfun_wgpu_sin_matches_cpu() {
@@ -1352,6 +1363,7 @@ mod tests {
         let _ = provider.free(&out_handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn arrayfun_wgpu_plus_matches_cpu() {
@@ -1407,13 +1419,16 @@ mod tests {
         let _ = provider.free(&out_handle);
     }
 
-    #[runmat_macros::runtime_builtin(name = "__arrayfun_test_handler")]
+    #[runmat_macros::runtime_builtin(
+        name = "__arrayfun_test_handler",
+        builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
+    )]
     fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
         let _ = rest;
         Ok(seed)
     }
 
-    #[cfg(feature = "doc_export")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn arrayfun_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

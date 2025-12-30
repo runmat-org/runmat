@@ -62,6 +62,15 @@ Example runtime payload:
 }
 ```
 
+### Browser / WASM hosts
+
+The browser bindings expose a `telemetryConsent` flag on `initRunMat({ … })`. It defaults to `true` so development builds behave like the CLI, but hosts can pass `false` to disable telemetry entirely. When consent is disabled:
+
+- Analytics collectors must call `RunMatSession::telemetry_consent()` before emitting anything. The wasm crate already forwards the JS flag to the session, and the CLI mirrors the user’s `telemetry.enabled` configuration into the same field, so hosts can respect the user’s preference without scraping CLI output. Profiling summaries (execution time, GPU counters, etc.) are still returned to the caller so local dashboards remain functional even when analytics are disabled.
+- Hosts that already have an analytics identifier (e.g., the PostHog CID in the web shell) can forward it via the `telemetryId` init option so any future runtime-level telemetry reuses the same client id. `session.telemetryClientId()` exposes the resolved value so shells can confirm what the runtime will emit.
+
+This keeps local tooling (profilers, dashboards) honest: if the user opts out, we avoid gathering GPU telemetry in the first place and nothing leaves the process.
+
 ### Anonymous client id
 
 Installers and the CLI store a random GUID in `~/.runmat/telemetry_id` (or `%USERPROFILE%\.runmat\telemetry_id`). It lets us count sessions without using personal identifiers. Delete the file to regenerate a new id.

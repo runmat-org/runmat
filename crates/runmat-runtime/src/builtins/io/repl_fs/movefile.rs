@@ -1,6 +1,6 @@
 //! MATLAB-compatible `movefile` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -13,9 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MOVEFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:MOVEFILE:FileDoesNotExist";
@@ -31,7 +29,14 @@ const ERR_DEST_ARG: &str = "movefile: destination must be a character vector or 
 const ERR_FLAG_ARG: &str =
     "movefile: flag must be the character 'f' supplied as a char vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "movefile",
+        builtin_path = "crate::builtins::io::repl_fs::movefile"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "movefile"
 category: "io/repl_fs"
@@ -172,6 +177,7 @@ status =
 - Issues: [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::movefile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "movefile",
     op_kind: GpuOpKind::Custom("io"),
@@ -188,8 +194,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem builtin. GPU-resident path and flag arguments are gathered automatically before moving files.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::movefile")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "movefile",
     shape: ShapeRequirements::Any,
@@ -200,17 +205,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects materialise immediately; metadata registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("movefile", DOC_MD);
-
 #[runtime_builtin(
     name = "movefile",
     category = "io/repl_fs",
     summary = "Move or rename files and folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "movefile,rename,move file,filesystem,status,message,messageid,force,overwrite",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::movefile"
 )]
 fn movefile_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -380,7 +381,7 @@ fn move_operation(
 
 fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileResult {
     let source_path = PathBuf::from(source);
-    if fs::metadata(&source_path).is_err() {
+    if vfs::metadata(&source_path).is_err() {
         return MovefileResult::source_not_found(source);
     }
 
@@ -389,7 +390,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
         return MovefileResult::success();
     }
 
-    let destination_meta = fs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata(&destination_path).ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -407,7 +408,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
             if target_path == source_path {
                 return MovefileResult::success();
             }
-            match fs::metadata(&target_path) {
+            match vfs::metadata(&target_path) {
                 Ok(existing) => {
                     if !force {
                         return MovefileResult::destination_exists(&path_to_display(&target_path));
@@ -475,7 +476,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match fs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata(&destination_path) {
         Ok(meta) => meta,
         Err(_) => return MovefileResult::destination_missing(destination),
     };
@@ -487,7 +488,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        if fs::metadata(&source_path).is_err() {
+        if vfs::metadata(&source_path).is_err() {
             return MovefileResult::source_not_found(&display_source);
         }
         let Some(name) = source_path.file_name() else {
@@ -502,7 +503,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
             continue;
         }
         let target_display = path_to_display(&target_path);
-        match fs::metadata(&target_path) {
+        match vfs::metadata(&target_path) {
             Ok(existing) => {
                 if !force {
                     return MovefileResult::destination_exists(&target_display);
@@ -578,9 +579,9 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                fs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all(&entry.target_path)
             } else {
-                fs::remove_file(&entry.target_path)
+                vfs::remove_file(&entry.target_path)
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -593,7 +594,7 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
             }
         }
 
-        if let Err(err) = fs::rename(&entry.source_path, &entry.target_path) {
+        if let Err(err) = vfs::rename(&entry.source_path, &entry.target_path) {
             return Err(MoveError {
                 source_display: entry.source_display.clone(),
                 target_display: entry.target_display.clone(),
@@ -652,12 +653,13 @@ fn path_to_display(path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use std::fs::{self, File};
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_renames_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -679,6 +681,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_moves_into_existing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -700,6 +703,7 @@ mod tests {
         assert!(dest_dir.join("report.txt").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_force_overwrites_existing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -723,6 +727,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_without_force_preserves_existing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -747,6 +752,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_moves_multiple_files_with_wildcard() {
         let _lock = REPL_FS_TEST_LOCK
@@ -772,6 +778,7 @@ mod tests {
         assert!(dest_dir.join("b.log").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_reports_missing_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -792,6 +799,7 @@ mod tests {
         assert!(eval.message().contains("does not exist"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_outputs_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -815,6 +823,7 @@ mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_rejects_invalid_flag() {
         let _lock = REPL_FS_TEST_LOCK
@@ -826,6 +835,7 @@ mod tests {
         assert_eq!(err, ERR_FLAG_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_force_flag_accepts_uppercase_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -847,6 +857,7 @@ mod tests {
         assert_eq!(eval.status(), 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_same_path_is_success() {
         let _lock = REPL_FS_TEST_LOCK
@@ -866,6 +877,7 @@ mod tests {
         assert!(source.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_moving_into_same_directory_is_success() {
         let _lock = REPL_FS_TEST_LOCK
@@ -887,6 +899,7 @@ mod tests {
         assert!(dir.join("readme.txt").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_reports_empty_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -898,6 +911,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_SOURCE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_reports_empty_destination() {
         let _lock = REPL_FS_TEST_LOCK
@@ -909,6 +923,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_DEST);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_requires_existing_destination_directory_for_pattern() {
         let _lock = REPL_FS_TEST_LOCK
@@ -930,6 +945,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_DEST_MISSING);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_requires_directory_destination_for_pattern() {
         let _lock = REPL_FS_TEST_LOCK
@@ -952,6 +968,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_DEST_NOT_DIR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn movefile_reports_invalid_pattern() {
         let _lock = REPL_FS_TEST_LOCK
@@ -967,8 +984,8 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_PATTERN_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

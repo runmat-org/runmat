@@ -21,11 +21,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "unique",
+        builtin_path = "crate::builtins::array::sorting_sets::unique"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "unique"
 category: "array/sorting_sets"
@@ -281,6 +284,7 @@ Sorting is stable where applicable; ties preserve their relative order. You can 
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::unique")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "unique",
     op_kind: GpuOpKind::Custom("unique"),
@@ -296,8 +300,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement the `unique` hook; default providers download tensors and reuse the CPU implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::sorting_sets::unique"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "unique",
     shape: ShapeRequirements::Any,
@@ -308,18 +313,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`unique` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("unique", DOC_MD);
-
 #[runtime_builtin(
     name = "unique",
     category = "array/sorting_sets",
     summary = "Return the unique elements or rows of arrays with optional index outputs.",
     keywords = "unique,set,distinct,stable,rows,indices,gpu",
     accel = "array_construct",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
 fn unique_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     evaluate(value, &rest).map(|eval| eval.into_values_value())
@@ -1441,11 +1442,12 @@ impl UniqueEvaluation {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_sorted_default() {
         let tensor = Tensor::new(vec![3.0, 1.0, 3.0, 2.0], vec![4, 1]).unwrap();
@@ -1469,6 +1471,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_sorted_handles_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
@@ -1485,6 +1488,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_stable_with_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 1.0], vec![4, 1]).unwrap();
@@ -1500,6 +1504,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_stable_preserves_order() {
         let tensor = Tensor::new(vec![4.0, 2.0, 4.0, 1.0, 2.0], vec![5, 1]).unwrap();
@@ -1515,6 +1520,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_last_occurrence() {
         let tensor = Tensor::new(vec![9.0, 8.0, 9.0, 7.0, 8.0], vec![5, 1]).unwrap();
@@ -1534,6 +1540,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_sorted_default() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 3.0, 3.0, 4.0, 2.0], vec![4, 2]).unwrap();
@@ -1556,6 +1563,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_stable_last() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 1.0, 1.0, 2.0], vec![3, 2]).unwrap();
@@ -1586,6 +1594,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_elements_sorted() {
         let chars = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
@@ -1609,6 +1618,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_rows_last() {
         let chars = CharArray::new(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
@@ -1636,6 +1646,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_string_elements_stable() {
         let array = StringArray::new(
@@ -1662,6 +1673,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_string_rows() {
         let array = StringArray::new(
@@ -1699,6 +1711,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_complex_sorted() {
         let tensor = ComplexTensor::new(
@@ -1719,6 +1732,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_handles_logical_arrays() {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![4, 1]).unwrap();
@@ -1730,6 +1744,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1749,6 +1764,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn unique_wgpu_matches_cpu() {
@@ -1782,6 +1798,7 @@ mod tests {
         assert_eq!(gpu_ic.data, host_ic.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
@@ -1789,6 +1806,7 @@ mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_conflicting_order_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1800,6 +1818,7 @@ mod tests {
         assert!(err.contains("stable"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_conflicting_occurrence_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1811,6 +1830,7 @@ mod tests {
         assert!(err.contains("first"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_rows_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
@@ -1818,13 +1838,14 @@ mod tests {
         assert!(err.contains("2-D matrix"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_handles_empty_rows() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -1847,6 +1868,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_accepts_integer_scalars() {
         let eval = evaluate(Value::Int(IntValue::I32(42)), &[]).expect("unique");

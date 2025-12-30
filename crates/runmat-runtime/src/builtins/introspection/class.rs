@@ -4,13 +4,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "class",
+        builtin_path = "crate::builtins::introspection::class"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "class"
 category: "introspection"
@@ -138,6 +142,7 @@ Calling `class(classref("Point"))` returns `"meta.class"`. Use the returned meta
 - Found a behavioural difference? Please open an issue with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::class")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "class",
     op_kind: GpuOpKind::Custom("introspection"),
@@ -153,8 +158,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Introspection-only builtin; providers do not need to implement hooks. RunMat reads residency metadata and returns a host string.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::class")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "class",
     shape: ShapeRequirements::Any,
@@ -165,16 +169,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; class executes on the host and returns a string scalar.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("class", DOC_MD);
-
 #[runtime_builtin(
     name = "class",
     category = "introspection",
     summary = "Return the MATLAB class name for scalars, arrays, and objects.",
-    keywords = "class,type inspection,type name,gpuArray class"
+    keywords = "class,type inspection,type name,gpuArray class",
+    builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> Result<String, String> {
     Ok(class_name_for_value(&value))
@@ -209,7 +209,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -219,18 +219,21 @@ mod tests {
     };
     use runmat_gc_api::GcPtr;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_double_for_numeric_scalars() {
         let name = class_builtin(Value::Num(std::f64::consts::PI)).expect("class");
         assert_eq!(name, "double");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_integer_type_names() {
         let name = class_builtin(Value::Int(IntValue::I32(12))).expect("class");
         assert_eq!(name, "int32");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_expected_names_for_core_types() {
         let logical_scalar = Value::Bool(true);
@@ -288,6 +291,7 @@ mod tests {
         assert_eq!(class_name_for_value(&exception), "MException");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_gpuarray_without_gather() {
         test_support::with_test_provider(|provider| {
@@ -302,6 +306,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_handle_class_names() {
         let fallback = HandleRef {
@@ -321,6 +326,7 @@ mod tests {
         assert_eq!(name, "MockHandle");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_object_and_listener_classes() {
         let object = ObjectInstance::new("pkg.Point".into());
@@ -339,6 +345,7 @@ mod tests {
         assert_eq!(listener_name, "event.listener");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn class_reports_gpuarray_with_wgpu_provider() {
@@ -361,8 +368,8 @@ mod tests {
         assert_eq!(name, "gpuArray");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

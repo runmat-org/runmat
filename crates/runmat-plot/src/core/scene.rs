@@ -6,6 +6,7 @@
 use crate::core::renderer::{PipelineType, Vertex};
 use glam::{Mat4, Vec3, Vec4};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Unique identifier for scene nodes
 pub type NodeId = u64;
@@ -19,6 +20,9 @@ pub struct SceneNode {
     pub visible: bool,
     pub cast_shadows: bool,
     pub receive_shadows: bool,
+
+    /// Axes index this node belongs to (for subplots). Row-major index in [0, rows*cols).
+    pub axes_index: usize,
 
     // Hierarchy
     pub parent: Option<NodeId>,
@@ -41,8 +45,50 @@ pub struct RenderData {
     pub pipeline_type: PipelineType,
     pub vertices: Vec<Vertex>,
     pub indices: Option<Vec<u32>>,
+    pub gpu_vertices: Option<GpuVertexBuffer>,
     pub material: Material,
     pub draw_calls: Vec<DrawCall>,
+    /// Optional image payload for textured rendering
+    pub image: Option<ImageData>,
+}
+
+impl RenderData {
+    pub fn vertex_count(&self) -> usize {
+        if !self.vertices.is_empty() {
+            self.vertices.len()
+        } else if let Some(buffer) = &self.gpu_vertices {
+            buffer.vertex_count
+        } else {
+            0
+        }
+    }
+}
+
+/// Optional GPU-resident vertex storage supplied by higher-level systems.
+#[derive(Debug, Clone)]
+pub struct GpuVertexBuffer {
+    pub buffer: Arc<wgpu::Buffer>,
+    pub vertex_count: usize,
+}
+
+impl GpuVertexBuffer {
+    pub fn new(buffer: Arc<wgpu::Buffer>, vertex_count: usize) -> Self {
+        Self {
+            buffer,
+            vertex_count,
+        }
+    }
+}
+
+/// CPU-side image payload for textured rendering
+#[derive(Debug, Clone)]
+pub enum ImageData {
+    /// 8-bit RGBA image (row-major, top-to-bottom rows)
+    Rgba8 {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
 }
 
 /// Material properties for rendering
@@ -593,6 +639,7 @@ mod tests {
             visible: true,
             cast_shadows: true,
             receive_shadows: true,
+            axes_index: 0,
             parent: None,
             children: Vec::new(),
             render_data: None,
@@ -610,6 +657,7 @@ mod tests {
             visible: true,
             cast_shadows: true,
             receive_shadows: true,
+            axes_index: 0,
             parent: Some(parent_id),
             children: Vec::new(),
             render_data: None,

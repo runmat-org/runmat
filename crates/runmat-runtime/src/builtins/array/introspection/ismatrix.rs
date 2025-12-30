@@ -5,13 +5,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "ismatrix",
+        builtin_path = "crate::builtins::array::introspection::ismatrix"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "ismatrix"
 category: "array/introspection"
@@ -199,6 +203,9 @@ Future sparse tensors will report their dimensions through the same metadata, so
 [isscalar](./isscalar), [isvector](./isvector), [ndims](./ndims), [size](./size), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "ismatrix",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -214,8 +221,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Consumes tensor shape metadata; falls back to gathering only when providers omit shape information.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ismatrix",
     shape: ShapeRequirements::Any,
@@ -226,17 +234,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that always yields a host logical scalar; fusion treats it as a control predicate.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("ismatrix", DOC_MD);
-
 #[runtime_builtin(
     name = "ismatrix",
     category = "array/introspection",
     summary = "Return true when an array has at most two dimensions (m-by-n, including vectors and scalars).",
     keywords = "ismatrix,matrix detection,metadata query,logical,gpu",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 fn ismatrix_builtin(value: Value) -> Result<Value, String> {
     Ok(Value::Bool(value_is_matrix(&value)))
@@ -247,13 +251,14 @@ fn value_is_matrix(value: &Value) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{
         CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_accepts_scalars_vectors_and_matrices() {
         let scalar = ismatrix_builtin(Value::Num(5.0)).expect("ismatrix scalar");
@@ -269,6 +274,7 @@ mod tests {
         assert_eq!(matrix_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_rejects_higher_rank_arrays() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -276,6 +282,7 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_handles_empty_dimensions_like_matlab() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -292,6 +299,7 @@ mod tests {
         assert_eq!(empty_3d_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_handles_scalar_like_runtime_values() {
         let bool_result = ismatrix_builtin(Value::Bool(true)).expect("ismatrix bool");
@@ -307,6 +315,7 @@ mod tests {
         assert_eq!(object_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_logical_arrays_respect_shape_rank() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical array");
@@ -321,6 +330,7 @@ mod tests {
         assert_eq!(logical3d_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_char_string_cell_and_struct_metadata() {
         let char_array = CharArray::new_row("RunMat");
@@ -351,6 +361,7 @@ mod tests {
         assert_eq!(struct_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_rejects_struct_arrays_with_extra_dimensions() {
         let mut struct_value = StructValue::new();
@@ -367,6 +378,7 @@ mod tests {
         assert_eq!(nested_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_tensor_uses_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -389,6 +401,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_tensor_vector_shape_is_matrix() {
         test_support::with_test_provider(|provider| {
@@ -404,6 +417,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_handle_without_shape_falls_back() {
         test_support::with_test_provider(|_| {
@@ -417,6 +431,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_is_matrix_matches_dimensions_helper() {
         let tensor = Tensor::new(vec![0.0; 12], vec![3, 4]).unwrap();
@@ -425,13 +440,14 @@ mod tests {
         assert!(!value_is_matrix(&Value::Tensor(higher)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ismatrix_wgpu_provider_populates_shape() {

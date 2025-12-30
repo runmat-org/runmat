@@ -1,5 +1,67 @@
 use std::fmt;
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm_registry {
+    #![allow(dead_code)]
+    use super::{BuiltinFusionSpec, BuiltinGpuSpec};
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+
+    static GPU_SPECS: Lazy<Mutex<Vec<&'static BuiltinGpuSpec>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+    static FUSION_SPECS: Lazy<Mutex<Vec<&'static BuiltinFusionSpec>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn submit_gpu_spec(spec: &'static BuiltinGpuSpec) {
+        GPU_SPECS
+            .lock()
+            .expect("gpu spec registry poisoned")
+            .push(spec);
+    }
+
+    pub(crate) fn submit_fusion_spec(spec: &'static BuiltinFusionSpec) {
+        FUSION_SPECS
+            .lock()
+            .expect("fusion spec registry poisoned")
+            .push(spec);
+    }
+
+    pub(crate) fn gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
+        GPU_SPECS
+            .lock()
+            .expect("gpu spec registry poisoned")
+            .clone()
+            .into_iter()
+    }
+
+    pub(crate) fn fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
+        FUSION_SPECS
+            .lock()
+            .expect("fusion spec registry poisoned")
+            .clone()
+            .into_iter()
+    }
+
+    use super::DocTextInventory;
+    static DOC_TEXTS: Lazy<Mutex<Vec<&'static DocTextInventory>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn submit_doc_text(entry: &'static DocTextInventory) {
+        DOC_TEXTS
+            .lock()
+            .expect("doc text registry poisoned")
+            .push(entry);
+    }
+
+    pub(crate) fn doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
+        DOC_TEXTS
+            .lock()
+            .expect("doc text registry poisoned")
+            .clone()
+            .into_iter()
+    }
+}
+
 /// Supported scalar precisions that GPU kernels may target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarType {
@@ -153,17 +215,31 @@ pub struct FusionSpecInventory {
     pub spec: &'static BuiltinFusionSpec,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(GpuSpecInventory);
+#[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(FusionSpecInventory);
 
 /// Iterate all registered GPU specs.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_gpu_specs() -> impl Iterator<Item = &'static BuiltinGpuSpec> {
     inventory::iter::<GpuSpecInventory>().map(|entry| entry.spec)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn builtin_gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
+    wasm_registry::gpu_specs()
+}
+
 /// Iterate all registered fusion specs.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_fusion_specs() -> impl Iterator<Item = &'static BuiltinFusionSpec> {
     inventory::iter::<FusionSpecInventory>().map(|entry| entry.spec)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn builtin_fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
+    wasm_registry::fusion_specs()
 }
 
 impl fmt::Debug for BuiltinFusionSpec {
@@ -176,42 +252,26 @@ impl fmt::Debug for BuiltinFusionSpec {
     }
 }
 
-#[macro_export]
-macro_rules! register_builtin_gpu_spec {
-    ($spec:expr) => {
-        inventory::submit! {
-            $crate::builtins::common::spec::GpuSpecInventory { spec: &$spec }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! register_builtin_fusion_spec {
-    ($spec:expr) => {
-        inventory::submit! {
-            $crate::builtins::common::spec::FusionSpecInventory { spec: &$spec }
-        }
-    };
-}
-
 // Documentation text inventory (only populated when doc_export feature is enabled)
 pub struct DocTextInventory {
     pub name: &'static str,
     pub text: &'static str,
 }
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
 inventory::collect!(DocTextInventory);
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
 pub fn builtin_doc_texts() -> impl Iterator<Item = &'static DocTextInventory> {
     inventory::iter::<DocTextInventory>()
 }
 
-#[macro_export]
-macro_rules! register_builtin_doc_text {
-    ($name:expr, $text:expr) => {
-        #[cfg(feature = "doc_export")]
-        inventory::submit! {
-            $crate::builtins::common::spec::DocTextInventory { name: $name, text: $text }
-        }
-    };
+#[cfg(all(target_arch = "wasm32", feature = "doc_export"))]
+pub fn builtin_doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
+    wasm_registry::doc_texts()
+}
+
+#[cfg(not(feature = "doc_export"))]
+pub fn builtin_doc_texts() -> std::iter::Empty<&'static DocTextInventory> {
+    std::iter::empty()
 }

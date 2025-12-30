@@ -4,13 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(feature = "wgpu")]
+use std::sync::Arc;
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
+type WorkgroupSizeHintFn = fn() -> Option<u32>;
 
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
+static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
@@ -54,6 +58,34 @@ pub fn sequence_threshold_hint() -> Option<usize> {
     SEQUENCE_THRESHOLD_PROVIDER
         .get()
         .and_then(|provider| provider())
+}
+
+/// Register a callback that reports the calibrated workgroup size selected by
+/// the active acceleration provider (if any). Plotting kernels can reuse this
+/// hint to match backend tuning.
+pub fn register_workgroup_size_hint_provider(provider: WorkgroupSizeHintFn) {
+    let _ = WORKGROUP_SIZE_HINT_PROVIDER.set(provider);
+}
+
+/// Query the current workgroup size hint exposed by the provider.
+pub fn workgroup_size_hint() -> Option<u32> {
+    WORKGROUP_SIZE_HINT_PROVIDER
+        .get()
+        .and_then(|provider| provider())
+}
+
+/// Export a shared acceleration context (e.g., the active WGPU device) when the
+/// current provider exposes one.
+pub fn export_context(kind: AccelContextKind) -> Option<AccelContextHandle> {
+    provider().and_then(|p| p.export_context(kind))
+}
+
+/// Request a provider-owned WGPU buffer for zero-copy consumers. Returns `None`
+/// when the active provider does not expose buffers or does not support the
+/// supplied handle.
+#[cfg(feature = "wgpu")]
+pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+    provider().and_then(|p| p.export_wgpu_buffer(handle))
 }
 
 /// Record the precision associated with a GPU tensor handle so host operations can
@@ -179,6 +211,53 @@ pub struct ProviderCumminResult {
 /// Alias of [`ProviderCumminResult`] because both operations return the same pair of tensors
 /// (running values and MATLAB-compatible indices).
 pub type ProviderCummaxResult = ProviderCumminResult;
+
+/// Names a shared acceleration context that callers may request (e.g. plotting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccelContextKind {
+    Plotting,
+}
+
+/// Handle returned by [`export_context`] that describes a shared GPU context.
+#[derive(Clone)]
+pub enum AccelContextHandle {
+    #[cfg(feature = "wgpu")]
+    Wgpu(WgpuContextHandle),
+}
+
+impl AccelContextHandle {
+    /// Returns the underlying WGPU context when available.
+    #[cfg(feature = "wgpu")]
+    pub fn as_wgpu(&self) -> Option<&WgpuContextHandle> {
+        match self {
+            AccelContextHandle::Wgpu(ctx) => Some(ctx),
+        }
+    }
+}
+
+/// Shared WGPU device/queue pair exported by the acceleration provider.
+#[cfg(feature = "wgpu")]
+#[derive(Clone)]
+pub struct WgpuContextHandle {
+    pub instance: Arc<wgpu::Instance>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub adapter: Arc<wgpu::Adapter>,
+    pub adapter_info: wgpu::AdapterInfo,
+    pub limits: wgpu::Limits,
+    pub features: wgpu::Features,
+}
+
+/// Borrowed reference to a provider-owned WGPU buffer corresponding to a `GpuTensorHandle`.
+#[cfg(feature = "wgpu")]
+#[derive(Clone)]
+pub struct WgpuBufferRef {
+    pub buffer: Arc<wgpu::Buffer>,
+    pub len: usize,
+    pub shape: Vec<usize>,
+    pub element_size: usize,
+    pub precision: ProviderPrecision,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PagefunOp {
@@ -800,6 +879,19 @@ pub trait AccelProvider: Send + Sync {
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
         0
+    }
+
+    /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
+    /// to reuse the same device/queue without copying tensor data back to the host.
+    fn export_context(&self, _kind: AccelContextKind) -> Option<AccelContextHandle> {
+        None
+    }
+
+    /// Export a provider-owned WGPU buffer for zero-copy integrations.
+    #[cfg(feature = "wgpu")]
+    fn export_wgpu_buffer(&self, _handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+        let _ = _handle;
+        None
     }
 
     /// Gather elements from `source` at the provided zero-based linear `indices`, materialising

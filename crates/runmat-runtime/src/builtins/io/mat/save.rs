@@ -1,12 +1,12 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use runmat_builtins::{CharArray, StructValue, Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use super::format::{
@@ -18,13 +18,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::gather_if_needed;
 use crate::workspace;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "save",
+        builtin_path = "crate::builtins::io::mat::save"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "save"
 category: "io/mat"
@@ -160,6 +164,7 @@ No. Parent folders must already exist; otherwise the builtin raises an error fro
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::save")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "save",
     op_kind: GpuOpKind::Custom("io-save"),
@@ -175,8 +180,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Performs synchronous host I/O; no GPU execution path is involved.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::mat::save")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "save",
     shape: ShapeRequirements::Any,
@@ -187,17 +191,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sink operation that terminates fusion graphs before serialisation.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("save", DOC_MD);
-
 #[runtime_builtin(
     name = "save",
     category = "io/mat",
     summary = "Persist workspace variables to a MAT-file.",
     keywords = "save,mat,workspace",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::io::mat::save"
 )]
 fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut host_args = Vec::with_capacity(args.len());
@@ -901,7 +901,7 @@ fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::workspace::WorkspaceResolver;
@@ -965,6 +965,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_numeric_variable() {
         ensure_test_resolver();
@@ -988,6 +989,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_string_array_variable_names() {
         ensure_test_resolver();
@@ -1012,6 +1014,7 @@ mod tests {
         assert!(mat.find_by_name("C").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_char_matrix_variable_names() {
         ensure_test_resolver();
@@ -1036,6 +1039,7 @@ mod tests {
         assert!(mat.find_by_name("baz").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_fields() {
         ensure_test_resolver();
@@ -1065,6 +1069,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_field_selection() {
         ensure_test_resolver();
@@ -1096,6 +1101,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_missing_variable_errors() {
         ensure_test_resolver();
@@ -1104,6 +1110,7 @@ mod tests {
         assert!(result.unwrap_err().contains("variable 'x'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_variable_selection() {
         ensure_test_resolver();
@@ -1129,6 +1136,7 @@ mod tests {
         assert!(mat.find_by_name("beta").is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_regex_requires_pattern() {
         ensure_test_resolver();
@@ -1139,6 +1147,7 @@ mod tests {
             .contains("'-regexp' requires at least one pattern"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_unsupported_option_errors() {
         ensure_test_resolver();
@@ -1151,6 +1160,7 @@ mod tests {
         assert!(result.unwrap_err().contains("unsupported option '-ascii'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_defaults_to_matlab_mat() {
         ensure_test_resolver();
@@ -1176,6 +1186,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_struct_without_filename_defaults_to_matlab_mat() {
         ensure_test_resolver();
@@ -1205,6 +1216,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_gpu_tensor_roundtrip() {
         ensure_test_resolver();
@@ -1238,6 +1250,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn save_wgpu_tensor_roundtrip() {
@@ -1281,8 +1294,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;
         let blocks = test_support::doc_examples(DOC_MD);

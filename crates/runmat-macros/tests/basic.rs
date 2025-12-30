@@ -1,7 +1,7 @@
 use runmat_builtins::builtin_functions;
 use runmat_macros::runtime_builtin;
 
-#[runtime_builtin(name = "foo")]
+#[runtime_builtin(name = "foo", builtin_path = "tests::foo")]
 fn foo(x: i32) -> Result<i32, String> {
     Ok(x + 1)
 }

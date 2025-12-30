@@ -82,20 +82,23 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dims_scalar_defaults_to_one_by_one() {
         assert_eq!(value_dimensions(&Value::Num(5.0)), vec![1, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dims_tensor_preserves_rank() {
         let tensor = Tensor::new(vec![0.0; 12], vec![2, 3, 2]).unwrap();
         assert_eq!(value_dimensions(&Value::Tensor(tensor)), vec![2, 3, 2]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_uses_shape_product() {
         let handle = runmat_accelerate_api::GpuTensorHandle {
@@ -106,6 +109,7 @@ mod tests {
         assert_eq!(value_numel(&Value::GpuTensor(handle)), 120);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();

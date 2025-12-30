@@ -1,10 +1,10 @@
 //! MATLAB-compatible `writematrix` builtin for emitting delimited text files.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -12,11 +12,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "writematrix",
+        builtin_path = "crate::builtins::io::tabular::writematrix"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "writematrix"
 category: "io/tabular"
@@ -187,6 +192,7 @@ prepend header lines manually with `fprintf` before calling `writematrix` in `'a
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "writematrix",
     op_kind: GpuOpKind::Custom("io-writematrix"),
@@ -202,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "writematrix",
     shape: ShapeRequirements::Any,
@@ -214,17 +219,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("writematrix", DOC_MD);
-
 #[runtime_builtin(
     name = "writematrix",
     category = "io/tabular",
     summary = "Write numeric or string matrices to delimited text files with MATLAB-compatible defaults.",
     keywords = "writematrix,csv,delimited text,write,append,quote strings",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
 fn writematrix_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -762,11 +763,11 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor};
@@ -776,10 +777,7 @@ mod tests {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(ext: &str) -> PathBuf {
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let millis = unix_timestamp_ms();
         let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(
@@ -792,6 +790,7 @@ mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_writes_space_delimited_txt() {
         let path = temp_path("txt");
@@ -806,6 +805,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_defaults_to_comma_for_csv() {
         let path = temp_path("csv");
@@ -820,6 +820,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_honours_write_mode_append() {
         let path = temp_path("txt");
@@ -845,6 +846,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_quotes_strings_by_default() {
         let path = temp_path("csv");
@@ -860,6 +862,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_accepts_gpu_tensor_inputs() {
         test_support::with_test_provider(|provider| {
@@ -881,8 +884,8 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

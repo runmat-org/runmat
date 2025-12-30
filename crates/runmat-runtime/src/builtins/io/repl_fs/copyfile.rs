@@ -1,6 +1,6 @@
 //! MATLAB-compatible `copyfile` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -13,9 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::gather_if_needed;
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
@@ -32,7 +30,14 @@ const ERR_DEST_ARG: &str = "copyfile: destination must be a character vector or 
 const ERR_FLAG_ARG: &str =
     "copyfile: flag must be the character 'f' supplied as a char vector or string scalar";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "copyfile",
+        builtin_path = "crate::builtins::io::repl_fs::copyfile"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "copyfile"
 category: "io/repl_fs"
@@ -173,6 +178,7 @@ MATLAB:COPYFILE:FileDoesNotExist
 - Found a bug? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "copyfile",
     op_kind: GpuOpKind::Custom("io"),
@@ -189,8 +195,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only filesystem operation. GPU-resident path and flag arguments are gathered automatically before performing the copy.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "copyfile",
     shape: ShapeRequirements::Any,
@@ -202,17 +207,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side effects materialise immediately; metadata is registered for completeness.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("copyfile", DOC_MD);
-
 #[runtime_builtin(
     name = "copyfile",
     category = "io/repl_fs",
     summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
-    accel = "cpu"
+    accel = "cpu",
+    builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 fn copyfile_builtin(args: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(&args)?;
@@ -389,7 +390,7 @@ fn copy_operation(
 
 fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
     let source_path = PathBuf::from(source);
-    let source_meta = match fs::metadata(&source_path) {
+    let source_meta = match vfs::metadata(&source_path) {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::source_not_found(source),
     };
@@ -400,7 +401,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         return CopyfileResult::same_path(&source_display);
     }
 
-    let destination_meta = fs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata(&destination_path).ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -424,7 +425,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
                     MESSAGE_ID_OS_ERROR,
                 );
             }
-            match fs::metadata(&target_path) {
+            match vfs::metadata(&target_path) {
                 Ok(existing) => {
                     if !force {
                         return CopyfileResult::destination_exists(&path_to_display(&target_path));
@@ -501,7 +502,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match fs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata(&destination_path) {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::destination_missing(destination),
     };
@@ -513,7 +514,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        let meta = match fs::metadata(&source_path) {
+        let meta = match vfs::metadata(&source_path) {
             Ok(meta) => meta,
             Err(_) => return CopyfileResult::source_not_found(&display_source),
         };
@@ -529,7 +530,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
             return CopyfileResult::same_path(&display_source);
         }
         let target_display = path_to_display(&target_path);
-        match fs::metadata(&target_path) {
+        match vfs::metadata(&target_path) {
             Ok(existing) => {
                 if !force {
                     return CopyfileResult::destination_exists(&target_display);
@@ -614,9 +615,9 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                fs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all(&entry.target_path)
             } else {
-                fs::remove_file(&entry.target_path)
+                vfs::remove_file(&entry.target_path)
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -650,36 +651,33 @@ fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Resul
 }
 
 fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
-    if let Some(parent) = destination.parent() {
-        if !parent.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Destination parent \"{}\" does not exist", parent.display()),
-            ));
+    ensure_parent_exists(destination)?;
+
+    match vfs::metadata(destination) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Destination exists and is not a directory",
+                ));
+            }
+        }
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                return Err(err);
+            }
+            vfs::create_dir(destination)?;
         }
     }
 
-    if destination.exists() && !destination.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "Destination exists and is not a directory",
-        ));
+    if let Ok(metadata) = vfs::metadata(source) {
+        let _ = vfs::set_readonly(destination, metadata.is_readonly());
     }
 
-    if !destination.exists() {
-        fs::create_dir(destination)?;
-    }
-
-    if let Ok(metadata) = fs::metadata(source) {
-        let perms = metadata.permissions();
-        let _ = fs::set_permissions(destination, perms);
-    }
-
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let child_source = entry.path();
-        let child_dest = destination.join(entry.file_name());
-        let child_meta = fs::metadata(&child_source)?;
+    for entry in vfs::read_dir(source)? {
+        let child_source = entry.path().to_path_buf();
+        let child_dest = destination.join(PathBuf::from(entry.file_name()));
+        let child_meta = vfs::metadata(&child_source)?;
         if child_meta.is_dir() {
             copy_directory_recursive(&child_source, &child_dest)?;
         } else {
@@ -691,22 +689,26 @@ fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()>
 }
 
 fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
-    if let Some(parent) = destination.parent() {
-        if !parent.exists() {
+    ensure_parent_exists(destination)?;
+
+    vfs::copy_file(source, destination)?;
+
+    if let Ok(metadata) = vfs::metadata(source) {
+        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    }
+
+    Ok(())
+}
+
+fn ensure_parent_exists(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if vfs::metadata(parent).is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("Destination parent \"{}\" does not exist", parent.display()),
             ));
         }
     }
-
-    fs::copy(source, destination)?;
-
-    if let Ok(metadata) = fs::metadata(source) {
-        let perms = metadata.permissions();
-        let _ = fs::set_permissions(destination, perms);
-    }
-
     Ok(())
 }
 
@@ -714,7 +716,7 @@ fn same_physical_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
+    match (vfs::canonicalize(a), vfs::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }
@@ -724,7 +726,7 @@ fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     if candidate.starts_with(parent) && candidate != parent {
         return true;
     }
-    match (fs::canonicalize(parent), fs::canonicalize(candidate)) {
+    match (vfs::canonicalize(parent), vfs::canonicalize(candidate)) {
         (Ok(parent_canon), Ok(candidate_canon)) => {
             candidate_canon.starts_with(&parent_canon) && candidate_canon != parent_canon
         }
@@ -779,12 +781,13 @@ fn path_to_display(path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use std::fs::{self, File};
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_file_to_new_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -806,6 +809,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_into_existing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -828,6 +832,7 @@ mod tests {
         assert!(dest_dir.join("report.txt").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_overwrites_existing_file() {
         let _lock = REPL_FS_TEST_LOCK
@@ -851,6 +856,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_without_force_fails_when_destination_exists() {
         let _lock = REPL_FS_TEST_LOCK
@@ -878,6 +884,7 @@ mod tests {
         assert!(dest.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_copies_folder_tree() {
         let _lock = REPL_FS_TEST_LOCK
@@ -905,6 +912,7 @@ mod tests {
         assert!(file_path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_requires_existing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -926,6 +934,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_DEST_MISSING);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_copies_multiple_files() {
         let _lock = REPL_FS_TEST_LOCK
@@ -951,6 +960,7 @@ mod tests {
         assert!(dest_dir.join("beta.log").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_pattern_copies_all_matches() {
         let _lock = REPL_FS_TEST_LOCK
@@ -976,6 +986,7 @@ mod tests {
         assert!(dest_dir.join("b.log").exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_missing_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -995,6 +1006,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_SOURCE_NOT_FOUND);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_outputs_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1018,6 +1030,7 @@ mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_rejects_invalid_flag() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1029,6 +1042,7 @@ mod tests {
         assert_eq!(err, ERR_FLAG_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_flag_accepts_uppercase_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1050,6 +1064,7 @@ mod tests {
         assert_eq!(eval.status(), 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_force_flag_accepts_uppercase_string() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1071,6 +1086,7 @@ mod tests {
         assert_eq!(eval.status(), 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_same_path_fails() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1090,6 +1106,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_SAME_PATH);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_empty_source() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1101,6 +1118,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_SOURCE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_empty_destination() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1112,6 +1130,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_DEST);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn copyfile_reports_invalid_pattern() {
         let _lock = REPL_FS_TEST_LOCK
@@ -1123,8 +1142,8 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_PATTERN_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

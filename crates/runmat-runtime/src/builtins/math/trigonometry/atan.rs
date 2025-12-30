@@ -17,11 +17,14 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "atan",
+        builtin_path = "crate::builtins::math::trigonometry::atan"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "atan"
 category: "math/trigonometry"
@@ -189,6 +192,7 @@ matching MATLAB's IEEE behavior.
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atan",
     op_kind: GpuOpKind::Elementwise,
@@ -204,8 +208,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers execute atan on-device via unary_atan; runtimes gather to host when the hook is unavailable.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atan",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -222,17 +225,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL atan calls; providers may override with specialised fused kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("atan", DOC_MD);
-
 #[runtime_builtin(
     name = "atan",
     category = "math/trigonometry",
     summary = "Arctangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
     keywords = "atan,arctangent,inverse tangent,trigonometry,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::trigonometry::atan"
 )]
 fn atan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -505,11 +504,12 @@ fn convert_real_value_to_gpu(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_scalar() {
         let result = atan_builtin(Value::Num(1.0), Vec::new()).expect("atan");
@@ -519,6 +519,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
@@ -534,6 +535,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_int_value_promotes() {
         let result = atan_builtin(Value::Int(IntValue::I32(-1)), Vec::new()).expect("atan");
@@ -543,6 +545,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_complex_scalar() {
         let result = atan_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("atan");
@@ -556,6 +559,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_complex_tensor_elements() {
         let tensor = ComplexTensor::new(vec![(1.0, 0.5), (-0.5, 1.0)], vec![2, 1]).unwrap();
@@ -580,6 +584,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_char_array_roundtrip() {
         let chars = CharArray::new_row("RU");
@@ -596,12 +601,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_string_errors() {
         let err = atan_builtin(Value::from("runmat"), Vec::new()).expect_err("expected error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_missing_prototype_errors() {
         let err =
@@ -609,6 +616,7 @@ mod tests {
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_host_prototype() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -626,6 +634,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_complex_prototype_promotes() {
         let result = atan_builtin(
@@ -642,6 +651,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -659,6 +669,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_gpu_prototype_keeps_residency() {
         test_support::with_test_provider(|provider| {
@@ -685,6 +696,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_real_with_complex_output_errors() {
         let err = atan_builtin(
@@ -695,6 +707,7 @@ mod tests {
         assert!(err.contains("complex"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_gpu_with_complex_output_errors() {
         test_support::with_test_provider(|provider| {
@@ -713,6 +726,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_non_numeric_prototype_errors() {
         let err = atan_builtin(
@@ -723,6 +737,7 @@ mod tests {
         assert!(err.contains("prototype must be numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_rejects_extra_arguments() {
         let err = atan_builtin(
@@ -733,6 +748,7 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_keyword_flexible_case() {
         let result = atan_builtin(Value::Num(1.0), vec![Value::from("LIKE"), Value::Num(0.0)])
@@ -743,6 +759,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
@@ -757,6 +774,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_unrecognised_argument_errors() {
         let err = atan_builtin(Value::Num(0.0), vec![Value::from("invalid")])
@@ -764,13 +782,14 @@ mod tests {
         assert!(err.contains("unrecognised argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn atan_wgpu_matches_cpu_elementwise() {

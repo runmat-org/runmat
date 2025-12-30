@@ -11,12 +11,16 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::NumericDType;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "zeros",
+        builtin_path = "crate::builtins::array::creation::zeros"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "zeros"
 category: "array/creation"
@@ -182,6 +186,7 @@ Absolutely. Preallocating with `zeros` (or `ones`) and then filling in values is
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "zeros",
     op_kind: GpuOpKind::Custom("generator"),
@@ -200,8 +205,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device zeros when providers expose dedicated hooks; otherwise falls back to host upload.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
     shape: ShapeRequirements::Any,
@@ -223,17 +227,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner materialises zeros as literal constants; providers may substitute inexpensive fill kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("zeros", DOC_MD);
-
 #[runtime_builtin(
     name = "zeros",
     category = "array/creation",
     summary = "Create arrays filled with zeros.",
     keywords = "zeros,array,logical,gpu,like",
-    accel = "array_construct"
+    accel = "array_construct",
+    builtin_path = "crate::builtins::array::creation::zeros"
 )]
 fn zeros_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedZeros::parse(rest)?;
@@ -504,9 +504,12 @@ fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
         return;
     }
     let elems = tensor::element_count(shape);
-    eprintln!(
-        "[zeros_debug] fallback dtype={:?} elems={} shape={:?} reason={}",
-        dtype, elems, shape, reason
+    tracing::debug!(
+        dtype = ?dtype,
+        elems,
+        shape = ?shape,
+        reason,
+        "[zeros_debug] fallback"
     );
 }
 
@@ -595,16 +598,18 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_default_scalar() {
         let result = zeros_builtin(Vec::new()).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
@@ -614,6 +619,7 @@ mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
@@ -623,6 +629,7 @@ mod tests {
         assert_eq!(tensor.data.len(), 8);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_from_size_vector() {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -632,6 +639,7 @@ mod tests {
         assert_eq!(tensor.shape, vec![2, 3]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_logical_output() {
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
@@ -645,6 +653,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_tensor_infers_shape() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -655,6 +664,7 @@ mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_complex_scalar() {
         let args = vec![
@@ -672,6 +682,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -687,6 +698,7 @@ mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_without_explicit_shape_uses_prototype_shape() {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -697,6 +709,7 @@ mod tests {
         assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_empty_input_returns_empty_matrix() {
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -710,6 +723,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_conflicting_like_and_logical_is_error() {
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -722,6 +736,7 @@ mod tests {
         assert!(zeros_builtin(args).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
@@ -749,13 +764,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn zeros_wgpu_single_allocates_gpu_without_like() {

@@ -7,11 +7,14 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{CellArray, CharArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "struct",
+        builtin_path = "crate::builtins::structs::core::r#struct"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "struct"
 category: "structs/core"
@@ -149,6 +152,7 @@ arrays. Passing other types raises an error.
 [load](../../io/mat/load), [whos](../../introspection/whos), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::r#struct")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "struct",
     op_kind: GpuOpKind::Custom("struct"),
@@ -164,8 +168,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only construction; GPU values are preserved as handles without gathering.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::r#struct")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "struct",
     shape: ShapeRequirements::Any,
@@ -175,11 +178,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Struct creation breaks fusion planning but retains GPU residency for field values.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("struct", DOC_MD);
 
 struct FieldEntry {
     name: String,
@@ -195,7 +193,8 @@ enum FieldValue {
     name = "struct",
     category = "structs/core",
     summary = "Create scalar structs or struct arrays from name/value pairs.",
-    keywords = "struct,structure,name-value,record"
+    keywords = "struct,structure,name-value,record",
+    builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 fn struct_builtin(rest: Vec<Value>) -> Result<Value, String> {
     match rest.len() {
@@ -396,16 +395,16 @@ fn is_subsequent_char_valid(c: char) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::GpuTensorHandle;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_empty() {
         let Value::Struct(s) = struct_builtin(Vec::new()).expect("struct") else {
@@ -414,6 +413,7 @@ mod tests {
         assert!(s.fields.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_empty_from_empty_matrix() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -428,6 +428,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_name_value_pairs() {
         let args = vec![
@@ -447,6 +448,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_from_cells() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -475,6 +477,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_replicates_scalars() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -495,6 +498,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_cell_size_mismatch_errors() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -509,6 +513,7 @@ mod tests {
         assert!(err.contains("matching sizes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_overwrites_duplicates() {
         let args = vec![
@@ -527,12 +532,14 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_odd_arguments() {
         let err = struct_builtin(vec![Value::from("name")]).unwrap_err();
         assert!(err.contains("name/value pairs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_invalid_field_name() {
         let err =
@@ -540,12 +547,14 @@ mod tests {
         assert!(err.contains("begin with a letter or underscore"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_non_text_field_name() {
         let err = struct_builtin(vec![Value::Num(1.0), Value::Int(IntValue::I32(1))]).unwrap_err();
         assert!(err.contains("strings or character vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_accepts_char_vector_name() {
         let chars = CharArray::new("field".chars().collect(), 1, 5).unwrap();
@@ -556,6 +565,7 @@ mod tests {
         assert!(s.fields.contains_key("field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_accepts_string_scalar_name() {
         let sa = StringArray::new(vec!["field".to_string()], vec![1]).unwrap();
@@ -566,6 +576,7 @@ mod tests {
         assert!(s.fields.contains_key("field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_allows_existing_struct_copy() {
         let mut base = StructValue::new();
@@ -575,6 +586,7 @@ mod tests {
         assert_eq!(copy, Value::Struct(base));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_copies_struct_array_argument() {
         let mut proto = StructValue::new();
@@ -598,6 +610,7 @@ mod tests {
         assert_eq!(cloned, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_cell_argument_without_structs() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -605,6 +618,7 @@ mod tests {
         assert!(err.contains("must contain structs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_preserves_gpu_tensor_handles() {
         let handle = GpuTensorHandle {
@@ -619,6 +633,7 @@ mod tests {
         assert!(matches!(s.fields.get("data"), Some(Value::GpuTensor(h)) if h == &handle));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_preserves_gpu_handles() {
         let first = GpuTensorHandle {
@@ -653,6 +668,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn struct_preserves_gpu_handles_with_registered_provider() {
@@ -672,8 +688,8 @@ mod tests {
         assert!(matches!(s.fields.get("gpu"), Some(Value::GpuTensor(h)) if h == &handle));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

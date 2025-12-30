@@ -12,9 +12,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
@@ -24,7 +21,14 @@ use runmat_macros::runtime_builtin;
 
 const NAME: &str = "transpose";
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = NAME,
+        builtin_path = "crate::builtins::math::linalg::ops::transpose"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "transpose"
 category: "math/linalg/ops"
@@ -176,6 +180,7 @@ perform a gather/transpose/upload round-trip automatically.
 - Found a behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::transpose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Transpose,
@@ -192,8 +197,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider transpose hook when available; otherwise gathers, transposes on the host, and uploads the result back to the GPU.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::linalg::ops::transpose"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -205,17 +211,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Transposes act as fusion boundaries; downstream kernels see the updated shape metadata.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!(NAME, DOC_MD);
-
 #[runtime_builtin(
     name = "transpose",
     category = "math/linalg/ops",
     summary = "Swap the first two dimensions of arrays without conjugating complex values.",
     keywords = "transpose,swap rows and columns,non-conjugate",
-    accel = "transpose"
+    accel = "transpose",
+    builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
 fn transpose_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -444,7 +446,7 @@ fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -456,6 +458,7 @@ mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_numeric_matrix() {
         let input = tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &[2, 3]);
@@ -469,6 +472,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_vector_to_column() {
         let input = tensor(&[1.0, 2.0, 3.0], &[1, 3]);
@@ -482,6 +486,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_complex_does_not_conjugate() {
         let data = vec![(1.0, 2.0), (3.0, -4.0)];
@@ -496,6 +501,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_high_dim_tensor() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
@@ -510,6 +516,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_logical_mask() {
         let la = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -523,6 +530,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_char_matrix() {
         let ca = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
@@ -537,6 +545,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_string_array() {
         let sa = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap();
@@ -553,6 +562,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_cell_array() {
         let cells = vec![
@@ -580,6 +590,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_scalar_types_identity() {
         assert_eq!(
@@ -600,6 +611,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn transpose_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -616,6 +628,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn transpose_wgpu_matches_cpu() {
@@ -640,8 +653,8 @@ mod tests {
         assert_eq!(gathered.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

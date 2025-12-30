@@ -10,15 +10,19 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random_args, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderCholResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "chol",
+        builtin_path = "crate::builtins::math::linalg::factor::chol"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "chol"
 category: "math/linalg/factor"
@@ -208,6 +212,7 @@ compute and exploit symmetry. Use `lu` or `qr` for more general matrices.
 - Issues & feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::chol")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "chol",
     op_kind: GpuOpKind::Custom("chol-factor"),
@@ -224,8 +229,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider 'chol' hook when present; otherwise gathers to the host implementation.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::chol")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "chol",
     shape: ShapeRequirements::Any,
@@ -236,18 +240,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Factorisation executes eagerly and does not participate in expression fusion.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("chol", DOC_MD);
-
 #[runtime_builtin(
     name = "chol",
     category = "math/linalg/factor",
     summary = "Cholesky factorization with MATLAB-compatible upper and lower forms.",
     keywords = "chol,cholesky,factorization,positive-definite",
     accel = "sink",
-    sink = true
+    sink = true,
+    builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
 fn chol_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let eval = evaluate(value, &rest)?;
@@ -589,7 +589,7 @@ impl RowMajorMatrix {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, LogicalArray, Tensor as Matrix};
@@ -754,6 +754,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_upper_factor_matches_reference() {
         let a = Matrix::new(
@@ -776,6 +777,7 @@ mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_upper_option_matches_default() {
         let a = Matrix::new(
@@ -795,6 +797,7 @@ mod tests {
         tensor_close(&default_tensor, &explicit_tensor, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_lower_option_returns_lower_factor() {
         let a = Matrix::new(
@@ -818,6 +821,7 @@ mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_two_output_lower_variant() {
         let a = Matrix::new(
@@ -837,6 +841,7 @@ mod tests {
         tensor_close(&recon, &a, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_two_output_reports_failure() {
         let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("matrix");
@@ -850,6 +855,7 @@ mod tests {
         assert!((factor.data[3] - 0.0).abs() < 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_single_output_errors_on_failure() {
         let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("matrix");
@@ -857,6 +863,7 @@ mod tests {
         assert!(err.contains("positive definite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_invalid_option_errors() {
         let a = Matrix::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
@@ -864,6 +871,7 @@ mod tests {
         assert!(err.to_ascii_lowercase().contains("unknown option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_non_square_errors() {
         let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -871,6 +879,7 @@ mod tests {
         assert!(err.to_ascii_lowercase().contains("square"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_empty_matrix_returns_empty() {
         let empty = Matrix::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -881,6 +890,7 @@ mod tests {
         assert!(factor.data.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_non_hermitian_reports_failure() {
         let a = Matrix::new(vec![2.0, 1.0, 0.0, 2.0], vec![2, 2]).expect("matrix");
@@ -888,6 +898,7 @@ mod tests {
         assert_eq!(eval.flag_index(), 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_logical_input_factorizes() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical array");
@@ -898,6 +909,7 @@ mod tests {
         tensor_close(&recon, &identity, 1e-12);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_complex_positive_definite() {
         let complex = ComplexTensor::new(
@@ -912,6 +924,7 @@ mod tests {
         complex_tensor_close(&recon, &complex, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_complex_lower_variant() {
         let complex = ComplexTensor::new(
@@ -930,6 +943,7 @@ mod tests {
         complex_tensor_close(&recon, &complex, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -946,6 +960,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_gpu_failure_flag() {
         test_support::with_test_provider(|provider| {
@@ -967,6 +982,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn chol_wgpu_matches_cpu() {
@@ -1010,6 +1026,7 @@ mod tests {
         tensor_close(&gpu_factor, &host_factor, tol);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn chol_accepts_scalar() {
         let result = chol_builtin(Value::Num(9.0), Vec::new()).expect("chol");
@@ -1023,8 +1040,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

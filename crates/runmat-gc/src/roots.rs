@@ -6,6 +6,7 @@
 
 use crate::Value;
 use crate::{GcError, GcPtr, Result};
+use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -294,7 +295,7 @@ impl RootScanner {
     /// Scan all roots and return reachable objects
     pub fn scan_roots(&self) -> Result<Vec<GcPtr<Value>>> {
         log::trace!("Starting root scan");
-        let scan_start = std::time::Instant::now();
+        let scan_start = Instant::now();
 
         let roots = self.roots.read();
         let mut all_roots = Vec::new();

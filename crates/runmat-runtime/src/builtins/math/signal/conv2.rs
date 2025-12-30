@@ -10,13 +10,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const EPS: f64 = 1e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "conv2",
+        builtin_path = "crate::builtins::math::signal::conv2"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "conv2"
 category: "math/signal"
@@ -199,6 +203,7 @@ add native kernels without breaking compatibility.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a small reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv2",
     op_kind: GpuOpKind::Custom("conv2d"),
@@ -214,8 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can keep results on-device by implementing a conv2d custom hook; absent that, the builtin gathers to the host for CPU execution.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::conv2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "conv2",
     shape: ShapeRequirements::Any,
@@ -226,17 +230,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Currently implemented as a standalone op; future work may add FFT-backed or fused variants.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("conv2", DOC_MD);
-
 #[runtime_builtin(
     name = "conv2",
     category = "math/signal",
     summary = "Two-dimensional convolution with MATLAB-compatible padding modes.",
     keywords = "conv2,2d convolution,image filtering,gpu",
-    accel = "custom"
+    accel = "custom",
+    builtin_path = "crate::builtins::math::signal::conv2"
 )]
 fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut extras = rest;
@@ -601,7 +601,7 @@ fn matrix_to_value(matrix: Matrix) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{tensor, test_support};
     use runmat_accelerate_api::HostTensorView;
@@ -619,6 +619,7 @@ mod tests {
         Tensor::new(col_major, vec![rows, cols]).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_full_basic() {
         let a = tensor_from_rows(2, 2, &[1.0, 2.0, 3.0, 4.0]);
@@ -635,6 +636,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_same_matches_reference() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -659,6 +661,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_valid_returns_expected_sum() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -679,6 +682,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_separable_matches_explicit_kernel() {
         let hcol = tensor_from_rows(3, 1, &[1.0, 2.0, 1.0]);
@@ -705,6 +709,7 @@ mod tests {
         assert_eq!(separable, explicit);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_complex_scaling() {
         let tensor = tensor_from_rows(2, 2, &[1.0, 2.0, 3.0, 4.0]);
@@ -723,6 +728,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_empty_inputs_follow_shape_rules() {
         let empty = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -756,6 +762,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_rejects_invalid_shape_keyword() {
         let a = tensor_from_rows(1, 1, &[1.0]);
@@ -769,6 +776,7 @@ mod tests {
         assert!(err.contains("shape argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_promotes_logical_inputs() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -796,6 +804,7 @@ mod tests {
         assert_eq!(logical_tensor.data, numeric_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_same_even_kernel_alignment() {
         let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
@@ -826,6 +835,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -865,6 +875,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn conv2_wgpu_fallback_matches_cpu() {
@@ -925,8 +936,8 @@ mod tests {
         assert_eq!(gpu_tensor.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

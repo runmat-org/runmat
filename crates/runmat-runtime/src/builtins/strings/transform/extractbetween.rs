@@ -4,21 +4,23 @@ use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{
-    gather_if_needed, make_cell_with_shape, register_builtin_fusion_spec, register_builtin_gpu_spec,
-};
+use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
-
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "extractBetween",
+        builtin_path = "crate::builtins::strings::transform::extractbetween"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "extractBetween"
 category: "strings/transform"
@@ -192,6 +194,9 @@ host-side results, and fusion planning treats the builtin as a residency sink.
 - Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "extractBetween",
     op_kind: GpuOpKind::Custom("string-transform"),
@@ -207,8 +212,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on the CPU; GPU-resident inputs are gathered before extraction and outputs are returned on the host.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "extractBetween",
     shape: ShapeRequirements::Any,
@@ -218,11 +224,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Pure string manipulation builtin; excluded from fusion plans and gathers GPU inputs immediately.",
 };
-
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("extractBetween", DOC_MD);
 
 const FN_NAME: &str = "extractBetween";
 const ARG_TYPE_ERROR: &str = "extractBetween: first argument must be a string array, character array, or cell array of character vectors";
@@ -249,7 +250,8 @@ enum BoundariesMode {
     category = "strings/transform",
     summary = "Extract substrings between boundary markers using MATLAB-compatible semantics.",
     keywords = "extractBetween,substring,boundaries,strings",
-    accel = "sink"
+    accel = "sink",
+    builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 fn extract_between_builtin(
     text: Value,
@@ -840,14 +842,14 @@ fn parse_position_int(value: IntValue) -> Result<usize, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    #[cfg(feature = "doc_export")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_basic_string() {
         let result = extract_between_builtin(
@@ -860,6 +862,7 @@ mod tests {
         assert_eq!(result, Value::String("accelerates".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_inclusive_option() {
         let result = extract_between_builtin(
@@ -875,6 +878,7 @@ mod tests {
         assert_eq!(result, Value::String("[b]".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_numeric_positions() {
         let result = extract_between_builtin(
@@ -887,6 +891,7 @@ mod tests {
         assert_eq!(result, Value::String("celer".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_numeric_positions_exclusive_option() {
         let result = extract_between_builtin(
@@ -902,6 +907,7 @@ mod tests {
         assert_eq!(result, Value::String("ele".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_numeric_positions_clamps_stop() {
         let result = extract_between_builtin(
@@ -914,6 +920,7 @@ mod tests {
         assert_eq!(result, Value::String("celerator".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_numeric_positions_start_past_length() {
         let result = extract_between_builtin(
@@ -926,6 +933,7 @@ mod tests {
         assert_eq!(result, Value::String(String::new()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_string_array_broadcast() {
         let array = StringArray::new(
@@ -949,6 +957,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_char_array_rows() {
         let chars = CharArray::new(
@@ -974,6 +983,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_cell_array_preserves_types() {
         let cell = CellArray::new(
@@ -1003,6 +1013,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_missing_string_propagates() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -1019,6 +1030,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_position_type_error() {
         let err = extract_between_builtin(
@@ -1031,6 +1043,7 @@ mod tests {
         assert_eq!(err, POSITION_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_mixed_boundary_error() {
         let err = extract_between_builtin(
@@ -1043,6 +1056,7 @@ mod tests {
         assert_eq!(err, BOUNDARY_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_numeric_tensor_broadcast() {
         let text = StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap();
@@ -1064,6 +1078,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_option_invalid_value() {
         let err = extract_between_builtin(
@@ -1079,6 +1094,7 @@ mod tests {
         assert_eq!(err, OPTION_VALUE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_option_name_error() {
         let err = extract_between_builtin(
@@ -1094,6 +1110,7 @@ mod tests {
         assert_eq!(err, OPTION_NAME_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_option_pair_error() {
         let err = extract_between_builtin(
@@ -1106,6 +1123,7 @@ mod tests {
         assert_eq!(err, OPTION_PAIR_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_missing_boundary_propagates() {
         let result = extract_between_builtin(
@@ -1118,6 +1136,7 @@ mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_cell_boundary_arguments() {
         let text = CellArray::new(vec![Value::String("A<GPU>".into())], 1, 1).unwrap();
@@ -1139,8 +1158,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn extractBetween_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

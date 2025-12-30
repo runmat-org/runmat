@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sign",
+        builtin_path = "crate::builtins::math::elementwise::sign"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sign"
 category: "math/elementwise"
@@ -191,6 +194,7 @@ beneficial.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sign",
     op_kind: GpuOpKind::Elementwise,
@@ -207,8 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sign on-device via unary_sign; the runtime gathers to the host when the hook is unavailable or complex normalisation is required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sign",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -228,17 +231,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels emit WGSL `sign` ops; providers can override via fused pipelines when advantageous.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sign", DOC_MD);
-
 #[runtime_builtin(
     name = "sign",
     category = "math/elementwise",
     summary = "Sign of scalars, vectors, matrices, or N-D tensors with real or complex values.",
     keywords = "sign,signum,elementwise,complex,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 fn sign_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -342,11 +341,12 @@ fn sign_complex(re: f64, im: f64) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_scalar_positive_negative_zero() {
         assert_eq!(sign_builtin(Value::Num(3.5)).unwrap(), Value::Num(1.0));
@@ -354,6 +354,7 @@ mod tests {
         assert_eq!(sign_builtin(Value::Num(0.0)).unwrap(), Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_scalar_nan_propagates() {
         let result = sign_builtin(Value::Num(f64::NAN)).unwrap();
@@ -363,6 +364,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_tensor_mixed_values() {
         let tensor = Tensor::new(vec![-2.0, -0.0, 0.0, 5.0], vec![2, 2]).unwrap();
@@ -376,6 +378,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_scalar_normalises() {
         let result = sign_builtin(Value::Complex(3.0, 4.0)).unwrap();
@@ -388,6 +391,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_tensor_handles_zero() {
         let tensor = ComplexTensor::new(vec![(0.0, 0.0), (1.0, -1.0)], vec![2, 1]).unwrap();
@@ -404,6 +408,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_character_array() {
         let ca = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
@@ -417,6 +422,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_logical_array() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
@@ -430,6 +436,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_int_values() {
         let value = Value::Int(IntValue::I32(-7));
@@ -440,6 +447,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_bool_values() {
         let t = sign_builtin(Value::Bool(true)).unwrap();
@@ -448,6 +456,7 @@ mod tests {
         assert_eq!(f, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_infinite_values() {
         let tensor = Tensor::new(
@@ -467,6 +476,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_string_input_errors() {
         let err = sign_builtin(Value::String("runmat".to_string())).unwrap_err();
@@ -476,6 +486,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_complex_with_nan() {
         let result = sign_builtin(Value::Complex(f64::NAN, 1.0)).unwrap();
@@ -488,6 +499,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -504,6 +516,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sign_gpu_fallback_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -519,13 +532,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sign_wgpu_matches_cpu() {

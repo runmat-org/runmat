@@ -19,6 +19,7 @@ use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::gather_if_needed;
+use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -1067,7 +1068,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
 
             // CPU path (no provider registered yet)
             let _ = interpret_function(&bytecode, vars.clone());
-            let start_cpu = std::time::Instant::now();
+            let start_cpu = Instant::now();
             let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("interpret");
             let elapsed_cpu = start_cpu.elapsed();
             let s_index = bytecode
@@ -1094,7 +1095,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
             // GPU path: register provider and run again
             ensure_provider_registered();
             let _ = interpret_function(&bytecode, vars.clone());
-            let start_gpu = std::time::Instant::now();
+            let start_gpu = Instant::now();
             let vars_gpu = interpret_function(&bytecode, vars).expect("interpret");
             let elapsed_gpu = start_gpu.elapsed();
             // Attempt to gather S at the computed index; if shape doesn't match expectation, scan for a length==rows tensor

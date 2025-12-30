@@ -10,11 +10,14 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "atan2",
+        builtin_path = "crate::builtins::math::trigonometry::atan2"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "atan2"
 category: "math/trigonometry"
@@ -175,6 +178,7 @@ Call `rad2deg(atan2(y, x))` or multiply the result by `180/pi`.
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atan2",
     op_kind: GpuOpKind::Elementwise,
@@ -193,8 +197,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement elem_atan2 to keep the computation on device; the runtime gathers operands to the host when the hook is unavailable or broadcasting is required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atan2",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -212,17 +215,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits WGSL atan2(y, x); providers may override via elem_atan2 for standalone execution.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("atan2", DOC_MD);
-
 #[runtime_builtin(
     name = "atan2",
     category = "math/trigonometry",
     summary = "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
     keywords = "atan2,inverse tangent,quadrant,gpu",
-    accel = "binary"
+    accel = "binary",
+    builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
 fn atan2_builtin(y: Value, x: Value) -> Result<Value, String> {
     match (y, x) {
@@ -291,7 +290,7 @@ fn value_into_atan2_tensor(value: Value) -> Result<Tensor, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
@@ -299,6 +298,7 @@ mod tests {
 
     const EPS: f64 = 1e-12;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_scalar_pair() {
         let result = atan2_builtin(Value::Num(1.0), Value::Num(1.0)).expect("atan2");
@@ -308,6 +308,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_quadrant_detection() {
         let result = atan2_builtin(Value::Num(-1.0), Value::Num(-1.0)).expect("atan2");
@@ -317,6 +318,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_matrix_vs_scalar_broadcast() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -338,6 +340,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_row_vector_broadcast() {
         let y = Tensor::new(vec![1.0, -1.0, 2.0, -2.0], vec![2, 2]).unwrap();
@@ -360,6 +363,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_char_input() {
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
@@ -370,6 +374,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_logical_input() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -392,6 +397,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_zero_zero_is_zero() {
         let result = atan2_builtin(Value::Num(0.0), Value::Num(0.0)).expect("atan2");
@@ -401,6 +407,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_signed_zero_behaviour() {
         let neg_zero = f64::from_bits(0x8000_0000_0000_0000);
@@ -430,6 +437,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_empty_tensor_result() {
         let y = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -444,12 +452,14 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_complex_input_errors() {
         let err = atan2_builtin(Value::Complex(1.0, 1.0), Value::Num(1.0)).unwrap_err();
         assert!(err.to_ascii_lowercase().contains("complex"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_dimension_mismatch_errors() {
         let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
@@ -461,6 +471,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -494,6 +505,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan2_gpu_host_mix_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -514,13 +526,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn atan2_wgpu_matches_cpu_elementwise() {

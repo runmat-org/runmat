@@ -3,8 +3,9 @@ use runmat_gc::gc_test_context;
 use runmat_hir::lower;
 use runmat_ignition::compile;
 use runmat_parser::parse;
+use runmat_time::Instant;
 use runmat_turbine::TurbineEngine;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[test]
 fn test_compilation_performance() {

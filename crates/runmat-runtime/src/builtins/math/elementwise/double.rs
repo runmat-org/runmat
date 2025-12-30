@@ -15,11 +15,14 @@ use crate::builtins::common::{
     },
     tensor,
 };
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "double",
+        builtin_path = "crate::builtins::math::elementwise::double"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "double"
 category: "math/elementwise"
@@ -198,6 +201,7 @@ precision.
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "double",
     op_kind: GpuOpKind::Elementwise,
@@ -215,8 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts inputs to float64. Providers without native float64 support gather to host; float64-capable providers keep results on device.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::double")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "double",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -233,17 +236,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion treats double as an identity when the execution scalar type is already float64.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("double", DOC_MD);
-
 #[runtime_builtin(
     name = "double",
     category = "math/elementwise",
     summary = "Convert scalars, arrays, logical masks, and gpuArray values to double precision.",
     keywords = "double,float64,cast,gpu",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::double"
 )]
 fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let template = parse_output_template(&rest)?;
@@ -430,7 +429,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -438,6 +437,7 @@ mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_scalar_num_is_identity() {
         let value = Value::Num(std::f64::consts::PI);
@@ -448,6 +448,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_promotes_integers() {
         let value = Value::Int(IntValue::I32(42));
@@ -458,6 +459,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_logical_array_returns_tensor() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
@@ -471,6 +473,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_char_array_converts_to_codes() {
         let chars = CharArray::new_row("AB");
@@ -484,6 +487,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_complex_scalar_is_identity() {
         let result = double_builtin(Value::Complex(1.5, -2.5), Vec::new()).expect("double");
@@ -496,6 +500,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2]).unwrap();
@@ -509,6 +514,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_rejects_strings() {
         let err = double_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
@@ -518,6 +524,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -534,6 +541,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_gpu_prototype_keeps_residency() {
         test_support::with_test_provider(|provider| {
@@ -559,6 +567,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_host_gathers_gpu_input() {
         test_support::with_test_provider(|provider| {
@@ -584,6 +593,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_missing_prototype_errors() {
         let err =
@@ -591,6 +601,7 @@ mod tests {
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_rejects_extra_arguments() {
         let err = double_builtin(
@@ -601,6 +612,7 @@ mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn double_wgpu_matches_cpu() {
@@ -644,8 +656,8 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -5,14 +5,18 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::class::class_name_for_value;
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{get_class, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "isa",
+        builtin_path = "crate::builtins::introspection::isa"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "isa"
 category: "introspection"
@@ -202,6 +206,7 @@ Yes. Meta-class references created with `classref` return `true` for `"meta.clas
 [`class`](./class), [`isnumeric`](../logical/tests/isnumeric), [`islogical`](../logical/tests/islogical), `isaUnderlying`, [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isa",
     op_kind: GpuOpKind::Custom("metadata"),
@@ -217,8 +222,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Metadata predicate that returns host logical scalars; no GPU kernels or gathers are required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isa",
     shape: ShapeRequirements::Any,
@@ -230,17 +234,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Not eligible for fusion planning; isa executes on the host and produces a logical scalar.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("isa", DOC_MD);
-
 #[runtime_builtin(
     name = "isa",
     category = "introspection",
     summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
-    accel = "metadata"
+    accel = "metadata",
+    builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> Result<Value, String> {
     let type_name = parse_type_name(&class_designator)?;
@@ -366,7 +366,7 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use runmat_accelerate_api::HostTensorView;
@@ -377,6 +377,7 @@ mod tests {
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_reports_expected_results_for_doubles() {
         let double_result = isa_builtin(Value::Num(42.0), Value::from("double")).expect("isa");
@@ -389,6 +390,7 @@ mod tests {
         assert_eq!(integer_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_integer_category_matches_int_values() {
         let value = Value::Int(IntValue::I16(12));
@@ -399,6 +401,7 @@ mod tests {
         assert_eq!(float_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_handles_logical_and_char_types() {
         let logical = Value::LogicalArray(LogicalArray::new(vec![1], vec![1]).unwrap());
@@ -414,6 +417,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_string_and_struct_detection() {
         let string_scalar = Value::String("runmat".into());
@@ -430,6 +434,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_cell_and_function_handle() {
         let cell = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap());
@@ -445,6 +450,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_gpu_arrays_treat_metadata_correctly() {
         test_support::with_test_provider(|provider| {
@@ -464,6 +470,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_gpu_logical_handles_match_categories() {
         test_support::with_test_provider(|provider| {
@@ -484,6 +491,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_handle_aliases_and_inheritance() {
         let handle = HandleRef {
@@ -512,6 +520,7 @@ mod tests {
         assert_eq!(exact, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_listener_alias_matches() {
         let listener = Listener {
@@ -537,6 +546,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_meta_class_detection() {
         let meta = Value::ClassRef("Point".into());
@@ -546,6 +556,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isa_errors_on_invalid_type_designator() {
         let type_array = Value::StringArray(
@@ -555,13 +566,14 @@ mod tests {
         assert_eq!(err, "isa: TYPE must be a string scalar or character vector");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isa_gpuarray_with_wgpu_provider_matches_numeric_category() {

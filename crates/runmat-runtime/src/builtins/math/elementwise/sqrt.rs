@@ -15,13 +15,17 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(feature = "doc_export")]
-use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const ZERO_EPS: f64 = 1e-12;
 
-#[cfg(feature = "doc_export")]
+#[cfg_attr(
+    feature = "doc_export",
+    runmat_macros::register_doc_text(
+        name = "sqrt",
+        builtin_path = "crate::builtins::math::elementwise::sqrt"
+    )
+)]
+#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 pub const DOC_MD: &str = r#"---
 title: "sqrt"
 category: "math/elementwise"
@@ -190,6 +194,7 @@ providers may expose complex buffers, and the builtin will automatically benefit
 - Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sqrt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sqrt",
     op_kind: GpuOpKind::Elementwise,
@@ -206,8 +211,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers execute sqrt directly on device buffers when inputs are non-negative; runtime gathers to host when complex promotion is required.",
 };
 
-register_builtin_gpu_spec!(GPU_SPEC);
-
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::sqrt")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sqrt",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -227,17 +231,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL sqrt calls; providers may replace them with fused elementwise kernels.",
 };
 
-register_builtin_fusion_spec!(FUSION_SPEC);
-
-#[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sqrt", DOC_MD);
-
 #[runtime_builtin(
     name = "sqrt",
     category = "math/elementwise",
     summary = "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
     keywords = "sqrt,square root,elementwise,gpu,complex",
-    accel = "unary"
+    accel = "unary",
+    builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 fn sqrt_builtin(value: Value) -> Result<Value, String> {
     match value {
@@ -406,11 +406,12 @@ fn zero_small(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_scalar_positive() {
         let result = sqrt_builtin(Value::Num(9.0)).expect("sqrt");
@@ -420,6 +421,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_scalar_negative() {
         let result = sqrt_builtin(Value::Num(-4.0)).expect("sqrt");
@@ -432,6 +434,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_bool_true() {
         let result = sqrt_builtin(Value::Bool(true)).expect("sqrt");
@@ -441,6 +444,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_logical_array_inputs() {
         let logical = LogicalArray::new(vec![1u8, 0, 1, 0], vec![2, 2]).expect("logical");
@@ -457,6 +461,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_tensor_with_negatives() {
         let tensor = Tensor::new(vec![-1.0, 4.0], vec![1, 2]).unwrap();
@@ -473,6 +478,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_char_array_inputs() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
@@ -487,6 +493,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_string_input_errors() {
         let err = sqrt_builtin(Value::from("hello")).unwrap_err();
@@ -496,6 +503,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_complex_scalar() {
         let result = sqrt_builtin(Value::Complex(3.0, 4.0)).expect("sqrt");
@@ -508,6 +516,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_integer_argument() {
         let result = sqrt_builtin(Value::Int(IntValue::I32(9))).expect("sqrt");
@@ -517,6 +526,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -536,6 +546,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_gpu_negative_falls_back_to_complex() {
         test_support::with_test_provider(|provider| {
@@ -557,13 +568,14 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sqrt_wgpu_matches_cpu_elementwise() {
