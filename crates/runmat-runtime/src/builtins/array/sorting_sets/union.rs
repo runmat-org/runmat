@@ -1604,6 +1604,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_sorted_default() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
@@ -1624,6 +1625,7 @@ pub(crate) mod tests {
         assert_eq!(ib.shape, vec![1, 1]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_stable_order() {
         let a = Tensor::new(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
@@ -1643,6 +1645,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![1.0, 2.0, 3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_sorted_places_nan_last() {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
@@ -1659,6 +1662,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_rows_sorted() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1678,6 +1682,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_numeric_rows_stable_preserves_first_occurrence() {
         let a = Tensor::new(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
@@ -1702,6 +1707,7 @@ pub(crate) mod tests {
         assert_eq!(ib_tensor.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_char_elements() {
         let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
@@ -1721,6 +1727,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![3.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_string_rows_stable() {
         let a = StringArray::new(
@@ -1772,6 +1779,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![2.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1802,6 +1810,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_rejects_legacy_option() {
         let tensor =
@@ -1815,6 +1824,7 @@ pub(crate) mod tests {
         assert!(err.contains("legacy"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -1823,6 +1833,7 @@ pub(crate) mod tests {
         assert!(err.contains("same number of columns"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_requires_matching_types() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1839,6 +1850,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_accepts_scalar_inputs() {
         let eval = evaluate(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("union");
@@ -1855,6 +1867,7 @@ pub(crate) mod tests {
         assert_eq!(ib.data, vec![1.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn union_wgpu_matches_cpu() {
@@ -1893,6 +1906,7 @@ pub(crate) mod tests {
         assert_eq!(gpu_ib.data, cpu_ib.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -286,6 +286,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::Tensor;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_matrix_returns_row_vector() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -299,6 +300,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_with_dimension_scalar_returns_extent() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
@@ -309,6 +311,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_with_dimension_vector_returns_row_vector() {
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
@@ -324,6 +327,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_gpu_tensor_uses_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -344,6 +348,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn size_wgpu_preserves_shape_metadata() {
@@ -385,6 +390,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_rejects_non_numeric_dimension() {
         let err = size_builtin(Value::Num(1.0), vec![Value::from("dim")]).unwrap_err();
@@ -394,6 +400,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_beyond_rank_returns_one() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -404,6 +411,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_requires_positive_integers() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -413,6 +421,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension must be an integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_must_not_be_matrix() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -422,6 +431,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension vector must be a vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_dimension_vector_must_not_be_empty() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
@@ -431,6 +441,7 @@ pub(crate) mod tests {
         assert!(err.contains("must contain at least one element"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

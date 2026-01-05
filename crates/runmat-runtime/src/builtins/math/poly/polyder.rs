@@ -610,6 +610,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_cubic_polynomial_is_correct() {
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
@@ -627,6 +628,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_product_matches_manual_rule() {
         let p = Tensor::new(vec![1.0, 0.0, -2.0], vec![1, 3]).unwrap();
@@ -646,6 +648,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn quotient_rule_produces_expected_num_and_den() {
         let u = Tensor::new(vec![1.0, 0.0, -4.0], vec![1, 3]).unwrap();
@@ -675,6 +678,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn column_vector_orientation_is_preserved() {
         let tensor = Tensor::new(vec![1.0, 0.0, -3.0], vec![3, 1]).unwrap();
@@ -692,6 +696,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_coefficients_are_supported() {
         let tensor =
@@ -713,6 +718,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_polynomial_returns_zero() {
         let tensor = Tensor::new(Vec::new(), vec![1, 0]).unwrap();
@@ -720,6 +726,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_matrix_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -730,6 +737,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_string_input() {
         let err = derivative_single(Value::String("abc".into())).unwrap_err();
@@ -739,6 +747,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mixed_gpu_cpu_product_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -770,6 +779,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn builtin_rejects_too_many_inputs() {
         let err = super::polyder_builtin(Value::Num(1.0), vec![Value::Num(2.0), Value::Num(3.0)])
@@ -780,6 +790,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_inputs_remain_on_device() {
         test_support::with_test_provider(|provider| {
@@ -803,6 +814,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_product_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -840,6 +852,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_quotient_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -884,6 +897,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_single_matches_cpu() {
@@ -911,6 +925,7 @@ pub(crate) mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_product_matches_cpu() {
@@ -946,6 +961,7 @@ pub(crate) mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn wgpu_polyder_quotient_matches_cpu() {
@@ -993,6 +1009,7 @@ pub(crate) mod tests {
             .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_promotes_integers() {
         let value = Value::Int(IntValue::I32(5));
@@ -1000,6 +1017,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

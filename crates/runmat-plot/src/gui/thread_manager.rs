@@ -15,7 +15,7 @@ use std::thread::{self, ThreadId};
 pub enum GuiThreadMessage {
     /// Request to show an interactive plot with response channel
     ShowPlot {
-        figure: Figure,
+        figure: Box<Figure>,
         response: mpsc::Sender<GuiOperationResult>,
         close_signal: Option<CloseSignal>,
     },
@@ -327,7 +327,7 @@ impl GuiThreadManager {
     /// Handle show plot request
     #[cfg(feature = "gui")]
     fn handle_show_plot(
-        figure: Figure,
+        figure: Box<Figure>,
         close_signal: Option<CloseSignal>,
         _gui_context: &GuiContext,
     ) -> GuiOperationResult {
@@ -363,7 +363,7 @@ impl GuiThreadManager {
             }
 
             // Set the figure data
-            window.set_figure(figure);
+            window.set_figure(*figure);
 
             // Run the window (this will block until the window is closed)
             match window.run().await {
@@ -379,7 +379,7 @@ impl GuiThreadManager {
 
     #[cfg(not(feature = "gui"))]
     fn handle_show_plot(
-        _figure: Figure,
+        _figure: Box<Figure>,
         _close_signal: Option<CloseSignal>,
         _gui_context: &GuiContext,
     ) -> GuiOperationResult {
@@ -409,7 +409,7 @@ impl GuiThreadManager {
         let (response_tx, response_rx) = mpsc::channel();
 
         let message = GuiThreadMessage::ShowPlot {
-            figure,
+            figure: Box::new(figure),
             response: response_tx,
             close_signal,
         };

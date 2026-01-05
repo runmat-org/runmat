@@ -1,11 +1,11 @@
 //! Execution engine for RunMat code within the Jupyter kernel
 //!
-//! Provides a kernel-specific wrapper around the ReplEngine to adapt
+//! Provides a kernel-specific wrapper around the RunMatSession to adapt
 //! its interface for Jupyter protocol requirements.
 
 use crate::Result;
 use runmat_builtins::Value;
-use runmat_repl::ReplEngine;
+use runmat_core::RunMatSession;
 use runmat_time::Instant;
 use std::path::Path;
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub struct ExecutionEngine {
     /// Whether debug mode is enabled
     debug: bool,
     /// Underlying REPL engine that does the actual execution
-    repl_engine: ReplEngine,
+    repl_engine: RunMatSession,
 }
 
 /// Result of code execution
@@ -67,7 +67,7 @@ impl ExecutionEngine {
     /// Create a new execution engine
     pub fn new() -> Self {
         let repl_engine =
-            ReplEngine::with_options(true, false).expect("Failed to create ReplEngine");
+            RunMatSession::with_options(true, false).expect("Failed to create RunMatSession");
         Self {
             execution_count: 0,
             timeout: Some(Duration::from_secs(300)), // 5 minutes default
@@ -79,7 +79,7 @@ impl ExecutionEngine {
     /// Create a new execution engine with custom timeout
     pub fn with_timeout(timeout: Option<Duration>) -> Self {
         let repl_engine =
-            ReplEngine::with_options(true, false).expect("Failed to create ReplEngine");
+            RunMatSession::with_options(true, false).expect("Failed to create RunMatSession");
         Self {
             execution_count: 0,
             timeout,
@@ -101,8 +101,8 @@ impl ExecutionEngine {
         snapshot_path: Option<P>,
     ) -> Result<Self> {
         let repl_engine =
-            ReplEngine::with_snapshot(enable_jit, debug, snapshot_path).map_err(|e| {
-                crate::KernelError::Internal(format!("Failed to create ReplEngine: {e}"))
+            RunMatSession::with_snapshot(enable_jit, debug, snapshot_path).map_err(|e| {
+                crate::KernelError::Internal(format!("Failed to create RunMatSession: {e}"))
             })?;
         Ok(Self {
             execution_count: 0,
@@ -131,7 +131,7 @@ impl ExecutionEngine {
             log::debug!("Executing code ({}): {}", self.execution_count, code);
         }
 
-        // Execute using the underlying ReplEngine
+        // Execute using the underlying RunMatSession
         match self.repl_engine.execute(code) {
             Ok(repl_result) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;

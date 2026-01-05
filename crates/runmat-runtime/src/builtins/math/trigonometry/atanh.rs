@@ -439,6 +439,7 @@ pub(crate) mod tests {
     use num_complex::Complex64;
     use runmat_builtins::{CharArray, IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_scalar_real() {
         let result = atanh_builtin(Value::Num(0.5)).expect("atanh");
@@ -448,6 +449,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_scalar_boundary() {
         let result = atanh_builtin(Value::Num(1.0)).expect("atanh");
@@ -462,6 +464,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_tensor_real_values() {
         let tensor =
@@ -484,6 +487,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_real_promotes_to_complex() {
         let result = atanh_builtin(Value::Num(2.0)).expect("atanh");
@@ -497,6 +501,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_tensor_complex_output() {
         let tensor =
@@ -521,6 +526,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-0.5, 0.75)];
@@ -540,6 +546,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_array_promotes_to_complex() {
         let chars = CharArray::new(vec!['A'], 1, 1).expect("char array");
@@ -554,12 +561,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_string_input_errors() {
         let err = atanh_builtin(Value::from("hello")).expect_err("expected error");
         assert!(err.contains("numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_arrays() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).expect("chars");
@@ -579,6 +588,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_logical_array() {
         let logical =
@@ -594,6 +604,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -614,6 +625,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_keeps_residency_for_real_inputs() {
         test_support::with_test_provider(|provider| {
@@ -640,6 +652,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_gpu_falls_back_for_complex() {
         test_support::with_test_provider(|provider| {
@@ -673,6 +686,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn atanh_wgpu_matches_cpu_elementwise() {
@@ -705,6 +719,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_accepts_int_inputs() {
         let value = Value::Int(IntValue::I8(0));
@@ -715,6 +730,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

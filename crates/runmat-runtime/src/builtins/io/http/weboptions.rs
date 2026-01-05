@@ -549,6 +549,7 @@ pub(crate) mod tests {
         let _ = stream.write_all(body);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_default_struct_matches_expected_fields() {
         let result = weboptions_builtin(Vec::new()).expect("weboptions");
@@ -589,6 +590,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_overrides_timeout_and_headers() {
         let mut headers = StructValue::new();
@@ -627,6 +629,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_updates_existing_struct() {
         let base = weboptions_builtin(vec![Value::from("ContentType"), Value::from("json")])
@@ -652,6 +655,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_unknown_option() {
         let err = weboptions_builtin(vec![Value::from("BogusOption"), Value::Num(1.0)])
@@ -659,6 +663,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown option"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_requires_username_when_password_provided() {
         let err = weboptions_builtin(vec![Value::from("Password"), Value::from("secret")])
@@ -669,6 +674,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_timeout_nonpositive() {
         let err = weboptions_builtin(vec![Value::from("Timeout"), Value::Num(0.0)])
@@ -679,6 +685,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_rejects_headerfields_bad_cell_shape() {
         let cell = CellArray::new(vec![Value::from("Accept")], 1, 1).expect("cell");
@@ -690,6 +697,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_uses_weboptions_without_polluting_query() {
         let options = weboptions_builtin(Vec::new()).expect("weboptions");
@@ -716,6 +724,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_uses_weboptions_auto_request_method() {
         let options = weboptions_builtin(Vec::new()).expect("weboptions default");
@@ -746,6 +755,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

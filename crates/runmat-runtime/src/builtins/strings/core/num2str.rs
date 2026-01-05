@@ -961,6 +961,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_scalar_default_precision() {
         let value = Value::Num(std::f64::consts::PI);
@@ -975,6 +976,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_precision_argument() {
         let value = Value::Num(std::f64::consts::PI);
@@ -988,6 +990,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_matrix_alignment() {
         let tensor =
@@ -1009,6 +1012,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_custom_format() {
         let tensor = Tensor::new(vec![1.234, 5.678], vec![1, 2]).expect("tensor");
@@ -1023,6 +1027,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_complex_values() {
         let complex = ComplexTensor::new(vec![(3.0, 4.0), (5.0, -6.0)], vec![1, 2]).expect("cplx");
@@ -1036,6 +1041,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_local_decimal() {
         std::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
@@ -1051,6 +1057,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_logical_array() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).expect("logical");
@@ -1064,6 +1071,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_gpu_tensor_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1085,18 +1093,21 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_input_type() {
         let err = num2str_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_invalid_format_string() {
         let err = num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err();
         assert!(err.contains("unsupported format string"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

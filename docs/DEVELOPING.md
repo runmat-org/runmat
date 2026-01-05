@@ -15,10 +15,10 @@ cargo build
 
 ## Running the REPL
 
-At this early stage the REPL simply tokenizes input and prints the token names:
+The REPL is provided by the `runmat` CLI:
 
 ```bash
-cargo run -p runmat-repl
+cargo run -p runmat -- repl
 ```
 
 Future milestones will integrate the parser, VM and JIT.

@@ -515,6 +515,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_inverts_known_fft() {
         let spectrum = HostComplexTensor::new(
@@ -535,6 +536,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symmetric_returns_real_tensor() {
         let spectrum = HostComplexTensor::new(
@@ -553,6 +555,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_zero_length_returns_empty_tensor() {
         let spectrum = HostComplexTensor::new(Vec::new(), vec![0]).unwrap();
@@ -567,6 +570,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_dimension_argument_recovers_matrix() {
         let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -599,18 +603,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_dimension_zero() {
         let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_unknown_string_option() {
         let err = parse_arguments(&[Value::from("invalidflag")]).unwrap_err();
         assert!(err.contains("unrecognized option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_accepts_nonsymmetric_flag() {
         let (len, dim, symmetric) = parse_arguments(&[Value::from("nonsymmetric")]).expect("parse");
@@ -631,12 +638,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_requires_final_position() {
         let err = parse_arguments(&[Value::from("nonsymmetric"), Value::Num(4.0)]).unwrap_err();
         assert!(err.contains("symmetry flag must appear as the final argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_symflag_accepts_whitespace() {
         let (len, dim, symmetric) = parse_arguments(&[Value::from(" symmetric ")]).expect("parse");
@@ -645,6 +654,7 @@ pub(crate) mod tests {
         assert!(symmetric);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_zero_padding_length_argument() {
         let spectrum = HostComplexTensor::new(vec![(4.0, 0.0)], vec![1]).unwrap();
@@ -661,6 +671,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_truncates_when_length_is_smaller() {
         let spectrum = HostComplexTensor::new(
@@ -687,6 +698,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_empty_length_with_symmetric_flag() {
         let empty = Tensor::new(Vec::new(), vec![0]).unwrap();
@@ -697,6 +709,7 @@ pub(crate) mod tests {
         assert!(symmetric);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -724,6 +737,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ifft_wgpu_matches_cpu() {
@@ -755,6 +769,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

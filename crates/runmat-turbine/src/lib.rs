@@ -17,6 +17,7 @@ use runmat_ignition::{Bytecode, Instr};
 
 use target_lexicon::Triple;
 use thiserror::Error;
+use tracing::info_span;
 
 #[cfg(feature = "native-accel")]
 fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
@@ -1031,6 +1032,12 @@ impl TurbineEngine {
         vars: &mut [Value],
     ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
+        let _span = info_span!(
+            "turbine.execute_or_compile",
+            hash = hash,
+            instrs = bytecode.instructions.len()
+        )
+        .entered();
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
@@ -1121,6 +1128,11 @@ impl TurbineEngine {
                     "LoadConst".hash(&mut hasher);
                     val.to_bits().hash(&mut hasher);
                 }
+                Instr::LoadComplex(re, im) => {
+                    "LoadComplex".hash(&mut hasher);
+                    re.to_bits().hash(&mut hasher);
+                    im.to_bits().hash(&mut hasher);
+                }
                 Instr::LoadString(s) => {
                     "LoadString".hash(&mut hasher);
                     s.hash(&mut hasher);
@@ -1144,6 +1156,7 @@ impl TurbineEngine {
                 Instr::Pow => "Pow".hash(&mut hasher),
                 Instr::Neg => "Neg".hash(&mut hasher),
                 Instr::Transpose => "Transpose".hash(&mut hasher),
+                Instr::ConjugateTranspose => "ConjugateTranspose".hash(&mut hasher),
                 Instr::ElemMul => "ElemMul".hash(&mut hasher),
                 Instr::ElemDiv => "ElemDiv".hash(&mut hasher),
                 Instr::ElemPow => "ElemPow".hash(&mut hasher),

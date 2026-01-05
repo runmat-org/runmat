@@ -265,6 +265,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = vertcat_builtin(Vec::new()).expect("vertcat");
@@ -277,6 +278,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_argument_round_trips() {
         let value = Value::Num(42.0);
@@ -284,6 +286,7 @@ pub(crate) mod tests {
         assert_eq!(result, value);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_vertical_concat() {
         let top = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -299,6 +302,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_rows() {
         let top = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
@@ -318,6 +322,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_arrays_concatenate_rows() {
         let header = StringArray::new(vec!["Name".into(), "Score".into()], vec![1, 2]).unwrap();
@@ -333,6 +338,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mismatched_columns_error_mentions_vertcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -342,6 +348,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension 2 mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vertcat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -365,6 +372,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_concatenate_rows() {
         let first = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -383,6 +391,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_arrays_concatenate_rows() {
         let first = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2, 1]).unwrap();
@@ -404,6 +413,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_arrays_concatenate_rows() {
         let first = CellArray::new(vec![Value::Num(1.0), Value::from("low")], 1, 2).unwrap();
@@ -419,6 +429,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vertcat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
@@ -448,6 +459,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn vertcat_wgpu_matches_cpu() {
@@ -485,6 +497,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

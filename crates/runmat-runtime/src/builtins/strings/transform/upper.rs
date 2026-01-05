@@ -293,12 +293,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_string_scalar_value() {
         let result = upper_builtin(Value::String("RunMat".into())).expect("upper");
         assert_eq!(result, Value::String("RUNMAT".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_string_array_preserves_shape() {
         let array = StringArray::new(
@@ -329,6 +331,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', 'd', 'o', 'g'];
@@ -344,6 +347,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_char_vector_handles_padding() {
         let array = CharArray::new_row("hello ");
@@ -359,6 +363,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_char_array_unicode_expansion_extends_width() {
         let data: Vec<char> = vec!['ß', 'a'];
@@ -375,6 +380,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -398,12 +404,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_errors_on_invalid_input() {
         let err = upper_builtin(Value::Num(1.0)).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -411,12 +419,14 @@ pub(crate) mod tests {
         assert_eq!(err, CELL_ELEMENT_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_preserves_missing_string() {
         let result = upper_builtin(Value::String("<missing>".into())).expect("upper");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_cell_allows_empty_char_vector() {
         let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
@@ -431,6 +441,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn upper_gpu_tensor_input_gathers_then_errors() {
@@ -451,6 +462,7 @@ pub(crate) mod tests {
         provider.free(&handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

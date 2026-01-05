@@ -724,8 +724,11 @@ fn initialize_registry_file(path: &Path) {
 }
 
 fn should_generate_wasm_registry() -> bool {
-    matches!(
-        std::env::var("RUNMAT_GENERATE_WASM_REGISTRY"),
+    // Generate the registry file for all builds by default so that downstream
+    // wasm consumers (which compile proc-macros for the host) still produce the table.
+    // Allow opting out with RUNMAT_DISABLE_WASM_REGISTRY=1.
+    !matches!(
+        std::env::var("RUNMAT_DISABLE_WASM_REGISTRY"),
         Ok(ref value) if value == "1"
     )
 }

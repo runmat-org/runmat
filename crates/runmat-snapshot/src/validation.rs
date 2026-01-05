@@ -774,9 +774,7 @@ mod tests {
         validator
             .validate_header(&header, &mut errors, &mut warnings)
             .unwrap();
-        if !errors.is_empty() {
-            eprintln!("Validation errors: {errors:?}");
-        }
+        assert!(errors.is_empty(), "Validation errors: {errors:?}");
         assert!(errors.is_empty());
     }
 
@@ -785,7 +783,7 @@ mod tests {
         let validator = SnapshotValidator::new();
         let metadata = SnapshotMetadata::current();
         let mut header = SnapshotHeader::new(metadata);
-        header.magic = [0; 8]; // Invalid magic
+        header.magic = [0; 7]; // Invalid magic
 
         let mut errors = Vec::new();
         let mut warnings = Vec::new();

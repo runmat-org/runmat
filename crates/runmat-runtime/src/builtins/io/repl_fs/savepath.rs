@@ -550,6 +550,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_writes_to_default_location_with_env_override() {
         let _lock = REPL_FS_TEST_LOCK
@@ -583,6 +584,7 @@ pub(crate) mod tests {
         assert_eq!(current_path_string(), path_string);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_env_override_empty_returns_failure() {
         let _lock = REPL_FS_TEST_LOCK
@@ -599,6 +601,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_CANNOT_RESOLVE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_accepts_explicit_filename_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -616,6 +619,7 @@ pub(crate) mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_appends_default_filename_for_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -633,6 +637,7 @@ pub(crate) mod tests {
         assert!(expected.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_appends_default_filename_for_trailing_separator() {
         let _lock = REPL_FS_TEST_LOCK
@@ -651,6 +656,7 @@ pub(crate) mod tests {
         assert!(dir.join(DEFAULT_FILENAME).exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_returns_failure_when_write_fails() {
         let _lock = REPL_FS_TEST_LOCK
@@ -676,6 +682,7 @@ pub(crate) mod tests {
         let _ = fs::set_permissions(&target, original_perms);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_outputs_vector_contains_message_and_id() {
         let _lock = REPL_FS_TEST_LOCK
@@ -694,6 +701,7 @@ pub(crate) mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_empty_filename() {
         let _lock = REPL_FS_TEST_LOCK
@@ -705,12 +713,14 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_EMPTY_FILENAME);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_non_string_input() {
         let err = savepath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert!(err.contains("savepath"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_accepts_string_array_scalar_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -729,6 +739,7 @@ pub(crate) mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_multi_element_string_array() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
@@ -737,6 +748,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_multi_row_char_array() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).expect("char array");
@@ -744,6 +756,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_tensor_with_fractional_codes() {
         let tensor = Tensor::new(vec![65.5], vec![1, 1]).expect("tensor");
@@ -751,6 +764,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_supports_gpu_tensor_filename() {
         let _lock = REPL_FS_TEST_LOCK
@@ -782,6 +796,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_supports_gpu_tensor_filename_with_wgpu_provider() {
         let _lock = REPL_FS_TEST_LOCK
@@ -814,6 +829,7 @@ pub(crate) mod tests {
         provider.free(&handle).expect("free");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

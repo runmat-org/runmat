@@ -49,13 +49,16 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_returns_scalar_handle() {
+        setup_plot_tests();
         let handle = gca_builtin(Vec::new()).unwrap();
         match handle {
             Value::Num(v) => assert!(v > 0.0),
@@ -63,8 +66,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_mode_returns_struct() {
+        setup_plot_tests();
         let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();
         assert!(matches!(value, Value::Struct(_)));
     }

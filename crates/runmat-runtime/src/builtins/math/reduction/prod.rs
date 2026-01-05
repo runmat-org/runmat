@@ -970,12 +970,14 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_scalar_num() {
         let result = prod_builtin(Value::Num(5.0), Vec::new()).expect("prod");
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -989,6 +991,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_matrix_dimension_two() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1003,6 +1006,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_all_dimension() {
         let tensor =
@@ -1011,6 +1015,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(720.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_vecdim_multiple_axes() {
         let tensor = Tensor::new(
@@ -1029,6 +1034,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_with_omit_nan_default_dimension() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
@@ -1037,6 +1043,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_with_include_nan_propagates() {
         let tensor = Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
@@ -1047,6 +1054,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_dimension_greater_than_ndims_returns_input() {
         let tensor = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -1059,6 +1067,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_native_integer_scalar() {
         let value = Value::Int(IntValue::I16(4));
@@ -1066,6 +1075,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Int(IntValue::I16(4)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_like_complex_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -1084,6 +1094,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_like_without_prototype_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1091,12 +1102,14 @@ pub(crate) mod tests {
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_rejects_complex_input() {
         let err = prod_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
         assert!(err.contains("complex inputs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1113,6 +1126,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_all_reduction() {
         test_support::with_test_provider(|provider| {
@@ -1129,6 +1143,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_like_prototype() {
         test_support::with_test_provider(|provider| {
@@ -1154,6 +1169,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -1171,12 +1187,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn prod_wgpu_dim1_matches_cpu() {

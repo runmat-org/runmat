@@ -258,6 +258,7 @@ pub(crate) mod tests {
         CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_accepts_scalars_vectors_and_matrices() {
         let scalar = ismatrix_builtin(Value::Num(5.0)).expect("ismatrix scalar");
@@ -273,6 +274,7 @@ pub(crate) mod tests {
         assert_eq!(matrix_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_rejects_higher_rank_arrays() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -280,6 +282,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_handles_empty_dimensions_like_matlab() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -296,6 +299,7 @@ pub(crate) mod tests {
         assert_eq!(empty_3d_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_handles_scalar_like_runtime_values() {
         let bool_result = ismatrix_builtin(Value::Bool(true)).expect("ismatrix bool");
@@ -311,6 +315,7 @@ pub(crate) mod tests {
         assert_eq!(object_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_logical_arrays_respect_shape_rank() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical array");
@@ -325,6 +330,7 @@ pub(crate) mod tests {
         assert_eq!(logical3d_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_char_string_cell_and_struct_metadata() {
         let char_array = CharArray::new_row("RunMat");
@@ -355,6 +361,7 @@ pub(crate) mod tests {
         assert_eq!(struct_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_rejects_struct_arrays_with_extra_dimensions() {
         let mut struct_value = StructValue::new();
@@ -371,6 +378,7 @@ pub(crate) mod tests {
         assert_eq!(nested_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_tensor_uses_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -393,6 +401,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_tensor_vector_shape_is_matrix() {
         test_support::with_test_provider(|provider| {
@@ -408,6 +417,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismatrix_gpu_handle_without_shape_falls_back() {
         test_support::with_test_provider(|_| {
@@ -421,6 +431,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn value_is_matrix_matches_dimensions_helper() {
         let tensor = Tensor::new(vec![0.0; 12], vec![3, 4]).unwrap();
@@ -429,12 +440,14 @@ pub(crate) mod tests {
         assert!(!value_is_matrix(&Value::Tensor(higher)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ismatrix_wgpu_provider_populates_shape() {

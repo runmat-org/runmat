@@ -445,6 +445,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_line_without_terminator() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -467,6 +468,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_strips_crlf_pairs() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -489,6 +491,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_empty_matrix_on_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -515,6 +518,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_buffers_partial_data_across_timeouts() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -566,6 +570,7 @@ pub(crate) mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_returns_partial_line_on_connection_close() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -595,6 +600,7 @@ pub(crate) mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_on_additional_arguments() {
         let err = readline_builtin(Value::Num(42.0), vec![Value::Num(1.0)])
@@ -605,6 +611,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_rejects_non_struct_argument() {
         let err = readline_builtin(Value::Num(5.0), Vec::new())
@@ -615,6 +622,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readline_errors_when_not_connected() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -647,6 +655,7 @@ pub(crate) mod tests {
         remove_client_for_test(id);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -1,6 +1,6 @@
 [package]
 name = "runmat-kernel"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -21,10 +21,10 @@ runmat-hir = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-runtime = { workspace = true }
-runmat-repl = { workspace = true }
-runmat-snapshot = { workspace = true, default-features = false, features = ["compression-native", "validation"] }
-runmat-plot = { workspace = true }
+runmat-runtime = { workspace = true, features = ["plot-core"] }
+runmat-core = { workspace = true, features = ["jit"] }
+runmat-snapshot = { workspace = true, features = ["compression-native", "validation"] }
+runmat-plot = { workspace = true, features = ["static", "gui"] }
 runmat-time = { workspace = true }
 hmac = "0.12"
 sha2 = "0.10"

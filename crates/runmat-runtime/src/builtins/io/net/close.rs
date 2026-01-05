@@ -443,6 +443,7 @@ pub(crate) mod tests {
         accepted
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpclient_releases_handle() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -458,6 +459,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_tcpserver_releases_listener_and_clients() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -476,6 +478,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_multiple_handles_in_single_call() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -504,6 +507,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_returns_zero_when_no_resources() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -513,6 +517,7 @@ pub(crate) mod tests {
         assert_eq!(status, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_clients_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -531,6 +536,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_servers_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -546,6 +552,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_string_all_option() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -568,6 +575,7 @@ pub(crate) mod tests {
         assert_eq!(second, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_char_array_command() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -580,6 +588,7 @@ pub(crate) mod tests {
         assert!(client_handle(cid).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_cell_array_arguments() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -600,6 +609,7 @@ pub(crate) mod tests {
         assert!(server_handle(server_id_value).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_argument_errors() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -626,6 +636,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_invalid_struct_errors() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -638,6 +649,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn close_empty_array_argument_returns_zero() {
         let _lock = TEST_GUARD.lock().unwrap();
@@ -647,6 +659,7 @@ pub(crate) mod tests {
         assert_eq!(status, Value::Num(0.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn close_with_wgpu_provider_active() {
@@ -664,6 +677,7 @@ pub(crate) mod tests {
         assert!(client_handle(cid).is_none());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

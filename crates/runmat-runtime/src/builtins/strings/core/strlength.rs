@@ -282,12 +282,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_scalar() {
         let result = strlength_builtin(Value::String("RunMat".into())).expect("strlength");
         assert_eq!(result, Value::Num(6.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_with_missing() {
         let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![2, 1]).unwrap();
@@ -303,6 +305,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
@@ -317,6 +320,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_vector_retains_explicit_spaces() {
         let data: Vec<char> = "hi   ".chars().collect();
@@ -325,6 +329,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(5.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_cell_array_of_char_vectors() {
         let cell = CellArray::new(
@@ -346,6 +351,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_cell_array_with_string_scalars() {
         let cell = CellArray::new(
@@ -371,6 +377,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_preserves_shape() {
         let array = StringArray::new(
@@ -388,6 +395,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_char_array_trims_padding() {
         let data: Vec<char> = vec!['d', 'o', 'g', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
@@ -402,12 +410,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_errors_on_invalid_input() {
         let err = strlength_builtin(Value::Num(1.0)).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_rejects_cell_with_invalid_element() {
         let cell = CellArray::new(
@@ -420,6 +430,7 @@ pub(crate) mod tests {
         assert_eq!(err, CELL_ELEMENT_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -787,6 +787,7 @@ pub(crate) mod tests {
         std::env::temp_dir().join(filename)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_read_existing_file_returns_fid() {
         registry::reset_for_tests();
@@ -805,6 +806,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_missing_file_returns_error() {
         registry::reset_for_tests();
@@ -818,6 +820,7 @@ pub(crate) mod tests {
         assert!(open.encoding.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_query_returns_metadata() {
         registry::reset_for_tests();
@@ -842,6 +845,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_lists_handles() {
         registry::reset_for_tests();
@@ -884,6 +888,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_machinefmt_filters_entries() {
         registry::reset_for_tests();
@@ -916,6 +921,7 @@ pub(crate) mod tests {
         fs::remove_file(&be_path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_binary_default_encoding_binary() {
         registry::reset_for_tests();
@@ -934,6 +940,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_encoding_argument_is_preserved() {
         registry::reset_for_tests();
@@ -954,6 +961,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_permission_canonicalizes_plus_binary_order() {
         registry::reset_for_tests();
@@ -974,6 +982,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_preserves_suffix() {
         registry::reset_for_tests();
@@ -995,6 +1004,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_machinefmt_pc_alias_maps_to_ieee_le() {
         registry::reset_for_tests();
@@ -1016,6 +1026,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_outputs_vector_padding() {
         registry::reset_for_tests();
@@ -1030,6 +1041,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_invalid_fid_returns_empty() {
         registry::reset_for_tests();
@@ -1039,6 +1051,7 @@ pub(crate) mod tests {
         assert!(query.permission.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(super::DOC_MD);

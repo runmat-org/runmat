@@ -2,6 +2,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
 
+type NumericTriplet = (Vec<f64>, Vec<f64>, Vec<f64>);
+
 /// Default error message when no plotting backend is available.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const ERR_PLOTTING_UNAVAILABLE: &str =
@@ -27,7 +29,7 @@ pub fn numeric_triplet(
     y: Tensor,
     z: Tensor,
     name: &str,
-) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), String> {
+) -> Result<NumericTriplet, String> {
     let (x_vec, y_vec) = numeric_pair(x, y, name)?;
     let z_vec = numeric_vector(z);
     if z_vec.len() != x_vec.len() {
@@ -134,10 +136,10 @@ pub fn tensor_to_surface_grid(
         ));
     }
     let mut grid = vec![vec![0.0; y_len]; x_len];
-    for col in 0..y_len {
-        for row in 0..x_len {
+    for (row, row_vec) in grid.iter_mut().enumerate() {
+        for (col, cell) in row_vec.iter_mut().enumerate().take(y_len) {
             let idx = col * x_len + row; // column-major layout
-            grid[row][col] = z.data[idx];
+            *cell = z.data[idx];
         }
     }
     Ok(grid)

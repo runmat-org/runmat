@@ -513,6 +513,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_default_points() {
         let result =
@@ -527,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_custom_points() {
         let result = logspace_builtin(
@@ -547,6 +549,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_zero_points() {
         let result = logspace_builtin(
@@ -564,6 +567,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_zero_points_bool_count() {
         let result = logspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Bool(false)])
@@ -577,6 +581,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_single_point() {
         let result = logspace_builtin(
@@ -594,6 +599,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_complex_points() {
         let result = logspace_builtin(
@@ -616,6 +622,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_tensor_scalar_inputs() {
         let start = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -638,6 +645,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_non_integer_count() {
         let err = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
@@ -645,6 +653,7 @@ pub(crate) mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_negative_count() {
         let err = logspace_builtin(
@@ -656,6 +665,7 @@ pub(crate) mod tests {
         assert!(err.contains(">="));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_infinite_count() {
         let err = logspace_builtin(
@@ -667,6 +677,7 @@ pub(crate) mod tests {
         assert!(err.contains("finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_rejects_non_scalar_inputs() {
         let start = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -675,6 +686,7 @@ pub(crate) mod tests {
         assert!(err.contains("scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -705,12 +717,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn logspace_wgpu_matches_cpu() {

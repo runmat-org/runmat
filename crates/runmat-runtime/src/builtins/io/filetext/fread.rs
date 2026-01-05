@@ -1284,6 +1284,7 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_reads_default_double() {
         registry::reset_for_tests();
@@ -1313,6 +1314,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_vector_with_count() {
         registry::reset_for_tests();
@@ -1343,6 +1345,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_uint8_matrix_with_padding() {
         registry::reset_for_tests();
@@ -1374,6 +1377,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_char_output() {
         registry::reset_for_tests();
@@ -1405,6 +1409,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_logical_output() {
         registry::reset_for_tests();
@@ -1441,6 +1446,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_requires_prototype() {
         registry::reset_for_tests();
@@ -1464,6 +1470,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_char_requires_precision() {
         registry::reset_for_tests();
@@ -1492,6 +1499,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_gpu_provider_roundtrip() {
         registry::reset_for_tests();
@@ -1537,6 +1545,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn fread_wgpu_like_uploads_gpu() {
@@ -1580,6 +1589,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_skip_bytes() {
         registry::reset_for_tests();
@@ -1609,6 +1619,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_big_endian_machine_format() {
         registry::reset_for_tests();
@@ -1640,6 +1651,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_invalid_fid_errors() {
         registry::reset_for_tests();
@@ -1647,6 +1659,7 @@ pub(crate) mod tests {
         assert!(err.contains("Invalid file identifier"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

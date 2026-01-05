@@ -490,6 +490,7 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_hcat_matrices() {
         let a = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
@@ -502,6 +503,7 @@ mod tests {
         assert_eq!(result.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_vcat_matrices() {
         let a = Tensor::new_2d(vec![1.0, 2.0], 1, 2).unwrap();
@@ -516,6 +518,7 @@ mod tests {
         assert_eq!(result.data, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_hcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
@@ -531,6 +534,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_vcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0)];

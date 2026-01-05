@@ -151,6 +151,9 @@ curl -fsSL https://runmat.org/install.sh | sh
 # Quick install (Windows PowerShell)
 iwr https://runmat.org/install.ps1 | iex
 
+# Homebrew (macOS/Linux)
+brew install runmat-org/tap/runmat
+
 # Or install from crates.io
 cargo install runmat --features gui
 
@@ -307,7 +310,7 @@ fprintf('m=%.6f\n', double(m));  % Single download at sink
 
 RunMat detects the elementwise chain (`sin`, `.*`, `+`), fuses them into one GPU dispatch, keeps `y` resident on GPU, and only downloads `m` when needed for output.
 
-For more details, see [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md) and [How RunMat Fusion Works](docs/HOW_RUNMAT_FUSION_WORKS.md).
+For more details, see [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md).
 
 ## 🎨 Modern Developer Experience
 

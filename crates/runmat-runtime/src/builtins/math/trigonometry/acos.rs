@@ -413,6 +413,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_within_domain() {
         let result = acos_builtin(Value::Num(0.5)).expect("acos");
@@ -422,6 +423,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_outside_domain_returns_complex() {
         let result = acos_builtin(Value::Num(1.2)).expect("acos");
@@ -435,6 +437,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_matrix_elementwise() {
         let tensor = Tensor::new(vec![0.0, -0.5, 0.75, 1.0], vec![2, 2]).expect("tensor");
@@ -456,6 +459,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_logical_array() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical");
@@ -470,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_char_array_complex_promotion() {
         let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
@@ -487,12 +492,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_string_errors() {
         let err = acos_builtin(Value::from("hello")).expect_err("acos string should error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_integer_scalar() {
         let result = acos_builtin(Value::Int(IntValue::I32(1))).expect("acos int");
@@ -502,6 +509,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_complex_scalar_input() {
         let result = acos_builtin(Value::Complex(1.0, 2.0)).expect("acos complex");
@@ -515,6 +523,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -539,6 +548,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_gpu_outside_domain_falls_back() {
         test_support::with_test_provider(|provider| {
@@ -559,12 +569,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);
         assert!(!examples.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn acos_wgpu_matches_cpu_elementwise() {

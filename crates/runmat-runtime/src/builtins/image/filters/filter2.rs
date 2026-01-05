@@ -364,6 +364,7 @@ pub(crate) mod tests {
         Tensor::new(data, vec![rows, cols]).expect("tensor construction")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_same_matches_imfilter_reference() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -385,6 +386,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn full_shape_option_expands_output() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -405,6 +407,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_shape_option_matches_reference() {
         let kernel = tensor(vec![1.0, 0.0, 0.0, -1.0], 2, 2);
@@ -425,6 +428,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn convolution_mode_rotates_kernel() {
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -445,6 +449,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_corr_option_matches_default() {
         let kernel = tensor(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
@@ -469,6 +474,7 @@ pub(crate) mod tests {
         assert_eq!(default_tensor.data, corr_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_and_shape_order_independent() {
         let kernel = tensor(vec![1.0, -1.0, 2.0, -2.0], 2, 2);
@@ -493,6 +499,7 @@ pub(crate) mod tests {
         assert_eq!(conv_first_tensor.data, shape_first_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_string_option_is_rejected() {
         let kernel = tensor(vec![1.0], 1, 1);
@@ -509,6 +516,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_input_promoted_to_double() {
         let kernel = tensor(vec![1.0, 1.0, 1.0, 1.0], 2, 2);
@@ -538,6 +546,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_option() {
         let kernel = tensor(vec![1.0], 1, 1);
@@ -554,6 +563,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter2_gpu_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -578,6 +588,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filter2_gpu_kernel_and_image() {
         test_support::with_test_provider(|provider| {
@@ -607,6 +618,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_same_matches_cpu() {
@@ -668,6 +680,7 @@ pub(crate) mod tests {
         std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_full_conv_matches_cpu() {
@@ -732,6 +745,7 @@ pub(crate) mod tests {
         std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

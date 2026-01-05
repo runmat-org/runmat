@@ -747,6 +747,7 @@ pub(crate) mod tests {
 
     const EPS: f64 = 1e-12;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_scalar_numbers() {
         let result = minus_builtin(Value::Num(2.0), Value::Num(3.5), Vec::new()).expect("minus");
@@ -756,6 +757,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_matrix_scalar() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -770,6 +772,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_row_column_broadcast() {
         let column = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -789,6 +792,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_complex_inputs() {
         let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
@@ -811,6 +815,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_char_input() {
         let chars = CharArray::new("DEF".chars().collect(), 1, 3).unwrap();
@@ -825,6 +830,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_logical_input_promotes_to_double() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -843,6 +849,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_dimension_mismatch_errors() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -851,6 +858,7 @@ pub(crate) mod tests {
         assert!(err.contains("minus"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -873,6 +881,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_gpu_scalar_right() {
         test_support::with_test_provider(|provider| {
@@ -889,6 +898,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_gpu_scalar_left() {
         test_support::with_test_provider(|provider| {
@@ -905,6 +915,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_gpu_prototype_keeps_residency() {
         test_support::with_test_provider(|provider| {
@@ -932,6 +943,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_host_gathers_gpu_value() {
         test_support::with_test_provider(|provider| {
@@ -961,6 +973,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_complex_prototype_yields_complex() {
         let lhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -986,6 +999,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_missing_prototype_errors() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -998,6 +1012,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_keyword_case_insensitive() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -1016,6 +1031,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
@@ -1031,12 +1047,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn minus_wgpu_matches_cpu_elementwise() {

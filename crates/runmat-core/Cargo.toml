@@ -1,6 +1,6 @@
 [package]
 name = "runmat-core"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -20,20 +20,27 @@ runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }
 anyhow = "1.0"
 log = "0.4"
+tracing = "0.1"
 uuid = { version = "1", features = ["v4"], default-features = false }
 runmat-time = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
+version = "1"
+features = ["v4", "js"]
+default-features = false
 
 [features]
 default = ["jit"]
 jit = ["dep:runmat-turbine"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-runmat-runtime = { workspace = true }
-runmat-snapshot = { workspace = true, default-features = false, features = ["compression-native", "validation"] }
+runmat-runtime = { workspace = true, features = ["plot-core"] }
+runmat-snapshot = { workspace = true, features = ["compression-native", "validation"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false, features = ["plot-web"] }
-runmat-snapshot = { workspace = true, default-features = false, features = ["compression-wasm", "validation"] }
+runmat-runtime = { workspace = true, features = ["plot-web"] }
+runmat-snapshot = { workspace = true, features = ["compression-wasm", "validation"] }
 
 [dev-dependencies]
-runmat-runtime = { workspace = true, features = ["interaction-test-hooks"] }
+runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }
+wasm-bindgen-test = "0.3"

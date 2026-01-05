@@ -572,10 +572,11 @@ fn compute_stack_offsets(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::Value;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -598,13 +599,17 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_requires_non_empty_input() {
+        setup_plot_tests();
         assert!(build_bar_chart(vec![]).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_builtin_matches_backend_contract() {
+        setup_plot_tests();
         let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
         if let Err(msg) = out {
             let msg_lower = msg.to_lowercase();
@@ -616,16 +621,20 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_parser_handles_stacked_flag() {
+        setup_plot_tests();
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let style =
             parse_bar_style_args("bar", &[Value::String("stacked".into())], defaults).unwrap();
         assert_eq!(style.layout, BarLayout::Stacked);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_series_from_matrix_grouped() {
+        setup_plot_tests();
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let tensor = matrix_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let style = parse_bar_style_args("bar", &[], defaults).unwrap();
@@ -633,8 +642,10 @@ pub(crate) mod tests {
         assert_eq!(charts.len(), 2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_series_from_matrix_stacked() {
+        setup_plot_tests();
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let style =
             parse_bar_style_args("bar", &[Value::String("stacked".into())], defaults).unwrap();

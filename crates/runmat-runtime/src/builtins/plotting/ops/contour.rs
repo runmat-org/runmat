@@ -24,18 +24,13 @@ use super::surf::build_color_lut;
 
 const DEFAULT_LEVELS: usize = 10;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLevelSpec {
+    #[default]
     Auto,
     Count(usize),
     Values(Vec<f64>),
     Step(f32),
-}
-
-impl Default for ContourLevelSpec {
-    fn default() -> Self {
-        ContourLevelSpec::Auto
-    }
 }
 
 impl ContourLevelSpec {
@@ -91,17 +86,12 @@ impl ContourLevelSpec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLineColor {
+    #[default]
     Auto,
     Color(Vec4),
     None,
-}
-
-impl Default for ContourLineColor {
-    fn default() -> Self {
-        ContourLineColor::Auto
-    }
 }
 
 #[derive(Clone)]
@@ -463,7 +453,7 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
     if options.is_empty() {
         return Ok(());
     }
-    if options.len() % 2 != 0 {
+    if !options.len().is_multiple_of(2) {
         return Err(format!(
             "{}: name-value arguments must come in pairs",
             args.name
@@ -1079,157 +1069,6 @@ fn implicit_axis(len: usize) -> Vec<f64> {
     (0..len).map(|idx| (idx + 1) as f64).collect()
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use runmat_builtins::NumericDType;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
-    }
-
-    fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
-        let mut shape = vec![rows];
-        if cols > 1 {
-            shape.push(cols);
-        }
-        Tensor {
-            data: data.to_vec(),
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
-    }
-
-    #[test]
-    fn explicit_axes_must_match_grid() {
-        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
-        let y = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 3, 1));
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let result = parse_contour_args("contour", x, vec![y, z]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn implicit_axes_respect_tensor_shape() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let args = parse_contour_args("contour", z, Vec::new()).unwrap();
-        assert_eq!(args.x_axis, vec![1.0, 2.0]);
-        assert_eq!(args.y_axis, vec![1.0, 2.0]);
-    }
-
-    #[test]
-    fn level_vector_must_increase() {
-        let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
-        assert!(parse_level_spec(bad_levels, "contour").is_err());
-
-        let good_levels = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 1, 3));
-        let spec = parse_level_spec(good_levels, "contour").unwrap();
-        match spec {
-            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0, 1.0, 2.0]),
-            _ => panic!("expected explicit levels"),
-        }
-    }
-
-    #[test]
-    fn level_step_option_generates_sequence() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let args = parse_contour_args(
-            "contour",
-            z,
-            vec![Value::String("LevelStep".into()), Value::Num(0.5)],
-        )
-        .unwrap();
-        match args.level_spec {
-            ContourLevelSpec::Step(step) => assert!((step - 0.5).abs() < f32::EPSILON),
-            other => panic!("expected LevelStep, found {other:?}"),
-        }
-    }
-
-    #[test]
-    fn line_color_option_parses_literal() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let args = parse_contour_args(
-            "contour",
-            z,
-            vec![Value::String("LineColor".into()), Value::String("r".into())],
-        )
-        .unwrap();
-        match args.line_color {
-            ContourLineColor::Color(color) => {
-                assert!((color.x - 1.0).abs() < f32::EPSILON);
-                assert!((color.y).abs() < f32::EPSILON);
-            }
-            other => panic!("expected explicit color, found {other:?}"),
-        }
-    }
-
-    #[test]
-    fn level_list_option_accepts_explicit_vector() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let args = parse_contour_args(
-            "contour",
-            z,
-            vec![
-                Value::String("LevelList".into()),
-                Value::Tensor(tensor_from(&[0.0, 0.5, 1.0], 1, 3)),
-            ],
-        )
-        .unwrap();
-        match args.level_spec {
-            ContourLevelSpec::Values(values) => {
-                assert_eq!(values, vec![0.0, 0.5, 1.0]);
-            }
-            other => panic!("expected explicit level list, found {other:?}"),
-        }
-    }
-
-    #[test]
-    fn line_color_none_suppresses_overlays() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let args = parse_contour_args(
-            "contour",
-            z,
-            vec![
-                Value::String("LineColor".into()),
-                Value::String("none".into()),
-            ],
-        )
-        .unwrap();
-        match args.line_color {
-            ContourLineColor::None => {}
-            other => panic!("expected LineColor none, found {other:?}"),
-        }
-    }
-
-    #[test]
-    fn level_list_mode_manual_requires_explicit_levels() {
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
-        let err = parse_contour_args(
-            "contour",
-            z.clone(),
-            vec![
-                Value::String("LevelListMode".into()),
-                Value::String("manual".into()),
-            ],
-        );
-        assert!(err.is_err());
-
-        let ok = parse_contour_args(
-            "contour",
-            z,
-            vec![
-                Value::String("LevelListMode".into()),
-                Value::String("manual".into()),
-                Value::String("LevelStep".into()),
-                Value::Num(0.25),
-            ],
-        );
-        assert!(ok.is_ok());
-    }
-}
-
 fn ensure_fill_levels(
     level_spec: &ContourLevelSpec,
     min_z: f32,
@@ -1271,5 +1110,173 @@ fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: 
             normal: normal.to_array(),
             tex_coords: [0.0, 0.0],
         });
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use runmat_builtins::NumericDType;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
+    }
+
+    fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
+        let mut shape = vec![rows];
+        if cols > 1 {
+            shape.push(cols);
+        }
+        Tensor {
+            data: data.to_vec(),
+            shape,
+            rows,
+            cols,
+            dtype: NumericDType::F64,
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn explicit_axes_must_match_grid() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 3, 1));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let result = parse_contour_args("contour", x, vec![y, z]);
+        assert!(result.is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_axes_respect_tensor_shape() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args("contour", z, Vec::new()).unwrap();
+        assert_eq!(args.x_axis, vec![1.0, 2.0]);
+        assert_eq!(args.y_axis, vec![1.0, 2.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn level_vector_must_increase() {
+        setup_plot_tests();
+        let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
+        assert!(parse_level_spec(bad_levels, "contour").is_err());
+
+        let good_levels = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 1, 3));
+        let spec = parse_level_spec(good_levels, "contour").unwrap();
+        match spec {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0, 1.0, 2.0]),
+            _ => panic!("expected explicit levels"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn level_step_option_generates_sequence() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("LevelStep".into()), Value::Num(0.5)],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Step(step) => assert!((step - 0.5).abs() < f32::EPSILON),
+            other => panic!("expected LevelStep, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn line_color_option_parses_literal() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("LineColor".into()), Value::String("r".into())],
+        )
+        .unwrap();
+        match args.line_color {
+            ContourLineColor::Color(color) => {
+                assert!((color.x - 1.0).abs() < f32::EPSILON);
+                assert!((color.y).abs() < f32::EPSILON);
+            }
+            other => panic!("expected explicit color, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn level_list_option_accepts_explicit_vector() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LevelList".into()),
+                Value::Tensor(tensor_from(&[0.0, 0.5, 1.0], 1, 3)),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => {
+                assert_eq!(values, vec![0.0, 0.5, 1.0]);
+            }
+            other => panic!("expected explicit level list, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn line_color_none_suppresses_overlays() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LineColor".into()),
+                Value::String("none".into()),
+            ],
+        )
+        .unwrap();
+        match args.line_color {
+            ContourLineColor::None => {}
+            other => panic!("expected LineColor none, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn level_list_mode_manual_requires_explicit_levels() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let err = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![
+                Value::String("LevelListMode".into()),
+                Value::String("manual".into()),
+            ],
+        );
+        assert!(err.is_err());
+
+        let ok = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::String("LevelListMode".into()),
+                Value::String("manual".into()),
+                Value::String("LevelStep".into()),
+                Value::Num(0.25),
+            ],
+        );
+        assert!(ok.is_ok());
     }
 }

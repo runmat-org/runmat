@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -14,7 +14,7 @@ links = "runmat_runtime_native"
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
-runmat-plot = { path = "../runmat-plot", version = "=0.2.7", optional = true, default-features = false }
+runmat-plot = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
@@ -26,6 +26,7 @@ encoding_rs = "0.8.35"
 chrono = { workspace = true }
 libc = "0.2"
 log = { workspace = true }
+tracing = "0.1"
 num-complex = "0.4"
 num-traits = "0.2"
 nalgebra = "0.32"
@@ -55,6 +56,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = ["plot-core"]
@@ -107,12 +109,15 @@ runmat-macros = { workspace = true }
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
 matfile = "0.5.0"
 tempfile = "3.10"
-axum = "0.7"
-tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 wgpu = "0.19"
 ctor = "0.2"
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+axum = "0.7"
+tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 
 [dependencies.serde]
 version = "1.0"

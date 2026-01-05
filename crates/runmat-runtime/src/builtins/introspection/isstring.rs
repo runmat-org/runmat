@@ -258,6 +258,7 @@ pub(crate) mod tests {
         StringArray, StructValue, Tensor,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_reports_true() {
         let value = Value::String("RunMat".to_string());
@@ -265,6 +266,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_object_and_handle_variants_report_false() {
         let complex_scalar = Value::Complex(1.25, -3.5);
@@ -299,6 +301,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_reports_true() {
         let array = StringArray::new(vec!["one".to_string(), "two".to_string()], vec![1, 2])
@@ -307,6 +310,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_string_array_reports_true() {
         let array = StringArray::new(vec![], vec![0, 0]).expect("empty string array");
@@ -314,6 +318,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn character_arrays_report_false() {
         let chars = CharArray::new_row("RunMat");
@@ -321,6 +326,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_and_logical_values_report_false() {
         let tensor = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor"));
@@ -343,6 +349,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_and_struct_values_report_false() {
         let empty_cell = CellArray::new(Vec::<Value>::new(), 0, 0).expect("cell");
@@ -357,6 +364,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isstring_gpu_inputs_return_false() {
         test_support::with_test_provider(|provider| {
@@ -371,12 +379,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isstring_wgpu_numeric_returns_false() {

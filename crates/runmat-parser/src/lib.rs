@@ -1,6 +1,34 @@
 use runmat_lexer::Token;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatMode {
+    #[default]
+    Matlab,
+    Strict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParserOptions {
+    #[serde(default)]
+    pub compat_mode: CompatMode,
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        Self {
+            compat_mode: CompatMode::Matlab,
+        }
+    }
+}
+
+impl ParserOptions {
+    pub fn new(compat_mode: CompatMode) -> Self {
+        Self { compat_mode }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String),
@@ -167,6 +195,7 @@ struct TokenInfo {
     token: Token,
     lexeme: String,
     position: usize,
+    end: usize,
 }
 
 #[derive(Debug)]
@@ -178,6 +207,10 @@ pub struct ParseError {
 }
 
 pub fn parse(input: &str) -> Result<Program, ParseError> {
+    parse_with_options(input, ParserOptions::default())
+}
+
+pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program, ParseError> {
     use runmat_lexer::tokenize_detailed;
 
     let toks = tokenize_detailed(input);
@@ -200,6 +233,7 @@ pub fn parse(input: &str) -> Result<Program, ParseError> {
             token: t.token,
             lexeme: t.lexeme,
             position: t.start,
+            end: t.end,
         });
     }
 
@@ -207,6 +241,7 @@ pub fn parse(input: &str) -> Result<Program, ParseError> {
         tokens,
         pos: 0,
         input: input.to_string(),
+        options,
     };
     parser.parse_program()
 }
@@ -256,11 +291,109 @@ struct Parser {
     tokens: Vec<TokenInfo>,
     pos: usize,
     input: String,
+    options: ParserOptions,
 }
+
+#[derive(Clone, Copy)]
+struct CommandVerb {
+    name: &'static str,
+    arg_kind: CommandArgKind,
+}
+
+#[derive(Clone, Copy)]
+enum CommandArgKind {
+    Keyword {
+        allowed: &'static [&'static str],
+        optional: bool,
+    },
+    Any,
+}
+
+const COMMAND_VERBS: &[CommandVerb] = &[
+    CommandVerb {
+        name: "hold",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["on", "off", "all", "reset"],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "grid",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["on", "off"],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "box",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["on", "off"],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "axis",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["auto", "manual", "tight", "equal", "ij", "xy"],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "shading",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["flat", "interp", "faceted"],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "colormap",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &[
+                "parula", "jet", "hsv", "hot", "cool", "spring", "summer", "autumn", "winter",
+                "gray", "bone", "copper", "pink",
+            ],
+            optional: false,
+        },
+    },
+    CommandVerb {
+        name: "colorbar",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &["on", "off"],
+            optional: true,
+        },
+    },
+    CommandVerb {
+        name: "figure",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "subplot",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "clf",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "cla",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "close",
+        arg_kind: CommandArgKind::Any,
+    },
+];
 
 impl Parser {
     fn skip_newlines(&mut self) {
         while self.consume(&Token::Newline) {}
+    }
+
+    fn tokens_adjacent(&self, left: usize, right: usize) -> bool {
+        match (self.tokens.get(left), self.tokens.get(right)) {
+            (Some(a), Some(b)) => a.end == b.position,
+            _ => false,
+        }
     }
 
     fn is_simple_assignment_ahead(&self) -> bool {
@@ -413,8 +546,16 @@ impl Parser {
                     // Command-form at statement start if it looks like a sequence of simple arguments
                     // and is not immediately followed by indexing/member syntax.
                     if self.can_start_command_form() {
+                        if self.options.compat_mode == CompatMode::Strict {
+                            return Err(self.error(
+                                "Command syntax is disabled in strict compatibility mode; call functions with parentheses.",
+                            ));
+                        }
                         let name = self.next().unwrap().lexeme;
-                        let args = self.parse_command_args();
+                        let mut args = self.parse_command_args();
+                        if let Some(command) = self.lookup_command(&name) {
+                            self.normalize_command_args(command, &mut args[..])?;
+                        }
                         Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
                     } else {
                         // If we see Ident <space> Ident immediately followed by postfix opener,
@@ -454,7 +595,27 @@ impl Parser {
 
     fn can_start_command_form(&self) -> bool {
         // At entry, peek_token() is Some(Ident) for callee
+        let Some(current) = self.tokens.get(self.pos) else {
+            return false;
+        };
+        let verb = current.lexeme.as_str();
+        let command = self.lookup_command(verb);
+        let zero_arg_allowed = matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::Any,
+                ..
+            })
+        ) || matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::Keyword { optional: true, .. },
+                ..
+            })
+        );
+
         let mut i = 1;
+        let mut saw_arg = false;
         while matches!(
             self.peek_token_at(i),
             Some(Token::Newline | Token::Ellipsis)
@@ -466,12 +627,17 @@ impl Parser {
             self.peek_token_at(i),
             Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
         ) {
-            return false;
+            if !zero_arg_allowed {
+                return false;
+            }
+        } else {
+            saw_arg = true;
         }
         // Consume all contiguous simple args
         loop {
             match self.peek_token_at(i) {
                 Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
+                    saw_arg = true;
                     i += 1;
                 }
                 Some(Token::Newline | Token::Ellipsis) => {
@@ -479,6 +645,9 @@ impl Parser {
                 }
                 _ => break,
             }
+        }
+        if !saw_arg && !zero_arg_allowed {
+            return false;
         }
         // If the next token begins indexing/member or other expression syntax, do not use command-form
         match self.peek_token_at(i) {
@@ -538,6 +707,59 @@ impl Parser {
             }
         }
         args
+    }
+
+    fn lookup_command(&self, name: &str) -> Option<&'static CommandVerb> {
+        COMMAND_VERBS
+            .iter()
+            .find(|cmd| cmd.name.eq_ignore_ascii_case(name))
+    }
+
+    fn normalize_command_args(
+        &self,
+        command: &CommandVerb,
+        args: &mut [Expr],
+    ) -> Result<(), ParseError> {
+        match command.arg_kind {
+            CommandArgKind::Keyword { allowed, optional } => {
+                if args.is_empty() {
+                    if optional {
+                        return Ok(());
+                    }
+                    return Err(self.error(&format!(
+                        "'{}' command syntax requires an argument",
+                        command.name
+                    )));
+                }
+                if args.len() > 1 {
+                    return Err(self.error(&format!(
+                        "'{}' command syntax accepts only one argument",
+                        command.name
+                    )));
+                }
+                let keyword = extract_keyword(&args[0]).ok_or_else(|| {
+                    self.error(&format!(
+                        "'{}' command syntax expects a keyword argument",
+                        command.name
+                    ))
+                })?;
+                if allowed
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(&keyword))
+                {
+                    args[0] = Expr::String(format!("\"{}\"", keyword));
+                } else {
+                    return Err(self.error(&format!(
+                        "'{}' command syntax does not support '{}'",
+                        command.name, keyword
+                    )));
+                }
+            }
+            CommandArgKind::Any => {
+                // Accept general expressions; no normalization needed.
+            }
+        }
+        Ok(())
     }
 
     fn try_parse_lvalue_assign(&mut self) -> Result<Option<Stmt>, ParseError> {
@@ -742,6 +964,19 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut node = self.parse_unary()?;
         loop {
+            if self.peek_token() == Some(&Token::Ident) && self.pos > 0 {
+                let prev = &self.tokens[self.pos - 1];
+                let curr = &self.tokens[self.pos];
+                let is_adjacent = self.tokens_adjacent(self.pos - 1, self.pos);
+                let is_imag =
+                    curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
+                if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
+                    let ident = self.next().unwrap().lexeme;
+                    let rhs = Expr::Ident(ident);
+                    node = Expr::Binary(Box::new(node), BinOp::Mul, Box::new(rhs));
+                    continue;
+                }
+            }
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,
@@ -1666,5 +1901,13 @@ impl Parser {
         } else {
             false
         }
+    }
+}
+
+fn extract_keyword(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(s) => Some(s.clone()),
+        Expr::String(s) => Some(s.trim_matches(&['"', '\''][..]).to_string()),
+        _ => None,
     }
 }

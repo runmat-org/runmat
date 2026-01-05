@@ -542,10 +542,11 @@ fn ensure_scatter3_host_metadata(
 pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::Value;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn test_style() -> Scatter3ResolvedStyle {
@@ -582,13 +583,17 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_scatter3_requires_equal_lengths() {
+        setup_plot_tests();
         assert!(build_scatter3_plot(vec![1.0], vec![], vec![1.0], &mut test_style()).is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_builtin_emits_result_or_backend_error() {
+        setup_plot_tests();
         let out = scatter3_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -600,8 +605,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_accepts_per_point_sizes() {
+        setup_plot_tests();
         let rest = vec![Value::Tensor(Tensor {
             data: vec![1.0, 2.0],
             shape: vec![2],
@@ -614,8 +621,10 @@ pub(crate) mod tests {
         assert!(style.per_point_sizes.is_some());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_applies_display_name() {
+        setup_plot_tests();
         let rest = vec![
             Value::String("DisplayName".into()),
             Value::String("Cloud A".into()),

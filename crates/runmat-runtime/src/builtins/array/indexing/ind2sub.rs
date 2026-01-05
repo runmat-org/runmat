@@ -409,6 +409,7 @@ pub(crate) mod tests {
         cell.data.iter().map(|ptr| (**ptr).clone()).collect()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn recovers_matrix_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -424,6 +425,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_vector_indices() {
         let dims = Tensor::new(vec![3.0, 5.0], vec![1, 2]).unwrap();
@@ -453,6 +455,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn recovers_three_dimensional_indices() {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
@@ -479,6 +482,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_out_of_range_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -490,6 +494,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_zero_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -501,6 +506,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_fractional_index() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
@@ -512,6 +518,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn errors_on_invalid_size_elements() {
         let dims = Tensor::new(vec![3.5, 4.0], vec![1, 2]).unwrap();
@@ -522,6 +529,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ind2sub_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -557,12 +565,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ind2sub_wgpu_matches_cpu() {

@@ -422,6 +422,7 @@ pub(crate) mod tests {
     use std::fs::File;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_creates_directory_with_single_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -436,6 +437,7 @@ pub(crate) mod tests {
         assert!(path_is_existing_directory(&target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_returns_success_when_directory_already_exists() {
         let _lock = REPL_FS_TEST_LOCK
@@ -453,6 +455,7 @@ pub(crate) mod tests {
         assert!(path_is_existing_directory(&target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_combines_parent_and_child_paths() {
         let _lock = REPL_FS_TEST_LOCK
@@ -474,6 +477,7 @@ pub(crate) mod tests {
         assert!(path_is_existing_directory(&parent.join(child)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_requires_string_inputs() {
         let _lock = REPL_FS_TEST_LOCK
@@ -487,6 +491,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_FOLDER_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_detects_missing_parent_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -507,6 +512,7 @@ pub(crate) mod tests {
         assert!(!path_exists(&expected_target));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_detects_parent_path_is_not_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -529,6 +535,7 @@ pub(crate) mod tests {
         assert!(!path_exists(&child));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_captures_failure_status_and_message() {
         let _lock = REPL_FS_TEST_LOCK
@@ -546,6 +553,7 @@ pub(crate) mod tests {
         assert!(eval.message().contains("non-directory"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_rejects_empty_folder_name() {
         let _lock = REPL_FS_TEST_LOCK
@@ -564,6 +572,7 @@ pub(crate) mod tests {
         assert!(paired.message().contains("must not be empty"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mkdir_outputs_vector_contains_message_and_id() {
         let _lock = REPL_FS_TEST_LOCK
@@ -580,6 +589,7 @@ pub(crate) mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

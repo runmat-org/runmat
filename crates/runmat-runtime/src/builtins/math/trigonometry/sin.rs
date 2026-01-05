@@ -372,6 +372,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_scalar() {
         let value = Value::Num(std::f64::consts::PI / 2.0);
@@ -382,6 +383,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
@@ -396,6 +398,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_int_value_promotes() {
         let value = Value::Int(IntValue::I32(1));
@@ -406,6 +409,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_complex_scalar() {
         let result = sin_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("sin");
@@ -418,6 +422,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_char_array_roundtrip() {
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
@@ -434,6 +439,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -451,6 +457,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_missing_prototype_errors() {
         let err =
@@ -458,6 +465,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_complex_prototype_errors() {
         let err = sin_builtin(
@@ -468,6 +476,7 @@ pub(crate) mod tests {
         assert!(err.contains("complex prototypes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -494,6 +503,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_host_with_gpu_input_gathers() {
         test_support::with_test_provider(|provider| {
@@ -521,6 +531,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_rejects_extra_arguments() {
         let err = sin_builtin(
@@ -531,6 +542,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_keyword_case_insensitive() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
@@ -549,6 +561,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
@@ -563,12 +576,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn sin_wgpu_matches_cpu_elementwise() {

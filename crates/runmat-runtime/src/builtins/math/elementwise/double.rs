@@ -437,6 +437,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_scalar_num_is_identity() {
         let value = Value::Num(std::f64::consts::PI);
@@ -447,6 +448,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_promotes_integers() {
         let value = Value::Int(IntValue::I32(42));
@@ -457,6 +459,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_logical_array_returns_tensor() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
@@ -470,6 +473,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_char_array_converts_to_codes() {
         let chars = CharArray::new_row("AB");
@@ -483,6 +487,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_complex_scalar_is_identity() {
         let result = double_builtin(Value::Complex(1.5, -2.5), Vec::new()).expect("double");
@@ -495,6 +500,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2]).unwrap();
@@ -508,6 +514,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_rejects_strings() {
         let err = double_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
@@ -517,6 +524,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -533,6 +541,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_gpu_prototype_keeps_residency() {
         test_support::with_test_provider(|provider| {
@@ -558,6 +567,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_host_gathers_gpu_input() {
         test_support::with_test_provider(|provider| {
@@ -583,6 +593,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_missing_prototype_errors() {
         let err =
@@ -590,6 +601,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_like_rejects_extra_arguments() {
         let err = double_builtin(
@@ -600,6 +612,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn double_wgpu_matches_cpu() {
@@ -643,6 +656,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

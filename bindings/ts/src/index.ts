@@ -37,6 +37,8 @@ export type {
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
 
+export type LanguageCompatMode = "matlab" | "strict";
+
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface RunMatSnapshotSource {
@@ -76,6 +78,9 @@ export interface RunMatInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  language?: {
+    compat?: LanguageCompatMode;
+  };
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -113,6 +118,33 @@ export interface StdoutEntry {
 }
 
 export type StdoutListener = (entry: StdoutEntry) => void;
+
+export interface RuntimeLogEntry {
+  ts: string;
+  level: string;
+  target: string;
+  message: string;
+  traceId?: string;
+  spanId?: string;
+  fields?: Record<string, unknown>;
+}
+
+export type RuntimeLogListener = (entry: RuntimeLogEntry) => void;
+
+export interface TraceEvent {
+  name: string;
+  cat: string;
+  ph: string;
+  ts: number;
+  dur?: number;
+  pid?: number;
+  tid?: number;
+  traceId?: string;
+  spanId?: string;
+  args?: Record<string, unknown>;
+}
+
+export type TraceEventListener = (entries: TraceEvent[]) => void;
 
 export type InputRequest =
   | { kind: "line"; prompt: string; echo: boolean }
@@ -332,6 +364,8 @@ export interface RunMatSessionHandle {
     options?: MaterializeVariableOptions
   ): Promise<MaterializedVariable>;
   setFusionPlanEnabled(enabled: boolean): void;
+  setLanguageCompat(mode: LanguageCompatMode): void;
+  fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
 }
 
 interface NativeInitOptions {
@@ -348,6 +382,7 @@ interface NativeInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  languageCompat?: LanguageCompatMode;
 }
 
 interface RunMatNativeSession {
@@ -369,6 +404,8 @@ interface RunMatNativeSession {
     options?: MaterializeVariableOptionsWire
   ) => MaterializedVariable;
   setFusionPlanEnabled?: (enabled: boolean) => void;
+  setLanguageCompat?: (mode: LanguageCompatMode) => void;
+  fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
 }
 
 interface ResumeInputWireValue {
@@ -410,6 +447,10 @@ interface RunMatNativeModule {
   renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
+  subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
+  unsubscribeRuntimeLog?: (id: number) => void;
+  subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
+  unsubscribeTraceEvents?: (id: number) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
 }
@@ -475,7 +516,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
     scatterTargetPoints: options.scatterTargetPoints,
     surfaceVertexBudget: options.surfaceVertexBudget,
-    emitFusionPlan: options.emitFusionPlan ?? false
+    emitFusionPlan: options.emitFusionPlan ?? false,
+    languageCompat: options.language?.compat
   });
   return new WebRunMatSession(session);
 }
@@ -534,6 +576,30 @@ export async function unsubscribeStdout(id: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "unsubscribeStdout");
   native.unsubscribeStdout(id);
+}
+
+export async function subscribeRuntimeLog(listener: RuntimeLogListener): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "subscribeRuntimeLog");
+  return native.subscribeRuntimeLog((entry: RuntimeLogEntry) => listener(entry));
+}
+
+export async function unsubscribeRuntimeLog(id: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "unsubscribeRuntimeLog");
+  native.unsubscribeRuntimeLog(id);
+}
+
+export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "subscribeTraceEvents");
+  return native.subscribeTraceEvents((entries: TraceEvent[]) => listener(entries));
+}
+
+export async function unsubscribeTraceEvents(id: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "unsubscribeTraceEvents");
+  native.unsubscribeTraceEvents(id);
 }
 
 export async function figure(handle?: number): Promise<number> {
@@ -749,6 +815,20 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "setFusionPlanEnabled");
     this.native.setFusionPlanEnabled(enabled);
+  }
+
+  setLanguageCompat(mode: LanguageCompatMode): void {
+    this.ensureActive();
+    requireNativeFunction(this.native, "setLanguageCompat");
+    this.native.setLanguageCompat(mode);
+  }
+
+  async fusionPlanForSource(source: string): Promise<FusionPlanSnapshot | null> {
+    this.ensureActive();
+    if (typeof this.native.fusionPlanForSource !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose fusionPlanForSource yet.");
+    }
+    return this.native.fusionPlanForSource(source) ?? null;
   }
 }
 

@@ -18,12 +18,14 @@ use runmat_accelerate_api::ProviderPrecision;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
-    matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
-    ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
-    FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind, InputResponse,
-    MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
-    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSnapshot,
+    matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
+    ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
+    FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
+    InputResponse, MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind,
+    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceSnapshot,
 };
+use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
@@ -31,7 +33,9 @@ use runmat_runtime::builtins::{
 use runmat_runtime::warning_store::RuntimeWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
+use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
+use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
@@ -125,6 +129,8 @@ struct InitOptions {
     telemetry_id: Option<String>,
     #[serde(default)]
     emit_fusion_plan: Option<bool>,
+    #[serde(default)]
+    language_compat: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -148,6 +154,28 @@ static STDOUT_FORWARDER: OnceLock<
 > = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
+        RefCell::new(HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static RUNTIME_LOG_FORWARDER: OnceLock<
+    Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
+> = OnceLock::new();
+static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
+        RefCell::new(HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static TRACE_FORWARDER: OnceLock<
+    Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
+> = OnceLock::new();
+static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
 #[derive(Clone)]
 struct SessionConfig {
     enable_jit: bool,
@@ -159,6 +187,7 @@ struct SessionConfig {
     wgpu_force_fallback_adapter: bool,
     auto_offload: AutoOffloadOptions,
     emit_fusion_plan: bool,
+    language_compat: CompatMode,
 }
 
 impl SessionConfig {
@@ -173,6 +202,7 @@ impl SessionConfig {
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
+            language_compat: parse_language_compat(opts.language_compat.as_deref()),
         }
     }
 
@@ -205,10 +235,27 @@ pub struct RunMatWasm {
 impl RunMatWasm {
     #[wasm_bindgen(js_name = execute)]
     pub fn execute(&self, source: String) -> Result<JsValue, JsValue> {
+        init_logging_once();
+        let exec_span = info_span!(
+            "runmat.execute",
+            source_len = source.len() as u64,
+            disposed = self.disposed.get()
+        );
+        let _enter = exec_span.enter();
+        info!(target = "runmat.runtime", "Execution started");
         let mut session = self.session.borrow_mut();
         let result = session
             .execute(&source)
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
+        info!(
+            target = "runmat.runtime",
+            workspace_entries = result.workspace.values.len(),
+            stdout_entries = result.streams.len(),
+            figures_touched = result.figures_touched.len(),
+            used_jit = result.used_jit,
+            error = result.error.as_deref().unwrap_or(""),
+            "Execution finished"
+        );
         let payload = ExecutionPayload::from(result);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
@@ -239,6 +286,7 @@ impl RunMatWasm {
             session.set_telemetry_client_id(None);
         }
         session.set_emit_fusion_plan(config.emit_fusion_plan);
+        session.set_compat_mode(config.language_compat);
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -247,6 +295,22 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
         self.session.borrow().cancel_execution();
+    }
+
+    #[wasm_bindgen(js_name = "setLanguageCompat")]
+    pub fn set_language_compat(&self, mode: String) {
+        if self.disposed.get() {
+            return;
+        }
+        if let Some(parsed) = parse_language_compat_from_str(&mode) {
+            {
+                let mut config = self.config.borrow_mut();
+                config.language_compat = parsed;
+            }
+            self.session.borrow_mut().set_compat_mode(parsed);
+        } else {
+            warn!("RunMat wasm: ignoring unknown language compat mode '{mode}'");
+        }
     }
 
     #[wasm_bindgen(js_name = setInputHandler)]
@@ -326,6 +390,20 @@ impl RunMatWasm {
         self.session.borrow_mut().set_emit_fusion_plan(enabled);
         if let Ok(mut cfg) = self.config.try_borrow_mut() {
             cfg.emit_fusion_plan = enabled;
+        }
+    }
+
+    /// Compile-only fusion plan snapshot (no execution).
+    #[wasm_bindgen(js_name = fusionPlanForSource)]
+    pub fn fusion_plan_for_source(&self, source: String) -> Result<JsValue, JsValue> {
+        let session = self.session.borrow();
+        let snapshot = session
+            .compile_fusion_plan(&source)
+            .map_err(|err| js_error(&format!("Failed to compile fusion plan: {err}")))?;
+        match snapshot {
+            Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
+                .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),
+            None => Ok(JsValue::NULL),
         }
     }
 
@@ -637,6 +715,76 @@ pub fn unsubscribe_stdout(id: u32) {
 pub fn unsubscribe_stdout(_id: u32) {}
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = subscribeRuntimeLog)]
+pub fn subscribe_runtime_log(callback: JsValue) -> Result<u32, JsValue> {
+    init_logging_once();
+    let function = callback
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| js_error("subscribeRuntimeLog expects a Function"))?;
+    ensure_runtime_log_forwarder_installed();
+    let id = RUNTIME_LOG_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().insert(id, function);
+    });
+    Ok(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = subscribeRuntimeLog)]
+pub fn subscribe_runtime_log(_callback: JsValue) -> Result<u32, JsValue> {
+    Err(js_error(
+        "subscribeRuntimeLog is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
+pub fn unsubscribe_runtime_log(id: u32) {
+    RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().remove(&id);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
+pub fn unsubscribe_runtime_log(_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = subscribeTraceEvents)]
+pub fn subscribe_trace_events(callback: JsValue) -> Result<u32, JsValue> {
+    init_logging_once();
+    let function = callback
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| js_error("subscribeTraceEvents expects a Function"))?;
+    ensure_trace_forwarder_installed();
+    let id = TRACE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    TRACE_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().insert(id, function);
+    });
+    Ok(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = subscribeTraceEvents)]
+pub fn subscribe_trace_events(_callback: JsValue) -> Result<u32, JsValue> {
+    Err(js_error(
+        "subscribeTraceEvents is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = unsubscribeTraceEvents)]
+pub fn unsubscribe_trace_events(id: u32) {
+    TRACE_SUBSCRIBERS.with(|cell| {
+        cell.borrow_mut().remove(&id);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = unsubscribeTraceEvents)]
+pub fn unsubscribe_trace_events(_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
 fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
     JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
@@ -922,6 +1070,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_client_id(Some(cid));
     }
     session.set_emit_fusion_plan(config.emit_fusion_plan);
+    session.set_compat_mode(config.language_compat);
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -980,6 +1129,22 @@ fn apply_plotting_overrides(opts: &InitOptions) {
     }
 }
 
+fn parse_language_compat(input: Option<&str>) -> CompatMode {
+    input
+        .and_then(parse_language_compat_from_str)
+        .unwrap_or(CompatMode::Matlab)
+}
+
+fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
+    if value.eq_ignore_ascii_case("strict") {
+        Some(CompatMode::Strict)
+    } else if value.eq_ignore_ascii_case("matlab") {
+        Some(CompatMode::Matlab)
+    } else {
+        None
+    }
+}
+
 fn install_cpu_provider(config: &SessionConfig) {
     let mut options = config.to_accel_options();
     options.enabled = false;
@@ -993,6 +1158,48 @@ fn ensure_figure_event_bridge() {
         let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
             Arc::new(|event| emit_js_figure_event(event));
         let _ = runtime_install_figure_observer(observer);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_runtime_log_forwarder_installed() {
+    RUNTIME_LOG_FORWARDER.get_or_init(|| {
+        let forwarder: Arc<dyn Fn(&RuntimeLogRecord) + Send + Sync> =
+            Arc::new(|record: &RuntimeLogRecord| {
+                let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+                RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
+                    for cb in cell.borrow().values() {
+                        let _ = cb.call1(&JsValue::NULL, &js_value);
+                    }
+                });
+            });
+        let hook = forwarder.clone();
+        set_runtime_log_hook(move |rec| {
+            (hook)(rec);
+        });
+        forwarder
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_trace_forwarder_installed() {
+    use runmat_logging::{set_trace_hook, TraceEvent};
+
+    TRACE_FORWARDER.get_or_init(|| {
+        let forwarder: Arc<dyn Fn(&[TraceEvent]) + Send + Sync> =
+            Arc::new(|events: &[TraceEvent]| {
+                let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+                TRACE_SUBSCRIBERS.with(|cell| {
+                    for cb in cell.borrow().values() {
+                        let _ = cb.call1(&JsValue::NULL, &js_value);
+                    }
+                });
+            });
+        let hook = forwarder.clone();
+        set_trace_hook(move |events| {
+            (hook)(events);
+        });
+        forwarder
     });
 }
 
@@ -1510,7 +1717,13 @@ fn init_logging_once() {
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = wasm_logger::init(wasm_logger::Config::default());
+            let _ = init_logging(LoggingOptions {
+                enable_otlp: false,
+                enable_traces: true,
+                pid: 1,
+            });
+            ensure_runtime_log_forwarder_installed();
+            ensure_trace_forwarder_installed();
         }
     });
 }

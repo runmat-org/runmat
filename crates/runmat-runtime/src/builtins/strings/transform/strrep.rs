@@ -357,6 +357,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_scalar_basic() {
         let result = strrep_builtin(
@@ -368,6 +369,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat Interpreter".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_array_preserves_missing() {
         let array = StringArray::new(
@@ -401,6 +403,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_array_with_char_pattern() {
         let array = StringArray::new(
@@ -423,6 +426,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_char_array_padding() {
         let chars = CharArray::new(vec!['R', 'u', 'n', ' ', 'M', 'a', 't'], 1, 7).unwrap();
@@ -443,6 +447,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_char_array_shrinks_rows_pad_with_spaces() {
         let mut data: Vec<char> = "alpha".chars().collect();
@@ -465,6 +470,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_char_vectors() {
         let cell = CellArray::new(
@@ -499,6 +505,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_string_scalars() {
         let cell = CellArray::new(
@@ -527,6 +534,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_invalid_element_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -539,6 +547,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_char_matrix_element() {
         let mut chars: Vec<char> = "alpha".chars().collect();
@@ -569,6 +578,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_cell_array_string_arrays() {
         let element = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
@@ -594,6 +604,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_empty_pattern_inserts_replacement() {
         let result = strrep_builtin(
@@ -605,6 +616,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("-a-b-c-".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_type_mismatch_errors() {
         let err = strrep_builtin(
@@ -616,6 +628,7 @@ pub(crate) mod tests {
         assert!(err.contains("same data type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_invalid_pattern_type_errors() {
         let err = strrep_builtin(
@@ -627,6 +640,7 @@ pub(crate) mod tests {
         assert!(err.contains("string scalars or character vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_first_argument_type_error() {
         let err = strrep_builtin(
@@ -638,6 +652,7 @@ pub(crate) mod tests {
         assert!(err.contains("first argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strrep_wgpu_provider_fallback() {
@@ -658,6 +673,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("Turbine JIT".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_smoke() {
         let blocks = test_support::doc_examples(DOC_MD);

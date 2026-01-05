@@ -483,6 +483,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_positive_values() {
         let result = mod_builtin(Value::Num(17.0), Value::Num(5.0)).expect("mod");
@@ -492,6 +493,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_negative_divisor_keeps_sign() {
         let tensor = Tensor::new(vec![-7.0, -3.0, 4.0, 9.0], vec![4, 1]).unwrap();
@@ -506,6 +508,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_negative_numerator_positive_divisor() {
         let result = mod_builtin(Value::Num(-3.0), Value::Num(2.0)).expect("mod");
@@ -515,6 +518,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_zero_divisor_returns_nan() {
         let result = mod_builtin(Value::Num(3.0), Value::Num(0.0)).expect("mod");
@@ -524,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_matrix_scalar_broadcast() {
         let matrix = Tensor::new(vec![4.5, 7.1, -2.3, 0.4], vec![2, 2]).unwrap();
@@ -540,6 +545,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_complex_operands() {
         let complex =
@@ -560,6 +566,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_char_array_support() {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
@@ -570,6 +577,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_string_input_errors() {
         let err = mod_builtin(Value::from("abc"), Value::Num(3.0))
@@ -577,6 +585,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_logical_array_support() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -588,6 +597,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_vector_broadcasting() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -602,6 +612,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_nan_inputs_propagate() {
         let result = mod_builtin(Value::Num(f64::NAN), Value::Num(3.0)).expect("mod");
@@ -611,6 +622,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -634,6 +646,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_int_scalar_promotes() {
         let result =
@@ -644,6 +657,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn mod_wgpu_matches_cpu() {
@@ -691,6 +705,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

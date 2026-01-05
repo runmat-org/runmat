@@ -219,18 +219,21 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_double_for_numeric_scalars() {
         let name = class_builtin(Value::Num(std::f64::consts::PI)).expect("class");
         assert_eq!(name, "double");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_integer_type_names() {
         let name = class_builtin(Value::Int(IntValue::I32(12))).expect("class");
         assert_eq!(name, "int32");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_expected_names_for_core_types() {
         let logical_scalar = Value::Bool(true);
@@ -288,6 +291,7 @@ pub(crate) mod tests {
         assert_eq!(class_name_for_value(&exception), "MException");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_gpuarray_without_gather() {
         test_support::with_test_provider(|provider| {
@@ -302,6 +306,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_handle_class_names() {
         let fallback = HandleRef {
@@ -321,6 +326,7 @@ pub(crate) mod tests {
         assert_eq!(name, "MockHandle");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_object_and_listener_classes() {
         let object = ObjectInstance::new("pkg.Point".into());
@@ -339,6 +345,7 @@ pub(crate) mod tests {
         assert_eq!(listener_name, "event.listener");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn class_reports_gpuarray_with_wgpu_provider() {
@@ -361,6 +368,7 @@ pub(crate) mod tests {
         assert_eq!(name, "gpuArray");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_runtime as rt;
 
@@ -37,6 +39,7 @@ fn assert_close(actual: &[f64], expected: &[f64], tol: f64) {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn mean_all_native_preserves_single_dtype_and_value() {
     let rows = 2;
@@ -64,6 +67,7 @@ fn mean_all_native_preserves_single_dtype_and_value() {
     assert_close(&scalar.data, &[expected], 1e-7);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn nlms_style_column_reductions_match_reference() {
     let rows = 4;

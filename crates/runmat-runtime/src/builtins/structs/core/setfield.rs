@@ -1238,6 +1238,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_creates_scalar_field() {
         let struct_value = StructValue::new();
@@ -1258,6 +1259,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_creates_nested_structs() {
         let struct_value = StructValue::new();
@@ -1288,6 +1290,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_struct_array_element() {
         let mut a = StructValue::new();
@@ -1323,6 +1326,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_assigns_into_cell_then_struct() {
         let mut inner1 = StructValue::new();
@@ -1370,6 +1374,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_struct_array_with_end_index() {
         let mut first = StructValue::new();
@@ -1409,6 +1414,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_assigns_object_property() {
         let mut class_def = ClassDef {
@@ -1444,6 +1450,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_errors_when_indexing_missing_field() {
         let struct_value = StructValue::new();
@@ -1464,6 +1471,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_errors_on_static_property_assignment() {
         let mut class_def = ClassDef {
@@ -1497,6 +1505,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_handle_target() {
         let mut inner = StructValue::new();
@@ -1529,6 +1538,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn setfield_gpu_tensor_indexing_gathers_to_host() {
@@ -1587,6 +1597,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

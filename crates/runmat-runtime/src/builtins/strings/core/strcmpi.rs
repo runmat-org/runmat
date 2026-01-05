@@ -239,6 +239,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_scalar_true_ignores_case() {
         let result = strcmpi_builtin(
@@ -249,6 +250,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_scalar_false_when_text_differs() {
         let result = strcmpi_builtin(
@@ -259,6 +261,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_array_broadcast_scalar_case_insensitive() {
         let array = StringArray::new(
@@ -272,6 +275,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_row_compare_casefold() {
         let chars = CharArray::new(vec!['c', 'a', 't', 'D', 'O', 'G'], 2, 3).unwrap();
@@ -281,6 +285,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_to_char_array_casefold() {
         let left = CharArray::new(vec!['A', 'b', 'C', 'd'], 2, 2).unwrap();
@@ -291,6 +296,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_scalar_casefold() {
         let cell = CellArray::new(
@@ -309,6 +315,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_vs_cell_array_broadcast() {
         let left = CellArray::new(vec![Value::from("North"), Value::from("East")], 1, 2).unwrap();
@@ -318,6 +325,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_string_array_multi_dimensional_broadcast() {
         let left = StringArray::new(vec!["north".into(), "south".into()], vec![2, 1]).unwrap();
@@ -332,6 +340,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_missing_strings_compare_false() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -343,6 +352,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_char_array_trailing_space_not_equal() {
         let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
@@ -351,6 +361,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -360,6 +371,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_invalid_argument_type() {
         let err =
@@ -367,6 +379,7 @@ pub(crate) mod tests {
         assert!(err.contains("first argument must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
@@ -375,6 +388,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements must be character vectors or string scalars"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_empty_char_array_returns_empty() {
         let chars = CharArray::new(Vec::<char>::new(), 0, 3).unwrap();
@@ -384,6 +398,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strcmpi_with_wgpu_provider_matches_expected() {
@@ -398,6 +413,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -885,6 +885,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_numeric_scalar() {
         let out = string_builtin(Value::Num(42.0), Vec::new()).expect("string");
@@ -897,6 +898,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_numeric_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -910,6 +912,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_logical_array_uses_boolean_text() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -923,6 +926,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_char_array_produces_column_vector() {
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
@@ -936,6 +940,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_cell_array() {
         let cell = CellArray::new(vec![Value::Bool(true), Value::Int(IntValue::I32(7))], 1, 2)
@@ -950,6 +955,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_cell_array_column_major() {
         let cell = CellArray::new(
@@ -973,6 +979,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_cell_element_requires_scalar_numeric() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -982,6 +989,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell numeric values must be scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_rejects_struct_input() {
         let err =
@@ -989,6 +997,7 @@ pub(crate) mod tests {
         assert!(err.contains("structs are not supported"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_errors_on_unsupported_encoding() {
         let err = string_builtin(
@@ -1002,6 +1011,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_accepts_system_encoding_alias() {
         let out = string_builtin(
@@ -1018,6 +1028,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_encoding_allows_percent_literal() {
         let out = string_builtin(
@@ -1034,6 +1045,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_spec_cell_requires_text_scalars() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -1044,6 +1056,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_cell_argument_requires_scalar_values() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1052,6 +1065,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell format arguments must contain scalar values"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_handles_large_unsigned_int() {
         let value = Value::Int(IntValue::U64(u64::MAX));
@@ -1065,6 +1079,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_numeric_scalar() {
         let out = string_builtin(Value::from("%d"), vec![Value::Num(7.0)]).expect("string");
@@ -1077,6 +1092,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_broadcast_over_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -1091,6 +1107,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_string_array_spec_alignment() {
         let spec = StringArray::new(vec!["[%d]".into(), "Value %d".into()], vec![1, 2]).unwrap();
@@ -1106,6 +1123,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_prefers_placeholders_over_encoding_hint() {
         let out = string_builtin(Value::from("%s"), vec![Value::from("UTF-8")]).expect("string");
@@ -1118,6 +1136,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_mismatched_lengths_errors() {
         let spec = StringArray::new(vec!["%d".into(), "%d".into()], vec![2, 1]).unwrap();
@@ -1127,6 +1146,7 @@ pub(crate) mod tests {
         assert!(err.contains("must be scalars or match formatSpec size"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_gpu_numeric_tensor() {
         test_support::with_test_provider(|provider| {
@@ -1148,12 +1168,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_parse() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn string_wgpu_numeric_tensor_matches_cpu() {

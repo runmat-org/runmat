@@ -1,7 +1,14 @@
-mod backend;
+#![cfg(feature = "native")]
 
-use backend::RunMatLanguageServer;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_runtime as _;
+
+mod backend;
+mod core;
+mod native;
+
 use log::LevelFilter;
+use native::RunMatLanguageServer;
 use tokio::io::{stdin, stdout};
 use tower_lsp::{LspService, Server};
 

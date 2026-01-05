@@ -7,16 +7,17 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info, warn};
+use std::env;
 
-mod config;
 mod telemetry;
-use config::{ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
+use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
+use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
+use runmat_core::RunMatSession;
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
-use runmat_repl::ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
@@ -29,6 +30,12 @@ use telemetry::{
     RuntimeExecutionCounters, RuntimeTelemetryRecord, TelemetryRunKind, TelemetrySessionEvent,
 };
 
+fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
+    match mode {
+        config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
+        config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
+    }
+}
 #[derive(Parser)]
 #[command(
     name = "runmat",
@@ -69,23 +76,23 @@ Examples:
 "#,
     after_help = r#"
 Environment Variables:
-  RUSTMAT_DEBUG=1              Enable debug logging
-  RUSTMAT_LOG_LEVEL=debug      Set log level (error, warn, info, debug, trace)
-  RUSTMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
-  RUSTMAT_KERNEL_KEY=<key>     Kernel authentication key
-  RUSTMAT_TIMEOUT=300          Execution timeout in seconds
-  RUSTMAT_CONFIG=<path>        Path to configuration file
-  RUSTMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
+  RUNMAT_DEBUG=1              Enable debug logging
+  RUNMAT_LOG_LEVEL=debug      Set log level (error, warn, info, debug, trace)
+  RUNMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
+  RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
+  RUNMAT_TIMEOUT=300          Execution timeout in seconds
+  RUNMAT_CONFIG=<path>        Path to configuration file
+  RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
   Garbage Collector:
-  RUSTMAT_GC_PRESET=<preset>   GC preset (low-latency, high-throughput, low-memory, debug)
-  RUSTMAT_GC_YOUNG_SIZE=<mb>   Young generation size in MB
-  RUSTMAT_GC_THREADS=<n>       Number of GC threads
+  RUNMAT_GC_PRESET=<preset>   GC preset (low-latency, high-throughput, low-memory, debug)
+  RUNMAT_GC_YOUNG_SIZE=<mb>   Young generation size in MB
+  RUNMAT_GC_THREADS=<n>       Number of GC threads
   
   JIT Compiler:
-  RUSTMAT_JIT_ENABLE=1         Enable JIT compilation (default: true)
-  RUSTMAT_JIT_THRESHOLD=<n>    JIT compilation threshold (default: 10)
-  RUSTMAT_JIT_OPT_LEVEL=<0-3>  JIT optimization level (default: 2)
+  RUNMAT_JIT_ENABLE=1         Enable JIT compilation (default: true)
+  RUNMAT_JIT_THRESHOLD=<n>    JIT compilation threshold (default: 10)
+  RUNMAT_JIT_OPT_LEVEL=<0-3>  JIT optimization level (default: 2)
 
 For more information, visit: https://github.com/runmat-org/runmat
 "#
@@ -93,54 +100,54 @@ For more information, visit: https://github.com/runmat-org/runmat
 #[command(propagate_version = true)]
 struct Cli {
     /// Enable debug logging
-    #[arg(short, long, env = "RUSTMAT_DEBUG", value_parser = parse_bool_env)]
+    #[arg(short, long, env = "RUNMAT_DEBUG", value_parser = parse_bool_env)]
     debug: bool,
 
     /// Set log level
-    #[arg(long, value_enum, env = "RUSTMAT_LOG_LEVEL", default_value = "info", value_parser = parse_log_level_env)]
+    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "info", value_parser = parse_log_level_env)]
     log_level: LogLevel,
 
     /// Execution timeout in seconds
-    #[arg(long, env = "RUSTMAT_TIMEOUT", default_value = "300")]
+    #[arg(long, env = "RUNMAT_TIMEOUT", default_value = "300")]
     timeout: u64,
 
     /// Configuration file path
-    #[arg(long, env = "RUSTMAT_CONFIG")]
+    #[arg(long, env = "RUNMAT_CONFIG")]
     config: Option<PathBuf>,
 
     // JIT Compiler Options
     /// Disable JIT compilation (use interpreter only)
-    #[arg(long, env = "RUSTMAT_JIT_DISABLE", value_parser = parse_bool_env)]
+    #[arg(long, env = "RUNMAT_JIT_DISABLE", value_parser = parse_bool_env)]
     no_jit: bool,
 
     /// JIT compilation threshold (number of executions before JIT)
-    #[arg(long, env = "RUSTMAT_JIT_THRESHOLD", default_value = "10")]
+    #[arg(long, env = "RUNMAT_JIT_THRESHOLD", default_value = "10")]
     jit_threshold: u32,
 
     /// JIT optimization level (0-3)
     #[arg(
         long,
         value_enum,
-        env = "RUSTMAT_JIT_OPT_LEVEL",
+        env = "RUNMAT_JIT_OPT_LEVEL",
         default_value = "speed"
     )]
     jit_opt_level: OptLevel,
 
     // Garbage Collector Options
     /// GC configuration preset
-    #[arg(long, value_enum, env = "RUSTMAT_GC_PRESET")]
+    #[arg(long, value_enum, env = "RUNMAT_GC_PRESET")]
     gc_preset: Option<GcPreset>,
 
     /// Young generation size in MB
-    #[arg(long, env = "RUSTMAT_GC_YOUNG_SIZE")]
+    #[arg(long, env = "RUNMAT_GC_YOUNG_SIZE")]
     gc_young_size: Option<usize>,
 
     /// Maximum number of GC threads
-    #[arg(long, env = "RUSTMAT_GC_THREADS")]
+    #[arg(long, env = "RUNMAT_GC_THREADS")]
     gc_threads: Option<usize>,
 
     /// Enable GC statistics collection
-    #[arg(long, env = "RUSTMAT_GC_STATS", value_parser = parse_bool_env)]
+    #[arg(long, env = "RUNMAT_GC_STATS", value_parser = parse_bool_env)]
     gc_stats: bool,
 
     /// Verbose output for REPL and execution
@@ -148,20 +155,20 @@ struct Cli {
     verbose: bool,
 
     /// Snapshot file to preload standard library
-    #[arg(long, env = "RUSTMAT_SNAPSHOT_PATH")]
+    #[arg(long, env = "RUNMAT_SNAPSHOT_PATH")]
     snapshot: Option<PathBuf>,
 
     // Plotting Options
     /// Plotting mode
-    #[arg(long, value_enum, env = "RUSTMAT_PLOT_MODE")]
+    #[arg(long, value_enum, env = "RUNMAT_PLOT_MODE")]
     plot_mode: Option<PlotMode>,
 
     /// Force headless plotting mode
-    #[arg(long, env = "RUSTMAT_PLOT_HEADLESS", value_parser = parse_bool_env)]
+    #[arg(long, env = "RUNMAT_PLOT_HEADLESS", value_parser = parse_bool_env)]
     plot_headless: bool,
 
     /// Plotting backend
-    #[arg(long, value_enum, env = "RUSTMAT_PLOT_BACKEND")]
+    #[arg(long, value_enum, env = "RUNMAT_PLOT_BACKEND")]
     plot_backend: Option<PlotBackend>,
 
     /// Override scatter target points for GPU decimation
@@ -201,11 +208,11 @@ enum Commands {
     /// Start Jupyter kernel
     Kernel {
         /// Kernel IP address
-        #[arg(long, env = "RUSTMAT_KERNEL_IP", default_value = "127.0.0.1")]
+        #[arg(long, env = "RUNMAT_KERNEL_IP", default_value = "127.0.0.1")]
         ip: String,
 
         /// Kernel authentication key
-        #[arg(long, env = "RUSTMAT_KERNEL_KEY")]
+        #[arg(long, env = "RUNMAT_KERNEL_KEY")]
         key: Option<String>,
 
         /// Transport protocol
@@ -217,23 +224,23 @@ enum Commands {
         signature_scheme: String,
 
         /// Shell socket port (0 for auto-assign)
-        #[arg(long, env = "RUSTMAT_SHELL_PORT", default_value = "0")]
+        #[arg(long, env = "RUNMAT_SHELL_PORT", default_value = "0")]
         shell_port: u16,
 
         /// IOPub socket port (0 for auto-assign)
-        #[arg(long, env = "RUSTMAT_IOPUB_PORT", default_value = "0")]
+        #[arg(long, env = "RUNMAT_IOPUB_PORT", default_value = "0")]
         iopub_port: u16,
 
         /// Stdin socket port (0 for auto-assign)
-        #[arg(long, env = "RUSTMAT_STDIN_PORT", default_value = "0")]
+        #[arg(long, env = "RUNMAT_STDIN_PORT", default_value = "0")]
         stdin_port: u16,
 
         /// Control socket port (0 for auto-assign)
-        #[arg(long, env = "RUSTMAT_CONTROL_PORT", default_value = "0")]
+        #[arg(long, env = "RUNMAT_CONTROL_PORT", default_value = "0")]
         control_port: u16,
 
         /// Heartbeat socket port (0 for auto-assign)
-        #[arg(long, env = "RUSTMAT_HB_PORT", default_value = "0")]
+        #[arg(long, env = "RUNMAT_HB_PORT", default_value = "0")]
         hb_port: u16,
 
         /// Write connection file to path
@@ -567,7 +574,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Initialize acceleration provider based on unified configuration
-    let accel_options = config.accelerate.to_init_options();
+    let accel_options: AccelerateInitOptions = (&config.accelerate).into();
     runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
 
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
@@ -648,8 +655,8 @@ async fn main() -> Result<()> {
 /// Load configuration from files and environment
 fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
     // Check if config file was explicitly provided via CLI (not just env var)
-    // We can detect this by checking if RUSTMAT_CONFIG env var matches the cli.config value
-    let config_from_env = std::env::var("RUSTMAT_CONFIG").ok().map(PathBuf::from);
+    // We can detect this by checking if RUNMAT_CONFIG env var matches the cli.config value
+    let config_from_env = std::env::var("RUNMAT_CONFIG").ok().map(PathBuf::from);
 
     if let Some(config_file) = &cli.config {
         // If config matches env var, it came from environment - be graceful
@@ -677,12 +684,12 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
         // If from env var and doesn't exist, fall through to standard loader
     }
 
-    // Use the standard loader (which will also check RUSTMAT_CONFIG but gracefully)
+    // Use the standard loader (which will also check RUNMAT_CONFIG but gracefully)
     match ConfigLoader::load() {
         Ok(c) => Ok(c),
         Err(e) => {
             // Ignore directory config paths and fall back to defaults
-            if let Ok(conf_env) = std::env::var("RUSTMAT_CONFIG") {
+            if let Ok(conf_env) = std::env::var("RUNMAT_CONFIG") {
                 let p = PathBuf::from(conf_env);
                 if p.is_dir() {
                     info!(
@@ -757,11 +764,11 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
             PlotMode::Headless => "headless",
             PlotMode::Jupyter => "jupyter",
         };
-        std::env::set_var("RUSTMAT_PLOT_MODE", env_value);
+        std::env::set_var("RUNMAT_PLOT_MODE", env_value);
     }
     if cli.plot_headless {
         config.plotting.force_headless = true;
-        std::env::set_var("RUSTMAT_PLOT_MODE", "headless");
+        std::env::set_var("RUNMAT_PLOT_MODE", "headless");
     }
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
@@ -786,8 +793,8 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
 
 /// Configure GC from the loaded configuration
 fn configure_gc_from_config(config: &RunMatConfig) -> Result<()> {
-    let mut gc_config = if let Some(preset) = &config.gc.preset {
-        (*preset).into()
+    let mut gc_config = if let Some(preset) = config.gc.preset {
+        gc_config_from_preset(preset)
     } else {
         runmat_gc::GcConfig::default()
     };
@@ -822,6 +829,15 @@ fn configure_gc_from_config(config: &RunMatConfig) -> Result<()> {
     runmat_gc::gc_configure(gc_config).context("Failed to configure garbage collector")?;
 
     Ok(())
+}
+
+fn gc_config_from_preset(preset: config::GcPreset) -> runmat_gc::GcConfig {
+    match preset {
+        config::GcPreset::LowLatency => runmat_gc::GcConfig::low_latency(),
+        config::GcPreset::HighThroughput => runmat_gc::GcConfig::high_throughput(),
+        config::GcPreset::LowMemory => runmat_gc::GcConfig::low_memory(),
+        config::GcPreset::Debug => runmat_gc::GcConfig::debug(),
+    }
 }
 
 fn configure_plotting_from_config(config: &RunMatConfig) {
@@ -934,13 +950,14 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     );
 
     // Create enhanced REPL engine with optional snapshot loading
-    let mut engine = ReplEngine::with_snapshot(
+    let mut engine = RunMatSession::with_snapshot(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
     )
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(parser_compat(config.language.compat));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -948,7 +965,10 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     info!("RunMat REPL ready");
 
     // Use rustyline for better REPL experience
-    use std::io::{self, Write};
+    use rustyline::error::ReadlineError;
+    use rustyline::DefaultEditor;
+
+    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
 
     println!(
         "RunMat v{} by Dystr (https://dystr.com)",
@@ -981,26 +1001,13 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
-    let mut input = String::new();
-    let is_interactive = atty::is(atty::Stream::Stdin);
-
     loop {
-        if is_interactive {
-            print!("runmat> ");
-            io::stdout().flush().unwrap();
-        }
+        let readline = rl.readline("runmat> ");
+        match readline {
+            Ok(line) => {
+                let line = line.trim();
+                let _ = rl.add_history_entry(line);
 
-        input.clear();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => {
-                // EOF reached (e.g., pipe closed)
-                if !is_interactive {
-                    break;
-                }
-                continue;
-            }
-            Ok(_) => {
-                let line = input.trim();
                 if line == "exit" || line == "quit" {
                     break;
                 }
@@ -1022,9 +1029,27 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                     println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
                     continue;
                 }
+                if line == ".gc-info" {
+                    let gc_stats = engine.gc_stats();
+                    println!("Garbage Collector Statistics:");
+                    println!("{}", gc_stats.summary_report());
+                    continue;
+                }
                 if line == ".gc" {
                     let gc_stats = engine.gc_stats();
                     println!("{}", gc_stats.summary_report());
+                    continue;
+                }
+                if line == ".gc-collect" {
+                    match gc_collect_major() {
+                        Ok(collected) => println!("Collected {collected} objects"),
+                        Err(e) => println!("GC collection failed: {e}"),
+                    }
+                    continue;
+                }
+                if line == ".reset-stats" {
+                    engine.reset_stats();
+                    println!("Statistics reset");
                     continue;
                 }
                 if line.is_empty() {
@@ -1049,8 +1074,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                                     }
                                 );
                             }
-                        } else if let Some(type_info) = result.type_info {
-                            println!("ans = {type_info}");
                         }
                     }
                     Err(e) => {
@@ -1058,8 +1081,16 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("Error reading input: {e}");
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
                 break;
             }
         }
@@ -1215,13 +1246,14 @@ async fn execute_script_with_args(
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     let enable_jit = config.jit.enabled;
-    let mut engine = ReplEngine::with_snapshot(
+    let mut engine = RunMatSession::with_snapshot(
         enable_jit,
         config.runtime.verbose,
         config.runtime.snapshot_path.as_ref(),
     )
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(parser_compat(config.language.compat));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1495,9 +1527,10 @@ async fn execute_benchmark(
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
-    let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
+    let mut engine = RunMatSession::with_snapshot(jit, false, _cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
+    engine.set_compat_mode(parser_compat(config.language.compat));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1721,7 +1754,7 @@ async fn execute_config_command(
             println!("====================================");
             println!();
 
-            if let Ok(config_path) = std::env::var("RUSTMAT_CONFIG") {
+            if let Ok(config_path) = std::env::var("RUNMAT_CONFIG") {
                 println!("Environment override: {config_path}");
             }
 
@@ -1785,18 +1818,6 @@ async fn execute_pkg_command(pkg_command: PkgCommand) -> Result<()> {
         PkgCommand::Publish => println!("pkg publish: {msg}"),
     }
     Ok(())
-}
-
-// Conversion implementations
-impl From<config::GcPreset> for runmat_gc::GcConfig {
-    fn from(preset: config::GcPreset) -> Self {
-        match preset {
-            config::GcPreset::LowLatency => runmat_gc::GcConfig::low_latency(),
-            config::GcPreset::HighThroughput => runmat_gc::GcConfig::high_throughput(),
-            config::GcPreset::LowMemory => runmat_gc::GcConfig::low_memory(),
-            config::GcPreset::Debug => runmat_gc::GcConfig::debug(),
-        }
-    }
 }
 
 impl From<CompressionAlg> for runmat_snapshot::CompressionAlgorithm {
@@ -1994,18 +2015,6 @@ fn show_version(detailed: bool) {
                 "release"
             }
         );
-        println!("Features: jupyter-kernel, plotting, repl, jit, gc");
-        println!();
-        println!("Components:");
-        println!("  • runmat-lexer: MATLAB/Octave tokenizer");
-        println!("  • runmat-parser: Syntax parser with error recovery");
-        println!("  • runmat-hir: High-level intermediate representation");
-        println!("  • runmat-ignition: Baseline interpreter");
-        println!("  • runmat-turbine: JIT compiler with Cranelift");
-        println!("  • runmat-gc: Generational garbage collector");
-        println!("  • runmat-runtime: BLAS/LAPACK runtime with builtins");
-        println!("  • runmat-kernel: Jupyter kernel protocol");
-        println!("  • runmat-plot: Headless plotting backend");
     }
 }
 
@@ -2049,22 +2058,22 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!();
 
     println!("Environment:");
-    println!("  RUSTMAT_DEBUG: {:?}", std::env::var("RUSTMAT_DEBUG").ok());
+    println!("  RUNMAT_DEBUG: {:?}", std::env::var("RUNMAT_DEBUG").ok());
     println!(
-        "  RUSTMAT_LOG_LEVEL: {:?}",
-        std::env::var("RUSTMAT_LOG_LEVEL").ok()
+        "  RUNMAT_LOG_LEVEL: {:?}",
+        std::env::var("RUNMAT_LOG_LEVEL").ok()
     );
     println!(
-        "  RUSTMAT_TIMEOUT: {:?}",
-        std::env::var("RUSTMAT_TIMEOUT").ok()
+        "  RUNMAT_TIMEOUT: {:?}",
+        std::env::var("RUNMAT_TIMEOUT").ok()
     );
     println!(
-        "  RUSTMAT_JIT_ENABLE: {:?}",
-        std::env::var("RUSTMAT_JIT_ENABLE").ok()
+        "  RUNMAT_JIT_ENABLE: {:?}",
+        std::env::var("RUNMAT_JIT_ENABLE").ok()
     );
     println!(
-        "  RUSTMAT_GC_PRESET: {:?}",
-        std::env::var("RUSTMAT_GC_PRESET").ok()
+        "  RUNMAT_GC_PRESET: {:?}",
+        std::env::var("RUNMAT_GC_PRESET").ok()
     );
     println!();
 
@@ -2336,6 +2345,9 @@ fn show_repl_help() {
     println!("  .info             Show detailed system information");
     println!("  .stats            Show execution statistics");
     println!("  .gc               Show garbage collector statistics");
+    println!("  .gc-info          Show garbage collector statistics with header");
+    println!("  .gc-collect       Force garbage collection");
+    println!("  .reset-stats      Reset execution statistics");
     println!();
     println!("MATLAB/Octave syntax is supported:");
     println!("  x = 1 + 2                         # Assignment");

@@ -649,12 +649,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_default() {
         let result = strip_builtin(Value::String("  RunMat  ".into()), Vec::new()).expect("strip");
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_direction() {
         let result = strip_builtin(
@@ -665,6 +667,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("data".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_custom_characters() {
         let result = strip_builtin(
@@ -675,6 +678,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("52".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_scalar_pattern_only() {
         let result = strip_builtin(
@@ -685,6 +689,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("acceleration".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_empty_pattern_returns_original() {
         let result = strip_builtin(
@@ -695,6 +700,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("abc".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_leading_synonym() {
         let result = strip_builtin(
@@ -705,6 +711,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("data".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_trailing_synonym() {
         let result = strip_builtin(
@@ -715,6 +722,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("data".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_per_element_characters() {
         let strings = StringArray::new(
@@ -743,6 +751,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_cell_pattern_per_element() {
         let strings =
@@ -763,6 +772,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_preserves_missing() {
         let strings =
@@ -777,6 +787,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_char_array_shrinks_width() {
         let source = "  cat  dog  ";
@@ -794,6 +805,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_char_array_supports_trailing_direction() {
         let array = CharArray::new_row("gpu   ");
@@ -813,6 +825,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -841,24 +854,28 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_preserves_missing_string() {
         let result = strip_builtin(Value::String("<missing>".into()), Vec::new()).expect("strip");
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_input() {
         let err = strip_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_pattern_type() {
         let err = strip_builtin(Value::String("abc".into()), vec![Value::Num(1.0)]).unwrap_err();
         assert_eq!(err, CHARACTERS_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_direction() {
         let err = strip_builtin(
@@ -869,6 +886,7 @@ pub(crate) mod tests {
         assert_eq!(err, DIRECTION_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_pattern_size_mismatch() {
         let strings = StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap();
@@ -882,6 +900,7 @@ pub(crate) mod tests {
         assert_eq!(err, SIZE_MISMATCH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_pattern_shape_mismatch() {
         let strings = StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap();
@@ -894,6 +913,7 @@ pub(crate) mod tests {
         assert_eq!(err, SIZE_MISMATCH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_cell_pattern_shape_mismatch() {
         let strings = StringArray::new(vec!["aa".into(), "bb".into()], vec![1, 2]).unwrap();
@@ -908,6 +928,7 @@ pub(crate) mod tests {
         assert_eq!(err, SIZE_MISMATCH_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_too_many_arguments() {
         let err = strip_builtin(
@@ -922,6 +943,7 @@ pub(crate) mod tests {
         assert_eq!(err, "strip: too many input arguments");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strip_gpu_tensor_errors() {
@@ -942,6 +964,7 @@ pub(crate) mod tests {
         provider.free(&handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

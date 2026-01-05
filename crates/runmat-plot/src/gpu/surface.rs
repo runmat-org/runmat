@@ -238,7 +238,7 @@ pub fn pack_surface_vertices(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (vertex_count + workgroup_size - 1) / workgroup_size;
+        let workgroups = vertex_count.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));
@@ -337,8 +337,8 @@ mod stress_tests {
             scalar: ScalarType::F32,
         };
         let stride = 8;
-        let lod_x_len = (x_len + stride - 1) / stride;
-        let lod_y_len = (y_len + stride - 1) / stride;
+        let lod_x_len = x_len.div_ceil(stride);
+        let lod_y_len = y_len.div_ceil(stride);
         let params = SurfaceGpuParams {
             min_z: -1.0,
             max_z: 1.0,

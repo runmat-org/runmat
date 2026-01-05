@@ -262,6 +262,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_scalar_real_zero() {
         let result = imag_builtin(Value::Num(-2.5)).expect("imag");
@@ -271,6 +272,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_complex_scalar() {
         let result = imag_builtin(Value::Complex(3.0, 4.0)).expect("imag");
@@ -280,6 +282,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_bool_scalar_zero() {
         let result = imag_builtin(Value::Bool(true)).expect("imag");
@@ -289,6 +292,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_int_scalar_zero() {
         let result = imag_builtin(Value::Int(IntValue::I32(-42))).expect("imag");
@@ -298,6 +302,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_tensor_real_is_zero() {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5, 4.25], vec![4, 1]).unwrap();
@@ -311,6 +316,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_empty_tensor_zero_length() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -324,6 +330,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_complex_tensor_to_tensor_of_imag_parts() {
         let complex =
@@ -338,6 +345,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_logical_array_zero() {
         let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical array");
@@ -351,6 +359,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_char_array_zeroes() {
         let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
@@ -364,12 +373,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_string_array_error() {
         let arr =
@@ -378,6 +389,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -394,12 +406,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn imag_wgpu_matches_cpu_zero() {

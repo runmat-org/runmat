@@ -318,6 +318,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_string_scalar_trims_whitespace() {
         let result =
@@ -325,6 +326,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_string_array_preserves_shape() {
         let array = StringArray::new(
@@ -355,6 +357,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_multiple_rows() {
         let data: Vec<char> = "  cat  ".chars().chain(" dog   ".chars()).collect();
@@ -370,6 +373,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_all_whitespace_yields_zero_width() {
         let array = CharArray::new("   ".chars().collect(), 1, 3).unwrap();
@@ -384,6 +388,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_mixed_content() {
         let cell = CellArray::new(
@@ -407,6 +412,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_preserves_missing_strings() {
         let result =
@@ -414,6 +420,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("<missing>".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_handles_tabs_and_newlines() {
         let input = Value::String("\tMetrics \n".into());
@@ -421,6 +428,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("Metrics".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_trims_unicode_whitespace() {
         let input = Value::String("\u{00A0}RunMat\u{2003}".into());
@@ -428,6 +436,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_zero_rows_stable() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
@@ -435,6 +444,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::CharArray(array));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_accepts_string_scalar() {
         let scalar = StringArray::new(vec![" padded ".into()], vec![1, 1]).unwrap();
@@ -449,6 +459,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_rejects_non_text() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
@@ -456,12 +467,14 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_errors_on_invalid_input() {
         let err = strtrim_builtin(Value::Num(1.0)).unwrap_err();
         assert!(err.contains("strtrim"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

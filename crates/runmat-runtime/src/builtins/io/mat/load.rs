@@ -930,6 +930,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_roundtrip_numeric() {
         ensure_test_resolver();
@@ -959,6 +960,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_selected_variables() {
         ensure_test_resolver();
@@ -979,6 +981,7 @@ pub(crate) mod tests {
         assert!(matches!(vars[0].1, Value::Num(42.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_regex_selection() {
         ensure_test_resolver();
@@ -1003,6 +1006,7 @@ pub(crate) mod tests {
         assert_eq!(names, vec!["w1".to_string(), "w2".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_missing_variable_errors() {
         ensure_test_resolver();
@@ -1020,6 +1024,7 @@ pub(crate) mod tests {
         assert!(err.contains("variable 'missing' was not found"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_string_array_roundtrip() {
         ensure_test_resolver();
@@ -1051,6 +1056,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_option_before_filename() {
         ensure_test_resolver();
@@ -1072,6 +1078,7 @@ pub(crate) mod tests {
         assert!(matches!(vars[0].1, Value::Num(2.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_char_array_names_trimmed() {
         ensure_test_resolver();
@@ -1105,6 +1112,7 @@ pub(crate) mod tests {
         assert!(matches!(vars[1].1, Value::Num(9.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_duplicate_names_last_wins() {
         ensure_test_resolver();
@@ -1126,6 +1134,7 @@ pub(crate) mod tests {
         assert!(matches!(vars[0].1, Value::Num(11.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn load_wgpu_tensor_roundtrip() {
@@ -1174,6 +1183,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

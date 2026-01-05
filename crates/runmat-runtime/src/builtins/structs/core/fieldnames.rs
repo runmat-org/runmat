@@ -339,6 +339,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_returns_sorted_names_for_scalar_struct() {
         let mut fields = StructValue::new();
@@ -354,6 +355,7 @@ pub(crate) mod tests {
         assert_eq!(collected, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_struct_array_collects_union() {
         let mut first = StructValue::new();
@@ -393,6 +395,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_errors_for_non_struct_inputs() {
         let err = fieldnames_builtin(Value::Num(1.0)).unwrap_err();
@@ -402,6 +405,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_handles_empty_struct_array() {
         let empty_array = CellArray::new(Vec::new(), 0, 0).expect("empty struct array backing");
@@ -413,6 +417,7 @@ pub(crate) mod tests {
         assert_eq!(cell.cols, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_cell_without_struct_errors() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -423,6 +428,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_preserves_case_distinctions() {
         let mut fields = StructValue::new();
@@ -436,6 +442,7 @@ pub(crate) mod tests {
         assert_eq!(collected, vec!["Name".to_string(), "name".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_object_includes_class_and_dynamic_properties() {
         let class_name = "runmat.unittest.FieldnamesObject";
@@ -480,6 +487,7 @@ pub(crate) mod tests {
         assert_eq!(collected, vec!["Step".to_string(), "Value".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_handle_object_merges_class_and_target() {
         let class_name = "runmat.unittest.FieldnamesHandle";
@@ -525,6 +533,7 @@ pub(crate) mod tests {
         assert_eq!(collected, vec!["Enabled".to_string(), "Status".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -405,10 +405,10 @@ fn validate_snapshot(input: PathBuf, strict: bool, compatibility_only: bool) -> 
                 let validation_time = start_time.elapsed();
 
                 println!("✅ Snapshot validation passed");
-                println!("   📏 Total size: {}", format_size(stats.total_size as u64));
+                println!("   📏 Total size: {}", format_size(stats.total_size));
                 println!(
                     "   🗜️  Compressed size: {}",
-                    format_size(stats.compressed_size as u64)
+                    format_size(stats.compressed_size)
                 );
                 println!(
                     "   📊 Compression ratio: {:.1}%",
@@ -522,7 +522,7 @@ fn show_snapshot_info(input: PathBuf, detailed: bool, metrics: bool) -> Result<(
                 println!("   Bytecode Cache Entries: {}", perf.bytecode_cache_entries);
                 println!(
                     "   Peak Memory Usage: {}",
-                    format_size(perf.peak_memory_usage as u64)
+                    format_size(perf.peak_memory_usage)
                 );
 
                 println!();
@@ -628,7 +628,7 @@ fn benchmark_snapshot(input: PathBuf, iterations: usize, warmup: usize) -> Resul
     if let Some(stats) = total_stats {
         println!();
         println!("📊 Load Statistics:");
-        println!("   Total Size: {}", format_size(stats.total_size as u64));
+        println!("   Total Size: {}", format_size(stats.total_size));
         println!(
             "   Throughput: {:.1} MB/s",
             stats.loading_throughput() / 1_000_000.0

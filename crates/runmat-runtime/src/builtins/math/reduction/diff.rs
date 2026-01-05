@@ -482,6 +482,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_row_vector_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
@@ -495,6 +496,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_column_vector_second_order() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![4, 1]).unwrap();
@@ -509,6 +511,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_matrix_along_columns() {
         let tensor = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
@@ -523,6 +526,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_handles_empty_when_order_exceeds_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -537,6 +541,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_char_array_promotes_to_double() {
         let chars = CharArray::new("ACEG".chars().collect(), 1, 4).unwrap();
@@ -550,6 +555,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_complex_tensor_preserves_type() {
         let tensor =
@@ -564,6 +570,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_zero_order_returns_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -572,6 +579,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Tensor(tensor));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_order_argument() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![3, 1]).unwrap();
@@ -581,6 +589,7 @@ pub(crate) mod tests {
         assert_eq!(result, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![1, 4]).unwrap();
@@ -598,6 +607,7 @@ pub(crate) mod tests {
         assert_eq!(result, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_negative_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -606,6 +616,7 @@ pub(crate) mod tests {
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_non_integer_order() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -614,6 +625,7 @@ pub(crate) mod tests {
         assert!(err.contains("non-negative integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_invalid_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -622,6 +634,7 @@ pub(crate) mod tests {
         assert!(err.contains("dimension must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -638,6 +651,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn diff_wgpu_matches_cpu() {
@@ -676,6 +690,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

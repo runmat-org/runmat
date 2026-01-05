@@ -3,12 +3,12 @@ use runmat_builtins::{builtin_functions, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_runtime::call_builtin;
 
-#[runtime_builtin(name = "double")]
+#[runtime_builtin(name = "double", builtin_path = "tests::double_fn")]
 fn double_fn(x: i32) -> Result<i32, String> {
     Ok(x * 2)
 }
 
-#[runtime_builtin(name = "host_only_trace")]
+#[runtime_builtin(name = "host_only_trace", builtin_path = "tests::host_only_trace")]
 fn host_only_trace(value: Value) -> Result<Value, String> {
     match value {
         Value::Tensor(t) => {
@@ -19,7 +19,10 @@ fn host_only_trace(value: Value) -> Result<Value, String> {
     }
 }
 
-#[runtime_builtin(name = "host_only_add_tensors")]
+#[runtime_builtin(
+    name = "host_only_add_tensors",
+    builtin_path = "tests::host_only_add_tensors"
+)]
 fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
         (Value::Tensor(ta), Value::Tensor(tb)) => {

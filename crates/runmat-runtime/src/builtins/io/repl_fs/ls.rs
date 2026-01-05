@@ -432,6 +432,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_lists_current_directory_when_no_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -456,6 +457,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_lists_specific_directory_contents() {
         let dir = tempdir().expect("tempdir");
@@ -471,6 +473,7 @@ pub(crate) mod tests {
         assert_eq!(rows, vec!["data.csv".to_string(), format!("nested{sep}")]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_handles_wildcard_patterns() {
         let _lock = REPL_FS_TEST_LOCK
@@ -494,6 +497,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_returns_path_for_single_file() {
         let dir = tempdir().expect("tempdir");
@@ -506,6 +510,7 @@ pub(crate) mod tests {
         assert_eq!(rows, vec![file_path.to_string_lossy().to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_returns_empty_for_missing_matches() {
         let dir = tempdir().expect("tempdir");
@@ -522,6 +527,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_accepts_string_scalar_input() {
         let dir = tempdir().expect("tempdir");
@@ -534,12 +540,14 @@ pub(crate) mod tests {
         assert!(rows.iter().any(|row| row.contains("file.dat")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_rejects_numeric_argument() {
         let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err, "ls: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

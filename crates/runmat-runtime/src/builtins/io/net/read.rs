@@ -777,6 +777,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_reads_requested_uint8_values() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -802,6 +803,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_without_count_drains_available_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -828,6 +830,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn read_respects_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -849,6 +852,7 @@ pub(crate) mod tests {
         remove_client_for_test(client_id(&client));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

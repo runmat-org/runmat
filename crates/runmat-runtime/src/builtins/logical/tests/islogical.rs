@@ -270,6 +270,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_scalars_report_true() {
         assert_eq!(
@@ -282,6 +283,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_arrays_report_true() {
         let array = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -291,6 +293,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_values_report_false() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -300,6 +303,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_values_report_false() {
         assert_eq!(
@@ -308,6 +312,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_report_false() {
         let chars = CharArray::new("rm".chars().collect(), 1, 2).unwrap();
@@ -317,6 +322,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn structures_and_cells_report_false() {
         let struct_value = runmat_builtins::StructValue::new();
@@ -331,6 +337,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_handles_use_metadata_when_available() {
         test_support::with_test_provider(|provider| {
@@ -347,6 +354,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_numeric_handles_report_false() {
         test_support::with_test_provider(|provider| {
@@ -362,6 +370,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn islogical_wgpu_elem_eq_sets_metadata() {
@@ -391,6 +400,7 @@ pub(crate) mod tests {
         provider.free(&rhs_handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn islogical_wgpu_numeric_stays_false() {
@@ -409,6 +419,7 @@ pub(crate) mod tests {
         provider.free(&handle).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

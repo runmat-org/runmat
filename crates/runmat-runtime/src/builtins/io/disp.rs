@@ -844,12 +844,14 @@ pub(crate) mod tests {
     use crate::make_cell;
     use runmat_builtins::{ComplexTensor, IntValue, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_without_quotes() {
         let lines = format_for_disp(&Value::String("Simulation complete.".into()));
         assert_eq!(lines, vec!["Simulation complete.".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_field_string_has_quotes() {
         let mut sv = StructValue::new();
@@ -858,6 +860,7 @@ pub(crate) mod tests {
         assert_eq!(lines, vec!["    msg: \"ok\"".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_matrix_right_aligned() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor");
@@ -868,6 +871,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_tensor_three_dimensional_pages() {
         let tensor =
@@ -887,6 +891,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_tensor_three_dimensional_pages() {
         let data: Vec<(f64, f64)> = vec![
@@ -915,6 +920,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_array_left_aligned() {
         let array = StringArray::new(
@@ -937,6 +943,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_array_summaries() {
         let cell =
@@ -945,6 +952,7 @@ pub(crate) mod tests {
         assert_eq!(lines, vec!["    [1]  \"alpha\"".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_field_matrix_summarised() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
@@ -954,12 +962,14 @@ pub(crate) mod tests {
         assert_eq!(lines, vec!["    A: [2x2 double]".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_64_bit_display() {
         let lines = format_for_disp(&Value::Int(IntValue::U64(u64::MAX)));
         assert_eq!(lines, vec![u64::MAX.to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_accepts_gpu_tensor() {
         test_support::with_test_provider(|provider| {
@@ -975,6 +985,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn disp_gathers_wgpu_tensor() {
@@ -992,6 +1003,7 @@ pub(crate) mod tests {
         disp_builtin(Value::GpuTensor(handle), Vec::new()).expect("disp");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_rejects_extra_arguments() {
         let err = disp_builtin(Value::Num(1.0), vec![Value::Int(IntValue::I32(2))])
@@ -999,6 +1011,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

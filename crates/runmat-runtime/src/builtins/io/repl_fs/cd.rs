@@ -334,6 +334,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_returns_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -347,6 +348,7 @@ pub(crate) mod tests {
         assert_eq!(actual, expected.to_string_lossy());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_changes_directory_and_returns_previous() {
         let _lock = REPL_FS_TEST_LOCK
@@ -367,6 +369,7 @@ pub(crate) mod tests {
         assert_eq!(canonical_path(&new_dir), canonical_path(temp.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_supports_relative_char_array_paths() {
         let _lock = REPL_FS_TEST_LOCK
@@ -390,6 +393,7 @@ pub(crate) mod tests {
         assert_eq!(canonical_path(&current), canonical_path(&child));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_errors_when_folder_missing() {
         let _lock = REPL_FS_TEST_LOCK
@@ -402,6 +406,7 @@ pub(crate) mod tests {
         assert!(err.contains("cd: unable to change directory"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_tilde_expands_to_home_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -421,6 +426,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_errors_on_empty_string() {
         let _lock = REPL_FS_TEST_LOCK
@@ -432,6 +438,7 @@ pub(crate) mod tests {
         assert_eq!(err, "cd: folder name must not be empty");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_errors_on_multi_element_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -448,6 +455,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_errors_on_multiline_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -463,6 +471,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cd_accepts_string_array_scalar() {
         let _lock = REPL_FS_TEST_LOCK
@@ -480,6 +489,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

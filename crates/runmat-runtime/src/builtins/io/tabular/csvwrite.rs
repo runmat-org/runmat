@@ -514,6 +514,7 @@ pub(crate) mod tests {
         default_line_ending()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_writes_basic_matrix() {
         let path = temp_path("csv");
@@ -528,6 +529,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_honours_offsets() {
         let path = temp_path("csv");
@@ -549,6 +551,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_gpu_tensors() {
         test_support::with_test_provider(|provider| {
@@ -570,6 +573,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_formats_with_short_g_precision() {
         let path = temp_path("csv");
@@ -588,6 +592,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_rejects_negative_offsets() {
         let path = temp_path("csv");
@@ -606,6 +611,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_wgpu_provider_gather() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -632,6 +638,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_expands_home_directory() {
         let Some(mut home) = fs_helpers::home_directory() else {
@@ -656,6 +663,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(home);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_rejects_non_numeric_inputs() {
         let path = temp_path("csv");
@@ -669,6 +677,7 @@ pub(crate) mod tests {
         assert!(err.contains("csvwrite"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_accepts_logical_arrays() {
         let path = temp_path("csv");
@@ -687,6 +696,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

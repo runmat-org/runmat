@@ -809,6 +809,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_scalar_numbers() {
         let result = power_builtin(Value::Num(2.0), Value::Num(3.0), Vec::new()).expect("power");
@@ -818,6 +819,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_matrix_broadcast() {
         let base = Tensor::new((1..=3).map(|v| v as f64).collect::<Vec<_>>(), vec![3, 1]).unwrap();
@@ -836,6 +838,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_complex_scalar() {
         let result = power_builtin(
@@ -853,6 +856,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_char_array() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
@@ -874,6 +878,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_complex_promotes_output() {
         let base = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
@@ -892,6 +897,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_gpu_residency() {
         test_support::with_test_provider(|provider| {
@@ -922,6 +928,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -947,6 +954,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn power_wgpu_matches_cpu_elementwise() {
@@ -985,6 +993,7 @@ pub(crate) mod tests {
         let _ = provider.free(&he);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_missing_prototype_errors() {
         let err = power_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
@@ -992,6 +1001,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_extra_arguments_error() {
         let err = power_builtin(
@@ -1003,6 +1013,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_zero_negative_exponent_infinite() {
         let result = power_builtin(Value::Num(0.0), Value::Num(-2.0), Vec::new()).expect("power");
@@ -1012,6 +1023,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_zero_complex_positive_real_part() {
         let result =
@@ -1025,6 +1037,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_zero_complex_negative_real_part() {
         let result =
@@ -1038,6 +1051,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

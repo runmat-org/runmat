@@ -16,6 +16,7 @@ pub mod wasm_registry {
         Lazy::new(|| Mutex::new(Vec::new()));
     static CONSTANTS: Lazy<Mutex<Vec<&'static Constant>>> = Lazy::new(|| Mutex::new(Vec::new()));
     static DOCS: Lazy<Mutex<Vec<&'static BuiltinDoc>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static REGISTERED: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
 
     fn leak<T>(value: T) -> &'static T {
         Box::leak(Box::new(value))
@@ -46,6 +47,14 @@ pub mod wasm_registry {
 
     pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
         DOCS.lock().unwrap().clone()
+    }
+
+    pub fn mark_registered() {
+        *REGISTERED.lock().unwrap() = true;
+    }
+
+    pub fn is_registered() -> bool {
+        *REGISTERED.lock().unwrap()
     }
 }
 
@@ -508,20 +517,19 @@ impl fmt::Display for Tensor {
             2 => {
                 let rows = self.rows();
                 let cols = self.cols();
-                write!(f, "[")?;
+                // Display as matrix
                 for r in 0..rows {
+                    writeln!(f)?;
+                    write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
-                            write!(f, " ")?;
+                            write!(f, "  ")?;
                         }
                         let v = self.data[r + c * rows];
                         write!(f, "{}", format_number_short_g(v))?;
                     }
-                    if r + 1 < rows {
-                        write!(f, "; ")?;
-                    }
                 }
-                write!(f, "]")
+                Ok(())
             }
             _ => write!(f, "Tensor(shape={:?})", self.shape),
         }
@@ -545,21 +553,20 @@ impl fmt::Display for StringArray {
             2 => {
                 let rows = self.rows();
                 let cols = self.cols();
-                write!(f, "[")?;
+                // Display as matrix
                 for r in 0..rows {
+                    writeln!(f)?;
+                    write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
-                            write!(f, " ")?;
+                            write!(f, "  ")?;
                         }
                         let v = &self.data[r + c * rows];
                         let escaped = v.replace('"', "\\\"");
                         write!(f, "\"{escaped}\"")?;
                     }
-                    if r + 1 < rows {
-                        write!(f, "; ")?;
-                    }
                 }
-                write!(f, "]")
+                Ok(())
             }
             _ => write!(f, "StringArray(shape={:?})", self.shape),
         }
@@ -583,20 +590,19 @@ impl fmt::Display for LogicalArray {
             2 => {
                 let rows = self.shape[0];
                 let cols = self.shape[1];
-                write!(f, "[")?;
+                // Display as matrix
                 for r in 0..rows {
+                    writeln!(f)?;
+                    write!(f, "  ")?; // Indent
                     for c in 0..cols {
                         if c > 0 {
-                            write!(f, " ")?;
+                            write!(f, "  ")?;
                         }
                         let idx = r + c * rows;
                         write!(f, "{}", if self.data[idx] != 0 { 1 } else { 0 })?;
                     }
-                    if r + 1 < rows {
-                        write!(f, "; ")?;
-                    }
                 }
-                write!(f, "]")
+                Ok(())
             }
             _ => write!(f, "LogicalArray(shape={:?})", self.shape),
         }
@@ -605,24 +611,15 @@ impl fmt::Display for LogicalArray {
 
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Display as single-quoted rows separated by ;
-        write!(f, "[")?;
         for r in 0..self.rows {
-            if r > 0 {
-                write!(f, "; ")?;
-            }
-            write!(f, "'")?;
+            writeln!(f)?;
+            write!(f, "  ")?; // Indent
             for c in 0..self.cols {
                 let ch = self.data[r * self.cols + c];
-                if ch == '\'' {
-                    write!(f, "''")?;
-                } else {
-                    write!(f, "{ch}")?;
-                }
+                write!(f, "{ch}")?;
             }
-            write!(f, "'")?;
         }
-        write!(f, "]")
+        Ok(())
     }
 }
 
@@ -1289,7 +1286,16 @@ impl fmt::Display for Value {
                     l.valid
                 )
             }
-            Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
+            Value::Struct(st) => {
+                write!(f, "struct {{")?;
+                for (i, (key, val)) in st.fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, val)?;
+                }
+                write!(f, "}}")
+            }
             Value::FunctionHandle(name) => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,

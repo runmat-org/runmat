@@ -559,6 +559,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_connects_to_loopback_server() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
@@ -591,6 +592,7 @@ pub(crate) mod tests {
         remove_client_for_test(cid);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_applies_name_value_options() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
@@ -650,6 +652,7 @@ pub(crate) mod tests {
         remove_client_for_test(cid);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_rejects_invalid_port() {
         let err = tcpclient_builtin(
@@ -661,6 +664,7 @@ pub(crate) mod tests {
         assert!(err.starts_with(MESSAGE_ID_INVALID_PORT));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpclient_reports_connection_failure() {
         // Assume nothing listens on port 65000.
@@ -673,6 +677,7 @@ pub(crate) mod tests {
         assert!(err.starts_with(MESSAGE_ID_CONNECT_FAILED));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

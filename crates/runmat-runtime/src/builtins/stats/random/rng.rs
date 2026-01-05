@@ -518,6 +518,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_returns_current_state() {
         let _guard = random::test_lock()
@@ -531,6 +532,7 @@ pub(crate) mod tests {
         assert_eq!(snapshot.algorithm, RngAlgorithm::RunMatLcg);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_is_reproducible() {
         let _guard = random::test_lock()
@@ -544,6 +546,7 @@ pub(crate) mod tests {
         assert_eq!(seq1, seq2);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_restore_struct_roundtrip() {
         let _guard = random::test_lock()
@@ -558,6 +561,7 @@ pub(crate) mod tests {
         assert_eq!(current.seed, Some(DEFAULT_USER_SEED));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_default_restores_state() {
         let _guard = random::test_lock()
@@ -574,6 +578,7 @@ pub(crate) mod tests {
         assert_ne!(prev_snapshot.state, restored.state);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_seed_with_twister_alias() {
         let _guard = random::test_lock()
@@ -589,6 +594,7 @@ pub(crate) mod tests {
         assert_eq!(host_seq, alias_seq);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_negative_seed() {
         let _guard = random::test_lock()
@@ -602,6 +608,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_rejects_unknown_generator() {
         let _guard = random::test_lock()
@@ -616,6 +623,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_state_struct_requires_type() {
         let _guard = random::test_lock()
@@ -630,6 +638,7 @@ pub(crate) mod tests {
         assert!(err.contains("Type"), "unexpected error message: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_syncs_provider_state() {
         let _guard = random::test_lock()
@@ -645,6 +654,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rng_wgpu_uniform_matches_cpu() {
@@ -680,6 +690,7 @@ pub(crate) mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_shuffle_uses_entropy_or_override() {
         let _guard = random::test_lock()
@@ -693,6 +704,7 @@ pub(crate) mod tests {
         assert_eq!(current.seed, Some(12345));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rng_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

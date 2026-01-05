@@ -57,7 +57,29 @@ impl SandboxFsProvider {
 
     fn virtualize(&self, real: &Path) -> PathBuf {
         let relative = real.strip_prefix(&self.root).unwrap_or(Path::new(""));
-        let mut virt = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        let mut virt = PathBuf::new();
+        #[cfg(windows)]
+        {
+            let prefix = self
+                .root
+                .components()
+                .next()
+                .and_then(|component| match component {
+                    Component::Prefix(prefix) => Some(prefix.as_os_str()),
+                    _ => None,
+                });
+            if let Some(prefix) = prefix {
+                let mut root = OsString::from(prefix);
+                root.push(std::path::MAIN_SEPARATOR.to_string());
+                virt.push(root);
+            } else {
+                virt.push(std::path::MAIN_SEPARATOR.to_string());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            virt.push(std::path::MAIN_SEPARATOR.to_string());
+        }
         if !relative.as_os_str().is_empty() {
             virt.push(relative);
         }
@@ -209,11 +231,9 @@ mod tests {
         assert!(entries.iter().any(|entry| entry.file_name() == "evil.txt"));
 
         let listing = provider.read_dir(Path::new("nested")).expect("list nested");
-        let names: Vec<_> = listing
+        assert!(listing
             .iter()
-            .map(|entry| entry.path().display().to_string())
-            .collect();
-        assert!(names.iter().any(|p| p.ends_with("nested/sub")));
+            .any(|entry| entry.path().ends_with(Path::new("nested/sub"))));
 
         let sandbox_read = provider
             .read(Path::new("/nested/sub/file.txt"))
@@ -234,7 +254,7 @@ mod tests {
         let canonical = provider
             .canonicalize(Path::new("./data/./file.bin"))
             .expect("canonicalize");
-        assert!(canonical.to_string_lossy().ends_with("data/file.bin"));
+        assert!(canonical.ends_with(Path::new("data/file.bin")));
         assert!(canonical.is_absolute());
     }
 }

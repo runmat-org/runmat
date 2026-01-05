@@ -452,6 +452,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_scalar_struct_single_name() {
         let mut st = StructValue::new();
@@ -466,6 +467,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_char_array_single_row() {
         let mut st = StructValue::new();
@@ -475,6 +477,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_struct_cell_names_produces_logical_array() {
         let mut st = StructValue::new();
@@ -496,6 +499,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_cell_mixed_string_types() {
         let mut st = StructValue::new();
@@ -517,6 +521,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_struct_array_intersection() {
         let mut first = StructValue::new();
@@ -543,12 +548,14 @@ pub(crate) mod tests {
         assert_eq!(res_name, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_non_struct_returns_false() {
         let result = isfield_builtin(Value::Num(5.0), Value::from("field")).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_string_array_names() {
         let mut st = StructValue::new();
@@ -560,6 +567,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_invalid_name_type_errors() {
         let mut st = StructValue::new();
@@ -568,6 +576,7 @@ pub(crate) mod tests {
         assert!(err.contains("field names must be strings"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfield_char_matrix_errors() {
         let mut st = StructValue::new();
@@ -577,6 +586,7 @@ pub(crate) mod tests {
         assert!(err.contains("field names must be strings"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

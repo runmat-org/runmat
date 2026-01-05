@@ -404,6 +404,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_empty() {
         let Value::Struct(s) = struct_builtin(Vec::new()).expect("struct") else {
@@ -412,6 +413,7 @@ pub(crate) mod tests {
         assert!(s.fields.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_empty_from_empty_matrix() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
@@ -426,6 +428,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_name_value_pairs() {
         let args = vec![
@@ -445,6 +448,7 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_from_cells() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -473,6 +477,7 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_replicates_scalars() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -493,6 +498,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_cell_size_mismatch_errors() {
         let names = CellArray::new(vec![Value::from("Ada"), Value::from("Grace")], 1, 2).unwrap();
@@ -507,6 +513,7 @@ pub(crate) mod tests {
         assert!(err.contains("matching sizes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_overwrites_duplicates() {
         let args = vec![
@@ -525,12 +532,14 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_odd_arguments() {
         let err = struct_builtin(vec![Value::from("name")]).unwrap_err();
         assert!(err.contains("name/value pairs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_invalid_field_name() {
         let err =
@@ -538,12 +547,14 @@ pub(crate) mod tests {
         assert!(err.contains("begin with a letter or underscore"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_non_text_field_name() {
         let err = struct_builtin(vec![Value::Num(1.0), Value::Int(IntValue::I32(1))]).unwrap_err();
         assert!(err.contains("strings or character vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_accepts_char_vector_name() {
         let chars = CharArray::new("field".chars().collect(), 1, 5).unwrap();
@@ -554,6 +565,7 @@ pub(crate) mod tests {
         assert!(s.fields.contains_key("field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_accepts_string_scalar_name() {
         let sa = StringArray::new(vec!["field".to_string()], vec![1]).unwrap();
@@ -564,6 +576,7 @@ pub(crate) mod tests {
         assert!(s.fields.contains_key("field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_allows_existing_struct_copy() {
         let mut base = StructValue::new();
@@ -573,6 +586,7 @@ pub(crate) mod tests {
         assert_eq!(copy, Value::Struct(base));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_copies_struct_array_argument() {
         let mut proto = StructValue::new();
@@ -596,6 +610,7 @@ pub(crate) mod tests {
         assert_eq!(cloned, baseline);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_rejects_cell_argument_without_structs() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
@@ -603,6 +618,7 @@ pub(crate) mod tests {
         assert!(err.contains("must contain structs"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_preserves_gpu_tensor_handles() {
         let handle = GpuTensorHandle {
@@ -617,6 +633,7 @@ pub(crate) mod tests {
         assert!(matches!(s.fields.get("data"), Some(Value::GpuTensor(h)) if h == &handle));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_preserves_gpu_handles() {
         let first = GpuTensorHandle {
@@ -651,6 +668,7 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn struct_preserves_gpu_handles_with_registered_provider() {
@@ -670,6 +688,7 @@ pub(crate) mod tests {
         assert!(matches!(s.fields.get("gpu"), Some(Value::GpuTensor(h)) if h == &handle));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -125,7 +125,7 @@ export default function HomePage() {
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center">
               <Link 
-                href="/docs/accelerate/how-it-works" 
+                href="/docs/accelerate/gpu-residency" 
                 className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
               >
                 Accelerate Architecture

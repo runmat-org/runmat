@@ -114,6 +114,7 @@ pub(crate) mod tests {
     use pollster::FutureExt;
     use std::sync::Arc;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn install_context_propagates_to_plot_crate() {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok() {

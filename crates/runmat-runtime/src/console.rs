@@ -22,7 +22,7 @@ pub struct ConsoleEntry {
 type StreamForwarder = dyn Fn(&ConsoleEntry) + Send + Sync + 'static;
 
 thread_local! {
-    static THREAD_BUFFER: RefCell<Vec<ConsoleEntry>> = RefCell::new(Vec::new());
+    static THREAD_BUFFER: RefCell<Vec<ConsoleEntry>> = const { RefCell::new(Vec::new()) };
 }
 
 static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new();

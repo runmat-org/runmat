@@ -3,7 +3,7 @@
 ## Goals
 - Preserve MATLAB-compatible file I/O APIs (`dlmwrite`, `save`, `load`, etc.) across four deployment modes:
   1. **Native CLI / server:** Native `std::fs` behaviour for local disks and network shares.
-  2. **Browser-only (runmat.org):** No native filesystem, must use sandboxed storage.
+  2. **Browser-only:** No native filesystem, must use sandboxed storage.
   3. **Multi-process:** Rust runtime still runs in a sandboxed process but can forward requests to a privileged host process (e.g. Tauri and Electron style multi-process architectures).
   4. **Virtualized/remote storage (e.g., S3-backed “drive”):** File APIs should work against logical paths served by a virtual filesystem provider.
 - Provide a uniform abstraction inside the runtime so individual builtins do not need to know whether they are reading from IndexedDB, the local disk, or a cloud bucket.

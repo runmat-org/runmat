@@ -60,6 +60,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
+use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -1963,7 +1964,7 @@ impl WgpuProvider {
         }
         let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
-            eprintln!(
+            log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
                 label,
                 usage,
@@ -2139,10 +2140,6 @@ impl WgpuProvider {
         }
         info!(
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
-            tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
-        );
-        eprintln!(
-            "[runmat] Compiling image_normalize pipeline: batch_tile={} values_per_thread={} lane_count={} spatial_tile={}",
             tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
         );
         let template = match self.precision {
@@ -3244,6 +3241,7 @@ impl WgpuProvider {
     }
 
     fn submit(&self, encoder: wgpu::CommandEncoder) {
+        let _span = info_span!("gpu.dispatch", label = "runmat-wgpu-submit").entered();
         self.queue.submit(Some(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
     }
@@ -3908,25 +3906,28 @@ impl WgpuProvider {
         let groups = (num_slices as u32).max(1);
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             for (i, buf) in input_bufs.iter().enumerate() {
-                eprintln!(
+                log::debug!(
                     "[fused-reduction] binding={} role=read ptr={:p}",
                     i,
                     buf.0.as_ref()
                 );
             }
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] binding={} role=read_write ptr={:p}",
                 inputs.len(),
                 out_buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] binding={} role=uniform ptr={:p}",
                 inputs.len() + 1,
                 params_buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
-                reduce_len, num_slices, workgroup_size, groups
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                groups
             );
         }
         let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
@@ -3960,7 +3961,7 @@ impl WgpuProvider {
             groups,
         );
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            eprintln!("[fused-reduction] single-pass dispatch complete");
+            log::debug!("[fused-reduction] single-pass dispatch complete");
         }
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
     }
@@ -7317,14 +7318,20 @@ impl WgpuProvider {
         let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
         let debug_matmul_dump = std::env::var("RUNMAT_DEBUG_MATMUL_DUMP").is_ok();
         if debug_matmul {
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] ptr_a={:p} ptr_b={:p}",
                 entry_a.buffer.as_ref(),
                 entry_b.buffer.as_ref()
             );
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
-                m, n, k, view_a.lda, view_b.lda, view_a.transpose, view_b.transpose
+                m,
+                n,
+                k,
+                view_a.lda,
+                view_b.lda,
+                view_a.transpose,
+                view_b.transpose
             );
             if debug_matmul_dump {
                 if let Ok(lhs_host) = self.download(a) {
@@ -7332,14 +7339,14 @@ impl WgpuProvider {
                         .data
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    eprintln!("[matmul_debug] lhs max_abs={:.6e}", max_a);
+                    log::debug!("[matmul_debug] lhs max_abs={:.6e}", max_a);
                 }
                 if let Ok(rhs_host) = self.download(b) {
                     let max_b = rhs_host
                         .data
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    eprintln!("[matmul_debug] rhs max_abs={:.6e}", max_b);
+                    log::debug!("[matmul_debug] rhs max_abs={:.6e}", max_b);
                 }
             }
         }
@@ -7373,9 +7380,12 @@ impl WgpuProvider {
         let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
         let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
         if debug_matmul {
-            eprintln!(
+            log::debug!(
                 "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
-                can_vec4, use_vec4, enable_chunk, out_usage
+                can_vec4,
+                use_vec4,
+                enable_chunk,
+                out_usage
             );
         }
 
@@ -7600,7 +7610,7 @@ impl WgpuProvider {
         let handle =
             self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
         if debug_matmul {
-            eprintln!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
+            log::debug!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
             if debug_matmul_dump {
                 if let Ok(out_host) = self.download(&handle) {
                     let max_out = out_host
@@ -7608,8 +7618,8 @@ impl WgpuProvider {
                         .iter()
                         .fold(0.0f64, |acc, value| acc.max(value.abs()));
                     let sample_len = out_host.data.len().min(8);
-                    eprintln!("[matmul_debug] out max_abs={:.6e}", max_out);
-                    eprintln!(
+                    log::debug!("[matmul_debug] out max_abs={:.6e}", max_out);
+                    log::debug!(
                         "[matmul_debug] out sample {:?}",
                         &out_host.data[0..sample_len]
                     );
@@ -12101,7 +12111,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            eprintln!(
+            log::debug!(
                 "[reduce-global] in ptr={:p} len={} op={}",
                 entry.buffer.as_ref(),
                 entry.len,
@@ -16070,6 +16080,12 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
+        let _span = info_span!(
+            "gpu.transfer.upload",
+            shape = ?host.shape,
+            len = host.data.len()
+        )
+        .entered();
         let len = host.data.len();
         let shape = host.shape.to_vec();
         let buffer =
@@ -16109,6 +16125,12 @@ impl AccelProvider for WgpuProvider {
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
     fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
+        let _span = info_span!(
+            "gpu.transfer.download",
+            shape = ?h.shape,
+            buffer_id = h.buffer_id
+        )
+        .entered();
         log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
         let entry = self.get_entry(h)?;
         if entry.len == 0 {

@@ -466,18 +466,21 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_scalar_positive() {
         let result = factorial_builtin(Value::Num(5.0), Vec::new()).expect("factorial");
         assert_eq!(result, Value::Num(120.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_zero_is_one() {
         let result = factorial_builtin(Value::Num(0.0), Vec::new()).expect("factorial");
         assert_eq!(result, Value::Num(1.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_vector_inputs() {
         let tensor = Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![4, 1]).unwrap();
@@ -491,6 +494,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_non_integer_produces_nan() {
         let result = factorial_builtin(Value::Num(2.5), Vec::new()).expect("factorial");
@@ -500,6 +504,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_negative_produces_nan() {
         let tensor = Tensor::new(vec![-1.0, 3.0], vec![2, 1]).unwrap();
@@ -513,6 +518,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_small_positive_non_integer_nan() {
         let result = factorial_builtin(Value::Num(1e-12), Vec::new()).expect("factorial");
@@ -522,6 +528,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_overflow_returns_inf() {
         let result = factorial_builtin(Value::Num(171.0), Vec::new()).expect("factorial");
@@ -531,6 +538,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_like_missing_prototype_errors() {
         let err = factorial_builtin(Value::Num(3.0), vec![Value::from("like")])
@@ -538,6 +546,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_like_gpu_prototype_uploads() {
         test_support::with_test_provider(|provider| {
@@ -563,6 +572,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -579,6 +589,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_like_host_with_gpu_input_gathers() {
         test_support::with_test_provider(|provider| {
@@ -602,6 +613,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_logical_input_promotes() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -612,6 +624,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_int_input_promotes_to_double() {
         let value = Value::Int(IntValue::U16(5));
@@ -619,6 +632,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(120.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_nan_propagates() {
         let result = factorial_builtin(Value::Num(f64::NAN), Vec::new()).expect("factorial");
@@ -628,6 +642,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_complex_input_errors() {
         let err = factorial_builtin(Value::Complex(1.0, 0.5), Vec::new())
@@ -635,6 +650,7 @@ pub(crate) mod tests {
         assert!(err.contains("complex"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_string_input_errors() {
         let err = factorial_builtin(Value::from("hello"), Vec::new())
@@ -642,6 +658,7 @@ pub(crate) mod tests {
         assert!(err.contains("numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_like_complex_prototype_rejected() {
         let err = factorial_builtin(
@@ -652,12 +669,14 @@ pub(crate) mod tests {
         assert!(err.contains("complex"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn factorial_wgpu_matches_cpu_after_gather() {

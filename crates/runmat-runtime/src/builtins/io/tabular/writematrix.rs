@@ -790,6 +790,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_writes_space_delimited_txt() {
         let path = temp_path("txt");
@@ -804,6 +805,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_defaults_to_comma_for_csv() {
         let path = temp_path("csv");
@@ -818,6 +820,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_honours_write_mode_append() {
         let path = temp_path("txt");
@@ -843,6 +846,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_quotes_strings_by_default() {
         let path = temp_path("csv");
@@ -858,6 +862,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn writematrix_accepts_gpu_tensor_inputs() {
         test_support::with_test_provider(|provider| {
@@ -879,6 +884,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

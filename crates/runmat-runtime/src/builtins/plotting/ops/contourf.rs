@@ -144,11 +144,12 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
-    }
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use runmat_builtins::Tensor;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
+    }
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
@@ -160,8 +161,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
+        setup_plot_tests();
         let res = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0])),
             vec![

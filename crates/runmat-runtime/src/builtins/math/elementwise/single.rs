@@ -471,6 +471,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_scalar_rounds_to_f32() {
         let value = Value::Num(std::f64::consts::PI);
@@ -481,6 +482,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2]).unwrap();
@@ -498,6 +500,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_complex_tensor_rounds_both_components() {
         let tensor = ComplexTensor::new(
@@ -519,6 +522,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_char_array_produces_codes() {
         let chars = CharArray::new_row("AZ");
@@ -532,6 +536,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_errors_on_string_input() {
         let err = single_builtin(Value::String("hello".to_string()), Vec::new())
@@ -540,6 +545,7 @@ pub(crate) mod tests {
         assert!(err.contains("string"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -565,12 +571,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_host_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -592,6 +600,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -621,6 +630,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_case_insensitive() {
         let tensor = Tensor::new(vec![1.5, 2.25], vec![2, 1]).unwrap();
@@ -642,6 +652,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_large_ones_preserve_values() {
         // Create a large ones tensor and ensure single() preserves ones exactly.
@@ -664,6 +675,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn single_wgpu_matches_cpu() {
@@ -684,6 +696,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, cpu.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn single_wgpu_large_ones_all_ones() {

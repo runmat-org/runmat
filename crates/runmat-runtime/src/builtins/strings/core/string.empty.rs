@@ -357,6 +357,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_is_zero_by_zero() {
         let result = string_empty_builtin(Vec::new()).expect("string.empty");
@@ -369,6 +370,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_dimension_creates_zero_by_n() {
         let result = string_empty_builtin(vec![Value::from(5)]).expect("string.empty");
@@ -381,6 +383,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn multiple_dimensions_respect_trailing_sizes() {
         let args = vec![Value::from(3), Value::from(4), Value::from(2)];
@@ -394,6 +397,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_vector_argument_supported() {
         let tensor = Tensor::new(vec![0.0, 5.0, 3.0], vec![1, 3]).unwrap();
@@ -407,6 +411,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn size_vector_from_nonempty_array_drops_leading_extent() {
         let tensor = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
@@ -420,6 +425,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_zero_in_any_position() {
         let args = vec![Value::from(3), Value::from(4), Value::from(0)];
@@ -430,6 +436,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_prototype_without_explicit_dims() {
         let proto = StringArray::new(vec!["alpha".to_string(); 6], vec![2, 3]).unwrap();
@@ -444,6 +451,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_prototype_with_scalar_shape() {
         let proto = StringArray::new(vec!["foo".to_string()], vec![1, 1]).unwrap();
@@ -458,6 +466,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_with_numeric_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -472,6 +481,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_with_explicit_dims_prefers_dimensions() {
         let proto = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -491,6 +501,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn missing_like_prototype_errors() {
         let err = string_empty_builtin(vec![Value::from("like")]).expect_err("expected error");
@@ -500,6 +511,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn duplicate_like_errors() {
         let proto = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -513,6 +525,7 @@ pub(crate) mod tests {
         assert!(err.contains("multiple 'like'"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_dimension_inputs() {
         let err =
@@ -523,6 +536,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn like_gathers_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -547,6 +561,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_dimension_arguments_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -569,6 +584,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_dimension() {
         let err = string_empty_builtin(vec![Value::from(-1.0)]).expect_err("expected error");
@@ -578,6 +594,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

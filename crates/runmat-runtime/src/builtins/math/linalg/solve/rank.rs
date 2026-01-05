@@ -362,6 +362,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_full_matrix() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -372,6 +373,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_singular_matrix() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -382,6 +384,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_default_tolerance_reduces_rank() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-16], vec![2, 2]).unwrap();
@@ -389,6 +392,7 @@ pub(crate) mod tests {
         assert_eq!(rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_custom_tolerance_behavior() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-4], vec![2, 2]).unwrap();
@@ -398,6 +402,7 @@ pub(crate) mod tests {
         assert_eq!(custom_rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_empty_matrix_returns_zero() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -408,6 +413,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_vector_input() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0], vec![3, 1]).unwrap();
@@ -415,6 +421,7 @@ pub(crate) mod tests {
         assert_eq!(rank, 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_zero_vector_is_zero() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0], vec![3, 1]).unwrap();
@@ -422,6 +429,7 @@ pub(crate) mod tests {
         assert_eq!(rank, 0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_invalid_shape_errors() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
@@ -432,6 +440,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -442,6 +451,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_non_scalar_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -453,6 +463,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_complex_matrix() {
         let tensor = ComplexTensor::new(
@@ -467,6 +478,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_scalar_bool_and_int() {
         let bool_rank = rank_builtin(Value::Bool(false), Vec::new()).expect("rank");
@@ -481,6 +493,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_gpu_round_trip() {
         test_support::with_test_provider(|provider| {
@@ -496,6 +509,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rank_wgpu_matches_cpu() {
@@ -525,6 +539,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, vec![cpu_rank]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

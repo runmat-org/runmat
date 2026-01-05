@@ -321,12 +321,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_scalar() {
         let result = str2double_builtin(Value::String("42.5".into())).expect("str2double");
         assert_eq!(result, Value::Num(42.5));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_scalar_invalid_returns_nan() {
         let result = str2double_builtin(Value::String("abc".into())).expect("str2double");
@@ -336,6 +338,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_string_array_preserves_shape() {
         let array =
@@ -353,6 +356,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_multiple_rows() {
         let data: Vec<char> = vec!['4', '2', ' ', ' ', '1', '0', '0', ' '];
@@ -368,6 +372,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_empty_rows() {
         let array = CharArray::new(Vec::new(), 0, 0).unwrap();
@@ -381,6 +386,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(
         clippy::approx_constant,
@@ -409,6 +415,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
@@ -419,6 +426,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_supports_d_exponent() {
         let result = str2double_builtin(Value::String("1.5D3".into())).expect("str2double");
@@ -428,6 +436,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_recognises_infinity_forms() {
         let array = StringArray::new(
@@ -446,6 +455,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

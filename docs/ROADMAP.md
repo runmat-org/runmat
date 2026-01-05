@@ -15,7 +15,7 @@ The below tracks the progress of the project towards the 1.0 release to date.
 
 - [x] Expand lexer to cover MATLAB operators, keywords and comments.
 - [x] Introduce `runmat-parser` crate producing an AST.
-- [x] Basic `runmat-repl` that tokenizes input and prints tokens.
+- [x] Basic REPL that tokenizes input and prints tokens.
 - [x] Set up CI with `cargo fmt` and `cargo check`.
 
 ### Milestone P1 - Language Core

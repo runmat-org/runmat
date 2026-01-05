@@ -7,12 +7,12 @@ use super::state::{clone_figure, FigureError, FigureHandle};
 pub fn render_figure(handle: FigureHandle, figure: Figure) -> Result<String, String> {
     #[cfg(feature = "gui")]
     {
-        return native::render(handle, figure);
+        native::render(handle, figure)
     }
 
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
-        return super::web::render_web_canvas(handle.as_u32(), figure);
+        super::web::render_web_canvas(handle.as_u32(), figure)
     }
 
     #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
@@ -91,7 +91,7 @@ pub(crate) mod native {
     }
 
     fn detect_mode() -> PlottingMode {
-        if let Ok(mode) = env::var("RUSTMAT_PLOT_MODE") {
+        if let Ok(mode) = env::var("RUNMAT_PLOT_MODE") {
             match mode.to_lowercase().as_str() {
                 "gui" => PlottingMode::Interactive,
                 "headless" | "static" => PlottingMode::Static,

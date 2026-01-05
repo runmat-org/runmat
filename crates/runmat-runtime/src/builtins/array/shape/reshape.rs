@@ -541,6 +541,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_vector_to_matrix() {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
@@ -559,6 +560,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_with_auto_dimension() {
         let data: Vec<f64> = (1..=18).map(|v| v as f64).collect();
@@ -574,6 +576,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_logical_array_preserves_type() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0, 1, 0], vec![6, 1]).expect("logical");
@@ -591,6 +594,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_char_array_single_dimension_becomes_column() {
         let chars = CharArray::new("abcd".chars().collect(), 1, 4).expect("char array");
@@ -607,6 +611,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_cell_array_two_dimensional() {
         let cell = CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).expect("cell");
@@ -625,6 +630,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_string_scalar_high_rank() {
         let result = reshape_builtin(
@@ -641,6 +647,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_gpu_preserves_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -666,6 +673,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn reshape_wgpu_updates_provider_shape() {
@@ -695,6 +703,7 @@ pub(crate) mod tests {
         assert_eq!(host.data, tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_mismatched_elements_errors() {
         let data: Vec<f64> = (1..=6).map(|v| v as f64).collect();
@@ -707,6 +716,7 @@ pub(crate) mod tests {
         assert!(err.contains("product of dimensions"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_multiple_auto_errors() {
         let data: Vec<f64> = (1..=6).map(|v| v as f64).collect();
@@ -720,6 +730,7 @@ pub(crate) mod tests {
         assert!(err.contains("single []"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_accepts_zero_sized_dimension() {
         let tensor = tensor_from_slice(&[], &[0, 1]);
@@ -734,6 +745,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_int_scalar_to_vector() {
         let value = Value::Int(IntValue::I32(5));
@@ -745,6 +757,7 @@ pub(crate) mod tests {
         assert!(matches!(ok, Value::Int(_)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_complex_scalar_high_rank() {
         let result = reshape_builtin(
@@ -761,6 +774,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_auto_dimension_mismatch_reports_product() {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
@@ -777,6 +791,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

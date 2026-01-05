@@ -307,6 +307,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_returns_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -321,6 +322,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_sets_new_value_and_returns_previous() {
         let _lock = REPL_FS_TEST_LOCK
@@ -341,6 +343,7 @@ pub(crate) mod tests {
         assert_eq!(current, dir_str);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_accepts_string_scalar() {
         let _lock = REPL_FS_TEST_LOCK
@@ -359,6 +362,7 @@ pub(crate) mod tests {
         assert_eq!(current, "runmat/path/string");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_accepts_tensor_codes() {
         let _lock = REPL_FS_TEST_LOCK
@@ -379,6 +383,7 @@ pub(crate) mod tests {
         assert_eq!(current, text);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_combines_two_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -405,6 +410,7 @@ pub(crate) mod tests {
         assert_eq!(current, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_multi_row_char_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -417,6 +423,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_multi_element_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -429,6 +436,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERROR_ARG_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_rejects_invalid_argument_types() {
         let _lock = REPL_FS_TEST_LOCK
@@ -440,6 +448,7 @@ pub(crate) mod tests {
         assert!(err.contains("path: arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn path_updates_search_directories() {
         let _lock = REPL_FS_TEST_LOCK
@@ -462,6 +471,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

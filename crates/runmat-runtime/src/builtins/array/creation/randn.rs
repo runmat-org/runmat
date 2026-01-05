@@ -430,6 +430,7 @@ pub(crate) mod tests {
         random::reset_rng();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
@@ -442,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
@@ -460,6 +462,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_size_vector_argument() {
         let _guard = random::test_lock().lock().unwrap();
@@ -479,6 +482,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_zero_dimension_returns_empty() {
         let _guard = random::test_lock().lock().unwrap();
@@ -493,6 +497,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_single_precision_produces_f32() {
         let _guard = random::test_lock().lock().unwrap();
@@ -510,6 +515,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
@@ -529,6 +535,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
@@ -553,6 +560,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -580,12 +588,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randn_wgpu_like_and_gather() {
@@ -612,6 +622,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randn_wgpu_provider_random_normal() {

@@ -550,6 +550,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hermitian_real_matrix_returns_true() {
         let tensor = Tensor::new(
@@ -561,6 +562,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hermitian_complex_matrix_returns_true() {
         let tensor = ComplexTensor::new(
@@ -573,6 +575,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_hermitian_matrix_returns_false() {
         let tensor = ComplexTensor::new(
@@ -585,6 +588,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn skew_hermitian_flag_requires_pure_imaginary_diagonal() {
         let tensor = ComplexTensor::new(
@@ -606,6 +610,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_enables_small_complex_deviations() {
         let tensor = ComplexTensor::new(
@@ -618,6 +623,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_matrix_is_promoted() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
@@ -626,6 +632,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn non_square_returns_false() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -633,6 +640,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_inputs_are_supported() {
         let result = ishermitian_builtin(Value::Num(3.0), Vec::new()).expect("ishermitian");
@@ -643,6 +651,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn skew_flag_accepts_tolerance_and_order_variants() {
         let tensor = ComplexTensor::new(
@@ -667,6 +676,7 @@ pub(crate) mod tests {
         assert_eq!(res_two, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diag_imaginary_requires_tolerance_in_hermitian_mode() {
         let tensor = ComplexTensor::new(
@@ -683,6 +693,7 @@ pub(crate) mod tests {
         assert_eq!(with_tol, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nan_entries_cause_false() {
         let tensor =
@@ -691,6 +702,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_flag() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -699,6 +711,7 @@ pub(crate) mod tests {
         assert!(err.contains("unknown flag"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -707,6 +720,7 @@ pub(crate) mod tests {
         assert!(err.contains("tolerance must be >= 0"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_scalar_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -716,6 +730,7 @@ pub(crate) mod tests {
         assert!(err.contains("tolerance must be a real scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_excess_arguments() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -727,6 +742,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unsupported_input_type() {
         let err = ishermitian_builtin(Value::String("abc".into()), Vec::new())
@@ -734,6 +750,7 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported input type"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ishermitian_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -749,12 +766,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn hermitian_wgpu_matches_cpu() {

@@ -273,7 +273,7 @@ pub fn pack_contour_vertices(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (total_invocations + workgroup_size - 1) / workgroup_size;
+        let workgroups = total_invocations.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));

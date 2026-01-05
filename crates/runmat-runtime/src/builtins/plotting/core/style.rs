@@ -395,7 +395,7 @@ pub fn parse_line_style_args(
 
     let mut options = LineStyleOptions::default();
     let mut idx = 0usize;
-    if let Some(token) = rest.get(0).and_then(value_as_string) {
+    if let Some(token) = rest.first().and_then(value_as_string) {
         if is_style_token(&token) {
             options.merge(parse_style_string(opts, &token)?);
             idx = 1;
@@ -410,7 +410,7 @@ pub fn parse_line_style_args(
                 "per-series styles interleaved with data are not supported yet",
             ));
         }
-        if remaining.len() % 2 != 0 {
+        if !remaining.len().is_multiple_of(2) {
             return Err(ctx_err(opts, "name-value arguments must come in pairs"));
         }
         options.merge(parse_name_value_pairs(opts, remaining)?);
@@ -436,7 +436,7 @@ pub fn parse_surface_style_args(
     if rest.is_empty() {
         return Ok(style);
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(ctx_err(
             &opts,
             "name-value arguments must come in pairs for surface plots",
@@ -999,7 +999,7 @@ pub fn parse_bar_style_args(
     let rest = filtered.as_slice();
 
     let mut idx = 0usize;
-    if let Some(token) = rest.get(0).and_then(value_as_string) {
+    if let Some(token) = rest.first().and_then(value_as_string) {
         let trimmed = token.trim();
         if !trimmed.is_empty() && !is_bar_option_name(trimmed) {
             style.face_color = parse_bar_color_literal(&opts, trimmed)?;
@@ -1011,7 +1011,7 @@ pub fn parse_bar_style_args(
     if remaining.is_empty() {
         return Ok(style);
     }
-    if remaining.len() % 2 != 0 {
+    if !remaining.len().is_multiple_of(2) {
         return Err(bar_ctx_err(
             builtin,
             "name-value arguments must come in pairs",
@@ -1230,6 +1230,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> String {
 pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn style_string_with_marker_no_longer_forces_cpu_fallback() {
         let rest = vec![Value::String("o--".into())];
@@ -1239,6 +1240,7 @@ pub(crate) mod tests {
         assert!(!parsed.requires_cpu_fallback);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn marker_none_disables_marker_without_fallback() {
         let rest = vec![Value::String("Marker".into()), Value::String("none".into())];
@@ -1248,6 +1250,7 @@ pub(crate) mod tests {
         assert!(!parsed.requires_cpu_fallback);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn marker_color_flat_literal_is_supported() {
         let opts = LineStyleParseOptions::plot();
@@ -1255,6 +1258,7 @@ pub(crate) mod tests {
         assert_eq!(color, MarkerColor::Flat);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_parses_face_and_edge_colors() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
@@ -1272,6 +1276,7 @@ pub(crate) mod tests {
         assert_eq!(style.edge_color, Some(Vec4::new(0.0, 0.0, 0.0, 1.0)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_accepts_label() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
@@ -1283,6 +1288,7 @@ pub(crate) mod tests {
         assert_eq!(style.label.as_deref(), Some("My Bars"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_style_accepts_flat_facecolor() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);

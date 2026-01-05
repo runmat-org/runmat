@@ -233,6 +233,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_string_scalar_true() {
         let result = strcmp_builtin(
@@ -243,6 +244,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_string_scalar_false() {
         let result = strcmp_builtin(
@@ -253,6 +255,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_string_array_broadcast_scalar() {
         let array = StringArray::new(
@@ -266,6 +269,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_row_compare() {
         let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
@@ -275,6 +279,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_to_char_array() {
         let left = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
@@ -285,6 +290,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_cell_array_scalar() {
         let cell = CellArray::new(
@@ -303,6 +309,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_cell_array_to_cell_array_broadcasts() {
         let left = CellArray::new(vec![Value::from("red"), Value::from("blue")], 2, 1).unwrap();
@@ -312,6 +319,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_string_array_multi_dimensional_broadcast() {
         let left = StringArray::new(vec!["north".into(), "south".into()], vec![2, 1]).unwrap();
@@ -326,6 +334,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_trailing_space_is_not_equal() {
         let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
@@ -334,6 +343,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_empty_rows_returns_empty() {
         let chars = CharArray::new(Vec::new(), 0, 0).unwrap();
@@ -348,6 +358,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_strings_compare_false() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -359,6 +370,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_string_false() {
         let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![1, 2]).unwrap();
@@ -368,6 +380,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -377,6 +390,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_invalid_argument_type() {
         let err =
@@ -384,6 +398,7 @@ pub(crate) mod tests {
         assert!(err.contains("first argument must be text"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

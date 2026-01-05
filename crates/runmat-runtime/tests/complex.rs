@@ -1,6 +1,9 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 // Complex numbers end-to-end tests
 use runmat_builtins::Value;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_scalar_arithmetic() {
     let a = Value::Complex(3.0, 2.0);
@@ -28,6 +31,7 @@ fn complex_scalar_arithmetic() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_scalar_with_real() {
     let a = Value::Complex(2.0, -1.0);
@@ -54,6 +58,7 @@ fn complex_scalar_with_real() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_array_elementwise_add() {
     use runmat_builtins::ComplexTensor;
@@ -72,6 +77,7 @@ fn complex_array_elementwise_add() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_matmul_and_transpose() {
     use runmat_builtins::{ComplexTensor, Tensor};
@@ -98,13 +104,14 @@ fn complex_matmul_and_transpose() {
         assert_eq!(m.cols, 2);
     }
     // transpose conjugate on complex matrix
-    let t = runmat_runtime::transpose(Value::ComplexTensor(a)).unwrap();
+    let t = runmat_runtime::call_builtin("transpose", &[Value::ComplexTensor(a)]).unwrap();
     if let Value::ComplexTensor(ct) = t {
         assert_eq!(ct.rows, 2);
         assert_eq!(ct.cols, 2);
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_string_and_logical() {
     let a = Value::Complex(0.0, -2.5);
@@ -136,6 +143,7 @@ fn complex_string_and_logical() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_power_basic() {
     // Complex elementwise/scalar power now supported
@@ -156,6 +164,7 @@ fn complex_power_basic() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_matrix_power_integer() {
     use runmat_builtins::ComplexTensor;
@@ -175,6 +184,7 @@ fn complex_matrix_power_integer() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_elementwise_power_tensor() {
     use runmat_builtins::ComplexTensor;

@@ -333,6 +333,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_exact_prefix_true() {
         let result = strncmp_builtin(
@@ -344,6 +345,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_mismatch_within_prefix_false() {
         let result = strncmp_builtin(
@@ -355,6 +357,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_longer_string_after_prefix_false() {
         let result = strncmp_builtin(
@@ -366,6 +369,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_zero_length_always_true() {
         let result = strncmp_builtin(
@@ -377,6 +381,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_bool_true_compares_first_character() {
         let result = strncmp_builtin(
@@ -388,6 +393,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_bool_false_treated_as_zero() {
         let result = strncmp_builtin(
@@ -399,6 +405,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_logical_array_scalar() {
         let logical = LogicalArray::new(vec![1], vec![1]).unwrap();
@@ -411,6 +418,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_tensor_scalar_double() {
         let limit = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -423,6 +431,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_char_array_rows() {
         let chars = CharArray::new(
@@ -443,6 +452,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_cell_arrays_broadcast() {
         let left = CellArray::new(
@@ -475,6 +485,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_string_array_broadcast_scalar() {
         let strings = StringArray::new(
@@ -492,6 +503,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_missing_string_false_when_prefix_positive() {
         let strings =
@@ -506,6 +518,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::LogicalArray(expected));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_missing_zero_length_true() {
         let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
@@ -518,6 +531,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
@@ -531,6 +545,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_invalid_length_type_errors() {
         let err = strncmp_builtin(
@@ -542,6 +557,7 @@ pub(crate) mod tests {
         assert!(err.contains("prefix length"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_negative_length_errors() {
         let err = strncmp_builtin(
@@ -553,6 +569,7 @@ pub(crate) mod tests {
         assert!(err.to_ascii_lowercase().contains("nonnegative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn strncmp_prefix_length_from_gpu_tensor() {
@@ -581,6 +598,7 @@ pub(crate) mod tests {
         let _ = provider.free(&handle);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

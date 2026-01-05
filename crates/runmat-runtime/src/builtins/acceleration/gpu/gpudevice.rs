@@ -394,6 +394,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_returns_struct() {
         test_support::with_test_provider(|_| {
@@ -412,6 +413,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_accepts_current_index() {
         test_support::with_test_provider(|_| {
@@ -432,6 +434,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_out_of_range_index_errors() {
         test_support::with_test_provider(|_| {
@@ -443,6 +446,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
@@ -451,6 +455,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -459,6 +464,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -468,6 +474,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
@@ -477,6 +484,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_invalid_index_rejected() {
         test_support::with_test_provider(|_| {
@@ -498,6 +506,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_device_wgpu_reports_metadata() {
@@ -548,6 +557,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_device_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

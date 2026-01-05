@@ -301,18 +301,21 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, MException};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_requires_message() {
         let err = error_builtin(Vec::new()).expect_err("should error");
         assert!(err.contains("missing message"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_identifier_is_applied() {
         let err = error_builtin(vec![Value::from("Failure!")]).expect_err("should error");
         assert_eq!(err, "MATLAB:error: Failure!");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn custom_identifier_is_preserved() {
         let err = error_builtin(vec![
@@ -324,6 +327,7 @@ pub(crate) mod tests {
         assert_eq!(err, "runmat:tests:badValue: Value 5 is not allowed.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn identifier_is_normalised_when_namespace_missing() {
         let err = error_builtin(vec![
@@ -334,6 +338,7 @@ pub(crate) mod tests {
         assert_eq!(err, "MATLAB:missingNamespace: Message");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn format_string_with_colon_not_treated_as_identifier() {
         let err = error_builtin(vec![
@@ -344,6 +349,7 @@ pub(crate) mod tests {
         assert_eq!(err, "MATLAB:error: Value: 7.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
@@ -351,6 +357,7 @@ pub(crate) mod tests {
         assert_eq!(err, "MATLAB:demo:test: broken");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_rejects_extra_args_after_mexception() {
         let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
@@ -359,6 +366,7 @@ pub(crate) mod tests {
         assert!(err.contains("additional arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_message_struct() {
         let mut st = StructValue::new();
@@ -370,6 +378,7 @@ pub(crate) mod tests {
         assert_eq!(err, "pkg:demo:failure: Struct message.");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_struct_requires_message_field() {
         let mut st = StructValue::new();
@@ -379,6 +388,7 @@ pub(crate) mod tests {
         assert!(err.contains("message struct must contain a 'message' field"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         use crate::builtins::common::test_support;

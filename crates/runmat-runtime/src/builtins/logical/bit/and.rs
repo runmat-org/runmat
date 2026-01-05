@@ -373,6 +373,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_of_booleans() {
         assert_eq!(
@@ -385,6 +386,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -399,6 +401,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
@@ -412,6 +415,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_char_arrays() {
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
@@ -427,12 +431,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_treats_nan_as_true() {
         let result = and_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_complex_inputs() {
         let result = and_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
@@ -442,6 +448,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -450,6 +457,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_rejects_unsupported_types() {
         let err = and_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
@@ -459,6 +467,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -476,6 +485,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_gpu_supports_broadcast() {
         test_support::with_test_provider(|provider| {
@@ -502,6 +512,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn and_wgpu_matches_host_path() {
@@ -550,6 +561,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

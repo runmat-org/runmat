@@ -384,6 +384,7 @@ pub(crate) mod tests {
         format!("RUNMAT_TEST_SETENV_{}", suffix)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_sets_variable_and_returns_success() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -401,6 +402,7 @@ pub(crate) mod tests {
         env::remove_var(name);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_removes_variable_when_value_is_empty() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -418,6 +420,7 @@ pub(crate) mod tests {
         env::remove_var(name);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_reports_failure_for_illegal_name() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -431,6 +434,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message(), MESSAGE_NAME_HAS_EQUAL);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_reports_failure_for_empty_name() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -444,6 +448,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message(), MESSAGE_EMPTY_NAME);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_reports_failure_for_null_in_name() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -457,6 +462,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message(), MESSAGE_NAME_HAS_NULL);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_reports_failure_for_null_in_value() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -470,6 +476,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message(), MESSAGE_VALUE_HAS_NULL);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_errors_when_name_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -478,6 +485,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_NAME_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_errors_when_value_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -489,6 +497,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_VALUE_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_accepts_scalar_string_array_arguments() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -511,6 +520,7 @@ pub(crate) mod tests {
         env::remove_var(name);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_errors_for_string_array_with_multiple_elements() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -524,6 +534,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_NAME_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_errors_for_char_array_with_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -536,6 +547,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_NAME_TYPE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_char_array_input_trims_padding() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -545,6 +557,7 @@ pub(crate) mod tests {
         assert_eq!(result, "FOO");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_outputs_success_message_is_empty_char_array() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -569,6 +582,7 @@ pub(crate) mod tests {
         env::remove_var(name);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_outputs_return_status_and_message() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -591,6 +605,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

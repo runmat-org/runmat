@@ -518,6 +518,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_swaps_dims() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
@@ -533,6 +534,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_adds_trailing_dimension() {
         let row = tensor(&[1.0, 2.0, 3.0], &[1, 3]);
@@ -546,6 +548,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_duplicates() {
         let data: Vec<f64> = (1..=6).map(|n| n as f64).collect();
@@ -555,6 +558,7 @@ pub(crate) mod tests {
         assert!(err.contains("duplicate dimension index"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_requires_vector_order() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -563,6 +567,7 @@ pub(crate) mod tests {
         assert!(err.contains("order must be a row or column vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_zero_index() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -571,6 +576,7 @@ pub(crate) mod tests {
         assert!(err.contains("indices must be >= 1"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_rejects_non_integer_order() {
         let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -579,6 +585,7 @@ pub(crate) mod tests {
         assert!(err.contains("indices must be integers"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_order_length_must_cover_rank() {
         let data: Vec<f64> = (1..=8).map(|n| n as f64).collect();
@@ -588,6 +595,7 @@ pub(crate) mod tests {
         assert!(err.contains("order length (2) must be at least ndims(A) (3)"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_logical_preserves_type() {
         let la = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -603,6 +611,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_complex_tensor() {
         let ct = ComplexTensor::new(
@@ -622,6 +631,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_string_array() {
         let sa = StringArray::new(
@@ -641,6 +651,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_transpose() {
         let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -656,6 +667,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_requires_two_dims() {
         let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
@@ -665,6 +677,7 @@ pub(crate) mod tests {
         assert!(err.contains("order length (1) must be at least ndims(A) (2)"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -688,6 +701,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
@@ -695,6 +709,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_wgpu_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(

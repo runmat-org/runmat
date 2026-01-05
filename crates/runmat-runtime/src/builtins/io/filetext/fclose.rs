@@ -462,6 +462,7 @@ pub(crate) mod tests {
         (fid, path)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_closes_single_file() {
         let _guard = registry_guard();
@@ -474,6 +475,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_invalid_identifier_returns_error() {
         let _guard = registry_guard();
@@ -483,6 +485,7 @@ pub(crate) mod tests {
         assert_eq!(eval.message(), INVALID_IDENTIFIER_MESSAGE);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_all_closes_everything() {
         let _guard = registry_guard();
@@ -496,6 +499,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_no_args_closes_all() {
         let _guard = registry_guard();
@@ -507,6 +511,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_vector_of_fids_closes_each() {
         let _guard = registry_guard();
@@ -534,6 +539,7 @@ pub(crate) mod tests {
         fs::remove_file(path2).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_repeat_returns_error_message() {
         let _guard = registry_guard();
@@ -547,6 +553,7 @@ pub(crate) mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_standard_stream_bool_argument() {
         let _guard = registry_guard();
@@ -559,6 +566,7 @@ pub(crate) mod tests {
         assert!(matches!(outputs[1], Value::CharArray(ref ca) if ca.rows == 1 && ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_logical_array_converts_to_numeric_ids() {
         let _guard = registry_guard();
@@ -569,6 +577,7 @@ pub(crate) mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_cell_array_closes_each_entry() {
         let _guard = registry_guard();
@@ -584,6 +593,7 @@ pub(crate) mod tests {
         fs::remove_file(path2).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_tensor_with_non_integer_entries_errors() {
         let _guard = registry_guard();
@@ -593,6 +603,7 @@ pub(crate) mod tests {
         assert_eq!(err, "fclose: file identifier must be an integer");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_string_array_all_equivalent() {
         let _guard = registry_guard();
@@ -603,6 +614,7 @@ pub(crate) mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_accepts_empty_tensor() {
         let _guard = registry_guard();
@@ -613,6 +625,7 @@ pub(crate) mod tests {
         assert!(eval.message().is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_errors_on_non_numeric_input() {
         let _guard = registry_guard();
@@ -621,6 +634,7 @@ pub(crate) mod tests {
         assert_eq!(err, "fclose: file identifier must be numeric or 'all'");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let _guard = registry_guard();

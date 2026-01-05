@@ -538,9 +538,9 @@ pub(crate) mod tests {
     use runmat_builtins::Tensor;
     use runmat_builtins::{CellArray, CharArray, IntValue, StringArray};
 
-    #[cfg(any(feature = "doc_export", feature = "wgpu"))]
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_string_scalar_concatenation() {
         let result = strcat_builtin(vec![
@@ -551,6 +551,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("RunMat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_string_array_broadcasts_scalar() {
         let array = StringArray::new(vec!["core".into(), "runtime".into()], vec![1, 2]).unwrap();
@@ -571,6 +572,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_char_array_multiple_rows_concatenates_per_row() {
         let first = CharArray::new(vec!['A', ' ', 'B', 'C'], 2, 2).expect("char");
@@ -588,6 +590,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_char_array_trims_trailing_spaces() {
         let first = CharArray::new_row("GPU ");
@@ -605,6 +608,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_mixed_char_and_string_returns_string_array() {
         let prefixes = CharArray::new(vec!['A', ' ', 'B', ' '], 2, 2).expect("char");
@@ -632,6 +636,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_cell_array_trims_trailing_spaces() {
         let cell = make_cell_with_shape(
@@ -661,6 +666,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_cell_array_two_by_two_preserves_row_major_order() {
         let cell = make_cell_with_shape(
@@ -701,6 +707,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_missing_strings_propagate() {
         let array = StringArray::new(
@@ -722,6 +729,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_empty_dimension_returns_empty_array() {
         let empty = StringArray::new(Vec::<String>::new(), vec![0, 2]).expect("string array");
@@ -739,12 +747,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_invalid_input_type() {
         let err = strcat_builtin(vec![Value::Int(IntValue::I32(4))]).expect_err("expected error");
         assert!(err.contains("inputs must be strings"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_mismatched_sizes() {
         let left = CharArray::new(vec!['A', 'B'], 2, 1).expect("char");
@@ -757,6 +767,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_invalid_cell_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
@@ -764,6 +775,7 @@ pub(crate) mod tests {
         assert!(err.contains("cell array elements must be character vectors"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_empty_argument_list() {
         let err = strcat_builtin(Vec::new()).expect_err("expected error");
@@ -771,6 +783,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_gpu_operand_still_errors_on_type() {
         test_support::with_test_provider(|provider| {
@@ -785,6 +798,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);

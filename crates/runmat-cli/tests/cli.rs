@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 // Helper function to get the binary path
@@ -54,10 +55,9 @@ fn test_version_detailed_command() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("RunMat"));
-    assert!(stdout.contains("Components:"));
-    assert!(stdout.contains("runmat-lexer"));
-    assert!(stdout.contains("runmat-turbine"));
-    assert!(stdout.contains("runmat-gc"));
+    assert!(stdout.contains("Built with Rust"));
+    assert!(stdout.contains("Target:"));
+    assert!(stdout.contains("Profile:"));
 }
 
 #[test]
@@ -342,6 +342,27 @@ fn test_repl_command() {
 }
 
 #[test]
+fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new(get_binary_path())
+        .args(["repl"])
+        .env("RUNMAT_ACCEL_ENABLE", "0")
+        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(b"1+1\n")?;
+    }
+    drop(child.stdin.take());
+    let output = child.wait_with_output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("RunMat v"));
+    assert!(stdout.contains("ans = 2"));
+    Ok(())
+}
+
+#[test]
 fn test_kernel_command_help() {
     let output = run_runmat(&["kernel", "--help"]);
     assert!(output.status.success());
@@ -408,9 +429,9 @@ fn test_help_shows_environment_variables() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Environment Variables"));
-    assert!(stdout.contains("RUSTMAT_DEBUG"));
-    assert!(stdout.contains("RUSTMAT_GC_PRESET"));
-    assert!(stdout.contains("RUSTMAT_JIT_ENABLE"));
+    assert!(stdout.contains("RUNMAT_DEBUG"));
+    assert!(stdout.contains("RUNMAT_GC_PRESET"));
+    assert!(stdout.contains("RUNMAT_JIT_ENABLE"));
 }
 
 #[test]

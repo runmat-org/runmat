@@ -277,6 +277,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_detects_row_and_column_vectors() {
         let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -287,6 +288,7 @@ pub(crate) mod tests {
         assert_eq!(col_result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_rejects_matrices_and_higher_dimensions() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -297,6 +299,7 @@ pub(crate) mod tests {
         assert_eq!(cube_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_counts_scalars_and_empty_one_dimensional_arrays() {
         let scalar_result = isvector_builtin(Value::Num(5.0)).expect("isvector scalar");
@@ -312,6 +315,7 @@ pub(crate) mod tests {
         assert_eq!(wide_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_char_and_cell_arrays_follow_dimensions() {
         let char_row = CharArray::new_row("RunMat");
@@ -340,6 +344,7 @@ pub(crate) mod tests {
         assert_eq!(cell_matrix_result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_trailing_singleton_dimensions_are_rejected() {
         let scalar_with_extra = Tensor::new(vec![5.0], vec![1, 1, 1]).unwrap();
@@ -348,6 +353,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isvector_gpu_tensor_uses_handle_shape() {
         test_support::with_test_provider(|provider| {
@@ -372,6 +378,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isvector_wgpu_provider_populates_shape() {
@@ -393,6 +400,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

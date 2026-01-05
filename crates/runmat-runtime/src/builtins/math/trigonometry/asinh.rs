@@ -311,6 +311,7 @@ pub(crate) mod tests {
     use num_complex::Complex64;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_scalar() {
         let value = Value::Num(0.5);
@@ -321,6 +322,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_tensor_values() {
         let tensor =
@@ -343,6 +345,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_complex_inputs() {
         let inputs = [Complex64::new(1.0, 2.0), Complex64::new(-0.5, 0.75)];
@@ -362,6 +365,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_char_array_roundtrip() {
         let chars = CharArray::new("az".chars().collect(), 1, 2).expect("char array");
@@ -378,6 +382,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -398,6 +403,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_logical_array_promotes() {
         let logical =
@@ -420,6 +426,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_string_errors() {
         let err = asinh_builtin(Value::from("not numeric")).expect_err("expected error");
@@ -429,12 +436,14 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn asinh_wgpu_matches_cpu() {

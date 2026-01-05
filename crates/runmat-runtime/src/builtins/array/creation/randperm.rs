@@ -533,6 +533,7 @@ pub(crate) mod tests {
         values
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_full_permutation_matches_expected_sequence() {
         let _guard = random::test_lock().lock().unwrap();
@@ -545,6 +546,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_partial_selection_is_unique_and_sorted() {
         let _guard = random::test_lock().lock().unwrap();
@@ -565,6 +567,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_zero_length_returns_empty() {
         let args = vec![Value::from(0)];
@@ -574,6 +577,7 @@ pub(crate) mod tests {
         assert!(gathered.data.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_errors_when_k_exceeds_n() {
         let args = vec![Value::from(3), Value::from(4)];
@@ -581,6 +585,7 @@ pub(crate) mod tests {
         assert!(err.contains("K must satisfy 0 <= K <= N"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_errors_for_negative_input() {
         let args = vec![Value::Num(-1.0)];
@@ -588,6 +593,7 @@ pub(crate) mod tests {
         assert!(err.contains("N must be a non-negative integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_rejects_single_precision_request() {
         let args = vec![Value::from(5), Value::from("single")];
@@ -595,6 +601,7 @@ pub(crate) mod tests {
         assert!(err.contains("single precision"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_accepts_double_keyword() {
         let _guard = random::test_lock().lock().unwrap();
@@ -607,6 +614,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_tensor_matches_host_output() {
         let _guard = random::test_lock().lock().unwrap();
@@ -624,6 +632,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_gpu_like_roundtrip() {
         let _guard = random::test_lock().lock().unwrap();
@@ -653,6 +662,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_requires_prototype() {
         let args = vec![Value::from(4), Value::from("like")];
@@ -660,6 +670,7 @@ pub(crate) mod tests {
         assert!(err.contains("prototype after 'like'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn randperm_wgpu_produces_unique_indices() {
@@ -675,11 +686,11 @@ pub(crate) mod tests {
         let provider = match registration {
             Ok(Ok(_)) => runmat_accelerate_api::provider().expect("wgpu provider registered"),
             Ok(Err(err)) => {
-                eprintln!("skipping wgpu randperm test: {err}");
+                tracing::warn!("skipping wgpu randperm test: {err}");
                 return;
             }
             Err(_) => {
-                eprintln!("skipping wgpu randperm test: provider initialization panicked");
+                tracing::warn!("skipping wgpu randperm test: provider initialization panicked");
                 return;
             }
         };
@@ -726,6 +737,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

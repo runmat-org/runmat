@@ -798,6 +798,7 @@ pub(crate) mod tests {
         crate::make_cell(cells, rows, cols).expect("cell")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn simple_numeric_cell() {
         let cell = scalar_cell(&[1.0, 2.0, 3.0, 4.0], 2, 2);
@@ -811,6 +812,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn block_concatenation() {
         let row1_left = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor"));
@@ -834,6 +836,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_cell() {
         let a = Value::Bool(true);
@@ -851,6 +854,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_cell() {
         let values = vec![Value::Complex(1.0, 2.0), Value::Complex(3.0, 4.0)];
@@ -865,6 +869,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_cell() {
         let a = Value::CharArray(CharArray::new("hi".chars().collect(), 1, 2).unwrap());
@@ -881,6 +886,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mismatched_block_sizes_error() {
         let a = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
@@ -890,6 +896,7 @@ pub(crate) mod tests {
         assert!(err.contains("block sizes"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn higher_dimensional_tiling() {
         let a = Value::Tensor(Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap());
@@ -905,6 +912,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_cell_returns_empty_double() {
         let cell = crate::make_cell(Vec::new(), 0, 0).expect("cell");
@@ -918,6 +926,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell2mat_gpu_cells_are_gathered() {
         test_support::with_test_provider(|provider| {
@@ -940,6 +949,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn cell2mat_wgpu_cells_are_gathered() {
@@ -964,6 +974,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

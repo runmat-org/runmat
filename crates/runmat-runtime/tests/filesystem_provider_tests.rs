@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]

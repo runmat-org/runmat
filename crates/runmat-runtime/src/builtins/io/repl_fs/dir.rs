@@ -647,6 +647,7 @@ pub(crate) mod tests {
             })
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_lists_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -696,6 +697,7 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_handles_wildcard_patterns() {
         let _lock = REPL_FS_TEST_LOCK
@@ -718,6 +720,7 @@ pub(crate) mod tests {
         assert_eq!(field_bool(&entries[0], "isdir"), Some(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_lists_specific_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -743,6 +746,7 @@ pub(crate) mod tests {
         assert!(names.contains(&"nested".to_string()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_folder_and_pattern_arguments() {
         let _lock = REPL_FS_TEST_LOCK
@@ -763,6 +767,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_returns_single_file_entry() {
         let _lock = REPL_FS_TEST_LOCK
@@ -783,6 +788,7 @@ pub(crate) mod tests {
         assert_eq!(field_bool(&entries[0], "isdir"), Some(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_accepts_char_array_input() {
         let _lock = REPL_FS_TEST_LOCK
@@ -798,6 +804,7 @@ pub(crate) mod tests {
         assert_eq!(entries.len(), 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_rejects_numeric_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -807,6 +814,7 @@ pub(crate) mod tests {
         assert_eq!(err, "dir: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_rejects_multi_element_string_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -818,6 +826,7 @@ pub(crate) mod tests {
         assert_eq!(err, "dir: name must be a character vector or string scalar");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_no_matches_returns_empty_struct_array() {
         let _lock = REPL_FS_TEST_LOCK
@@ -835,6 +844,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_errors_on_wildcard_folder_argument() {
         let _lock = REPL_FS_TEST_LOCK
@@ -849,6 +859,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(not(windows))]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dir_expands_tilde_to_home_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -871,6 +882,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

@@ -594,6 +594,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repeats_matrix_with_vector_reps() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -623,6 +624,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_accepts_column_vector_arguments() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -635,6 +637,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_replication_factor_expands_all_dims() {
         let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -648,6 +651,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_high_dim_numeric() {
         let base_data: Vec<f64> = (0..6).map(|v| v as f64).collect();
@@ -683,6 +687,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_array_replication_preserves_type() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -703,6 +708,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_bool_scalar_returns_logical() {
         let result =
@@ -716,6 +722,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_array_replication_tiles_rows_and_cols() {
         let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
@@ -735,6 +742,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_char_rejects_high_dim() {
         let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
@@ -744,6 +752,7 @@ pub(crate) mod tests {
         assert!(err.contains("two dimensions"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zero_replication_yields_empty_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
@@ -761,6 +770,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_errors_on_fractional_replication() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -769,6 +779,7 @@ pub(crate) mod tests {
         assert!(err.contains("integer"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_errors_on_negative_factor() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -777,6 +788,7 @@ pub(crate) mod tests {
         assert!(err.contains("non-negative"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_errors_on_infinite_factor() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -785,6 +797,7 @@ pub(crate) mod tests {
         assert!(err.contains("finite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_complex_scalar_tiles() {
         let result = repmat_builtin(
@@ -801,6 +814,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_complex_tensor_tiles_entries() {
         let base = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0)], vec![1, 2]).unwrap();
@@ -830,6 +844,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_cell_array_tiles_values() {
         let cell = CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap();
@@ -857,6 +872,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -875,6 +891,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_string_scalar() {
         let result =
@@ -896,6 +913,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn repmat_wgpu_matches_cpu() {
@@ -928,6 +946,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.data, cpu_tensor.data);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

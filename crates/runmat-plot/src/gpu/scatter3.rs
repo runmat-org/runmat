@@ -153,7 +153,7 @@ pub fn pack_vertices_from_xyz(
     });
 
     let lod_stride = params.lod_stride.max(1);
-    let max_points = (inputs.len + lod_stride - 1) / lod_stride;
+    let max_points = inputs.len.div_ceil(lod_stride);
     let output_size = max_points as u64 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scatter3-gpu-vertices"),
@@ -242,7 +242,7 @@ pub fn pack_vertices_from_xyz(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (inputs.len + workgroup_size - 1) / workgroup_size;
+        let workgroups = inputs.len.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -423,7 +423,7 @@ mod stress_tests {
         };
         let point_count = 1_200_000u32;
         let stride = 4u32;
-        let max_points = (point_count + stride - 1) / stride;
+        let max_points = point_count.div_ceil(stride);
 
         let x: Vec<f32> = (0..point_count).map(|i| i as f32 * 0.001).collect();
         let y: Vec<f32> = x.iter().map(|v| v.cos()).collect();

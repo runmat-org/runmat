@@ -155,7 +155,7 @@ fn ceil_div(len: u32, stride: u32) -> u32 {
     if stride == 0 {
         return len;
     }
-    (len + stride - 1) / stride
+    len.div_ceil(stride)
 }
 
 /// Compute the level-of-detail stride for scatter3 given the number of points
@@ -168,7 +168,7 @@ pub(crate) fn scatter3_lod_stride(point_count: u32, extent_hint: f32) -> u32 {
     if point_count <= adjusted {
         1
     } else {
-        (point_count + adjusted - 1) / adjusted
+        point_count.div_ceil(adjusted)
     }
 }
 
@@ -176,6 +176,7 @@ pub(crate) fn scatter3_lod_stride(point_count: u32, extent_hint: f32) -> u32 {
 pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_target_env_override() {
         std::env::set_var("RUNMAT_PLOT_SCATTER_TARGET", "300000");
@@ -185,6 +186,7 @@ pub(crate) mod tests {
         assert_eq!(read_env_u64("RUNMAT_PLOT_SCATTER_TARGET").unwrap(), 300_000);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn surface_lod_identity_when_small() {
         let lod = compute_surface_lod(32, 64, 10.0);
@@ -194,6 +196,7 @@ pub(crate) mod tests {
         assert_eq!(lod.lod_y_len, 64);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn surface_lod_downsamples_large_grid() {
         let lod = compute_surface_lod(4096, 4096, 10_000.0);
@@ -202,6 +205,7 @@ pub(crate) mod tests {
         assert!((lod.lod_x_len as u64) * (lod.lod_y_len as u64) <= surface_vertex_budget());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_stride_scales_with_extent() {
         set_scatter_target_points(100_000);

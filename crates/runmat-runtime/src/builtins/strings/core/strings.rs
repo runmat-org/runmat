@@ -493,6 +493,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_default_scalar() {
         let result = strings_builtin(Vec::new()).expect("strings");
@@ -505,6 +506,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_square_from_single_dimension() {
         let args = vec![Value::Num(4.0)];
@@ -518,6 +520,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rectangular_multiple_args() {
         let args = vec![
@@ -534,6 +537,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_from_size_vector_tensor() {
         let dims = Tensor::new(vec![2.0, 3.0, 1.0], vec![1, 3]).unwrap();
@@ -547,6 +551,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_preserves_trailing_singletons() {
         let args = vec![
@@ -565,6 +570,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_bool_dimensions() {
         let result = strings_builtin(vec![Value::Bool(true), Value::Bool(false)]).expect("strings");
@@ -577,6 +583,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_logical_vector_argument() {
         let logical =
@@ -591,24 +598,28 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_negative_dimension_errors() {
         let err = strings_builtin(vec![Value::Num(-5.0)]).expect_err("expected error");
         assert!(err.contains(super::SIZE_NONNEGATIVE_ERR));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rejects_non_integer_dimension() {
         let err = strings_builtin(vec![Value::Num(2.5)]).expect_err("expected error");
         assert!(err.contains(super::SIZE_INTEGER_ERR));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rejects_non_numeric_dimension() {
         let err = strings_builtin(vec![Value::String("size".into())]).expect_err("expected error");
         assert!(err.contains("size arguments must be numeric"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_empty_vector_returns_empty_array() {
         let dims = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
@@ -622,6 +633,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_missing_option_fills_with_missing() {
         let result = strings_builtin(vec![
@@ -640,6 +652,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_missing_without_dims_defaults_to_scalar() {
         let result = strings_builtin(vec![Value::String("missing".into())]).expect("strings");
@@ -652,6 +665,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_prototype_shape() {
         let proto = StringArray::new(
@@ -673,6 +687,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_numeric_prototype() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -690,6 +705,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_overrides_shape_when_dims_provided() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -707,12 +723,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_requires_prototype() {
         let err = strings_builtin(vec![Value::String("like".into())]).expect_err("expected error");
         assert!(err.contains("expected prototype"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_rejects_multiple_specs() {
         let err = strings_builtin(vec![
@@ -725,6 +743,7 @@ pub(crate) mod tests {
         assert!(err.contains("multiple 'like'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_gpu_size_vector_argument() {
         test_support::with_test_provider(|provider| {
@@ -745,6 +764,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_accepts_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -767,6 +787,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_handles_wgpu_size_vectors() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -788,6 +809,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let examples = test_support::doc_examples(DOC_MD);

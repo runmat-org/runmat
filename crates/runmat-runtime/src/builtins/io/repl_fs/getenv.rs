@@ -376,6 +376,7 @@ pub(crate) mod tests {
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{CharArray, StringArray, Value};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_existing_variable() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -392,6 +393,7 @@ pub(crate) mod tests {
         env::remove_var("RUNMAT_TEST_GETENV_CHAR");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_string_missing_variable_returns_empty_string() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -404,6 +406,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_string_array_preserves_shape() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -426,6 +429,7 @@ pub(crate) mod tests {
         env::remove_var("RUNMAT_TEST_GETENV_B");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_matrix_handles_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -449,6 +453,7 @@ pub(crate) mod tests {
         env::remove_var("RUN2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_input_missing_variable_returns_empty_char_vector() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -464,6 +469,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_char_matrix_trims_trailing_spaces() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -488,6 +494,7 @@ pub(crate) mod tests {
         env::remove_var("RUNMAT_TEST_TRIM2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_cell_array_preserves_element_types() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -527,6 +534,7 @@ pub(crate) mod tests {
         env::remove_var("RUNMAT_TEST_CELL2");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_cell_array_rejects_invalid_entries() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -546,6 +554,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_returns_struct_with_all_variables() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -570,6 +579,7 @@ pub(crate) mod tests {
         env::remove_var("RUNMAT_TEST_STRUCT");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_invalid_input_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -581,6 +591,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getenv_too_many_arguments_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -595,6 +606,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let examples = crate::builtins::common::test_support::doc_examples(DOC_MD);

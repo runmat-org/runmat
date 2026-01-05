@@ -1314,6 +1314,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_basic_counts() {
         let x = Tensor::new(vec![0.5, 1.5, 2.5, 3.5], vec![4, 1]).unwrap();
@@ -1350,6 +1351,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_probability_normalization() {
         let x = Tensor::new(vec![0.2, 0.4, 1.1, 1.5], vec![4, 1]).unwrap();
@@ -1370,6 +1372,7 @@ pub(crate) mod tests {
         assert_eq!(counts.data, vec![0.5, 0.0, 0.0, 0.5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_nan_pairs_excluded() {
         let x = Tensor::new(vec![1.0, 2.0, f64::NAN, 3.0], vec![4, 1]).unwrap();
@@ -1387,6 +1390,7 @@ pub(crate) mod tests {
         assert_eq!(counts.data.iter().sum::<f64>(), 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_num_bins_vector() {
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -1405,6 +1409,7 @@ pub(crate) mod tests {
         assert_eq!(counts.data.iter().sum::<f64>(), 4.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_bin_width_and_limits() {
         let x_tensor = Tensor::new(vec![0.2, 1.2, 2.4, 2.6], vec![4, 1]).unwrap();
@@ -1458,6 +1463,7 @@ pub(crate) mod tests {
         assert_eq!(density.data[0], 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_cdf_normalization() {
         let x = Tensor::new(vec![0.1, 0.9, 1.2, 1.8], vec![4, 1]).unwrap();
@@ -1479,6 +1485,7 @@ pub(crate) mod tests {
         assert!(cdf.data.windows(2).all(|w| w[0] <= w[1] + 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_integer_bin_method() {
         let x = Tensor::new(vec![0.2, 1.7, 2.1], vec![3, 1]).unwrap();
@@ -1509,6 +1516,7 @@ pub(crate) mod tests {
             .all(|w| (w[1] - w[0] - 1.0).abs() < 1e-12));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_num_bins_zero_errors() {
         let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1521,6 +1529,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_binmethod_conflict_errors() {
         let x = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
@@ -1538,6 +1547,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts2_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1575,6 +1585,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn histcounts2_wgpu_roundtrip() {
@@ -1628,6 +1639,7 @@ pub(crate) mod tests {
         assert_eq!(count(1, 1), 0.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

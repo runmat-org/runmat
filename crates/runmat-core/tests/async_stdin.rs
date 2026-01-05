@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use anyhow::Result;
 use runmat_builtins::Value;
 use runmat_core::{
@@ -45,6 +47,7 @@ fn assert_line_request(kind: &InputRequestKind) {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn input_prompts_suspend_and_resume() -> Result<()> {
     let _guard = InteractiveGuard::new();
@@ -66,6 +69,7 @@ fn input_prompts_suspend_and_resume() -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn multiple_inputs_queue_separate_requests() -> Result<()> {
     let _guard = InteractiveGuard::new();
@@ -96,6 +100,7 @@ fn multiple_inputs_queue_separate_requests() -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_literal_round_trips() -> Result<()> {
     let _guard = InteractiveGuard::new();
@@ -106,6 +111,7 @@ fn char_literal_round_trips() -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn pause_without_args_suspends_and_resumes() -> Result<()> {
     let _guard = InteractiveGuard::new();
@@ -126,6 +132,7 @@ fn pause_without_args_suspends_and_resumes() -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn multiple_pauses_queue_separate_requests() -> Result<()> {
     let _guard = InteractiveGuard::new();

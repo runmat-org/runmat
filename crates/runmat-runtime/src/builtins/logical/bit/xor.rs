@@ -380,6 +380,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_of_booleans() {
         assert_eq!(
@@ -396,6 +397,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_numeric_arrays() {
         let a = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -410,6 +412,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_logical_array_inputs() {
         let left = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -425,6 +428,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_empty_inputs() {
         let lhs = Tensor::new(Vec::<f64>::new(), vec![0, 3]).unwrap();
@@ -439,6 +443,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_scalar_broadcasts() {
         let tensor = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![4, 1]).unwrap();
@@ -452,6 +457,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_char_arrays() {
         let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
@@ -467,6 +473,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_treats_nan_as_true() {
         let result = xor_builtin(Value::Num(f64::NAN), Value::Num(1.0)).unwrap();
@@ -475,6 +482,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_complex_inputs() {
         let result = xor_builtin(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
@@ -484,6 +492,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_size_mismatch_errors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -492,6 +501,7 @@ pub(crate) mod tests {
         assert!(err.contains("size mismatch"), "unexpected error: {err}");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_rejects_unsupported_types() {
         let err = xor_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
@@ -501,6 +511,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -523,6 +534,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_gpu_supports_broadcast() {
         test_support::with_test_provider(|provider| {
@@ -549,6 +561,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn xor_wgpu_matches_host_path() {
@@ -597,6 +610,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

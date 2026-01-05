@@ -850,6 +850,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_default_uint8_sends_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -875,6 +876,7 @@ pub(crate) mod tests {
         assert_eq!(received, vec![1, 2, 3, 4]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_double_big_endian_encodes_correctly() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -909,6 +911,7 @@ pub(crate) mod tests {
         assert_eq!(received.to_vec(), expected);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_char_payload_encodes_ascii() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -938,6 +941,7 @@ pub(crate) mod tests {
         assert_eq!(received, b"RunMat");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_errors_when_client_disconnected() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -972,6 +976,7 @@ pub(crate) mod tests {
         handle.join().expect("join");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_compile() {
         let blocks = test_support::doc_examples(DOC_MD);

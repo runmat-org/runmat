@@ -1,6 +1,9 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{builtin_functions, Tensor as Matrix, Value};
 use runmat_runtime::{call_builtin, comparison::*, indexing::*, matrix::*};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_arithmetic() {
     let a = Matrix::new_2d(vec![1.0, 3.0, 2.0, 4.0], 2, 2).unwrap();
@@ -21,6 +24,7 @@ fn test_matrix_arithmetic() {
     assert_eq!(e.data, vec![4.0, 10.0, 5.0, 11.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_scalar_operations() {
     let a = Matrix::new_2d(vec![1.0, 3.0, 2.0, 4.0], 2, 2).unwrap();
@@ -30,18 +34,23 @@ fn test_scalar_operations() {
     assert_eq!(b.data, vec![2.0, 6.0, 4.0, 8.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_transpose() {
     // Build A as 3x2 with column-major data for [[1,2],[3,4],[5,6]]
     let a = Matrix::new_2d(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2).unwrap();
-    let b = matrix_transpose(&a);
+    let b = match call_builtin("transpose", &[Value::Tensor(a)]).unwrap() {
+        Value::Tensor(t) => t,
+        other => panic!("expected tensor transpose, got {other:?}"),
+    };
 
     assert_eq!(b.rows(), 2);
     assert_eq!(b.cols(), 3);
     // Transpose should yield [[1,3,5],[2,4,6]] with col-major data [1,2,3,4,5,6]
-    assert_eq!(b.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+    assert_eq!(b.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_eye() {
     let eye3 = matrix_eye(3);
@@ -50,6 +59,7 @@ fn test_matrix_eye() {
     assert_eq!(eye3.data, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_comparison_operations() {
     let a = Matrix::new_2d(vec![1.0, 3.0, 2.0, 4.0], 2, 2).unwrap();
@@ -68,6 +78,7 @@ fn test_comparison_operations() {
     assert_eq!(eq_result.data, vec![0.0, 0.0, 1.0, 0.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_indexing() {
     let mut matrix = Matrix::new_2d(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 2, 3).unwrap();
@@ -85,6 +96,7 @@ fn test_matrix_indexing() {
     assert!(matrix_set_element(&mut matrix, 1, 0, 5.0).is_err());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_row_column_access() {
     let matrix = Matrix::new_2d(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 2, 3).unwrap();
@@ -108,6 +120,7 @@ fn test_row_column_access() {
     assert_eq!(col3.data, vec![3.0, 6.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_builtin_functions() {
     // Test that our new built-in functions are registered
@@ -116,12 +129,13 @@ fn test_builtin_functions() {
     assert!(names.contains(&"matrix_zeros"));
     assert!(names.contains(&"matrix_ones"));
     assert!(names.contains(&"matrix_eye"));
-    assert!(names.contains(&"matrix_transpose"));
+    assert!(names.contains(&"transpose"));
     assert!(names.contains(&"gt"));
     assert!(names.contains(&"lt"));
     assert!(names.contains(&"eq"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_builtin_dispatch() {
     // Test zeros function
@@ -161,6 +175,7 @@ fn test_builtin_dispatch() {
     assert_eq!(result, Value::Num(1.0));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_matrix_dimension_errors() {
     let a = Matrix::new_2d(vec![1.0, 2.0], 1, 2).unwrap();

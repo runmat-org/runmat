@@ -484,6 +484,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::LogicalArray;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_polynomial_without_constant() {
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
@@ -502,6 +503,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_with_constant() {
         let tensor = Tensor::new(vec![4.0, 0.0, -8.0], vec![1, 3]).unwrap();
@@ -521,6 +523,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_scalar_value() {
         let result = polyint_builtin(Value::Num(5.0), Vec::new()).expect("polyint");
@@ -534,6 +537,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_logical_coefficients() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
@@ -553,6 +557,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn preserves_column_vector_orientation() {
         let tensor = Tensor::new(vec![2.0, 0.0, -6.0], vec![3, 1]).unwrap();
@@ -571,6 +576,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_complex_coefficients() {
         let tensor =
@@ -593,6 +599,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_matrix_coefficients() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -600,6 +607,7 @@ pub(crate) mod tests {
         assert!(err.contains("vector"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_scalar_constant() {
         let coeffs = Tensor::new(vec![1.0, -4.0, 6.0], vec![1, 3]).unwrap();
@@ -609,6 +617,7 @@ pub(crate) mod tests {
         assert!(err.contains("constant of integration must be a scalar"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_excess_arguments() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
@@ -620,6 +629,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handles_empty_input_as_zero_polynomial() {
         let tensor = Tensor::new(vec![], vec![1, 0]).unwrap();
@@ -635,6 +645,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_input_with_constant() {
         let tensor = Tensor::new(vec![], vec![1, 0]).unwrap();
@@ -652,6 +663,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyint_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -678,6 +690,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyint_gpu_complex_constant_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
@@ -706,6 +719,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyint_gpu_with_gpu_constant() {
         test_support::with_test_provider(|provider| {
@@ -743,6 +757,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn polyint_wgpu_matches_cpu() {
@@ -777,6 +792,7 @@ pub(crate) mod tests {
             .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < tol));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

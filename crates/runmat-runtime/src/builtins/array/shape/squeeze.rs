@@ -332,6 +332,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_removes_middle_singletons() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
@@ -342,6 +343,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_preserves_row_vector() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -352,6 +354,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_single_dimension_becomes_column_vector() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 1, 4, 1]).unwrap();
@@ -362,6 +365,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_on_logical_array_respects_zero_dims() {
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![1, 4, 1]).unwrap();
@@ -372,6 +376,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_on_string_array() {
         let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 1, 2]).unwrap();
@@ -382,6 +387,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_preserves_zero_length_dimensions() {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![1, 0, 3]).unwrap();
@@ -392,6 +398,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -407,12 +414,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn squeeze_scalar_inputs_passthrough() {
         let result = squeeze_builtin(Value::Int(IntValue::I32(42))).expect("squeeze ok for scalar");
         assert_eq!(result, Value::Int(IntValue::I32(42)));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn squeeze_wgpu_updates_shape_metadata() {
@@ -447,6 +456,7 @@ pub(crate) mod tests {
         assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

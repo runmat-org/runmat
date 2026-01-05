@@ -1019,6 +1019,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_basic_replacement() {
         let result = regexprep_builtin(
@@ -1034,6 +1035,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_sequence_patterns() {
         let subject =
@@ -1065,6 +1067,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_ignore_case() {
         let result = regexprep_builtin(
@@ -1084,6 +1087,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_preserve_case() {
         let result = regexprep_builtin(
@@ -1099,6 +1103,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_once_option() {
         let result = regexprep_builtin(
@@ -1114,6 +1119,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_elementwise_arrays() {
         let subject = Value::StringArray(
@@ -1133,6 +1139,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_emptymatch_policy() {
         let subject = Value::String("abc".into());
@@ -1161,6 +1168,7 @@ pub(crate) mod tests {
         assert_eq!(allowed, Value::String("Xabc".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_char_array_result() {
         let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
@@ -1181,6 +1189,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_invalid_option_errors() {
         let err = regexprep_builtin(
@@ -1196,6 +1205,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_boolean_name_value_pairs() {
         let subject = Value::String("foo\nbar".into());
@@ -1229,6 +1239,7 @@ pub(crate) mod tests {
         assert_eq!(preserve, Value::String("Runmat".into()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_cell_subject_outputs_cell() {
         let cell = runmat_builtins::CellArray::new(
@@ -1257,6 +1268,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_elementwise_mismatch_errors() {
         let subject = Value::StringArray(
@@ -1275,6 +1287,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

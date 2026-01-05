@@ -471,9 +471,10 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -494,8 +495,10 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_plot_requires_equal_lengths() {
+        setup_plot_tests();
         assert!(build_line_plot(
             vec![1.0, 2.0],
             vec![1.0],
@@ -505,8 +508,10 @@ pub(crate) mod tests {
         .is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
+        setup_plot_tests();
         let result = plot_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -517,8 +522,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_handles_interleaved_styles() {
+        setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
@@ -533,8 +540,10 @@ pub(crate) mod tests {
         assert_eq!(plans[1].appearance.line_style, LineStyle::Dashed);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_errors_on_incomplete_pair() {
+        setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::String("linewidth".into()),
@@ -543,15 +552,19 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric Y argument"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_rejects_style_before_data() {
+        setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
         assert!(err.contains("expected numeric X data"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_extracts_line_style_order() {
+        setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),

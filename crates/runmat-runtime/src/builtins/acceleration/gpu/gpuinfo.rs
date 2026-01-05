@@ -237,6 +237,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(non_snake_case)]
     fn gpuInfo_with_provider_formats_summary() {
@@ -259,6 +260,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(non_snake_case)]
     fn gpuInfo_placeholder_matches_expectation() {
@@ -266,6 +268,7 @@ pub(crate) mod tests {
         assert_eq!(placeholder, "GPU[no provider]");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(non_snake_case)]
     fn gpuInfo_format_summary_handles_core_value_types() {
@@ -323,6 +326,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[allow(non_snake_case)]
     fn gpuInfo_doc_examples_present() {
@@ -330,6 +334,7 @@ pub(crate) mod tests {
         assert!(!blocks.is_empty(), "expected at least one MATLAB example");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     #[allow(non_snake_case)]
@@ -346,7 +351,7 @@ pub(crate) mod tests {
         let provider = match register_wgpu_provider(options) {
             Ok(p) => p,
             Err(err) => {
-                eprintln!("Skipping gpuInfo WGPU provider test: {err}");
+                tracing::warn!("Skipping gpuInfo WGPU provider test: {err}");
                 return;
             }
         };

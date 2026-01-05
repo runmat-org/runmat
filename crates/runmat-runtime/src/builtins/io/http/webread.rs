@@ -748,6 +748,7 @@ pub(crate) mod tests {
         String::from_utf8_lossy(&buffer).to_string()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_fetches_json_response() {
         let url = spawn_server(|mut stream| {
@@ -782,6 +783,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_fetches_text_response() {
         let url = spawn_server(|mut stream| {
@@ -801,6 +803,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_fetches_binary_payload() {
         let payload = [1u8, 2, 3, 254, 255];
@@ -823,6 +826,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_appends_query_parameters() {
         let (tx, rx) = mpsc::channel();
@@ -856,6 +860,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_struct_argument_supports_options_and_query() {
         let (tx, rx) = mpsc::channel();
@@ -889,6 +894,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_headerfields_struct_applies_custom_headers() {
         let (tx, rx) = mpsc::channel();
@@ -920,6 +926,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_queryparameters_option_struct() {
         let (tx, rx) = mpsc::channel();
@@ -950,6 +957,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_errors_on_missing_name_value_pair() {
         let err = webread_builtin(
@@ -963,6 +971,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_rejects_non_positive_timeout() {
         let args = vec![Value::from("Timeout"), Value::Num(0.0)];
@@ -974,6 +983,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_rejects_password_without_username() {
         let args = vec![Value::from("Password"), Value::from("secret")];
@@ -985,6 +995,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_rejects_unsupported_content_type() {
         let args = vec![Value::from("ContentType"), Value::from("table")];
@@ -996,6 +1007,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webread_rejects_invalid_headerfields_shape() {
         let cell = crate::make_cell(
@@ -1014,6 +1026,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

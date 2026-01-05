@@ -1423,7 +1423,7 @@ pub mod vertex_utils {
             -(dir0.y / len0) * (width_px * 0.5),
             0.0,
         );
-        pts[0] = pts[0] + ext0;
+        pts[0] += ext0;
         // extend end
         let n = pts.len();
         let dir1 = (pts[n - 1] - pts[n - 2]).truncate();
@@ -1433,7 +1433,7 @@ pub mod vertex_utils {
             (dir1.y / len1) * (width_px * 0.5),
             0.0,
         );
-        pts[n - 1] = pts[n - 1] + ext1;
+        pts[n - 1] += ext1;
         extrude_polyline(&pts, color, width_px)
     }
 

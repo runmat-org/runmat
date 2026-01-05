@@ -451,6 +451,7 @@ pub(crate) mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_removes_empty_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -467,6 +468,7 @@ pub(crate) mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_requires_string_inputs() {
         let _lock = REPL_FS_TEST_LOCK
@@ -480,6 +482,7 @@ pub(crate) mod tests {
         assert_eq!(err, ERR_FLAG_ARG);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_non_recursive_fails_when_not_empty() {
         let _lock = REPL_FS_TEST_LOCK
@@ -502,6 +505,7 @@ pub(crate) mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_recursive_removes_contents() {
         let _lock = REPL_FS_TEST_LOCK
@@ -523,6 +527,7 @@ pub(crate) mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_handles_missing_directory() {
         let _lock = REPL_FS_TEST_LOCK
@@ -538,6 +543,7 @@ pub(crate) mod tests {
         assert!(eval.message().contains("does not exist"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_rejects_files() {
         let _lock = REPL_FS_TEST_LOCK
@@ -555,6 +561,7 @@ pub(crate) mod tests {
         assert!(target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_accepts_uppercase_flag() {
         let _lock = REPL_FS_TEST_LOCK
@@ -573,6 +580,7 @@ pub(crate) mod tests {
         assert!(!target.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmdir_outputs_produce_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -590,6 +598,7 @@ pub(crate) mod tests {
         assert!(matches!(outputs[2], Value::CharArray(ref ca) if ca.cols == 0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);

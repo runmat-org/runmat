@@ -1049,6 +1049,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_basic_square() {
         let a = Tensor::new(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
@@ -1061,6 +1062,7 @@ pub(crate) mod tests {
         approx_eq(t.data[1], 2.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_lower_triangular_hint() {
         let a = Tensor::new(
@@ -1084,6 +1086,7 @@ pub(crate) mod tests {
         approx_eq(tensor.data[2], 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_transposed_triangular_hint() {
         let a = Tensor::new(
@@ -1122,6 +1125,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_rcond_enforced() {
         let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0 + 1e-12], vec![2, 2]).unwrap();
@@ -1140,6 +1144,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_recovers_rcond_output() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
@@ -1169,6 +1174,7 @@ pub(crate) mod tests {
         approx_eq(rcond_value, 1.0);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_round_trip_matches_cpu() {
         test_support::with_test_provider(|provider| {
@@ -1212,6 +1218,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1260,6 +1267,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

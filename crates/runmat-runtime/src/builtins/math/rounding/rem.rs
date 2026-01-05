@@ -464,6 +464,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_positive_values() {
         let result = rem_builtin(Value::Num(17.0), Value::Num(5.0)).expect("rem");
@@ -473,6 +474,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_negative_dividend_keeps_sign() {
         let result = rem_builtin(Value::Num(-7.0), Value::Num(4.0)).expect("rem");
@@ -482,6 +484,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_negative_divisor_retains_dividend_sign() {
         let result = rem_builtin(Value::Num(7.0), Value::Num(-4.0)).expect("rem");
@@ -491,6 +494,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_zero_divisor_returns_nan() {
         let result = rem_builtin(Value::Num(3.0), Value::Num(0.0)).expect("rem");
@@ -500,6 +504,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_infinite_divisor_returns_dividend() {
         let result = rem_builtin(Value::Num(4.5), Value::Num(f64::INFINITY)).expect("rem");
@@ -509,6 +514,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_infinite_dividend_returns_nan() {
         let result = rem_builtin(Value::Num(f64::INFINITY), Value::Num(3.0)).expect("rem");
@@ -518,6 +524,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_matrix_scalar_broadcast() {
         let matrix = Tensor::new(vec![4.5, 7.1, -2.3, 0.4], vec![2, 2]).unwrap();
@@ -537,6 +544,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_complex_support() {
         let lhs = ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).unwrap();
@@ -552,6 +560,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_char_array_support() {
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
@@ -571,6 +580,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_logical_array_support() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
@@ -582,6 +592,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_broadcasting_between_vectors() {
         let lhs = Tensor::new(vec![1.0, -2.0], vec![2, 1]).unwrap();
@@ -596,6 +607,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_gpu_pair_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -622,6 +634,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_int_inputs_promote() {
         let result =
@@ -632,6 +645,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_string_input_errors() {
         let err = rem_builtin(Value::from("abc"), Value::Num(3.0))
@@ -639,6 +653,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn rem_wgpu_matches_cpu() {
@@ -686,6 +701,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

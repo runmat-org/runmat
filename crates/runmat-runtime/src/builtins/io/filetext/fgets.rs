@@ -354,7 +354,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> 
         .map_err(|_| "fgets: failed to lock file handle (poisoned mutex)".to_string())?;
 
     let limit = parse_nchar(rest)?;
-    let read = read_line(&mut *file, limit).map_err(|err| format!("fgets: {err}"))?;
+    let read = read_line(&mut file, limit).map_err(|err| format!("fgets: {err}"))?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -697,6 +697,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_reads_line_with_newline() {
         registry::reset_for_tests();
@@ -725,6 +726,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_returns_minus_one_at_eof() {
         registry::reset_for_tests();
@@ -740,6 +742,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_honours_nchar_limit() {
         registry::reset_for_tests();
@@ -766,6 +769,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_errors_for_write_only_identifier() {
         registry::reset_for_tests();
@@ -783,6 +787,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_respects_limit_before_crlf_sequence() {
         registry::reset_for_tests();
@@ -828,6 +833,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_handles_crlf_newlines() {
         registry::reset_for_tests();
@@ -854,6 +860,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_decodes_latin1() {
         registry::reset_for_tests();
@@ -882,6 +889,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_nchar_zero_returns_empty_char() {
         registry::reset_for_tests();
@@ -906,6 +914,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
         registry::reset_for_tests();
@@ -941,6 +950,7 @@ pub(crate) mod tests {
         fs::remove_file(&path).unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

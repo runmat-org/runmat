@@ -2,7 +2,10 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use core::ffi::{c_char, c_int};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(
+    all(not(target_arch = "wasm32"), not(windows)),
+    all(windows, target_env = "gnu")
+))]
 use libc;
 use runmat_builtins::{Tensor, Value};
 use runmat_filesystem::{self as vfs, File, OpenOptions};
@@ -629,7 +632,7 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
 
     let (existing_nonempty, ends_with_newline) = if options.append {
         match vfs::metadata(path) {
-            Ok(meta) if meta.len() > 0 => {
+            Ok(meta) if !meta.is_empty() => {
                 let ends = file_ends_with_newline(path).map_err(|e| {
                     format!(
                         "dlmwrite: failed to inspect existing file \"{}\" ({e})",
@@ -834,7 +837,7 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
     wasm_format_float(value, spec)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: usize,
@@ -1065,17 +1068,17 @@ impl ParsedFormat {
                 if self.left_adjust {
                     let mut result = prefix;
                     result.push_str(&body);
-                    result.extend(std::iter::repeat(' ').take(pad));
+                    result.extend(std::iter::repeat_n(' ', pad));
                     return result;
                 } else if self.zero_pad {
                     let mut result = String::with_capacity(width);
                     result.push_str(&prefix);
-                    result.extend(std::iter::repeat('0').take(pad));
+                    result.extend(std::iter::repeat_n('0', pad));
                     result.push_str(&body);
                     return result;
                 } else {
                     let mut result = String::with_capacity(width);
-                    result.extend(std::iter::repeat(' ').take(pad));
+                    result.extend(std::iter::repeat_n(' ', pad));
                     result.push_str(&prefix);
                     result.push_str(&body);
                     return result;
@@ -1123,7 +1126,7 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     if abs_val == 0.0 {
         return if alternate {
             let mut s = "0.".to_string();
-            s.extend(std::iter::repeat('0').take(effective_precision - 1));
+            s.extend(std::iter::repeat_n('0', effective_precision - 1));
             s
         } else {
             "0".to_string()
@@ -1276,6 +1279,7 @@ pub(crate) mod tests {
         path
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wasm_precision_parser_handles_common_specs() {
         fn fmt(value: f64, spec: &str) -> String {
@@ -1295,6 +1299,7 @@ pub(crate) mod tests {
         LineEnding::platform_default().as_str()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_writes_default_comma() {
         let path = temp_path("csv");
@@ -1309,6 +1314,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_accepts_positional_delimiter_and_offsets() {
         let path = temp_path("txt");
@@ -1331,6 +1337,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_supports_append_and_offsets() {
         let path = temp_path("csv");
@@ -1364,6 +1371,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_precision_digits() {
         let path = temp_path("csv");
@@ -1381,6 +1389,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_precision_format_string() {
         let path = temp_path("txt");
@@ -1403,6 +1412,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_newline_pc() {
         let path = temp_path("csv");
@@ -1420,6 +1430,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_coffset_inserts_empty_fields() {
         let path = temp_path("csv");
@@ -1437,6 +1448,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_handles_gpu_tensors() {
         test_support::with_test_provider(|provider| {
@@ -1456,6 +1468,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn dlmwrite_handles_wgpu_provider_gather() {
@@ -1477,6 +1490,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_interprets_control_sequence_delimiters() {
         let path = temp_path("txt");
@@ -1494,6 +1508,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_rejects_negative_offsets() {
         let path = temp_path("csv");
@@ -1509,6 +1524,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_rejects_fractional_offsets() {
         let path = temp_path("csv");
@@ -1524,6 +1540,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_rejects_empty_delimiter() {
         let path = temp_path("csv");
@@ -1539,6 +1556,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_precision_zero_error() {
         let path = temp_path("csv");
@@ -1554,6 +1572,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_requires_name_value_pairs() {
         let path = temp_path("csv");
@@ -1571,6 +1590,7 @@ pub(crate) mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_expands_home_directory() {
         let Some(mut home) = fs_helpers::home_directory() else {
@@ -1594,6 +1614,7 @@ pub(crate) mod tests {
         let _ = fs::remove_file(home);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_rejects_non_numeric_inputs() {
         let path = temp_path("csv");
@@ -1607,6 +1628,7 @@ pub(crate) mod tests {
         assert!(err.contains("dlmwrite"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

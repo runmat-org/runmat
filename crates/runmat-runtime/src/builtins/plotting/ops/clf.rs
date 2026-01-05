@@ -101,21 +101,26 @@ fn parse_clf_action(args: &[Value]) -> Result<(ClfAction, bool), String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[ctor::ctor]
-    fn init_plot_test_env() {
-        crate::builtins::plotting::state::disable_rendering_for_tests();
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    fn setup_plot_tests() {
+        ensure_plot_test_env();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn defaults_to_current() {
+        setup_plot_tests();
         assert!(matches!(
             parse_clf_action(&[]).unwrap(),
             (ClfAction::Current, false)
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parses_all_flag() {
+        setup_plot_tests();
         let values = vec![Value::String("all".to_string())];
         assert!(matches!(
             parse_clf_action(&values).unwrap(),
@@ -123,8 +128,10 @@ pub(crate) mod tests {
         ));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parses_handles() {
+        setup_plot_tests();
         let values = vec![Value::Num(2.0)];
         match parse_clf_action(&values).unwrap() {
             (ClfAction::Handles(handles), _) => {

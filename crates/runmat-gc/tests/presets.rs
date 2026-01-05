@@ -146,15 +146,15 @@ fn test_config_builder() {
 fn test_config_builder_from_env() {
     gc_test_context(|| {
         // Test environment variable parsing
-        std::env::set_var("RUSTMAT_GC_YOUNG_SIZE", "64");
-        std::env::set_var("RUSTMAT_GC_THREADS", "8");
+        std::env::set_var("RUNMAT_GC_YOUNG_SIZE", "64");
+        std::env::set_var("RUNMAT_GC_THREADS", "8");
 
         let config = runmat_gc::GcConfigBuilder::from_env().build();
         assert!(config.is_ok());
 
         // Clean up
-        std::env::remove_var("RUSTMAT_GC_YOUNG_SIZE");
-        std::env::remove_var("RUSTMAT_GC_THREADS");
+        std::env::remove_var("RUNMAT_GC_YOUNG_SIZE");
+        std::env::remove_var("RUNMAT_GC_THREADS");
     });
 }
 

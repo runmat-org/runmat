@@ -551,6 +551,7 @@ pub(crate) mod tests {
         path_to_string(&normalized)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_prepends_by_default() {
         let _lock = REPL_FS_TEST_LOCK
@@ -576,6 +577,7 @@ pub(crate) mod tests {
         assert_eq!(segments.first().unwrap(), &expected_front);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_removes_duplicates() {
         let _lock = REPL_FS_TEST_LOCK
@@ -604,6 +606,7 @@ pub(crate) mod tests {
         assert_eq!(segments.iter().filter(|p| *p == &first_str).count(), 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_respects_end_option() {
         let _lock = REPL_FS_TEST_LOCK
@@ -625,6 +628,7 @@ pub(crate) mod tests {
         assert_eq!(segments.last().unwrap(), &canonical(second.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_handles_string_array_and_cell_input() {
         let _lock = REPL_FS_TEST_LOCK
@@ -655,6 +659,7 @@ pub(crate) mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_supports_multi_row_char_arrays() {
         let _lock = REPL_FS_TEST_LOCK
@@ -685,6 +690,7 @@ pub(crate) mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_errors_on_missing_folder() {
         let _lock = REPL_FS_TEST_LOCK
@@ -700,6 +706,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_genpath_string_is_expanded() {
         let _lock = REPL_FS_TEST_LOCK
@@ -726,6 +733,7 @@ pub(crate) mod tests {
         assert_eq!(segments[1], canonical(&sub));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_returns_previous_path() {
         let _lock = REPL_FS_TEST_LOCK
@@ -742,6 +750,7 @@ pub(crate) mod tests {
         assert_eq!(returned_str, guard.previous);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_rejects_conflicting_position_flags() {
         let _lock = REPL_FS_TEST_LOCK
@@ -759,6 +768,7 @@ pub(crate) mod tests {
         assert!(err.contains("position option"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_handles_dash_begin() {
         let _lock = REPL_FS_TEST_LOCK
@@ -781,6 +791,7 @@ pub(crate) mod tests {
         assert_eq!(segments[1], canonical(dir2.path()));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_accepts_string_containers() {
         let _lock = REPL_FS_TEST_LOCK
@@ -798,6 +809,7 @@ pub(crate) mod tests {
         assert_eq!(current, canonical(&cwd));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn addpath_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

@@ -309,42 +309,49 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_positive() {
         let result = isinf_builtin(Value::Num(f64::INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_negative() {
         let result = isinf_builtin(Value::Num(f64::NEG_INFINITY)).expect("isinf");
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_finite() {
         let result = isinf_builtin(Value::Num(42.0)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_nan_false() {
         let result = isinf_builtin(Value::Num(f64::NAN)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_bool_false() {
         let result = isinf_builtin(Value::Bool(true)).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_scalar_int_false() {
         let result = isinf_builtin(Value::Int(IntValue::I32(7))).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_complex_scalar_detects_infinite_components() {
         let finite = isinf_builtin(Value::Complex(1.0, 2.0)).expect("isinf");
@@ -357,6 +364,7 @@ pub(crate) mod tests {
         assert_eq!(inf_imag, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_tensor_mask() {
         let tensor =
@@ -371,6 +379,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_logical_array_returns_zeros() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
@@ -384,6 +393,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
@@ -401,12 +411,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_string_scalar_false() {
         let result = isinf_builtin(Value::String("Inf".to_string())).expect("isinf");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_string_array_returns_all_false() {
         let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
@@ -420,6 +432,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_empty_tensor_preserves_shape() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -433,6 +446,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_singleton_tensor_returns_scalar_bool() {
         let tensor = Tensor::new(vec![f64::INFINITY], vec![1, 1]).unwrap();
@@ -444,6 +458,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_rejects_unsupported_types() {
         let err = isinf_builtin(Value::FunctionHandle("foo".to_string()))
@@ -454,6 +469,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_char_array_returns_zeros() {
         let array = CharArray::new("Inf".chars().collect(), 1, 3).unwrap();
@@ -467,6 +483,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -483,12 +500,14 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isinf_wgpu_matches_host_path() {

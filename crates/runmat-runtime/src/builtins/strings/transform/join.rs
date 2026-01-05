@@ -710,6 +710,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_builtins::IntValue;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_string_array_default_dimension() {
         let array = StringArray::new(
@@ -741,6 +742,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_custom_scalar_delimiter() {
         let array = StringArray::new(
@@ -766,6 +768,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_delimiter_array_per_row() {
         let array = StringArray::new(
@@ -799,6 +802,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_dimension_argument() {
         let array = StringArray::new(
@@ -833,6 +837,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_dimension_greater_than_ndims_returns_input() {
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
@@ -850,6 +855,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_cell_array_of_char_vectors() {
         let gpu = CharArray::new_row("GPU");
@@ -888,6 +894,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_numeric_second_argument_uses_default_delimiter() {
         let array = StringArray::new(
@@ -909,6 +916,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_char_array_input_produces_string_array() {
         let data: Vec<char> = "RunMatGPUDev".chars().collect();
@@ -923,6 +931,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_with_cell_delimiter_array() {
         let array = StringArray::new(
@@ -968,6 +977,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_3d_string_array_along_third_dimension() {
         let mut data = Vec::new();
@@ -999,6 +1009,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_errors_on_zero_dimension() {
         let array = StringArray::new(vec!["a".into()], vec![1, 1]).unwrap();
@@ -1013,6 +1024,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_errors_on_mismatched_delimiter_shape() {
         let array = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap();
@@ -1022,6 +1034,7 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_propagates_missing_strings() {
         let array = StringArray::new(vec!["GPU".into(), "<missing>".into()], vec![1, 2]).unwrap();
@@ -1034,6 +1047,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_accepts_char_delimiter_scalar() {
         let array = StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap();
@@ -1051,6 +1065,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_handles_empty_axis() {
         let array = StringArray::new(Vec::new(), vec![2, 0]).unwrap();
@@ -1064,6 +1079,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_missing_dimension_broadcast_delimiters() {
         let array = StringArray::new(
@@ -1086,12 +1102,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn join_executes_with_wgpu_provider_registered() {

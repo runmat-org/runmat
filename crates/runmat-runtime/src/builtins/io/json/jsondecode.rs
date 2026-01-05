@@ -602,12 +602,14 @@ pub(crate) mod tests {
         Value::CharArray(CharArray::new_row(text))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_scalar_number() {
         let result = jsondecode_builtin(char_row("42")).expect("jsondecode");
         assert_eq!(result, Value::Num(42.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_boolean_array() {
         let result = jsondecode_builtin(char_row("[true,false,true]")).expect("jsondecode");
@@ -620,6 +622,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_matrix_to_tensor() {
         let result = jsondecode_builtin(char_row("[[1,2,3],[4,5,6]]")).expect("jsondecode matrix");
@@ -632,6 +635,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_numeric_tensor_3d() {
         let json = "[[[1,2],[3,4]],[[5,6],[7,8]]]";
@@ -645,6 +649,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_numeric_singleton_array_retains_tensor() {
         let result =
@@ -660,6 +665,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_object_to_struct() {
         let result = jsondecode_builtin(char_row("{\"name\":\"RunMat\",\"year\":2025}"))
@@ -680,6 +686,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_string_array() {
         let result = jsondecode_builtin(char_row("[\"alpha\",\"beta\",\"gamma\"]"))
@@ -702,6 +709,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_mixed_array_returns_cell() {
         let result =
@@ -721,6 +729,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_rectangular_cell_array_preserves_layout() {
         let text = "[[1,true],[false,null]]";
@@ -745,6 +754,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_array_of_objects_returns_cell() {
         let text = "[{\"id\":1,\"name\":\"Ada\"},{\"id\":2,\"name\":\"Charles\"}]";
@@ -782,6 +792,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_null_returns_empty_double() {
         let result = jsondecode_builtin(char_row("null")).expect("jsondecode null");
@@ -794,6 +805,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_invalid_text_reports_error() {
         let err = jsondecode_builtin(char_row("{not json}")).expect_err("expected failure");
@@ -803,6 +815,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_rejects_multirow_char_input() {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
@@ -810,6 +823,7 @@ pub(crate) mod tests {
         assert_eq!(err, INPUT_TYPE_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_accepts_string_input() {
         let result = jsondecode_builtin(Value::String("[1,2]".to_string())).expect("jsondecode");
@@ -822,6 +836,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_accepts_string_array_scalar_input() {
         let array = StringArray::new(vec!["[1,2]".to_string()], vec![1, 1]).expect("string scalar");
@@ -835,12 +850,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsondecode_round_trip_with_jsonencode() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");

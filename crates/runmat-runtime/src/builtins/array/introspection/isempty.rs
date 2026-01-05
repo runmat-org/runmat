@@ -227,6 +227,7 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_builtins::{CellArray, CharArray, Tensor};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_empty_tensor_returns_true() {
         let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
@@ -234,12 +235,14 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_scalar_returns_false() {
         let result = isempty_builtin(Value::Num(5.0)).expect("isempty");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_char_array_behaves_like_matlab() {
         let empty_chars = CharArray::new_row("");
@@ -250,6 +253,7 @@ pub(crate) mod tests {
         assert_eq!(non_empty, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_cell_array_uses_dimensions() {
         let empty_cell = CellArray::new(Vec::new(), 0, 2).unwrap();
@@ -260,12 +264,14 @@ pub(crate) mod tests {
         assert_eq!(populated, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_scalar_is_false_even_if_empty_text() {
         let result = isempty_builtin(Value::String(String::new())).expect("isempty");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_array_zero_rows_is_true() {
         let array = runmat_builtins::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
@@ -273,6 +279,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_gpu_tensor_respects_shape() {
         test_support::with_test_provider(|provider| {
@@ -301,6 +308,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn isempty_wgpu_provider_uses_handle_shape() {
@@ -324,6 +332,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

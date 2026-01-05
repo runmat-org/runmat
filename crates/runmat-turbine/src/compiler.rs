@@ -303,7 +303,10 @@ impl BytecodeCompiler {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);
                     }
-                    Instr::LoadString(_) | Instr::LoadCharRow(_) | Instr::LoadBool(_) => {
+                    Instr::LoadString(_)
+                    | Instr::LoadCharRow(_)
+                    | Instr::LoadBool(_)
+                    | Instr::LoadComplex(_, _) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
                         return Err(TurbineError::ExecutionError(
                             "Non-numeric literal not supported in JIT mode".to_string(),
@@ -356,6 +359,12 @@ impl BytecodeCompiler {
                         local_stack.push(result);
                     }
                     Instr::Transpose => {
+                        // Matrix transpose is complex - fall back to interpreter
+                        return Err(TurbineError::ExecutionError(
+                            "Matrix transpose not supported in JIT mode".to_string(),
+                        ));
+                    }
+                    Instr::ConjugateTranspose => {
                         // Matrix transpose is complex - fall back to interpreter
                         return Err(TurbineError::ExecutionError(
                             "Matrix transpose not supported in JIT mode".to_string(),
@@ -1266,6 +1275,7 @@ impl BytecodeCompiler {
                 | "matrix_ones"
                 | "matrix_eye"
                 | "matrix_transpose"
+                | "transpose"
                 | "blas_matmul"
                 | "inv"
                 | "solve"

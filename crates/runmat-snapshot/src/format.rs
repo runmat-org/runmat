@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 /// Snapshot file format magic number
-pub const SNAPSHOT_MAGIC: &[u8; 8] = b"RUSTMAT\x01";
+pub const SNAPSHOT_MAGIC: &[u8; 7] = b"RUNMAT\0";
 
 /// Current snapshot format version
 pub const SNAPSHOT_VERSION: u32 = 1;
@@ -31,7 +31,7 @@ pub struct SnapshotFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotHeader {
     /// Magic number for format identification
-    pub magic: [u8; 8],
+    pub magic: [u8; 7],
 
     /// Format version
     pub version: u32,
@@ -263,7 +263,7 @@ impl SnapshotHeader {
         // Estimate based on data size and compression
         let base_time = Duration::from_millis(10); // Base overhead
         let data_time = Duration::from_nanos(
-            (self.data_info.compressed_size as u64 * 10) / 1024, // ~10ns per KB
+            (self.data_info.compressed_size * 10) / 1024, // ~10ns per KB
         );
 
         match self.data_info.compression.algorithm {

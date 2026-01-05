@@ -573,6 +573,7 @@ pub(crate) mod tests {
         assert!((a - b).abs() <= tol, "expected {b}, got {a} (tol {tol})");
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_positive_integer() {
         match gamma_builtin(Value::Num(5.0), Vec::new()).expect("gamma") {
@@ -581,6 +582,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_half_integer() {
         match gamma_builtin(Value::Num(0.5), Vec::new()).expect("gamma") {
@@ -589,6 +591,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_negative_non_integer() {
         match gamma_builtin(Value::Num(-0.5), Vec::new()).expect("gamma") {
@@ -597,6 +600,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_matrix() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -612,6 +616,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_pole_returns_inf() {
         match gamma_builtin(Value::Num(0.0), Vec::new()).expect("gamma") {
@@ -624,6 +629,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_small_negative_not_infinite() {
         match gamma_builtin(Value::Num(-1.0e-10), Vec::new()).expect("gamma") {
@@ -636,6 +642,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_complex_identity() {
         let z = Complex64::new(0.5, 1.0);
@@ -647,6 +654,7 @@ pub(crate) mod tests {
         approx_eq(lhs.im, rhs.im, 1e-10);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_char_array() {
         let chars = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
@@ -660,12 +668,14 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_string_input_errors() {
         let err = gamma_builtin(Value::from("hello"), Vec::new()).expect_err("expected error");
         assert!(err.contains("expected numeric input"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_gpu_provider_fallback() {
         test_support::with_test_provider(|provider| {
@@ -683,6 +693,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn gamma_wgpu_matches_cpu() {
@@ -709,6 +720,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
@@ -734,6 +746,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_gpu_complex_result_errors() {
         test_support::with_test_provider(|provider| {
@@ -751,6 +764,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_complex_requires_host() {
         let result = gamma_builtin(
@@ -767,6 +781,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_like_rejects_extra_args() {
         let err = gamma_builtin(
@@ -777,6 +792,7 @@ pub(crate) mod tests {
         assert!(err.contains("too many input arguments"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_int_promotes() {
         let value = Value::Int(IntValue::I32(4));
@@ -786,6 +802,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gamma_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

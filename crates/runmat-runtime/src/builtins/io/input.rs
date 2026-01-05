@@ -225,6 +225,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::interaction::{push_queued_response, InteractionResponse};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numeric_input_parses_scalar() {
         push_queued_response(Ok(InteractionResponse::Line("41".into())));
@@ -232,6 +233,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::Num(41.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_mode_returns_char_row() {
         push_queued_response(Ok(InteractionResponse::Line("RunMat".into())));
@@ -241,6 +243,7 @@ pub(crate) mod tests {
         assert_eq!(value, Value::CharArray(CharArray::new_row("RunMat")));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_response_returns_empty_tensor() {
         push_queued_response(Ok(InteractionResponse::Line("   ".into())));
@@ -251,6 +254,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_string_flag_errors_before_prompt() {
         push_queued_response(Ok(InteractionResponse::Line("ignored".into())));
