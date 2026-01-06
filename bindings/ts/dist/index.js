@@ -63,7 +63,8 @@ export async function initRunMat(options = {}) {
         wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
         scatterTargetPoints: options.scatterTargetPoints,
         surfaceVertexBudget: options.surfaceVertexBudget,
-        emitFusionPlan: options.emitFusionPlan ?? false
+        emitFusionPlan: options.emitFusionPlan ?? false,
+        languageCompat: options.language?.compat
     });
     return new WebRunMatSession(session);
 }
@@ -87,6 +88,16 @@ export async function registerFigureCanvas(handle, canvas) {
         throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
     }
     await native.registerFigureCanvas(handle, canvas);
+}
+export async function resizeFigureCanvas(handle, widthPx, heightPx) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "resizeFigureCanvas");
+    native.resizeFigureCanvas(handle, widthPx, heightPx);
+}
+export async function renderCurrentFigureScene(handle) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "renderCurrentFigureScene");
+    native.renderCurrentFigureScene(handle);
 }
 export async function deregisterPlotCanvas() {
     const native = await loadNativeModule();
@@ -114,6 +125,26 @@ export async function unsubscribeStdout(id) {
     const native = await loadNativeModule();
     requireNativeFunction(native, "unsubscribeStdout");
     native.unsubscribeStdout(id);
+}
+export async function subscribeRuntimeLog(listener) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "subscribeRuntimeLog");
+    return native.subscribeRuntimeLog((entry) => listener(entry));
+}
+export async function unsubscribeRuntimeLog(id) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "unsubscribeRuntimeLog");
+    native.unsubscribeRuntimeLog(id);
+}
+export async function subscribeTraceEvents(listener) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "subscribeTraceEvents");
+    return native.subscribeTraceEvents((entries) => listener(entries));
+}
+export async function unsubscribeTraceEvents(id) {
+    const native = await loadNativeModule();
+    requireNativeFunction(native, "unsubscribeTraceEvents");
+    native.unsubscribeTraceEvents(id);
 }
 export async function figure(handle) {
     const native = await loadNativeModule();
@@ -299,6 +330,18 @@ class WebRunMatSession {
         this.ensureActive();
         requireNativeFunction(this.native, "setFusionPlanEnabled");
         this.native.setFusionPlanEnabled(enabled);
+    }
+    setLanguageCompat(mode) {
+        this.ensureActive();
+        requireNativeFunction(this.native, "setLanguageCompat");
+        this.native.setLanguageCompat(mode);
+    }
+    async fusionPlanForSource(source) {
+        this.ensureActive();
+        if (typeof this.native.fusionPlanForSource !== "function") {
+            throw new Error("The loaded runmat-wasm module does not expose fusionPlanForSource yet.");
+        }
+        return this.native.fusionPlanForSource(source) ?? null;
     }
 }
 function ensureFsProvider(provider) {

@@ -8,7 +8,7 @@
 #![cfg(all(target_arch = "wasm32", feature = "web"))]
 
 use crate::context::SharedWgpuContext;
-use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer};
+use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::plots::Figure;
 use log::{debug, warn};
 use std::sync::Arc;
@@ -72,6 +72,8 @@ pub struct WebRenderer {
     plot_renderer: PlotRenderer,
     render_config: PlotRenderConfig,
     options: WebRendererOptions,
+    msaa_texture: Option<wgpu::Texture>,
+    msaa_extent: (u32, u32),
 }
 
 impl WebRenderer {
@@ -174,9 +176,33 @@ impl WebRenderer {
                 ..Default::default()
             },
             options,
+            msaa_texture: None,
+            msaa_extent: (0, 0),
         };
         renderer.sync_renderer_config();
         Ok(renderer)
+    }
+
+    /// Explicitly resize the underlying surface to the provided dimensions (in
+    /// physical pixels). Returns early if the surface already matches the
+    /// requested size.
+    pub fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), WebRendererError> {
+        if width == 0 || height == 0 {
+            return Err(WebRendererError::CanvasZeroArea);
+        }
+        if self.surface_config.width == width && self.surface_config.height == height {
+            return Ok(());
+        }
+        self.surface_config.width = width;
+        self.surface_config.height = height;
+        self.render_config.width = width;
+        self.render_config.height = height;
+        self.canvas.set_width(width);
+        self.canvas.set_height(height);
+        self.msaa_texture = None;
+        self.msaa_extent = (0, 0);
+        self.reconfigure_surface()?;
+        self.render_current_scene()
     }
 
     /// Render a [`Figure`] directly into the canvas.
@@ -206,9 +232,37 @@ impl WebRenderer {
             Err(err) => return Err(WebRendererError::SurfaceFrame(err)),
         };
 
-        let view = frame
+        let frame_view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let requested_samples = self.render_config.msaa_samples.max(1);
+        let use_msaa = requested_samples > 1;
+        if use_msaa {
+            self.ensure_msaa_texture()?;
+        }
+
+        let msaa_view_holder = if use_msaa {
+            Some(
+                self.msaa_texture
+                    .as_ref()
+                    .expect("MSAA texture missing")
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+            )
+        } else {
+            None
+        };
+        let render_target = if let Some(msaa_view) = msaa_view_holder.as_ref() {
+            RenderTarget {
+                view: msaa_view,
+                resolve_target: Some(&frame_view),
+            }
+        } else {
+            RenderTarget {
+                view: &frame_view,
+                resolve_target: None,
+            }
+        };
 
         let mut encoder = self
             .device
@@ -221,7 +275,7 @@ impl WebRenderer {
         self.render_config.msaa_samples = self.options.msaa_samples.max(1);
 
         self.plot_renderer
-            .render(&mut encoder, &view, &self.render_config)
+            .render(&mut encoder, render_target, &self.render_config)
             .map_err(|err| WebRendererError::Render(err.to_string()))?;
 
         self.queue.submit(Some(encoder.finish()));
@@ -240,6 +294,8 @@ impl WebRenderer {
         self.surface_config.height = height;
         self.render_config.width = width;
         self.render_config.height = height;
+        self.msaa_texture = None;
+        self.msaa_extent = (0, 0);
         self.reconfigure_surface()
     }
 
@@ -254,6 +310,42 @@ impl WebRenderer {
 
     fn sync_renderer_config(&mut self) {
         self.plot_renderer.wgpu_renderer.surface_config = self.surface_config.clone();
+        self.msaa_texture = None;
+        let _ = self.ensure_msaa_texture();
+    }
+
+    fn ensure_msaa_texture(&mut self) -> Result<(), WebRendererError> {
+        if self.render_config.msaa_samples <= 1 {
+            self.msaa_texture = None;
+            self.msaa_extent = (0, 0);
+            return Ok(());
+        }
+
+        let width = self.surface_config.width.max(1);
+        let height = self.surface_config.height.max(1);
+        if let Some(_) = &self.msaa_texture {
+            if self.msaa_extent == (width, height) {
+                return Ok(());
+            }
+        }
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("runmat-plot-msaa-target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: self.render_config.msaa_samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.surface_config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        self.msaa_texture = Some(texture);
+        self.msaa_extent = (width, height);
+        Ok(())
     }
 }
 

@@ -5,6 +5,7 @@ use runmat_plot::plots::Figure;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub(crate) mod wasm {
     use super::*;
+    use log::debug;
     use runmat_plot::web::WebRenderer;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -51,6 +52,15 @@ pub(crate) mod wasm {
     pub fn render_web_canvas(handle: u32, figure: Figure) -> Result<String, String> {
         with_renderer(handle, |renderer| renderer.render_figure(figure))
             .map(|_| "Plot rendered to canvas".to_string())
+    }
+
+    pub fn resize_web_renderer(handle: u32, width: u32, height: u32) -> Result<(), String> {
+        with_renderer(handle, |renderer| renderer.resize_surface(width, height)).map(|_| ())
+    }
+
+    pub fn render_current_scene(handle: u32) -> Result<(), String> {
+        debug!("plot-web: render_current_scene(handle={handle})");
+        with_renderer(handle, |renderer| renderer.render_current_scene()).map(|_| ())
     }
 
     fn with_renderer<F, R>(handle: u32, f: F) -> Result<R, String>
@@ -109,8 +119,18 @@ pub(crate) mod wasm {
     }
 
     pub(super) use RendererPlaceholder as RendererType;
+
+    pub fn resize_web_renderer(_handle: u32, _width: u32, _height: u32) -> Result<(), String> {
+        Err(ERR_PLOTTING_UNAVAILABLE.to_string())
+    }
+
+    pub fn render_current_scene(_handle: u32) -> Result<(), String> {
+        Err(ERR_PLOTTING_UNAVAILABLE.to_string())
+    }
 }
 
+pub use wasm::render_current_scene;
+pub use wasm::resize_web_renderer;
 pub use wasm::web_renderer_ready;
 
 pub fn install_web_renderer(renderer: wasm::RendererType) -> Result<(), String> {

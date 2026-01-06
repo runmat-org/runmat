@@ -6,6 +6,7 @@ export { createWorkspaceHoverProvider } from "./workspace-hover.js";
 export type { WorkspaceHoverOptions, WorkspaceHoverController, HoverFormatState } from "./workspace-hover.js";
 export { createFusionPlanAdapter } from "./fusion-plan.js";
 export type { FusionPlanAdapter, FusionPlanAdapterOptions } from "./fusion-plan.js";
+export type LanguageCompatMode = "matlab" | "strict";
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 export interface RunMatSnapshotSource {
     bytes?: Uint8Array | ArrayBuffer;
@@ -33,27 +34,52 @@ export interface RunMatInitOptions {
     scatterTargetPoints?: number;
     surfaceVertexBudget?: number;
     emitFusionPlan?: boolean;
+    language?: {
+        compat?: LanguageCompatMode;
+    };
 }
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
-export interface FigureLegendEntry {
-    label: string;
-    plotType: string;
-    color: [number, number, number, number];
-}
 export interface FigureEvent {
     handle: number;
     kind: FigureEventKind;
+    figure?: FigureSnapshot;
+}
+export interface FigureSnapshot {
+    layout: FigureLayout;
+    metadata: FigureMetadata;
+    plots: FigurePlotDescriptor[];
+}
+export interface FigureLayout {
     axesRows: number;
     axesCols: number;
-    plotCount: number;
     axesIndices: number[];
+}
+export interface FigureMetadata {
     title?: string;
     xLabel?: string;
     yLabel?: string;
-    gridEnabled?: boolean;
-    legendEnabled?: boolean;
-    legendEntries?: FigureLegendEntry[];
+    gridEnabled: boolean;
+    legendEnabled: boolean;
+    colorbarEnabled: boolean;
+    axisEqual: boolean;
+    backgroundRgba: [number, number, number, number];
+    colormap?: string;
+    colorLimits?: [number, number];
+    legendEntries: FigureLegendEntry[];
 }
+export interface FigureLegendEntry {
+    label: string;
+    plotType: FigurePlotKind;
+    colorRgba: [number, number, number, number];
+}
+export interface FigurePlotDescriptor {
+    kind: FigurePlotKind;
+    label?: string;
+    axesIndex: number;
+    colorRgba: [number, number, number, number];
+    visible: boolean;
+}
+export type FigurePlotKind = "line" | "scatter" | "bar" | "error_bar" | "stairs" | "stem" | "area" | "quiver" | "pie" | "image" | "surface" | "scatter3" | "contour" | "contour_fill";
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 export type StdoutStreamKind = "stdout" | "stderr";
@@ -63,6 +89,29 @@ export interface StdoutEntry {
     timestampMs: number;
 }
 export type StdoutListener = (entry: StdoutEntry) => void;
+export interface RuntimeLogEntry {
+    ts: string;
+    level: string;
+    target: string;
+    message: string;
+    traceId?: string;
+    spanId?: string;
+    fields?: Record<string, unknown>;
+}
+export type RuntimeLogListener = (entry: RuntimeLogEntry) => void;
+export interface TraceEvent {
+    name: string;
+    cat: string;
+    ph: string;
+    ts: number;
+    dur?: number;
+    pid?: number;
+    tid?: number;
+    traceId?: string;
+    spanId?: string;
+    args?: Record<string, unknown>;
+}
+export type TraceEventListener = (entries: TraceEvent[]) => void;
 export type InputRequest = {
     kind: "line";
     prompt: string;
@@ -254,6 +303,8 @@ export interface RunMatSessionHandle {
     pendingStdinRequests(): Promise<PendingStdinRequest[]>;
     materializeVariable(selector: WorkspaceMaterializeSelector, options?: MaterializeVariableOptions): Promise<MaterializedVariable>;
     setFusionPlanEnabled(enabled: boolean): void;
+    setLanguageCompat(mode: LanguageCompatMode): void;
+    fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
 }
 interface NativeInitOptions {
     snapshotBytes?: Uint8Array;
@@ -269,6 +320,7 @@ interface NativeInitOptions {
     scatterTargetPoints?: number;
     surfaceVertexBudget?: number;
     emitFusionPlan?: boolean;
+    languageCompat?: LanguageCompatMode;
 }
 interface RunMatNativeSession {
     execute(source: string): ExecuteResult;
@@ -286,6 +338,8 @@ interface RunMatNativeSession {
     pendingStdinRequests?: () => PendingStdinRequest[];
     materializeVariable?: (selector: WorkspaceMaterializeSelectorWire, options?: MaterializeVariableOptionsWire) => MaterializedVariable;
     setFusionPlanEnabled?: (enabled: boolean) => void;
+    setLanguageCompat?: (mode: LanguageCompatMode) => void;
+    fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
 }
 interface ResumeInputWireValue {
     kind?: "line" | "keyPress";
@@ -308,6 +362,8 @@ interface RunMatNativeModule {
     deregisterPlotCanvas?: () => void;
     plotRendererReady?: () => boolean;
     registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
+    resizeFigureCanvas?: (handle: number, width: number, height: number) => void;
+    renderCurrentFigureScene?: (handle: number) => void;
     deregisterFigureCanvas?: (handle: number) => void;
     onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
     newFigureHandle?: () => number;
@@ -321,6 +377,10 @@ interface RunMatNativeModule {
     renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
     subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
     unsubscribeStdout?: (id: number) => void;
+    subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
+    unsubscribeRuntimeLog?: (id: number) => void;
+    subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
+    unsubscribeTraceEvents?: (id: number) => void;
     resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
     pendingStdinRequests?: () => PendingStdinRequest[];
 }
@@ -328,11 +388,17 @@ export declare function initRunMat(options?: RunMatInitOptions): Promise<RunMatS
 export declare function attachPlotCanvas(canvas: HTMLCanvasElement): Promise<void>;
 export declare function plotRendererReady(): Promise<boolean>;
 export declare function registerFigureCanvas(handle: number, canvas: HTMLCanvasElement): Promise<void>;
+export declare function resizeFigureCanvas(handle: number, widthPx: number, heightPx: number): Promise<void>;
+export declare function renderCurrentFigureScene(handle: number): Promise<void>;
 export declare function deregisterPlotCanvas(): Promise<void>;
 export declare function deregisterFigureCanvas(handle: number): Promise<void>;
 export declare function onFigureEvent(listener: FigureEventListener | null): Promise<void>;
 export declare function subscribeStdout(listener: StdoutListener): Promise<number>;
 export declare function unsubscribeStdout(id: number): Promise<void>;
+export declare function subscribeRuntimeLog(listener: RuntimeLogListener): Promise<number>;
+export declare function unsubscribeRuntimeLog(id: number): Promise<void>;
+export declare function subscribeTraceEvents(listener: TraceEventListener): Promise<number>;
+export declare function unsubscribeTraceEvents(id: number): Promise<void>;
 export declare function figure(handle?: number): Promise<number>;
 export declare function newFigureHandle(): Promise<number>;
 export declare function currentFigureHandle(): Promise<number>;

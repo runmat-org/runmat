@@ -195,7 +195,8 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 
 - `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
 - `deregisterFigureCanvas(handle)` detaches the renderer for a given handle when a tab is hidden or destroyed, freeing GPU resources until the UI reattaches.
-- `onFigureEvent(listener)` registers a callback that now receives rich metadata `{ handle, kind, axesRows, axesCols, plotCount, axesIndices[], title?, xLabel?, yLabel?, gridEnabled?, legendEnabled?, legendEntries[] }` whenever a figure changes. `legendEntries` mirrors MATLAB's legend labels plus RGBA colors so UI sidebars can display labels without re-rendering the plot. Pass `null` to unsubscribe.
+- `renderCurrentFigureScene(handle)` forces the renderer to redraw the most recent scene for that figure handle (handy after host-driven resizes or when reactivating a tab that stayed attached to an OffscreenCanvas).
+- `onFigureEvent(listener)` registers a callback that now receives `FigureEvent { handle, kind, figure?: { layout, metadata, plots[] } }`. Metadata contains axis/grid flags, legend entries (including RGBA + plot kind), background/theme info, and optional labels. Plot descriptors enumerate every series (`kind`, `label`, `axesIndex`, `colorRgba`, `visible`). Pass `null` to unsubscribe.
 
 The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
 
