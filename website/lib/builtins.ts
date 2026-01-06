@@ -96,14 +96,10 @@ export function loadBuiltins(): Builtin[] {
   const data = readFileSync(p, 'utf-8');
   const arr = JSON.parse(data) as Builtin[];
   
-  // Enhance builtins with first paragraph from MDX files
-  return arr.map(builtin => {
-    if (!builtin.mdxPath) {
-      return builtin;
-    }
-    
+  // Enhance builtins with first paragraph from MDX files, filter out builtins without MDX file
+  return arr.filter(builtin => builtin.mdxPath).map(builtin => {
     try {
-      const mdxPath = join(process.cwd(), 'content', builtin.mdxPath);
+      const mdxPath = join(process.cwd(), 'content', builtin.mdxPath!);
       if (existsSync(mdxPath)) {
         const mdxContent = readFileSync(mdxPath, 'utf-8');
         const firstParagraph = extractFirstParagraphFromMDX(mdxContent);
