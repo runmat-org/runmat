@@ -198,7 +198,7 @@ Yes. The fusion planner can emit WGSL kernels that include `acos` when the provi
 generated path, allowing fused GPU execution without intermediate buffers.
 
 ## See Also
-[asin](./asin), [cos](./cos), [sin](./sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[asin](./asin), [cos](./cos), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `acos` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/acos.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/acos.rs)

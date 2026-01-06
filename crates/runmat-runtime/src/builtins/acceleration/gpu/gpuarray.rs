@@ -209,7 +209,7 @@ Not yet. Gather or decompose the data first, mirroring MATLAB’s requirement to
 numeric or logical types.
 
 ## See Also
-[gather](./gather), [gpuDevice](./gpudevice), [gpuInfo](./gpuinfo), [arrayfun](./arrayfun), [zeros](../../array/creation/zeros), [sum](../../math/reduction/sum)
+[gather](./gather), [gpuDevice](./gpudevice), [gpuInfo](./gpuinfo), [arrayfun](./arrayfun), [zeros](./zeros), [sum](./sum)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/acceleration/gpu/gpuarray.rs`

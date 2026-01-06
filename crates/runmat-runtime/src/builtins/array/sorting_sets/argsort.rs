@@ -162,7 +162,7 @@ A double-precision tensor (or scalar) with the same shape as the input, containi
 No. It only returns indices. Combine the result with indexing (`A(idx)`) to obtain reordered values when needed.
 
 ## See also
-[sort](./sort), [sortrows](./sortrows), [randperm](../../array/creation/randperm), [max](../../math/reduction/max), [min](../../math/reduction/min)
+[sort](./sort), [sortrows](./sortrows), [randperm](./randperm), [max](./max), [min](./min)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/array/sorting_sets/argsort.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/argsort.rs)

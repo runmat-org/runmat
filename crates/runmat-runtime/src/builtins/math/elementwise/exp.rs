@@ -173,7 +173,7 @@ Yes. RunMat stores dense numeric tensors as double precision (`f64`). Providers 
 single precision when configured, but results are converted back to double.
 
 ## See Also
-[logspace](../../array/creation/logspace), [abs](./abs), [sin](../trigonometry/sin), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[logspace](./logspace), [abs](./abs), [sin](./sin), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `exp` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/exp.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/exp.rs)

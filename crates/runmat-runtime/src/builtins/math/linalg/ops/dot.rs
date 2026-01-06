@@ -171,7 +171,7 @@ Yes. Inputs are promoted to double precision before evaluation so you never lose
 No. MATLAB's `dot` is fixed to conjugate the first argument. Use `sum(A .* conj(B))` manually if you need the opposite orientation.
 
 ## See Also
-[mtimes](./mtimes), [mldivide](./mldivide), [norm](../solve/norm), [sum](../../reduction/sum)
+[mtimes](./mtimes), [mldivide](./mldivide), [norm](./norm), [sum](./sum)
 
 ## Source & Feedback
 - The full source code for the implementation of the `dot` function is available at: [`crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs)

@@ -205,7 +205,7 @@ Use `chol` when the matrix is Hermitian positive definite—its triangular facto
 compute and exploit symmetry. Use `lu` or `qr` for more general matrices.
 
 ## See Also
-[lu](./lu), [qr](./qr), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[lu](./lu), [qr](./qr), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs)

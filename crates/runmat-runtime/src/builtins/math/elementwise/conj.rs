@@ -169,7 +169,7 @@ Yes. For real tensors the result is an exact copy; the conjugate matches CPU res
 Yes. The fusion planner can fold `conj` into neighbouring elementwise kernels, letting providers keep tensors on the GPU whenever possible.
 
 ## See Also
-[real](./real), [imag](./imag), [abs](./abs), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[real](./real), [imag](./imag), [abs](./abs), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `conj` function is available at: [`crates/runmat-runtime/src/builtins/math/elementwise/conj.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/conj.rs)

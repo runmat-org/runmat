@@ -235,7 +235,7 @@ Yes. Providers either execute the constant fill entirely on the GPU or RunMat up
 host tensor, ensuring identical results.
 
 ## See Also
-[zeros](./zeros), [ones](./ones), [repmat](../manipulation/repmat), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[zeros](./zeros), [ones](./ones), [repmat](./repmat), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/array/creation/fill.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs)

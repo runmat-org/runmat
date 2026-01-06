@@ -206,7 +206,7 @@ when the optional feature is enabled.
 Providers may fuse GEMM with adjacent operations; otherwise fusion falls back to the standard kernels.
 
 ## See Also
-[eye](../../../array/creation/eye), [zeros](../../../array/creation/zeros), [ones](../../../array/creation/ones), [sum](../../reduction/sum), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[eye](./eye), [zeros](./zeros), [ones](./ones), [sum](./sum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs)

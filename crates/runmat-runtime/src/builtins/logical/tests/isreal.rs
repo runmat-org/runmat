@@ -181,7 +181,7 @@ No. It is a metadata query. Providers can answer it without dispatching kernels,
 Use elementwise predicates such as `imag`/`real` combined with comparison (`imag(A) == 0`) or express the logic with fused operations. `isreal` is intentionally scalar.
 
 ## See Also
-[isfinite](./isfinite), [isinf](./isinf), [isnan](./isnan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isfinite](./isfinite), [isinf](./isinf), [isnan](./isnan), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isreal")]

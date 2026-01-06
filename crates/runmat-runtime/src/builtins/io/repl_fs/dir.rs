@@ -178,7 +178,7 @@ No cache files found.
   diagnostics wherever possible.
 
 ## See Also
-[ls](./ls), [pwd](./pwd), [cd](./cd), [fullfile](../../strings/path/fullfile)
+[ls](./ls), [pwd](./pwd), [cd](./cd), [fullfile](./fullfile)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/dir.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/dir.rs)

@@ -207,7 +207,7 @@ Consider enabling the in-process provider for development or the WGPU provider f
 the operation on the GPU.
 
 ## See Also
-[tanh](./tanh), [asinh](./asinh), [acosh](./acosh), [atan](./atan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[tanh](./tanh), [asinh](./asinh), [acosh](./acosh), [atan](./atan), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `atanh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs)

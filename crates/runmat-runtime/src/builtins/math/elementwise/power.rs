@@ -200,7 +200,7 @@ Yes—pass `'like', gpuArrayPrototype`. The runtime mirrors the residency of the
 uploads the result when necessary.
 
 ## See Also
-[.^ operator](https://www.mathworks.com/help/matlab/ref/power.html), [times](./times), [rdivide](./rdivide), [ldivide](./ldivide), [pow2](./pow2), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[.^ operator](https://www.mathworks.com/help/matlab/ref/power.html), [times](./times), [rdivide](./rdivide), [ldivide](./ldivide), [pow2](./pow2), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/elementwise/power.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/power.rs)

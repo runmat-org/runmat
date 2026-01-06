@@ -197,7 +197,7 @@ the polynomial is ill-conditioned. RunMat mirrors MATLAB by treating this as a s
 raising an error unless the degree is zero.
 
 ## See Also
-[polyval](./polyval), [poly](./poly), [roots](./roots), [mldivide](../linalg/ops/mldivide), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[polyval](./polyval), [poly](./poly), [roots](./roots), [mldivide](./mldivide), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: `crates/runmat-runtime/src/builtins/math/poly/polyfit.rs`

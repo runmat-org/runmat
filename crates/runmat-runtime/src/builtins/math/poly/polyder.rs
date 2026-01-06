@@ -217,7 +217,7 @@ padding, trimming, and orientation.
 All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB’s default numeric type.
 
 ## See Also
-[polyval](./polyval), [polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[polyval](./polyval), [polyfit](./polyfit), [conv](./conv), [deconv](./deconv), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]

@@ -138,7 +138,7 @@ No. Timer builtins are tagged as CPU-only. Expressions containing `tic` are alwa
 any GPU-resident tensors are gathered automatically by surrounding code when necessary.
 
 ## See Also
-[toc](./toc), [timeit](./timeit), [profile](../diagnostics/profile)
+[toc](./toc), [timeit](./timeit), [profile](./profile)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/timing/tic.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/tic.rs)

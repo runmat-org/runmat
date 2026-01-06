@@ -179,7 +179,7 @@ The implementation explicitly overwrites the final element with `10^b` to match 
 Yes. `logspace(3, 1, 4)` returns `[1000 464.1589 215.4435 100]`, decreasing logarithmically.
 
 ## See Also
-[linspace](./linspace), [zeros](./zeros), [ones](./ones), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[linspace](./linspace), [zeros](./zeros), [ones](./ones), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `logspace` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/logspace.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/logspace.rs)

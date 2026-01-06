@@ -215,7 +215,7 @@ Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write
 `cellfun('isclass', C, 'double')` just like in MATLAB.
 
 ## See Also
-[cell](./cell), [cell2mat](./cell2mat), [mat2cell](./mat2cell), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[cell](./cell), [cell2mat](./cell2mat), [mat2cell](./mat2cell), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/cells/core/cellfun.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs)

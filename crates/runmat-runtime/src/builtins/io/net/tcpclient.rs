@@ -152,7 +152,7 @@ No. RunMat automatically gathers GPU scalars before opening sockets. The returne
 - **What happens when the server rejects the connection?** `tcpclient` raises `MATLAB:tcpclient:ConnectionFailed` with the OS error (such as “connection refused”).
 
 ## See also
-[tcpserver](./tcpserver), [accept](./accept), [fread](../filetext/fread), [fwrite](../filetext/fwrite)
+[tcpserver](./tcpserver), [accept](./accept), [fread](./fread), [fwrite](./fwrite)
 
 ## Source & feedback
 - Source: `crates/runmat-runtime/src/builtins/io/net/tcpclient.rs`

@@ -145,7 +145,7 @@ control, particularly when interoperating with MATLAB code that expects it.
    Yes. Passing `[]` leaves that dimension unchanged while applying the specified size to the other dimension.
 
 ## See Also
-[fft](./fft), [ifft](./ifft), [fftshift](./fftshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[fft](./fft), [ifft](./ifft), [fftshift](./fftshift), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Full source: `crates/runmat-runtime/src/builtins/math/fft/fft2.rs`

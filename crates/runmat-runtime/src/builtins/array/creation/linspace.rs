@@ -173,7 +173,7 @@ Every element equals `a` (and `b`). For example, `linspace(5, 5, 4)` returns
 `[5 5 5 5]`.
 
 ## See Also
-[zeros](./zeros), [ones](./ones), [rand](./rand), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[zeros](./zeros), [ones](./ones), [rand](./rand), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `linspace` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/linspace.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/linspace.rs)

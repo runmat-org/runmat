@@ -184,7 +184,7 @@ Possibly, but today it always gathers to the CPU. Providers may add device-side 
 and the behaviour documented here will remain the reference.
 
 ## See Also
-[strip](./strip), [strcat](./strcat), [lower](./lower), [upper](./upper), [compose](../core/compose)
+[strip](./strip), [strcat](./strcat), [lower](./lower), [upper](./upper), [compose](./compose)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/pad.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/pad.rs)

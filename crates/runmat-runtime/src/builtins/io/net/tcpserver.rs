@@ -272,7 +272,7 @@ No. `tcpserver` is a host-side operation. RunMat transparently gathers GPU scala
 - **Is TLS supported?** Not directly. Combine `tcpserver` with application-layer protocol helpers or custom TLS wrappers until dedicated support lands.
 
 ## See also
-[fopen](../filetext/fopen), [fread](../filetext/fread), [fwrite](../filetext/fwrite), [fprintf](../filetext/fprintf)
+[fopen](./fopen), [fread](./fread), [fwrite](./fwrite), [fprintf](./fprintf)
 
 ## Source & feedback
 - Source: `crates/runmat-runtime/src/builtins/io/net/tcpserver.rs`

@@ -191,7 +191,7 @@ You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps 
 9. **Can fusion keep `floor` on the GPU?** Yes. `floor` participates in elementwise fusion, so fused graphs can stay resident on the device when supported.
 
 ## See Also
-[ceil](./ceil), [round](./round), [fix](./fix), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[ceil](./ceil), [round](./round), [fix](./fix), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `floor` lives at: [`crates/runmat-runtime/src/builtins/math/rounding/floor.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/floor.rs)

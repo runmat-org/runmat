@@ -167,7 +167,7 @@ Use `gpuInfo()`. It internally calls `gpuDevice` and formats the struct fields i
 string that is convenient for logging or display.
 
 ## See Also
-[gpuArray](./gpuArray), [gather](./gather), [gpuInfo](./gpuInfo)
+[gpuArray](./gpuarray), [gather](./gather), [gpuInfo](./gpuinfo)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpudevice")]

@@ -132,7 +132,7 @@ Yes when an acceleration provider exposes the QR hook; the bundled WGPU backend 
 Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `A*E`. For vector permutations, `A(:,p)` reproduces the pivoted columns.
 
 ## See Also
-[lu](./lu), [chol](./chol), [svd](../structure/svd), [det](../../det), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[lu](./lu), [chol](./chol), [svd](./svd), [det](./det), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/math/linalg/factor/qr.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/qr.rs)
