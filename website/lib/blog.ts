@@ -21,7 +21,31 @@ export interface AuthorInfo {
   url?: string
 }
 
-function normalizeAuthors(frontmatter: Record<string, any>): AuthorInfo[] {
+type FrontmatterAuthorEntry =
+  | string
+  | {
+      name?: string
+      url?: string
+    }
+  | null
+  | undefined
+
+interface BlogFrontmatter {
+  title?: string
+  description?: string
+  excerpt?: string
+  date?: string
+  readTime?: string
+  author?: string
+  authors?: FrontmatterAuthorEntry[]
+  tags?: string[]
+  image?: string
+  imageAlt?: string
+  visibility?: 'public' | 'unlisted'
+  [key: string]: unknown
+}
+
+function normalizeAuthors(frontmatter: BlogFrontmatter): AuthorInfo[] {
   const result: AuthorInfo[] = []
 
   if (Array.isArray(frontmatter.authors)) {
@@ -60,7 +84,8 @@ export function getAllBlogPosts(): BlogPost[] {
       const slug = file.replace(/\.md$/, '')
       const filePath = join(blogDir, file)
       const fileContent = readFileSync(filePath, 'utf-8')
-      const { data: frontmatter } = matter(fileContent)
+      const { data } = matter(fileContent)
+      const frontmatter = data as BlogFrontmatter
       const authors = normalizeAuthors(frontmatter)
       const visibility: 'public' | 'unlisted' =
         frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public'
@@ -73,7 +98,7 @@ export function getAllBlogPosts(): BlogPost[] {
         readTime: frontmatter.readTime || '5 min read',
         author: authors.map(author => author.name).join(', '),
         authors,
-        tags: frontmatter.tags || [],
+        tags: Array.isArray(frontmatter.tags) ? frontmatter.tags : [],
         image: frontmatter.image,
         imageAlt: frontmatter.imageAlt,
         visibility,
