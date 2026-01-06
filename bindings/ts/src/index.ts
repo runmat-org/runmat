@@ -74,7 +74,7 @@ export interface RunMatInitOptions {
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
   fsProvider?: RunMatFilesystemProvider;
-  plotCanvas?: OffscreenCanvas | HTMLCanvasElement;
+  plotCanvas?: HTMLCanvasElement;
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
@@ -397,6 +397,7 @@ export interface RunMatSessionHandle {
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
+  cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
   resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
   pendingStdinRequests(): Promise<PendingStdinRequest[]>;
@@ -437,6 +438,7 @@ interface RunMatNativeSession {
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
+  cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
@@ -826,6 +828,15 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     if (typeof this.native.cancelExecution === "function") {
       this.native.cancelExecution();
+    }
+  }
+
+  cancelPendingRequests(): void {
+    if (this.disposed) {
+      return;
+    }
+    if (typeof this.native.cancelPendingRequests === "function") {
+      this.native.cancelPendingRequests();
     }
   }
 
