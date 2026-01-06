@@ -9,10 +9,46 @@ export interface BlogPost {
   date: string
   readTime: string
   author: string
+  authors: AuthorInfo[]
   tags: string[]
   image?: string
   imageAlt?: string
   visibility: 'public' | 'unlisted'
+}
+
+export interface AuthorInfo {
+  name: string
+  url?: string
+}
+
+function normalizeAuthors(frontmatter: Record<string, any>): AuthorInfo[] {
+  const result: AuthorInfo[] = []
+
+  if (Array.isArray(frontmatter.authors)) {
+    for (const entry of frontmatter.authors) {
+      if (!entry) continue
+      if (typeof entry === 'string') {
+        result.push({ name: entry })
+        continue
+      }
+      if (typeof entry === 'object' && 'name' in entry && typeof entry.name === 'string') {
+        result.push({
+          name: entry.name,
+          url: typeof entry.url === 'string' ? entry.url : undefined,
+        })
+      }
+    }
+  }
+
+  if (result.length === 0 && typeof frontmatter.author === 'string') {
+    result.push({ name: frontmatter.author })
+  }
+
+  if (result.length === 0) {
+    result.push({ name: 'RunMat Team' })
+  }
+
+  return result
 }
 
 export function getAllBlogPosts(): BlogPost[] {
@@ -25,6 +61,9 @@ export function getAllBlogPosts(): BlogPost[] {
       const filePath = join(blogDir, file)
       const fileContent = readFileSync(filePath, 'utf-8')
       const { data: frontmatter } = matter(fileContent)
+      const authors = normalizeAuthors(frontmatter)
+      const visibility: 'public' | 'unlisted' =
+        frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public'
 
       return {
         slug,
@@ -32,11 +71,12 @@ export function getAllBlogPosts(): BlogPost[] {
         description: frontmatter.description || frontmatter.excerpt || '',
         date: frontmatter.date || new Date().toISOString(),
         readTime: frontmatter.readTime || '5 min read',
-        author: frontmatter.author || 'RunMat Team',
+        author: authors.map(author => author.name).join(', '),
+        authors,
         tags: frontmatter.tags || [],
         image: frontmatter.image,
         imageAlt: frontmatter.imageAlt,
-        visibility: frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public',
+        visibility,
       }
     })
 

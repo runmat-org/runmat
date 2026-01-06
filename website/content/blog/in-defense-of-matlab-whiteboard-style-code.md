@@ -2,10 +2,14 @@
 title: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
 description: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
 date: "2025-12-11"
-author: "Nabeel Allana"
+authors:
+  - name: "Fin Watterson"
+    url: "https://www.linkedin.com/in/finbarrwatterson/"
+  - name: "Nabeel Allana"
+    url: "https://x.com/nabeelallana"
 readTime: "8 min read"
 slug: "in-defense-of-matlab-whiteboard-style-code"
-tags: ["matlab", "runmat", "whiteboard-code", "scientific-computing", "engineering-math", "llm-codegen"]
+tags: ["matlab", "runmat", "whiteboard-code", "scientific-computing", "engineering-math", "matlab-alternative"]
 keywords: "MATLAB, MATLAB syntax, whiteboard-style code, RunMat, scientific computing, engineering math, code review, LLM code generation, MATLAB alternative"
 excerpt: "People joke about MATLAB, but the syntax is not the problem. Whiteboard-style code is still one of the safest ways for engineers to write and review math-heavy logic. This article explains why readable math matters in an AI coding world and how RunMat keeps the syntax while modernizing the engine."
 image: "https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
@@ -17,6 +21,71 @@ twitterCard: "summary_large_image"
 twitterTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
 twitterDescription: "Whiteboard-style MATLAB code is still a superpower for engineers. Here’s why readable math matters for safety, code review, and AI-assisted workflows."
 canonical: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
+# --- SCHEMA MARKUP START ---
+jsonLd:
+  "@context": "https://schema.org"
+  "@graph":
+    - "@type": "BreadcrumbList"
+      itemListElement:
+        - "@type": "ListItem"
+          position: 1
+          name: "RunMat"
+          item: "https://runmat.org"
+        - "@type": "ListItem"
+          position: 2
+          name: "Blog"
+          item: "https://runmat.org/blog"
+        - "@type": "ListItem"
+          position: 3
+          name: "In Defense of MATLAB"
+          item: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
+
+    - "@type": "BlogPosting"
+      "@id": "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code#article"
+      headline: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
+      alternativeHeadline: "Why readable math matters in an AI coding world"
+      description: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
+      image: "https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
+      datePublished: "2025-12-11"
+      dateModified: "2025-12-11"
+      author:
+        - "@type": "Person"
+          name: "Fin Watterson"
+          url: "https://www.linkedin.com/in/finbarrwatterson/"
+        - "@type": "Person"
+          name: "Nabeel Allana"
+          url: "https://x.com/nabeelallana"
+          sameAs: ["https://dystr.com/about"]
+      publisher:
+        "@type": "Organization"
+        name: "RunMat by Dystr"
+        logo:
+          "@type": "ImageObject"
+          url: "/runmat-logo.png"
+      
+      # SEMANTIC LINKING: Connecting the article to real-world entities
+      about:
+        - "@type": "SoftwareApplication"
+          name: "MATLAB"
+          sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+        - "@type": "SoftwareApplication"
+          name: "RunMat"
+          sameAs: "https://runmat.org"
+        - "@type": "ComputerLanguage"
+          name: "Python"
+          sameAs: "https://en.wikipedia.org/wiki/Python_(programming_language)"
+
+      # DEFINED TERM: Establishing your new concept
+      mentions:
+        "@type": "DefinedTerm"
+        name: "Whiteboard-Style Code"
+        description: "A coding style where one line of code corresponds to one line of mathematical derivation, characterized by high density and visual similarity to matrix equations."
+
+      # VOICE SEARCH OPTIMIZATION
+      speakable:
+        "@type": "SpeakableSpecification"
+        cssSelector: ["h1", ".excerpt"]
+
 ---
 
 

@@ -9,7 +9,8 @@ interface BlogLayoutProps {
   description: string;
   date: string;
   readTime: string;
-  author: string;
+  author?: string;
+  authors?: { name: string; url?: string }[];
   tags: string[];
   rightAside?: React.ReactNode;
   backLink?: { href: string; text: string };
@@ -23,11 +24,19 @@ export function BlogLayout({
   date,
   readTime,
   author,
+  authors,
   tags,
   rightAside,
   backLink = { href: '/blog', text: 'Back to Blog' },
   descriptionPlacement = 'beforeMeta'
 }: BlogLayoutProps) {
+  const resolvedAuthors =
+    (authors && authors.length > 0
+      ? authors
+      : author
+        ? [{ name: author }]
+        : [{ name: 'RunMat Team' }]);
+
   const descriptionSpacingClass =
     descriptionPlacement === 'afterMeta' ? 'mt-6 mb-6' : 'mb-6';
 
@@ -64,7 +73,26 @@ export function BlogLayout({
         </div>
         <div className="flex items-center gap-2">
           <User className="h-4 w-4" />
-          By {author}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>By</span>
+            {resolvedAuthors.map((authorItem, index) => (
+              <span key={authorItem.name + index} className="flex items-center gap-1">
+                {authorItem.url ? (
+                  <Link
+                    href={authorItem.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    {authorItem.name}
+                  </Link>
+                ) : (
+                  <span>{authorItem.name}</span>
+                )}
+                {index < resolvedAuthors.length - 1 && <span>,</span>}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 

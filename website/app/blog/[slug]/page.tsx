@@ -13,13 +13,19 @@ import { Button } from '@/components/ui/button';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
 
+interface AuthorInfo {
+  name: string;
+  url?: string;
+}
+
 interface BlogPost {
   slug: string;
   frontmatter: {
     title: string;
     description: string;
     date: string;
-    author: string;
+    author?: string;
+    authors?: Array<{ name: string; url?: string } | string>;
     readTime: string;
     tags: string[];
     excerpt: string;
@@ -29,6 +35,37 @@ interface BlogPost {
     jsonLd?: unknown;
   };
   content: string;
+  authors: AuthorInfo[];
+}
+
+function normalizeAuthors(frontmatter: BlogPost['frontmatter']): AuthorInfo[] {
+  const result: AuthorInfo[] = [];
+
+  if (Array.isArray(frontmatter.authors)) {
+    for (const entry of frontmatter.authors) {
+      if (!entry) continue;
+      if (typeof entry === 'string') {
+        result.push({ name: entry });
+        continue;
+      }
+      if (typeof entry === 'object' && 'name' in entry && typeof entry.name === 'string') {
+        result.push({
+          name: entry.name,
+          url: typeof entry.url === 'string' ? entry.url : undefined,
+        });
+      }
+    }
+  }
+
+  if (result.length === 0 && typeof frontmatter.author === 'string') {
+    result.push({ name: frontmatter.author });
+  }
+
+  if (result.length === 0) {
+    result.push({ name: 'RunMat Team' });
+  }
+
+  return result;
 }
 
 function getBlogPost(slug: string): BlogPost | null {
@@ -41,6 +78,7 @@ function getBlogPost(slug: string): BlogPost | null {
       slug,
       frontmatter: frontmatter as BlogPost['frontmatter'],
       content,
+      authors: normalizeAuthors(frontmatter as BlogPost['frontmatter']),
     };
   } catch {
     return null;
@@ -52,6 +90,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const post = getBlogPost(slug);
   if (!post) return {};
 
+  const authorNames = post.authors.map(author => author.name);
   const img = post.frontmatter.image;
   let imageUrl: string | undefined = undefined;
   if (img && typeof img === 'string') {
@@ -74,7 +113,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       description: post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
-      authors: [post.frontmatter.author],
+      authors: authorNames,
       images: imageUrl ? [imageUrl] : undefined,
     },
     twitter: {
@@ -116,20 +155,49 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     return `${month}/${day}/${year}`;
   };
 
+  const fallbackJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: post.frontmatter.title,
+    description: post.frontmatter.description,
+    datePublished: post.frontmatter.date,
+    dateModified: post.frontmatter.date,
+    author: post.authors.map(author => ({
+      "@type": "Person",
+      name: author.name,
+      ...(author.url ? { url: author.url } : {}),
+    })),
+    publisher: {
+      "@type": "Organization",
+      name: "RunMat",
+    },
+    ...(post.frontmatter.canonical ? { mainEntityOfPage: post.frontmatter.canonical } : {}),
+    ...(post.frontmatter.image ? { image: post.frontmatter.image } : {}),
+  };
+
+  const jsonLdString = (() => {
+    try {
+      const data = post.frontmatter.jsonLd || fallbackJsonLd;
+      return JSON.stringify(data);
+    } catch {
+      return undefined;
+    }
+  })();
+
   return (
     <BlogLayout
       title={post.frontmatter.title}
       description=""
       date={formatDate(post.frontmatter.date)}
       readTime={post.frontmatter.readTime}
-      author={post.frontmatter.author}
+      authors={post.authors}
       tags={post.frontmatter.tags}
       rightAside={<HeadingsNav source={post.content} />}
     >
-      {post.frontmatter.jsonLd && (
+      {jsonLdString && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(post.frontmatter.jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: jsonLdString }}
         />
       )}
       <MarkdownRenderer source={post.content} />
