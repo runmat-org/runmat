@@ -55,7 +55,6 @@ jsonLd:
         - "@type": "Person"
           name: "Nabeel Allana"
           url: "https://x.com/nabeelallana"
-          sameAs: ["https://dystr.com/about"]
       publisher:
         "@type": "Organization"
         name: "RunMat by Dystr"

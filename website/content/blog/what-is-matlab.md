@@ -3,6 +3,9 @@ title: "What is MATLAB? The Language, The Runtime, and RunMat"
 description: "A plain-English explainer of MATLAB's language model and how RunMat delivers a modern, high-performance open-source runtime for it."
 date: "2025-01-01"
 author: "RunMat Team"
+authors:
+  - name: "Julie Ruiz"
+    url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
 readTime: "8 min read"
 slug: "what-is-matlab"
 tags: ["MATLAB", "RunMat", "language", "runtime"]
@@ -82,9 +85,7 @@ jsonLd:
             text: "RunMat uses <b>Fusion</b> to capture chains of array operations and automatically route them to the CPU or GPU based on cost. It also features a tiered execution model with a fast-start interpreter and a JIT compiler for hot loops."
 ---
 
-# WHAT_IS_MATLAB
 
-## What is MATLAB?
 
 MATLAB is a **programming language and computing environment** designed for working with **matrices, vectors, and numeric data**. The name comes from *MATrix LABoratory*, and that focus shows up everywhere: most values are arrays, and most operations are expressed as high-level array math.
 
@@ -257,11 +258,11 @@ For the full CLI reference, see [CLI](../CLI.md).
 
 If you’d like to learn more about RunMat, please visit Runmat.org, or read the following articles:
 
-- **Language compatibility**: [Language Coverage](../LANGUAGE_COVERAGE.md)
-- **Why the project is structured this way**: [Design Philosophy](../DESIGN_PHILOSOPHY.md)
-- **How GPU acceleration works**: [Introduction to RunMat GPU/Fusion](../INTRODUCTION_TO_RUNMAT_GPU.md)
-- **How to run/benchmark/configure RunMat**: [CLI](../CLI.md)
-- **Toolboxes-as-packages direction**: [Package Manager (design)](../PACKAGE_MANAGER.md)
+- **Language compatibility**: [Language Coverage](/docs/language-coverage)
+- **Why the project is structured this way**: [Design Philosophy](/docs/design-philosophy)
+- **How GPU acceleration works**: [Introduction to RunMat GPU/Fusion](/docs/accelerate/fusion-intro)
+- **How to run/benchmark/configure RunMat**: [CLI](/docs/cli)
+- **Toolboxes-as-packages direction**: [Package Manager (design)](/docs/package-manager)
 
 ---
 
