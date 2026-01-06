@@ -45,6 +45,15 @@ interface BlogFrontmatter {
   [key: string]: unknown
 }
 
+function slugifyFileName(file: string): string {
+  const base = file.replace(/\.md$/, '').toLowerCase()
+  const normalized = base
+    .replace(/[^a-z0-9]+/g, '-') // keep alnum, replace runs with hyphen
+    .replace(/^-+|-+$/g, '') // trim leading/trailing hyphens
+
+  return normalized || 'post'
+}
+
 function normalizeAuthors(frontmatter: BlogFrontmatter): AuthorInfo[] {
   const result: AuthorInfo[] = []
 
@@ -81,7 +90,7 @@ export function getAllBlogPosts(): BlogPost[] {
     const files = readdirSync(blogDir).filter(file => file.endsWith('.md'))
 
     const posts = files.map(file => {
-      const slug = file.replace(/\.md$/, '')
+      const slug = slugifyFileName(file)
       const filePath = join(blogDir, file)
       const fileContent = readFileSync(filePath, 'utf-8')
       const { data } = matter(fileContent)
