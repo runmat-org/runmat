@@ -1,7 +1,7 @@
 {
   "name": "runmat",
   "version": "0.2.7",
-  "description": "Browser-ready WebAssembly bindings for the RunMat runtime",
+  "description": "Blazing fast runtime for math. Run MATLAB code on CPU or GPU.",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE.md",
   "homepage": "https://runmat.org",

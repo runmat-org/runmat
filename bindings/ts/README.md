@@ -1,6 +1,30 @@
-# runmat
+# RunMat: Blazing Fast Runtime for Math
 
-TypeScript/ESM bindings for the `runmat` crate. The package exposes an async `initRunMat` helper that boots the WASM runtime, streams optional snapshot bytes, and returns a browser-friendly session wrapper.
+RunMat automatically fuses math operations and intelligently routes between CPU and GPU.
+
+Write math in MATLAB syntax, and RunMat runs it blazing fast.
+
+Runs on Windows, macOS, Linux, and Web, across NVIDIA, AMD, Apple Silicon, and Intel GPUs.
+
+## Initialization options
+
+`initRunMat` accepts the following options so hosts can tailor the runtime to their environment:
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `snapshot` | `{ bytes \| url \| stream \| fetcher }` | Preload the standard library. Streams avoid copying large buffers. |
+| `fsProvider` | `RunMatFilesystemProvider` | Install a custom filesystem (remote, IndexedDB, etc.). Defaults to `createDefaultFsProvider()`. |
+| `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
+| `enableJit` | `boolean` | Toggle the JIT tier. |
+| `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
+| `telemetryId` | `string` | Existing analytics client ID to reuse. |
+| `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
+| `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
+| `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
+| `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
+| `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
+| `language.compat` | `"matlab" \| "strict"` | Matches `[language] compat` in `.runmat`. See docs/LANGUAGE.md for more information. |
+
 
 ## Developing
 
@@ -81,25 +105,6 @@ if (gpu.adapter) {
   console.log("GPU backend:", gpu.adapter.name, gpu.adapter.backend, gpu.adapter.precision);
 }
 ```
-
-## Initialization options
-
-`initRunMat` accepts the following options so hosts can tailor the runtime to their environment:
-
-| Option | Type | Description |
-| --- | --- | --- |
-| `snapshot` | `{ bytes \| url \| stream \| fetcher }` | Preload the standard library. Streams avoid copying large buffers. |
-| `fsProvider` | `RunMatFilesystemProvider` | Install a custom filesystem (remote, IndexedDB, etc.). Defaults to `createDefaultFsProvider()`. |
-| `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
-| `enableJit` | `boolean` | Toggle the JIT tier. |
-| `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
-| `telemetryId` | `string` | Existing analytics client ID to reuse. |
-| `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
-| `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
-| `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
-| `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
-| `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
-| `language.compat` | `"matlab" \| "strict"` | Matches `[language] compat` in `.runmat`. See docs/LANGUAGE.md for more information. |
 
 ## Telemetry consent
 
