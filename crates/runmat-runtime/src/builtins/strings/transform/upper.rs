@@ -163,7 +163,7 @@ results match MATLAB exactly. Providers may add device-side kernels in the futur
 compatible.
 
 ## See Also
-[lower](./lower), [string](../core/string), [char](../core/char), [regexprep](../regex/regexprep), [strcmpi](../search/strcmpi)
+[lower](./lower), [string](./string), [char](./char), [regexprep](./regexprep), [strcmpi](./strcmpi)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/upper.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/upper.rs)

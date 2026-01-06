@@ -196,7 +196,7 @@ No. The gpuArray remains on the device. Free the handle explicitly (by clearing 
 no longer need it.
 
 ## See Also
-[gpuArray](./gpuArray), [gpuDevice](./gpuDevice), [sum](../../math/reduction/sum), [mean](../../math/reduction/mean)
+[gpuArray](./gpuarray), [gpuDevice](./gpudevice), [sum](./sum), [mean](./mean)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/acceleration/gpu/gather.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/gather.rs)

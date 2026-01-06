@@ -183,8 +183,8 @@ No. Concatenation materialises results immediately and is treated as a fusion si
 - [`cat`](./cat)
 - [`horzcat`](./horzcat)
 - [`reshape`](./reshape)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/array/shape/vertcat.rs`

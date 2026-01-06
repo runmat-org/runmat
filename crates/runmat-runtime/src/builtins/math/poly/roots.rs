@@ -169,7 +169,7 @@ Not yet. RunMat gathers coefficients from the GPU, solves the companion matrix o
 Small imaginary components (|imag| ≤ 1e-10·(1 + |real|)) are rounded to zero so that near-real roots are displayed as real numbers, matching MATLAB formatting.
 
 ## See Also
-[polyval](./polyval), [polyfit](./polyfit), [residue](../signal/residue), [roots documentation (MathWorks)](https://www.mathworks.com/help/matlab/ref/roots.html)
+[polyval](./polyval), [polyfit](./polyfit), [residue](./residue), [roots documentation (MathWorks)](https://www.mathworks.com/help/matlab/ref/roots.html)
 
 ## Source & Feedback
 - The full source code for the implementation of the `roots` function is available at: [`crates/runmat-runtime/src/builtins/math/poly/roots.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/roots.rs)

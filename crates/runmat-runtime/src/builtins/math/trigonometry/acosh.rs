@@ -205,7 +205,7 @@ Yes. Marking it as an element-wise builtin ensures future autodiff tooling can r
 metadata to generate gradients.
 
 ## See Also
-[asinh](./asinh), [tanh](./tanh), [cosh](./cosh), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[asinh](./asinh), [tanh](./tanh), [cosh](./cosh), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `acosh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/acosh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/acosh.rs)

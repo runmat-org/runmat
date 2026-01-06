@@ -196,7 +196,7 @@ falls back to the CPU path and returns a host tensor; this fallback is documente
 add native kernels without breaking compatibility.
 
 ## See Also
-[conv](./conv), [filter2](https://www.mathworks.com/help/matlab/ref/filter2.html), [imfilter](https://www.mathworks.com/help/images/ref/imfilter.html), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[conv](./conv), [filter2](https://www.mathworks.com/help/matlab/ref/filter2.html), [imfilter](https://www.mathworks.com/help/images/ref/imfilter.html), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for `conv2` lives at: [`crates/runmat-runtime/src/builtins/math/signal/conv2.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs)

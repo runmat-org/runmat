@@ -138,7 +138,7 @@ Expected output:
 - **Can I change to folders whose names include spaces?** Yes. Provide them as strings or character vectors—RunMat preserves whitespace exactly.
 
 ## See Also
-[pwd](../../../../builtins/io/repl_fs/pwd), [ls](../../../../builtins/io/repl_fs/ls), [dir](../../../../builtins/io/repl_fs/dir), [fileread](../../filetext/fileread)
+[pwd](./pwd), [ls](./ls), [dir](./dir), [fileread](./fileread)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/cd.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/cd.rs)

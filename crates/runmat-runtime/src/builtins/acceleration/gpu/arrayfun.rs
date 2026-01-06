@@ -180,7 +180,7 @@ Logical results use 0.0/1.0 buffers on the device. When you gather them RunMat c
 back into a logical array automatically.
 
 ## See Also
-[cellfun](../../cells/core/cellfun), [gpuArray](./gpuarray), [gather](./gather)
+[cellfun](./cellfun), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Source code: [`crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs)

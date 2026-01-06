@@ -181,8 +181,8 @@ Yes. The function only reorders elements; values are never modified, so it is nu
 - [`fliplr`](./fliplr)
 - [`permute`](./permute)
 - [`reshape`](./reshape)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/array/shape/flipud.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/flipud.rs)

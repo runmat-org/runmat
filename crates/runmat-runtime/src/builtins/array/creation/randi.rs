@@ -199,7 +199,7 @@ RunMat falls back to host generation followed by a single upload. The resulting 
 Not yet. The `randi` builtin currently supports doubles only. Supplying `'single'` or integer class names raises a descriptive error.
 
 ## See Also
-[rand](./rand), [randn](./randn), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[rand](./rand), [randn](./randn), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `randi` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/randi.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randi.rs)

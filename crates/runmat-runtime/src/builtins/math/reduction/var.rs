@@ -171,7 +171,7 @@ RunMat returns the input unchanged so that MATLAB-compatible code relying on tha
 Not yet. RunMat currently requires real inputs for `var`. Convert complex data to magnitude or separate real/imaginary parts before calling the builtin.
 
 ## See Also
-[std](./std), [mean](./mean), [sum](./sum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[std](./std), [mean](./mean), [sum](./sum), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `var` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/var.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/var.rs)

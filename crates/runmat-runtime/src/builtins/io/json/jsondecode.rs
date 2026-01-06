@@ -191,7 +191,7 @@ Leading and trailing whitespace is ignored, and embedded newlines are permitted 
 remains valid JSON.
 
 ## See Also
-[jsonencode](./jsonencode), [struct](../../structs/constructors/struct), [cell](../../array/constructors/cell), [fileread](../filetext/fileread)
+[jsonencode](./jsonencode), [struct](./struct), [cell](./cell), [fileread](./fileread)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsondecode")]

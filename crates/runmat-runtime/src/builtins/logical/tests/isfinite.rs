@@ -157,7 +157,7 @@ Yes. The fusion planner treats `isfinite` as an elementwise operation, so expres
 Each predicate performs a single elementwise test. Performance is dominated by memory bandwidth, so they have comparable cost on both CPU and GPU.
 
 ## See Also
-[isinf](./isinf), [isnan](./isnan), [isreal](./isreal), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[isinf](./isinf), [isnan](./isnan), [isreal](./isreal), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isfinite")]

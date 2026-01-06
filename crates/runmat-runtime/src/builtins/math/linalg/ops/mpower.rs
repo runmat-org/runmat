@@ -154,7 +154,7 @@ Yes—provided the acceleration provider implements `matmul`. When it does not, 
 Integers up to ±(2³¹−1) are supported. Exponents outside this range trigger a descriptive error.
 
 ## See Also
-[mtimes](./mtimes), [power](../../elementwise/power), [eye](../../../array/creation/eye), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[mtimes](./mtimes), [power](./power), [eye](./eye), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/mpower.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mpower.rs)

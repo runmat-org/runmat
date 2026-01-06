@@ -163,16 +163,16 @@ ans = logical 1
 9. **What if the order vector is a gpuArray?**  
    MATLAB requires host numeric vectors for order specifications. RunMat enforces the same rule and raises an error.
 10. **Is there a performance benefit on the GPU?**  
-    Yes when the provider implements the permute hook. Otherwise the fallback path behaves like MATLAB's gather/permute/gpuArray workflow.
+    Yes when the provider implements the permute hook. Otherwise the fallback path behaves like MATLAB's gather/permut/gpuArray workflow.
 
 ## See Also
 - [`permute`](./permute)
 - [`reshape`](./reshape)
 - [`squeeze`](./squeeze)
-- [`size`](../introspection/size)
-- [`ndims`](../introspection/ndims)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`size`](./size)
+- [`ndims`](./ndims)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - The full source for `ipermute` lives at [`crates/runmat-runtime/src/builtins/array/shape/ipermute.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/ipermute.rs)

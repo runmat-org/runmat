@@ -203,7 +203,7 @@ Providers may reuse buffers internally, but from the user’s perspective the re
 
 ## See Also
 [`permute`](./permute), [`rot90`](./rot90), [`flip`](./flip),
-[`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather)
+[`gpuArray`](./gpuarray), [`gather`](./gather)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/array/shape/circshift.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/circshift.rs)

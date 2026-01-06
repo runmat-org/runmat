@@ -185,7 +185,7 @@ file is touched.
 prepend header lines manually with `fprintf` before calling `writematrix` in `'append'` mode.
 
 ## See Also
-[readmatrix](./readmatrix), [writecell](../cell/writecell), [fprintf](../../filetext/fprintf), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[readmatrix](./readmatrix), [writecell](./writecell), [fprintf](./fprintf), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `writematrix` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs)

@@ -180,7 +180,7 @@ Sparse support is planned; current releases operate on dense arrays. Inputs are 
 Fused kernels treat `trace` as a scalar reduction boundary. The planner emits GPU kernels when hooks are available; otherwise it falls back gracefully.
 
 ## See Also
-[diag](../../../array/shape/diag), [sum](../../reduction/sum), [mtimes](../mtimes), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+[diag](./diag), [sum](./sum), [mtimes](./mtimes), [gpuArray](./gpuarray), [gather](./gather)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs)

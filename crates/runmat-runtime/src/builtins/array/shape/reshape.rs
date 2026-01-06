@@ -150,11 +150,11 @@ RunMat raises `reshape: product of dimensions (X) must equal numel(A) (Y)`.
 Yes. Complex scalars become complex tensors when the target shape has more than one element.
 
 ## See Also
-- [`size`](../introspection/size)
-- [`ndims`](../introspection/ndims)
-- [`numel`](../introspection/numel)
-- [`gpuArray`](../../acceleration/gpu/gpuArray)
-- [`gather`](../../acceleration/gpu/gather)
+- [`size`](./size)
+- [`ndims`](./ndims)
+- [`numel`](./numel)
+- [`gpuArray`](./gpuarray)
+- [`gather`](./gather)
 
 ## Source & Feedback
 - Full implementation: `crates/runmat-runtime/src/builtins/array/shape/reshape.rs`

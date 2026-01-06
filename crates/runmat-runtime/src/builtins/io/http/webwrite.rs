@@ -182,7 +182,7 @@ the payload, and results are created on the host. Manually gathering is unnecess
     graphs and ensure residency is released.
 
 ## See Also
-[webread](./webread), [jsonencode](../json/jsonencode), [jsondecode](../json/jsondecode), [gpuArray](../../acceleration/gpu/gpuArray)
+[webread](./webread), [jsonencode](./jsonencode), [jsondecode](./jsondecode), [gpuArray](./gpuarray)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webwrite")]

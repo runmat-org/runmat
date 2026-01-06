@@ -167,7 +167,7 @@ Use `replace` for literal substitution or `regexprep` for regular expressions wh
 removal rather than literal substring erasure.
 
 ## See Also
-[replace](./replace), [strrep](./strrep), [split](./split), [regexprep](../regex/regexprep), [string](../core/string)
+[replace](./replace), [strrep](./strrep), [split](./split), [regexprep](./regexprep), [string](./string)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/erase.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erase.rs)

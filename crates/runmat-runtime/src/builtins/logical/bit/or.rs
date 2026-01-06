@@ -164,7 +164,7 @@ They share the same element-wise semantics. The functional form is convenient fo
 RunMat promotes the other input to the GPU before dispatch when the auto-offload planner decides it is profitable. If the provider lacks a device implementation, both operands gather to host automatically and the logical result executes on the CPU.
 
 ## See Also
-[gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::or")]

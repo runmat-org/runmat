@@ -165,7 +165,7 @@ Yes. Real or complex inputs return `true` when exactly one operand has a non-zer
 RunMat promotes the other input to the GPU before dispatch when the auto-offload planner decides it is profitable. If the provider lacks a device implementation, both operands gather to host automatically and the logical result executes on the CPU.
 
 ## See Also
-[and](./and), [or](./or), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[and](./and), [or](./or), [gpuArray](./gpuarray), [gather](./gather)
 "#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::bit::xor")]

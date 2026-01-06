@@ -197,7 +197,7 @@ Not currently. gpuArray values hold numeric or logical tensors, so `isstring` al
 No. It only checks the value’s type metadata, so the cost is constant regardless of array size.
 
 ## See Also
-[ischar](./ischar), [isa](./isa), [string](../strings/core/string), [convertStringsToChars](../strings/manipulation/convertStringsToChars), [gpuArray](../acceleration/gpu/gpuArray)
+[ischar](./ischar), [isa](./isa), [string](./string), [convertStringsToChars](./convertStringsToChars), [gpuArray](./gpuarray)
 
 ## Source & Feedback
 - The full source code for the implementation of the `isstring` function is available at: [`crates/runmat-runtime/src/builtins/introspection/isstring.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/isstring.rs)

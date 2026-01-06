@@ -187,7 +187,7 @@ Yes. Inputs stored on a GPU are gathered automatically. The function executes on
 host-side results, and fusion planning treats the builtin as a residency sink.
 
 ## See Also
-[replace](../../transform/replace), [split](../../transform/split), [join](../../transform/join), [contains](../../search/contains), [strfind](../../search/strfind)
+[replace](./replace), [split](./split), [join](./join), [contains](./contains), [strfind](./strfind)
 
 ## Source & Feedback
 - Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/extractbetween.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/extractbetween.rs)
