@@ -2180,7 +2180,11 @@ fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
 
 #[cfg(target_arch = "wasm32")]
 fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
-    WASM_THREAD_PROVIDER.lock().ok().and_then(|slot| *slot)
+    WASM_THREAD_PROVIDER
+        .lock()
+        .expect("wasm provider mutex poisoned")
+        .as_ref()
+        .copied()
 }
 
 /// Register a global acceleration provider.

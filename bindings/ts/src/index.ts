@@ -548,11 +548,13 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const requestedGpu = options.enableGpu ?? true;
   let effectiveEnableGpu: boolean;
   if (hasExplicitEnableFlag) {
-    effectiveEnableGpu = requestedGpu;
     if (requestedGpu && !supportsWebGpu) {
       console.warn(
         "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
       );
+      effectiveEnableGpu = false;
+    } else {
+      effectiveEnableGpu = requestedGpu;
     }
   } else {
     effectiveEnableGpu = requestedGpu && supportsWebGpu;
