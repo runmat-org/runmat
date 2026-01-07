@@ -547,8 +547,6 @@ jobs:
         run: npm run lint --workspace bindings/ts
 
       - name: Publish bindings package to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd bindings/ts
           npm publish --access public
