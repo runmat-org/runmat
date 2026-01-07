@@ -43,6 +43,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut accel_values: Vec<String> = Vec::new();
     let mut builtin_path_lit: Option<LitStr> = None;
     let mut sink_flag = false;
+    let mut accel_provider_flag = true;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
             if path.is_ident("name") {
@@ -71,6 +72,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_ascii_lowercase()),
                     );
+                }
+            } else if path.is_ident("accel_provider") {
+                if let Lit::Bool(lb) = lit {
+                    accel_provider_flag = lb.value;
+                } else {
+                    panic!("accel_provider must be a boolean literal");
                 }
             } else if path.is_ident("sink") {
                 if let Lit::Bool(lb) = lit {
@@ -261,6 +268,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let sink_bool = sink_flag;
 
+    let accel_helpers = if accel_provider_flag {
+        let context_ident = format_ident!("__runmat_accel_context_{}", ident);
+        quote! {
+            #[allow(non_upper_case_globals)]
+            const #context_ident: &str =
+                concat!(module_path!(), "::", stringify!(#ident));
+        }
+    } else {
+        quote! {}
+    };
+
     let builtin_expr = quote! {
         runmat_builtins::BuiltinFunction::new(
             #name_str,
@@ -318,6 +336,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #func
+        #accel_helpers
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #wrapper
         #wasm_helper
