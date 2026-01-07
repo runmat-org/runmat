@@ -16,7 +16,7 @@ import NewsletterCta from '@/components/NewsletterCta';
 interface AuthorInfo {
   name: string;
   url?: string;
-}
+} 
 
 type JsonLdPrimitive = string | number | boolean | null;
 type JsonLdValue = JsonLdPrimitive | JsonLdObject | JsonLdValue[];
@@ -24,7 +24,7 @@ export type JsonLdObject = {
   "@context"?: string;
   "@type"?: string | string[];
   "@id"?: string;
-  [key: string]: JsonLdValue;
+  [key: string]: JsonLdValue | undefined;
 };
 type JsonLd = JsonLdObject | { "@graph": JsonLdObject[] };
 
@@ -85,7 +85,7 @@ function validateJsonLd(jsonLd: unknown, slug: string): JsonLd | undefined {
     !Array.isArray(jsonLd) &&
     '@graph' in jsonLd &&
     Array.isArray((jsonLd as Record<string, unknown>)['@graph']) &&
-    (jsonLd as Record<string, unknown>)['@graph']!.every(isJsonLdObject)
+    ((jsonLd as Record<string, unknown>)['@graph'] as unknown[]).every(isJsonLdObject)
   ) {
     return jsonLd as JsonLd;
   }
