@@ -2,15 +2,15 @@
     "$schema": "https://openapi.vercel.sh/microfrontends.json",
     "applications": {
     "runmat": { },
-      "runmat-desktop": {
-        "routing": [
-          {
-            "paths": ["/sandbox"]
-          },
-          {
-            "paths": ["/_pnext/(.*)"]
-          }
-        ]
-      }
+    "runmat-desktop": {
+      "routing": [
+        {
+          "paths": ["/sandbox"]
+        },
+        {
+          "paths": ["/_pnext/:path*"]
+        }
+      ]
+    }
     }
 }
