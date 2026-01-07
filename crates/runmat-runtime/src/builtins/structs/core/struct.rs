@@ -1,9 +1,12 @@
 //! MATLAB-compatible `struct` builtin.
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::cell_array_from_values;
 use runmat_builtins::{CellArray, CharArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -298,7 +301,7 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> Result<Val
         structs.push(Value::Struct(fields));
     }
 
-    CellArray::new_with_shape(structs, shape)
+    cell_array_from_values(structs, shape)
         .map(Value::Cell)
         .map_err(|e| format!("struct: failed to assemble struct array: {e}"))
 }
@@ -311,7 +314,7 @@ fn clone_cell_element(cell: &CellArray, index: usize) -> Result<Value, String> {
 }
 
 fn empty_struct_array() -> Result<Value, String> {
-    CellArray::new(Vec::new(), 0, 0)
+    cell_array_from_values(Vec::new(), vec![0, 0])
         .map(Value::Cell)
         .map_err(|e| format!("struct: failed to create empty struct array: {e}"))
 }
@@ -328,7 +331,7 @@ fn clone_struct_array(array: &CellArray) -> Result<Value, String> {
         }
         values.push(value);
     }
-    CellArray::new_with_shape(values, array.shape.clone())
+    cell_array_from_values(values, array.shape.clone())
         .map(Value::Cell)
         .map_err(|e| format!("struct: failed to copy struct array: {e}"))
 }
@@ -672,10 +675,16 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn struct_preserves_gpu_handles_with_registered_provider() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::structs::core::struct::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
         let host = HostTensorView {
             data: &[1.0, 2.0],
             shape: &[2, 1],

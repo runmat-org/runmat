@@ -9,6 +9,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -1078,7 +1080,9 @@ pub(crate) mod tests {
             // No WGPU device available on this host; skip.
             return;
         };
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::io::json::jsonencode::wgpu-provider-gather")
+                .expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,

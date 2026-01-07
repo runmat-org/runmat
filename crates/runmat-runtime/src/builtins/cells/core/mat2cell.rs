@@ -3,6 +3,8 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -982,9 +984,16 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn mat2cell_wgpu_matches_cpu_partitions() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::cells::core::mat2cell::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
 
         let tensor = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![4, 2]).unwrap();
         let cpu_result = mat2cell_builtin(
@@ -997,10 +1006,7 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .expect("wgpu provider")
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu_result = mat2cell_builtin(
             Value::GpuTensor(handle),
             vec![row_vector(&[1.0, 3.0]), row_vector(&[1.0, 1.0])],

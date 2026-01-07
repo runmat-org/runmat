@@ -13,6 +13,8 @@ use runmat_builtins::{Tensor, Value};
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -617,9 +619,9 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let Some(provider) = runmat_accelerate_api::provider() else {
-            panic!("wgpu provider not registered");
-        };
+        let provider =
+            accel_provider::maybe_provider("builtins::io::tabular::csvwrite::wgpu-provider-gather")
+                .expect("wgpu provider");
 
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();

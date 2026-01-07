@@ -7,6 +7,8 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -543,7 +545,8 @@ pub(crate) mod tests {
         {
             return;
         }
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_pause_builtin)
+            .expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.data,

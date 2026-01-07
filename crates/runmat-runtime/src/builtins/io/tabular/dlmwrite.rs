@@ -15,6 +15,8 @@ use std::ffi::CString;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -853,6 +855,10 @@ extern "C" {
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
+#[link(name = "legacy_stdio_definitions")]
+extern "C" {} // Ensure `_snprintf` and other legacy CRT helpers link on MSVC targets.
+
+#[cfg(all(windows, target_env = "msvc"))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: usize,
@@ -1474,7 +1480,9 @@ pub(crate) mod tests {
     fn dlmwrite_handles_wgpu_provider_gather() {
         let _ =
             wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::io::tabular::dlmwrite::wgpu-provider-gather")
+                .expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.data,

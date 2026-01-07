@@ -3,6 +3,8 @@
 use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -798,7 +800,8 @@ pub(crate) mod tests {
             data: &dims.data,
             shape: &dims.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_strings_builtin)
+            .expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
         let result = strings_builtin(vec![Value::GpuTensor(handle)]).expect("strings");
         match result {

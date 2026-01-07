@@ -8,6 +8,8 @@ const NAME: &str = "std";
 
 use runmat_macros::runtime_builtin;
 
+use crate::accel_provider;
+
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -311,8 +313,11 @@ fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
         Value::Tensor(t) => Some(t.dtype),
         Value::GpuTensor(handle) => {
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
-                runmat_accelerate_api::provider_for_handle(handle)
-                    .map(|provider| provider.precision())
+                accel_provider::maybe_provider_for_handle(
+                    __runmat_accel_context_std_builtin,
+                    handle,
+                )
+                .map(|provider| provider.precision())
             });
             precision.map(precision_to_dtype)
         }
@@ -855,7 +860,7 @@ fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, Str
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = accel_provider::maybe_provider(__runmat_accel_context_std_builtin) {
         if let Some(device_value) = std_gpu_reduce(provider, &handle, args) {
             return Ok(Value::GpuTensor(device_value));
         }
@@ -1044,7 +1049,7 @@ fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String
 }
 
 fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = accel_provider::maybe_provider(__runmat_accel_context_std_builtin) else {
         return Err("std: no acceleration provider available to honour GPU output".to_string());
     };
     let view = HostTensorView {
@@ -1380,7 +1385,9 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        let provider =
+            accel_provider::maybe_provider("builtins::math::reduction::std::wgpu_provider")
+                .expect("provider registered");
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 6.0], vec![2, 2]).unwrap();
         let args = ParsedArguments {
             axes: StdAxes::Dim(1),

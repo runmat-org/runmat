@@ -5,6 +5,8 @@
 //! objects. The builtin performs all updates on host data; GPU-resident values are
 //! gathered automatically before mutation. Updated tensors remain on the host.
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -1232,11 +1234,12 @@ fn is_struct_array(cell: &CellArray) -> bool {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
-        Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
+        Access, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
     };
     use runmat_gc::gc_allocate;
 
     use crate::builtins::common::test_support;
+    use crate::cell_array_from_values;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1299,10 +1302,10 @@ pub(crate) mod tests {
         let mut b = StructValue::new();
         b.fields
             .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-        let array = CellArray::new_with_shape(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2])
-            .unwrap();
+        let array =
+            cell_array_from_values(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2]).unwrap();
         let indices =
-            CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
+            cell_array_from_values(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
         let updated = setfield_builtin(
             Value::Cell(array),
             vec![
@@ -1333,7 +1336,7 @@ pub(crate) mod tests {
         inner1.fields.insert("value".to_string(), Value::Num(1.0));
         let mut inner2 = StructValue::new();
         inner2.fields.insert("value".to_string(), Value::Num(2.0));
-        let cell = CellArray::new_with_shape(
+        let cell = cell_array_from_values(
             vec![Value::Struct(inner1), Value::Struct(inner2)],
             vec![1, 2],
         )
@@ -1342,7 +1345,7 @@ pub(crate) mod tests {
         root.fields.insert("samples".to_string(), Value::Cell(cell));
 
         let index_cell =
-            CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
+            cell_array_from_values(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
         let updated = setfield_builtin(
             Value::Struct(root),
             vec![
@@ -1385,12 +1388,12 @@ pub(crate) mod tests {
         second
             .fields
             .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-        let array = CellArray::new_with_shape(
+        let array = cell_array_from_values(
             vec![Value::Struct(first), Value::Struct(second)],
             vec![1, 2],
         )
         .unwrap();
-        let index_cell = CellArray::new_with_shape(vec![Value::from("end")], vec![1, 1]).unwrap();
+        let index_cell = cell_array_from_values(vec![Value::from("end")], vec![1, 1]).unwrap();
         let updated = setfield_builtin(
             Value::Cell(array),
             vec![
@@ -1455,7 +1458,7 @@ pub(crate) mod tests {
     fn setfield_errors_when_indexing_missing_field() {
         let struct_value = StructValue::new();
         let index_cell =
-            CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
+            cell_array_from_values(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
         let err = setfield_builtin(
             Value::Struct(struct_value),
             vec![
@@ -1547,13 +1550,14 @@ pub(crate) mod tests {
         };
         use runmat_accelerate_api::HostTensorView;
 
-        if runmat_accelerate_api::provider().is_none()
-            && register_wgpu_provider(WgpuProviderOptions::default()).is_err()
-        {
-            runmat_accelerate::simple_provider::register_inprocess_provider();
-        }
-
-        let provider = runmat_accelerate_api::provider().expect("accel provider");
+        let provider = match register_wgpu_provider(WgpuProviderOptions::default()) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::structs::core::setfield::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
         let data = [1.0, 2.0, 3.0, 4.0];
         let shape = [2usize, 2usize];
         let view = HostTensorView {
@@ -1566,7 +1570,7 @@ pub(crate) mod tests {
         root.fields
             .insert("values".to_string(), Value::GpuTensor(handle));
 
-        let index_cell = CellArray::new_with_shape(
+        let index_cell = cell_array_from_values(
             vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
             vec![1, 2],
         )

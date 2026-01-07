@@ -5,6 +5,8 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::accel_provider;
+
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -643,7 +645,7 @@ fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, Str
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = accel_provider::maybe_provider(__runmat_accel_context_var_builtin) {
         if let Some(device_value) = var_gpu_reduce(provider, &handle, args) {
             return Ok(Value::GpuTensor(device_value));
         }
@@ -743,6 +745,8 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::accel_provider;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
@@ -985,10 +989,10 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let provider =
+            accel_provider::maybe_provider("builtins::math::reduction::var::wgpu_provider")
+                .expect("provider registered");
+        let handle = provider.upload(&view).unwrap();
         let gpu = var_gpu(
             handle,
             &ParsedArguments {

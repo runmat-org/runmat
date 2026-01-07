@@ -1,9 +1,13 @@
 //! MATLAB-compatible `argsort` builtin returning permutation indices.
 
+#[cfg(all(test, feature = "wgpu"))]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::sort;
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -439,10 +443,10 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let gpu_handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let provider =
+            accel_provider::maybe_provider("builtins::array::sorting_sets::argsort::wgpu_test")
+                .expect("provider registered");
+        let gpu_handle = provider.upload(&view).expect("upload");
         let gpu_indices = argsort_builtin(Value::GpuTensor(gpu_handle), Vec::new()).unwrap();
 
         let cpu_tensor = match cpu_indices {

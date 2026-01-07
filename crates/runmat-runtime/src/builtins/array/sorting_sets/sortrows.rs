@@ -9,6 +9,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -261,7 +262,9 @@ fn sortrows_gpu(handle: GpuTensorHandle, rest: &[Value]) -> Result<SortRowsEvalu
     let args = SortRowsArgs::parse(rest, cols)?;
 
     if args.missing_is_auto() {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) =
+            accel_provider::maybe_provider(__runmat_accel_context_sortrows_builtin)
+        {
             let provider_columns = args.to_provider_columns();
             let provider_comparison = args.provider_comparison();
             match provider.sort_rows(&handle, &provider_columns, provider_comparison) {
@@ -997,6 +1000,8 @@ impl SortRowsEvaluation {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::accel_provider;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, Value};
 
@@ -1259,7 +1264,9 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::array::sorting_sets::sortrows::wgpu_test")
+                .expect("provider registered");
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle.clone()), &[]).expect("gpu evaluate");
         let (gpu_sorted_val, gpu_indices_val) = gpu_eval.into_values();

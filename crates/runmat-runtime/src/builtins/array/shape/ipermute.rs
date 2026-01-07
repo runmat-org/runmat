@@ -5,6 +5,8 @@
 //! automatically computes the inverse order vector before delegating to the shared
 //! permutation helpers.
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::array::shape::permute::{
     parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,
     permute_logical_array, permute_string_array, permute_tensor, validate_rank,
@@ -446,7 +448,8 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_ipermute_builtin)
+            .expect("wgpu provider");
 
         let host = make_tensor(&(0..24).map(|n| n as f64).collect::<Vec<_>>(), &[2, 3, 4]);
         let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);

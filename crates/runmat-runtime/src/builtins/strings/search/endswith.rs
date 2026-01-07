@@ -3,6 +3,8 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -560,7 +562,9 @@ pub(crate) mod tests {
             // Skip when wgpu backend cannot initialise on this machine.
             return;
         }
-        let Some(provider) = runmat_accelerate_api::provider() else {
+        let Some(provider) =
+            accel_provider::maybe_provider(__runmat_accel_context_endswith_builtin)
+        else {
             return;
         };
         let data = [1.0];

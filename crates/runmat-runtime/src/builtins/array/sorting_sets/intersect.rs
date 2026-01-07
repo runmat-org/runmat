@@ -9,9 +9,13 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(all(test, feature = "wgpu"))]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -1712,7 +1716,9 @@ pub(crate) mod tests {
         let cpu_ia = tensor::value_into_tensor_for("intersect", cpu_eval.ia_value()).unwrap();
         let cpu_ib = tensor::value_into_tensor_for("intersect", cpu_eval.ib_value()).unwrap();
 
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::array::sorting_sets::intersect::wgpu_test")
+                .expect("provider registered");
         let view_a = HostTensorView {
             data: &a.data,
             shape: &a.shape,

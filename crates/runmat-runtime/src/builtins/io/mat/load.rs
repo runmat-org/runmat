@@ -15,6 +15,8 @@ use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT32,
     MI_INT8, MI_MATRIX, MI_UINT16, MI_UINT32, MI_UINT8,
 };
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -1146,7 +1148,8 @@ pub(crate) mod tests {
         {
             return;
         }
-        let Some(provider) = runmat_accelerate_api::provider() else {
+        let provider = accel_provider::maybe_provider("builtins::io::mat::load::wgpu-roundtrip");
+        let Some(provider) = provider else {
             return;
         };
 
