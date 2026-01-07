@@ -50,6 +50,7 @@ interface BlogPost {
     twitterCard?: string;
     twitterTitle?: string;
     twitterDescription?: string;
+    visibility?: string;
     jsonLd?: JsonLd;
   };
   content: string;
@@ -76,6 +77,7 @@ const FRONTMATTER_KEYS = new Set([
   'twitterCard',
   'twitterTitle',
   'twitterDescription',
+  'visibility',
   'jsonLd',
 ]);
 
@@ -152,6 +154,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const twitterTitle = raw.twitterTitle === undefined ? undefined : assertString(raw.twitterTitle, 'twitterTitle', slug);
   const twitterDescription =
     raw.twitterDescription === undefined ? undefined : assertString(raw.twitterDescription, 'twitterDescription', slug);
+  const visibility = raw.visibility === undefined ? undefined : assertString(raw.visibility, 'visibility', slug);
 
   const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
   const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
@@ -200,6 +203,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     twitterCard,
     twitterTitle,
     twitterDescription,
+    visibility,
     jsonLd,
   };
 }
