@@ -34,6 +34,7 @@ interface BlogPost {
     title: string;
     description: string;
     date: string;
+    slug?: string;
     author?: string;
     authors?: Array<{ name: string; url?: string } | string>;
     readTime: string;
@@ -52,6 +53,7 @@ const FRONTMATTER_KEYS = new Set([
   'title',
   'description',
   'date',
+  'slug',
   'author',
   'authors',
   'readTime',
@@ -121,6 +123,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const readTime = assertString(raw.readTime, 'readTime', slug);
   const excerpt = assertString(raw.excerpt, 'excerpt', slug);
   const tags = assertStringArray(raw.tags, 'tags', slug);
+  const fmSlug = raw.slug === undefined ? undefined : assertString(raw.slug, 'slug', slug);
 
   const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
   const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
@@ -154,6 +157,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     description,
     date,
     author,
+    slug: fmSlug,
     authors: authors as BlogPost['frontmatter']['authors'],
     readTime,
     tags,
