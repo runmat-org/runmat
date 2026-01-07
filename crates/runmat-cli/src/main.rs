@@ -1111,7 +1111,11 @@ fn process_repl_line(
                 println!(
                     "  ({}ms {})",
                     result.execution_time_ms,
-                    if result.used_jit { "JIT" } else { "interpreter" }
+                    if result.used_jit {
+                        "JIT"
+                    } else {
+                        "interpreter"
+                    }
                 );
             }
         }
