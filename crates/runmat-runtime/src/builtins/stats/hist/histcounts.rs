@@ -6,6 +6,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(feature = "wgpu")]
+use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1266,7 +1268,8 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_histcounts_builtin)
+            .expect("wgpu provider");
         let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,

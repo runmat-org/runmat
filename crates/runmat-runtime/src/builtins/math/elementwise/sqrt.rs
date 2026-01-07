@@ -9,6 +9,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(feature = "wgpu")]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -588,7 +590,7 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
+        let handle = accel_provider::maybe_provider(__runmat_accel_context_sqrt_builtin)
             .unwrap()
             .upload(&view)
             .expect("upload");
@@ -598,10 +600,14 @@ pub(crate) mod tests {
             Value::Tensor(ct) => {
                 assert_eq!(gathered.shape, ct.shape);
                 for (gpu, cpu) in gathered.data.iter().zip(ct.data.iter()) {
-                    let tol = match runmat_accelerate_api::provider().unwrap().precision() {
-                        runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                        runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-                    };
+                    let tol =
+                        match accel_provider::maybe_provider(__runmat_accel_context_sqrt_builtin)
+                            .unwrap()
+                            .precision()
+                        {
+                            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                        };
                     assert!((gpu - cpu).abs() < tol, "|{gpu} - {cpu}| >= {tol}");
                 }
             }

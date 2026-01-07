@@ -4,6 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(feature = "wgpu")]
+use crate::accel_provider;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -665,7 +667,8 @@ pub(crate) mod tests {
         let cpu_value =
             rem_host(Value::Tensor(numer.clone()), Value::Tensor(denom.clone())).expect("cpu rem");
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_rem_builtin)
+            .expect("wgpu provider registered");
         let numer_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &numer.data,

@@ -1,65 +1,30 @@
-# RunMat HIR vs VM map (grounded in code)
+# RunMat boundary migration summary
 
-1) Execution pipeline (code-backed)
-- Lexing into tokens: `crates/runmat-lexer/src/lib.rs:13`, `crates/runmat-lexer/src/lib.rs:206`
-- Parsing into AST nodes (Expr/Stmt/Program): `crates/runmat-parser/src/lib.rs:33`, `crates/runmat-parser/src/lib.rs:97`, `crates/runmat-parser/src/lib.rs:209`
-- HIR lowering with VarId and type inference: `crates/runmat-hir/src/lib.rs:11`, `crates/runmat-hir/src/lib.rs:20`, `crates/runmat-hir/src/lib.rs:47`, `crates/runmat-hir/src/lib.rs:152`, `crates/runmat-hir/src/lib.rs:356`, `crates/runmat-hir/src/lib.rs:2466`
-- HIR to bytecode compilation: `crates/runmat-ignition/src/bytecode.rs:8`, `crates/runmat-ignition/src/compiler.rs:1`
-- Bytecode execution in the interpreter: `crates/runmat-ignition/src/vm.rs:11377`
-- Bytecode to Cranelift IR (JIT): `crates/runmat-turbine/src/compiler.rs:207`
-- Hotness tracking for compilation decisions: `crates/runmat-turbine/src/profiler.rs:41`, `crates/runmat-turbine/src/profiler.rs:88`
+## Reason: boundary leakage in the pipeline
+- The interpreter/JIT stack currently crosses into the runtime for almost every primitive operation (`crates/runmat-ignition/src/vm.rs:181-2000`), so letting `runmat_accelerate_api::provider()` escape into builtins scattered across the tree makes telemetry, gatekeeping, and fallback behavior hard to keep consistent.
+- GPU slicing/indexing also invoked the acceleration API directly, which duplicated provider counter updates and warning emissions inside many builtin implementations (`crates/runmat-ignition/src/vm.rs:5921-6566`, `crates/runmat-runtime/src/accel_provider.rs`), exposing seams that leak into the interpreter boundary when the runtime falls back to host tensors.
+- These leaks defeat the notion of a living boundary; the helper must now shield every builtin and test from directly importing the provider so we keep the shared trace counter, warning strings, and error telemetry under one roof.
 
-2) HIR side (front-end / semantics)
-- `runmat-lexer`: token stream definition and scanning utilities live in `crates/runmat-lexer/src/lib.rs:13` and `crates/runmat-lexer/src/lib.rs:206`
-- `runmat-parser`: AST node definitions and parse entrypoints are in `crates/runmat-parser/src/lib.rs:33`, `crates/runmat-parser/src/lib.rs:97`, and `crates/runmat-parser/src/lib.rs:209`
-- `runmat-hir`: HIR nodes, VarId, lowering, scope resolution, and type inference live in `crates/runmat-hir/src/lib.rs:11`, `crates/runmat-hir/src/lib.rs:152`, and `crates/runmat-hir/src/lib.rs:2466`
+## Chosen approach
 
-3) VM side (execution)
-- `runmat-ignition`: bytecode model and instruction set (`Bytecode`, `Instr`) are in `crates/runmat-ignition/src/functions.rs:44` and `crates/runmat-ignition/src/instr.rs:4`; the compiler and interpreter live in `crates/runmat-ignition/src/compiler.rs:1` and `crates/runmat-ignition/src/vm.rs:11377`
-- `runmat-turbine`: bytecode to Cranelift lowering is in `crates/runmat-turbine/src/compiler.rs:207`
-- `runmat-gc` and `runmat-gc-api`: GC implementation and pointer handle type live in `crates/runmat-gc/src/lib.rs:1` and `crates/runmat-gc-api/src/lib.rs:7`
-- `runmat-snapshot`: snapshot structures and builder for cached HIR/bytecode are in `crates/runmat-snapshot/src/lib.rs:51`, `crates/runmat-snapshot/src/builder.rs:22`, and `crates/runmat-snapshot/src/builder.rs:658`
+### Code-level mission (individual fixes)
+- Keep the VM/runtime boundary healthy by having the interpreter always call `runmat_runtime::call_builtin`, which now routes GPU work through `accel_provider::maybe_provider` so the runtime trace counter and telemetry stay centralized (`crates/runmat-runtime/src/dispatcher.rs:23-70` and `crates/runmat-runtime/src/elementwise.rs:1-280`).
+- Guard the few GPU-only tests that still import `crate::accel_provider` with `#[cfg(feature = "wgpu")]` to avoid unused-import lints while keeping the helper accessible when wgpu is enabled (e.g., `crates/runmat-runtime/src/builtins/array/shape/ipermute.rs:8-14`).
+- Document the boundary crossings that still exist (workspace resolvers, interaction handlers, GC barriers) so reviewers see exactly which seams remain after this migration.
 
-4) Mixed / seam-heavy components
-- `runmat-core`: orchestration of parse → HIR → bytecode plus optional JIT and snapshots (`RunMatSession`) lives in `crates/runmat-core/src/lib.rs:29`, with parsing/lowering/compile calls in `crates/runmat-core/src/lib.rs:807`, `crates/runmat-core/src/lib.rs:814`, and `crates/runmat-core/src/lib.rs:827`
-- `runmat-builtins`: shared `Value` and builtin metadata types in `crates/runmat-builtins/src/lib.rs:62` and `crates/runmat-builtins/src/lib.rs:979`
-- `runmat-macros`: `runtime_builtin` procedural macro that registers builtins in `crates/runmat-macros/src/lib.rs:31`
-- `runmat-runtime`: builtin dispatcher and implementations in `crates/runmat-runtime/src/dispatcher.rs:92` and `crates/runmat-runtime/src/lib.rs:36`
-- `runmat-accelerate` and `runmat-accelerate-api`: acceleration graph and GPU handles in `crates/runmat-accelerate/src/graph.rs:11`, `crates/runmat-accelerate-api/src/lib.rs:1`, with runtime fallback in `crates/runmat-accelerate/src/lib.rs:503`
-- `runmat-plot` + runtime plotting builtins: plotting core is in `crates/runmat-plot/src/lib.rs:1` and runtime integration uses it in `crates/runmat-runtime/src/builtins/plotting/ops/plot.rs:3`
-- Tooling/hosts (CLI + kernel) live in `crates/runmat-cli/src/main.rs:1` and `crates/runmat-kernel/src/lib.rs:1`
+### Builtin mission (systematic macro work)
+- Extend `runmat_macros::runtime_builtin` so every generated catalog entry includes an `accel_provider` flag/guard setter; the macro can then import `runmat_runtime::accel_provider::{maybe_provider, maybe_provider_for_handle, provider_for_handle}` and emit the telemetry-friendly guard without touching the implementation body.
+- Rebuild the builtin inventory (`tools/builtin_inventory/`) once the macro is extended so the generated list of helpers reflects the new contracts instead of referencing raw `runmat_accelerate_api::provider()` calls scattered across `crates/runmat-runtime/src/builtins`.
+- Repeatedly rerun the conversion script (`tools/convert_accel_provider.py`) whenever a builtin or test still imports `runmat_accelerate_api::provider()` to keep the helper-based pattern in sync.
 
-5) Observed boundary crossings (actual code examples)
-- VM stores HIR directly: `runmat_ignition::UserFunction` keeps `HirStmt` and `VarId` in `crates/runmat-ignition/src/functions.rs:9` and `crates/runmat-ignition/src/functions.rs:44`
-- `_Status: resolved via FunctionResolver and Bytecode-backed resolver; user function metadata now lives in `UserFunction`, `RunMatSession` builds an `Arc<dyn FunctionResolver>`, and compiled bytecode carries a `function_bodies` map with a `BytecodeFunctionResolver` so the interpreter/JIT can fetch `HirStmt::Function` bodies on demand without keeping the vectors in the VM.`
-- HIR consults the builtin registry during type inference: `crates/runmat-hir/src/lib.rs:356`, `crates/runmat-hir/src/lib.rs:3042`
-- Bytecode encodes MATLAB-specific indexing (colon/end offsets) via dedicated opcodes in `crates/runmat-ignition/src/instr.rs:49`, `crates/runmat-ignition/src/instr.rs:53`, and `crates/runmat-ignition/src/instr.rs:63`, emitted by the compiler at `crates/runmat-ignition/src/compiler.rs:2395` and `crates/runmat-ignition/src/compiler.rs:2453`
-- RunMatSession hands bytecode to `TurbineEngine::execute_or_compile`, letting Turbine compile hot paths with Cranelift but fall back into `runmat_ignition::interpret_with_vars` when needed, so the interpreter and JIT tiers share execution state (`crates/runmat-core/src/lib.rs:1038-1074`, `crates/runmat-turbine/src/lib.rs:1029-1074`)
-- Turbine exports FFI helpers (`runmat_value_*`, `runmat_load/store_var`, `runmat_call_builtin`) that call into `runmat_gc::gc_allocate` and `runmat_runtime::call_builtin`, showing how JIT code crosses back into the runtime + GC boundary for arithmetic, builtin dispatch, and value management (`crates/runmat-turbine/src/lib.rs:45-446`)
-- The interpreter forwards most primitive ops through `call_builtin_auto`, which prepares args via `runmat_accelerate::prepare_builtin_args` and then calls `runmat_runtime::call_builtin` (`crates/runmat-ignition/src/vm.rs:181-194`, `crates/runmat-ignition/src/vm.rs:1521`, `crates/runmat-ignition/src/vm.rs:2000`, `crates/runmat-ignition/src/vm.rs:3233`, `crates/runmat-ignition/src/vm.rs:5090`, `crates/runmat-ignition/src/vm.rs:10106`), so VM bytecode execution frequently jumps back into the runtime for builtin semantics.
-- Mutable stores notify the GC via `runmat_gc::gc_record_write` whenever globals, locals, or cell entries change (`crates/runmat-ignition/src/vm.rs:9676-10058`), creating another boundary crossing between the interpreter and the garbage collector.
-- RunMatSession also binds into `runmat_runtime` for console/reset, plotting/warnings, interrupts, and stdin interaction handling, so host-driven I/O and cancellation cross from the runtime session into the runtime services (`crates/runmat-core/src/lib.rs:643-777`, `crates/runmat-core/src/lib.rs:855-867`).
-- RunMatSession installs its interaction handler through the new `replace_thread_local_handler` guard, so every execution/thread keeps its own handler while the global slot remains untouched, preventing concurrent async-stdin runs from clobbering each other even when tests execute in parallel (`crates/runmat-core/src/lib.rs:643-867`, `crates/runmat-runtime/src/interaction.rs:70-165`).
-- GPU slicing/indexing now invocations proceed via `runmat_accelerate_api::provider()` and the `runmat_runtime::accel_provider` helper to keep the boundary behaviorally consistent even if the VM falls back to host tensors (`crates/runmat-ignition/src/vm.rs:5921-5950`, `crates/runmat-ignition/src/vm.rs:6523-6566`, `crates/runmat-runtime/src/accel_provider.rs`).
-- `TurbineEngine::execute_compiled_with_functions` leaks a `RuntimeContext` via `Box::leak` so the JIT code can hold a `'static` pointer before invoking native code and then clears it afterward (`crates/runmat-turbine/src/lib.rs:961-1024`), demonstrating another JIT->interpreter boundary crossing when compiled functions call back into the VM for user-defined symbols.
-- Workspace resolver registration is now scoped with `WorkspaceResolverGuard`, which registers at interpreter entry and calls `runmat_runtime::workspace::unregister_workspace_resolver` on drop; runtime tests verify the guard (`crates/runmat-ignition/src/vm.rs:1118-1159`, `crates/runmat-runtime/src/workspace.rs:5-130`).
-- `ExecutionPlan` now drops its `PendingWorkspaceGuard` even if a pending run is canceled, so the `PENDING_WORKSPACE` TLS slot cannot leak state between aborted runs (`crates/runmat-core/src/lib.rs:326-347`).
-- Acceleration graph metadata now flows through `runmat_accelerate::graph::builtin_accel_info()`, so `runmat_ignition::GraphBuilder` no longer touches the runtime builtin registry while constructing nodes and values (`crates/runmat-ignition/src/accel_graph.rs:1-80`, `crates/runmat-accelerate/src/graph.rs:1-120`).
-- Runtime builtins now call `runmat_runtime::accel_provider` for every GPU upload/hook, ensuring the centralized trace counter, `No acceleration provider registered` warning, and error telemetry stay uniform before the helper dispatches to `runmat_accelerate_api` (`crates/runmat-runtime/src/accel_provider.rs`, `crates/runmat-runtime/src/elementwise.rs:1-280`, `crates/runmat-runtime/src/dispatcher.rs:23-70`).
+## Tools & documentation
+- PyComby is the structural search/replace tool referenced for these migrations; the updated README at `https://github.com/bardo84/pycomby` now presents a generic “way forward” (pattern matching → helper injection → verify workflow) that matches our macro-driven approach without naming RunMat specifics.
+- The living document content above is the PR-ready story: reason, code approach, builtin approach, tooling, and next steps, so reviewers can point to `docs/runmat_HIR_VM.md` and see why we did the migration and how.
 
-6) Recent updates (status note)
-- Nested closures no longer trigger indexing errors: `nested_handle(3)` now runs via the shared resolver, and `tests/functions/closure_resolver_script.m` (outer_helper expected result 17) covers script-function handles plus nested state.
-- `cargo run -p runmat --release -- --no-jit tests/functions/closure_resolver_script.m` passes cleanly after the latest resolver and GC work; keep rerunning it as further boundary fixes land.
-- Object/struct field writes now funnel through a GC-barrier helper so every property assignment invokes `runmat_gc::gc_record_write` before mutating `runmat_builtins::ObjectInstance` or `StructValue` fields, and `StoreIndexCell` records barriers before replacing each cell slot (`crates/runmat-ignition/src/vm.rs:122-188`, `crates/runmat-ignition/src/vm.rs:9989-10034`).
-- The Turbine runtime context is now managed by a `RuntimeContextGuard` so allocations in `runmat-turbine/src/lib.rs:520-619` drop immediately after each compiled invocation instead of leaking via `Box::leak`; the guard also clears the global pointer before deallocating.
-- Runtime-built cell constructors route `Value` inputs through `cell_array_from_values` so struct/cell helpers allocate `GcPtr<Value>` via `runmat_gc::gc_allocate` before calling `CellArray::new_handles_with_shape`, keeping the runtime→GC boundary explicit (`crates/runmat-runtime/src/lib.rs:62-83`).
-- `RunMatSession` zeroes console buffers, plotting hooks, warnings, and provider telemetry before each execution/resume while `_input_guard` and `_interrupt_guard` install interaction/interrupt handlers, so every run (including pending resumes) starts with a clean runtime I/O boundary (`crates/runmat-core/src/lib.rs:643-867`, `crates/runmat-core/src/lib.rs:848-1449`, `crates/runmat-runtime/src/console.rs`, `crates/runmat-runtime/src/plotting_hooks.rs`, `crates/runmat-runtime/src/warning_store.rs`, `crates/runmat-runtime/src/interaction.rs`, `crates/runmat-runtime/src/interrupt.rs`).
-- Async-stdin tests now share the runtime I/O boundary safely even with multiple threads because `RunMatSession` installs interaction handlers via `replace_thread_local_handler`, so each execution’s handler stays thread-local while the global hook stays untouched (`crates/runmat-core/src/lib.rs:643-867`, `crates/runmat-runtime/src/interaction.rs:70-165`). Verified via `cargo test -p runmat-core async_stdin -- --test-threads=2`.
-- Workspace tests no longer need `RUST_TEST_THREADS=1` because introspection/REPL suites install thread-local workspace resolvers through `replace_thread_local_workspace_resolver`, isolating each thread’s resolver state (`crates/runmat-runtime/src/workspace.rs:1-130`, `crates/runmat-runtime/src/builtins/introspection/which.rs:470-570`, `crates/runmat-runtime/src/builtins/io/repl_fs/exist.rs:500-580`). Verified via `cargo test -p runmat-runtime workspace`.
-- GPU provider access is centralized through `runmat_runtime::accel_provider`, so matrix slicing and indexing reroute through the helper, incrementing the shared boundary counter and surfacing the same “no acceleration provider registered” message regardless of the originating builtin (`crates/runmat-runtime/src/accel_provider.rs`, `crates/runmat-runtime/src/indexing.rs:1-140`, `crates/runmat-ignition/src/vm.rs:5921-6566`).
+## Validation
+- `cargo test -p runmat-runtime workspace` (ran with an extended timeout after the first invocation hit the 124 s limit) confirms that the helper changes compile and the workspace/introspection tests still pass.
 
-7) Macro extension plan
-- Extend `#[runtime_builtin]` in `crates/runmat-macros/src/lib.rs` to offer an `accel_provider` flag so generating wrappers can import `runmat_runtime::accel_provider::{maybe_provider, maybe_provider_for_handle, provider_for_handle}` and document the guard in the builtin metadata (category/summary keywords) without touching the implementation body.
-- Rerun the builtin inventory build (e.g., `tools/builtin_inventory/`) after touching the macro so the generated catalog reflects the new helper contracts and the living doc can point to helper-based coverage rather than per-builtins call sites.
-- Rebuild the builtins that touched `runmat_accelerate_api::provider(*)` directly using the extended macro (search `rg "provider("\\` under `crates/runmat-runtime/src/builtins*`), replace those calls with the helper, and keep the shared telemetry intact via the macro-generated guard.
-- Verify the boundary after the macro change with `cargo test -p runmat-runtime workspace` and run the async/stdin/test harnesses referenced above to ensure TLS handler isolation remains stable.
+## Next steps before closing the migration
+1. Extend the macro’s `accel_provider` metadata and rebuild the builtin inventory so new helpers automatically get the shared guard.
+2. Run the async/stdin and workspace test harnesses (`cargo test -p runmat-core async_stdin -- --test-threads=2`, `cargo test -p runmat-runtime workspace`) after each macro/builtin change to verify TLS handler isolation remains stable.
+3. Push the updated docs/code once the macro extension and builtin rebuild are complete, referencing this summary in the PR description so reviewers understand the boundary story.

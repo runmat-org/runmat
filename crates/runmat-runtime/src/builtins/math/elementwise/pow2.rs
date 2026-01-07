@@ -4,6 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(feature = "wgpu")]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -636,7 +638,8 @@ pub(crate) mod tests {
             other => panic!("expected tensor result from cpu path, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_pow2_builtin)
+            .expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
@@ -674,7 +677,8 @@ pub(crate) mod tests {
             other => panic!("expected tensor from cpu scale, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider = accel_provider::maybe_provider(__runmat_accel_context_pow2_builtin)
+            .expect("wgpu provider");
         let m_view = runmat_accelerate_api::HostTensorView {
             data: &mantissa.data,
             shape: &mantissa.shape,
