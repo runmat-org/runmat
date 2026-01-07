@@ -43,6 +43,7 @@ interface BlogPost {
     image?: string;
     imageAlt?: string;
     canonical?: string;
+    keywords?: string | string[];
     jsonLd?: JsonLd;
   };
   content: string;
@@ -58,6 +59,7 @@ const FRONTMATTER_KEYS = new Set([
   'authors',
   'readTime',
   'tags',
+  'keywords',
   'excerpt',
   'image',
   'imageAlt',
@@ -124,6 +126,12 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const excerpt = assertString(raw.excerpt, 'excerpt', slug);
   const tags = assertStringArray(raw.tags, 'tags', slug);
   const fmSlug = raw.slug === undefined ? undefined : assertString(raw.slug, 'slug', slug);
+  const keywords =
+    raw.keywords === undefined
+      ? undefined
+      : typeof raw.keywords === 'string'
+        ? raw.keywords
+        : assertStringArray(raw.keywords, 'keywords', slug);
 
   const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
   const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
@@ -165,6 +173,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     image,
     imageAlt,
     canonical,
+    keywords,
     jsonLd,
   };
 }
