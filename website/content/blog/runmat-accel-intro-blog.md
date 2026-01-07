@@ -2,7 +2,9 @@
 title: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 description: "RunMat Accelerate is an open-source MATLAB-style runtime that fuses your array math into fast CPU and GPU kernels, often beating MATLAB gpuArray, PyTorch, and Julia for dense numerical workloads."
 date: "2025-11-18"
-author: "Nabeel Allana"
+authors:
+  - name: "Nabeel Allana"
+    url: "https://x.com/nabeelallana"
 readTime: "8 min read"
 slug: "runmat-accelerate-fastest-runtime-for-your-math"
 tags: ["MATLAB", "Pytorch", "JIT", "Julia", "scientific computing", "numerical computing", "GPU Math", "open source"]
@@ -16,6 +18,90 @@ twitterCard: "summary_large_image"
 twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 twitterDescription: "See how RunMat Accelerate turns a real 4K image pipeline into fused GPU work and stacks up against MATLAB, PyTorch, and Julia as the fastest runtime for your math."
 canonical: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
+
+jsonLd:
+  "@context": "https://schema.org"
+  "@graph":
+    - "@type": "BreadcrumbList"
+      itemListElement:
+        - "@type": "ListItem"
+          position: 1
+          name: "RunMat"
+          item: "https://runmat.org"
+        - "@type": "ListItem"
+          position: 2
+          name: "Blog"
+          item: "https://runmat.org/blog"
+        - "@type": "ListItem"
+          position: 3
+          name: "Introducing RunMat Accelerate"
+          item: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
+
+    - "@type": "BlogPosting"
+      "@id": "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math#article"
+      headline: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
+      alternativeHeadline: "RunMat vs PyTorch vs Julia: GPU Benchmarks"
+      description: "RunMat Accelerate fuses MATLAB-style array math into fast CPU and GPU kernels, eliminating the need for CUDA or manual device management."
+      image: "https://web.runmatstatic.com/runmat-4k-image-performance.png"
+      datePublished: "2025-11-18"
+      dateModified: "2025-11-18"
+      author:
+        "@type": "Person"
+        name: "Nabeel Allana"
+        url: "https://x.com/nabeelallana"
+        sameAs: ["https://dystr.com/about"]
+      publisher:
+        "@type": "Organization"
+        name: "Dystr Inc."
+        logo:
+          "@type": "ImageObject"
+          url: "/runmat-logo.svg"
+          width: 600
+          height: 60
+      about:
+        - "@type": "SoftwareApplication"
+          name: "RunMat"
+          sameAs: "https://runmat.org"
+        - "@type": "SoftwareApplication"
+          name: "MATLAB"
+          sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+        - "@type": "SoftwareApplication"
+          name: "PyTorch"
+          sameAs: "https://en.wikipedia.org/wiki/PyTorch"
+        - "@type": "ComputerLanguage"
+          name: "Julia"
+          sameAs: "https://en.wikipedia.org/wiki/Julia_(programming_language)"
+        - "@type": "DefinedTerm"
+          name: "GPU Acceleration"
+          sameAs: "https://en.wikipedia.org/wiki/Hardware_acceleration"
+
+      mentions:
+        "@type": "DefinedTerm"
+        name: "RunMat Accelerate"
+        description: "An engine feature within RunMat that automatically fuses array operations into optimized kernels and routes them to CPU or GPU based on performance heuristics."
+
+    - "@type": "FAQPage"
+      mainEntity:
+        - "@type": "Question"
+          name: "What is RunMat?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "An open-source MATLAB-compatible runtime focused on fast, portable numerical computing. It keeps MATLAB-style syntax and accelerates code on GPU when available."
+        - "@type": "Question"
+          name: "Which operating systems and GPUs are supported by RunMat?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "macOS (Apple Silicon/AMD/NVIDIA), Windows, and Linux via native APIs (Metal, DirectX 12, Vulkan). If no GPU is present, it falls back to CPU."
+        - "@type": "Question"
+          name: "Do I need a MATLAB license to use RunMat?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "No. RunMat is a standalone, open-source runtime. It adheres to MATLAB core grammar but is not associated with MathWorks."
+        - "@type": "Question"
+          name: "Can I mix CPU and GPU code in one script?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. The RunMat planner chooses CPU JIT/BLAS or GPU per step automatically. You do not need to write separate code paths."
 ---
 
 ### Why a faster way to do math

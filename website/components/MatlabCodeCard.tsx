@@ -32,7 +32,10 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
           <span className="h-3.5 w-3.5 rounded-full bg-[#27c93f]" />
         </div>
       </div>
-      <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white language-example">
+      <pre
+        className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white language-example"
+        tabIndex={0}
+      >
         {highlighted ? (
           <code className="language-matlab" dangerouslySetInnerHTML={{ __html: highlighted }} />
         ) : (

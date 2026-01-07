@@ -19,7 +19,7 @@ interface Benchmark {
     title: string;
     description: string;
     date: string;
-    author: string;
+    authors?: Array<{ name: string; url?: string } | string>;
     readTime: string;
     tags: string[];
     excerpt: string;
@@ -29,6 +29,30 @@ interface Benchmark {
   };
   content: string;
   introParagraph: string;
+  authors: { name: string; url?: string }[];
+}
+
+function normalizeAuthors(frontmatter: Benchmark['frontmatter']): { name: string; url?: string }[] {
+  const out: { name: string; url?: string }[] = [];
+  if (Array.isArray(frontmatter.authors)) {
+    for (const entry of frontmatter.authors) {
+      if (!entry) continue;
+      if (typeof entry === 'string') {
+        out.push({ name: entry });
+      } else if (
+        typeof entry === 'object' &&
+        'name' in entry &&
+        typeof (entry as { name?: unknown }).name === 'string'
+      ) {
+        const url = (entry as { url?: unknown }).url;
+        out.push({ name: (entry as { name: string }).name, url: typeof url === 'string' ? url : undefined });
+      }
+    }
+  }
+  if (out.length === 0) {
+    out.push({ name: 'RunMat Team' });
+  }
+  return out;
 }
 
 function extractTitleFromMarkdown(content: string): string {
@@ -145,6 +169,7 @@ function getBenchmark(slug: string): Benchmark | null {
     // Get file modification date as fallback
     const stats = statSync(filePath);
     const defaultDate = stats.mtime.toISOString();
+    const authors = normalizeAuthors(frontmatter as Benchmark['frontmatter']);
     
     return {
       slug,
@@ -152,7 +177,7 @@ function getBenchmark(slug: string): Benchmark | null {
         title,
         description,
         date: frontmatter.date || defaultDate,
-        author: frontmatter.author || 'RunMat Team',
+        authors: (frontmatter as Benchmark['frontmatter']).authors,
         readTime: frontmatter.readTime || '5 min read',
         tags: frontmatter.tags || [],
         excerpt,
@@ -162,6 +187,7 @@ function getBenchmark(slug: string): Benchmark | null {
       },
       content: strippedContent,
       introParagraph: safeIntroParagraph,
+      authors,
     };
   } catch {
     return null;
@@ -173,6 +199,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const benchmark = getBenchmark(slug);
   if (!benchmark) return {};
 
+  const authorNames = benchmark.authors.map(a => a.name);
   const img = benchmark.frontmatter.image;
   let imageUrl: string | undefined = undefined;
   if (img && typeof img === 'string') {
@@ -195,7 +222,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       description: benchmark.frontmatter.description,
       type: 'article',
       publishedTime: benchmark.frontmatter.date,
-      authors: [benchmark.frontmatter.author],
+      authors: authorNames,
       images: imageUrl ? [imageUrl] : undefined,
     },
     twitter: {
@@ -238,7 +265,7 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
       descriptionPlacement="afterMeta"
       date={new Date(benchmark.frontmatter.date).toLocaleDateString()}
       readTime={benchmark.frontmatter.readTime}
-      author={benchmark.frontmatter.author}
+      authors={benchmark.authors}
       tags={benchmark.frontmatter.tags}
       rightAside={<HeadingsNav source={benchmark.content} />}
       backLink={{ href: '/benchmarks', text: 'Back to Benchmarks' }}

@@ -2,7 +2,9 @@
 title: "Introducing RunMat: A Fast, Free, Modern MATLAB Code Runtime"
 description: "A fast, open-source runtime for MATLAB code. Slim core written in Rust, V8-inspired execution, generational GC, and a package-first standard library."
 date: "2025-08-07"
-author: "Nabeel Allana"
+authors:
+  - name: "Nabeel Allana"
+    url: "https://x.com/nabeelallana"
 readTime: "7 min read"
 slug: "introducing-runmat"
 tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
@@ -17,6 +19,86 @@ twitterCard: "summary_large_image"
 twitterTitle: "RunMat: A modern, fast MATLAB code runtime built in Rust"
 twitterDescription: "Slim core, tiered execution, generational GC. Open-source, designed for performance and extensibility."
 canonical: "https://runmat.org/blog/introducing-runmat"
+jsonLd:
+  "@context": "https://schema.org"
+  "@graph":
+    - "@type": "BreadcrumbList"
+      itemListElement:
+        - "@type": "ListItem"
+          position: 1
+          name: "RunMat"
+          item: "https://runmat.org"
+        - "@type": "ListItem"
+          position: 2
+          name: "Blog"
+          item: "https://runmat.org/blog"
+        - "@type": "ListItem"
+          position: 3
+          name: "Introducing RunMat"
+          item: "https://runmat.org/blog/introducing-runmat"
+
+    - "@type": "BlogPosting"
+      "@id": "https://runmat.org/blog/introducing-runmat#article"
+      headline: "Introducing RunMat: A Fast, Free, Modern MATLAB Code Runtime"
+      alternativeHeadline: "RunMat vs GNU Octave: Performance Benchmarks"
+      description: "RunMat is a modern, open-source runtime that executes MATLAB code quickly using a Rust-based engine, tiered JIT execution, and automatic GPU acceleration."
+      image: "https://runmat.org/plot-example.jpg"
+      datePublished: "2025-08-07"
+      dateModified: "2025-08-07"
+      author:
+        "@type": "Person"
+        name: "Nabeel Allana"
+        url: "https://x.com/nabeelallana"
+      publisher:
+        "@type": "Organization"
+        name: "Dystr Inc."
+        logo:
+          "@type": "ImageObject"
+          url: "/runmat-logo.svg"
+          width: 600
+          height: 60
+      about:
+        - "@type": "SoftwareApplication"
+          name: "RunMat"
+          sameAs: "https://runmat.org"
+        - "@type": "SoftwareApplication"
+          name: "MATLAB"
+          sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+        - "@type": "SoftwareApplication"
+          name: "GNU Octave"
+          sameAs: "https://en.wikipedia.org/wiki/GNU_Octave"
+        - "@type": "ComputerLanguage"
+          name: "Rust"
+          sameAs: "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+
+    - "@type": "SoftwareApplication"
+      name: "RunMat"
+      operatingSystem: ["Linux", "macOS", "Windows"]
+      applicationCategory: "Scientific Computing"
+      license: "https://opensource.org/licenses/MIT"
+      featureList: "JIT Compilation, GPU Acceleration, MATLAB Compatibility"
+      offers:
+        "@type": "Offer"
+        price: "0"
+        priceCurrency: "USD"
+
+    - "@type": "FAQPage"
+      mainEntity:
+        - "@type": "Question"
+          name: "What is RunMat?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "RunMat is a modern, open-source runtime built in Rust that executes MATLAB code. It features a slim core, tiered execution (interpreter + JIT), and a package-first standard library."
+        - "@type": "Question"
+          name: "Is RunMat faster than GNU Octave?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. Benchmarks on an Apple M2 Max show RunMat is <b>150x–180x faster</b> than GNU Octave for startup time, matrix operations, and control flow loops."
+        - "@type": "Question"
+          name: "Does RunMat require a MATLAB license?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "No. RunMat is a standalone, free, and open-source project. It is not affiliated with MathWorks and does not use any proprietary MATLAB code."
 ---
 
 ## TL;DR

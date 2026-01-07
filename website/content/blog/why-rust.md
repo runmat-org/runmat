@@ -2,7 +2,11 @@
 title: "Choosing Rust for LLM-Generated Code"
 description: "Why the training distribution of programming languages matters for LLMs, and how Rust improves reliability in model-written code."
 date: "2025-09-12"
-author: "Nabeel Allana"
+authors:
+  - name: "Fin Watterson"
+    url: "https://www.linkedin.com/in/finbarrwatterson/"
+  - name: "Nabeel Allana"
+    url: "https://x.com/nabeelallana"
 readTime: "8 min read"
 slug: "rust-llm-training-distribution"
 tags: ["Rust", "LLM", "MATLAB", "RunMat", "Programming Languages"]
@@ -17,6 +21,61 @@ twitterCard: "summary_large_image"
 twitterTitle: "Rust + LLMs: Why Distribution Matters"
 twitterDescription: "Rust narrows the training distribution and provides strong compiler feedback, enabling more reliable model-written code."
 canonical: "https://runmat.org/blog/rust-llm-training-distribution"
+
+jsonLd:
+  "@context": "https://schema.org"
+  "@graph":
+    - "@type": "BreadcrumbList"
+      itemListElement:
+        - "@type": "ListItem"
+          position: 1
+          name: "RunMat"
+          item: "https://runmat.org"
+        - "@type": "ListItem"
+          position: 2
+          name: "Blog"
+          item: "https://runmat.org/blog"
+        - "@type": "ListItem"
+          position: 3
+          name: "Choosing Rust for LLM-Generated Code"
+          item: "https://runmat.org/blog/rust-llm-training-distribution"
+
+    - "@type": "BlogPosting"
+      "@id": "https://runmat.org/blog/rust-llm-training-distribution#article"
+      headline: "Choosing Rust for LLM-Generated Code"
+      alternativeHeadline: "Why Rust Improves LLM-Written Code"
+      description: "Why the training distribution of programming languages matters for LLMs, and how Rust improves reliability in model-written code."
+      image: "https://runmat.org/rust-blog-image.png"
+      datePublished: "2025-09-12"
+      dateModified: "2025-09-12"
+      author:
+        - "@type": "Person"
+          name: "Fin Watterson"
+          url: "https://www.linkedin.com/in/finbarrwatterson/"
+        - "@type": "Person"
+          name: "Nabeel Allana"
+          url: "https://x.com/nabeelallana"
+      publisher:
+        "@type": "Organization"
+        name: "Dystr Inc."
+        logo:
+          "@type": "ImageObject"
+          url: "/runmat-logo.svg"
+      about:
+        - "@type": "ComputerLanguage"
+          name: "Rust"
+          sameAs: "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+        - "@type": "ComputerLanguage"
+          name: "TypeScript"
+          sameAs: "https://en.wikipedia.org/wiki/TypeScript"
+        - "@type": "SoftwareApplication"
+          name: "RunMat"
+          sameAs: "https://runmat.org"
+
+      mentions:
+        "@type": "DefinedTerm"
+        name: "Training Distribution"
+        description: "In the context of Large Language Models, this refers to the consistency, quality, and variation of code examples (the corpus) present in the model's training data."
 ---
 
 ![Why Rust](/rust-blog-image.png)
