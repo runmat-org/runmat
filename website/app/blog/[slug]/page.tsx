@@ -44,6 +44,7 @@ interface BlogPost {
     imageAlt?: string;
     canonical?: string;
     keywords?: string | string[];
+    ogType?: string;
     jsonLd?: JsonLd;
   };
   content: string;
@@ -64,6 +65,7 @@ const FRONTMATTER_KEYS = new Set([
   'image',
   'imageAlt',
   'canonical',
+  'ogType',
   'jsonLd',
 ]);
 
@@ -132,6 +134,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
       : typeof raw.keywords === 'string'
         ? raw.keywords
         : assertStringArray(raw.keywords, 'keywords', slug);
+  const ogType = raw.ogType === undefined ? undefined : assertString(raw.ogType, 'ogType', slug);
 
   const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
   const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
@@ -174,6 +177,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     imageAlt,
     canonical,
     keywords,
+    ogType,
     jsonLd,
   };
 }
