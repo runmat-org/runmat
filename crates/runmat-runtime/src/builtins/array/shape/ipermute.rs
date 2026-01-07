@@ -5,7 +5,7 @@
 //! automatically computes the inverse order vector before delegating to the shared
 //! permutation helpers.
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::array::shape::permute::{
     parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,

@@ -3,6 +3,8 @@
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -446,7 +448,9 @@ pub(crate) mod tests {
             other => panic!("expected tensor output, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::array::shape::horzcat::wgpu_matches_cpu")
+                .expect("wgpu provider");
         let view_a = runmat_accelerate_api::HostTensorView {
             data: &a.data,
             shape: &a.shape,

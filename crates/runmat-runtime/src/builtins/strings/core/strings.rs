@@ -3,7 +3,7 @@
 use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::spec::{

@@ -9,7 +9,7 @@
 
 use std::cmp::Ordering;
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,

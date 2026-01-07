@@ -5,6 +5,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -637,15 +639,21 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn cell_wgpu_size_vector_and_like() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::cells::core::cell::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
         let tensor = Tensor::new(vec![2.0, 3.0, 1.0], vec![1, 3]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload size vector");
         let result = cell_builtin(vec![Value::GpuTensor(handle)]).expect("cell(wgpu size)");
         expect_cell(result, &[2, 3, 1]);

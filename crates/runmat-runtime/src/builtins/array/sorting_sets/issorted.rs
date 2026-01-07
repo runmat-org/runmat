@@ -2,9 +2,13 @@
 
 use std::cmp::Ordering;
 
+#[cfg(all(test, feature = "wgpu"))]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1485,10 +1489,10 @@ pub(crate) mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .expect("wgpu provider")
-            .upload(&view)
-            .expect("upload");
+        let provider =
+            accel_provider::maybe_provider("builtins::array::sorting_sets::issorted::wgpu_test")
+                .expect("provider registered");
+        let handle = provider.upload(&view).expect("upload");
         let gpu = issorted_builtin(Value::GpuTensor(handle), vec![]).expect("gpu issorted");
         assert_eq!(gpu, cpu);
     }

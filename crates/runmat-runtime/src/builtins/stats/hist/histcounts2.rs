@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{

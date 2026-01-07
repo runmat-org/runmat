@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{

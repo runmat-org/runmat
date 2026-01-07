@@ -13,7 +13,9 @@ use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use log::{debug, error, info, warn};
 use runmat_builtins::{Type, Value};
 use runmat_gc::gc_allocate;
-use runmat_ignition::{Bytecode, Instr};
+use runmat_ignition::{Bytecode, FunctionResolver, Instr};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use target_lexicon::Triple;
 use thiserror::Error;
@@ -517,15 +519,48 @@ static mut RUNTIME_CONTEXT: Option<&'static RuntimeContext> = None;
 
 pub struct RuntimeContext {
     pub function_definitions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
+    pub function_resolver: Arc<dyn FunctionResolver>,
 }
 
 impl RuntimeContext {
     pub fn new(
         functions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
+        function_resolver: Arc<dyn FunctionResolver>,
     ) -> Self {
         Self {
             function_definitions: functions,
+            function_resolver,
         }
+    }
+}
+
+struct RuntimeContextGuard(*mut RuntimeContext);
+
+impl RuntimeContextGuard {
+    fn new(context: RuntimeContext) -> Self {
+        RuntimeContextGuard(Box::into_raw(Box::new(context)))
+    }
+
+    fn as_static(&self) -> &'static RuntimeContext {
+        unsafe { &*self.0 }
+    }
+}
+
+impl Drop for RuntimeContextGuard {
+    fn drop(&mut self) {
+        unsafe {
+            clear_runtime_context();
+            drop(Box::from_raw(self.0));
+        }
+    }
+}
+
+#[derive(Debug)]
+struct EmptyFunctionResolver;
+
+impl FunctionResolver for EmptyFunctionResolver {
+    fn resolve_function(&self, _name: &str) -> Option<runmat_hir::HirStmt> {
+        None
     }
 }
 
@@ -620,7 +655,12 @@ pub extern "C" fn runmat_call_user_function(
         );
 
         // Execute function using Ignition interpreter with proper variable isolation
-        match execute_user_function_isolated(function_def, &args, &context.function_definitions) {
+        match execute_user_function_isolated(
+            function_def,
+            &args,
+            &context.function_definitions,
+            context.function_resolver.clone(),
+        ) {
             Ok(result) => {
                 // Write result to result_ptr
                 *(result_ptr as *mut f64) = match result {
@@ -645,30 +685,43 @@ fn execute_user_function_isolated(
     function_def: &runmat_ignition::UserFunction,
     args: &[Value],
     all_functions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
+    function_resolver: Arc<dyn FunctionResolver>,
 ) -> Result<Value> {
-    // Create complete variable remapping that includes all variables referenced in the function body
+    let function_stmt = function_resolver
+        .resolve_function(&function_def.name)
+        .ok_or_else(|| {
+            TurbineError::ExecutionError(format!(
+                "Resolver could not find body for '{}'",
+                function_def.name
+            ))
+        })?;
+    let function_body = if let runmat_hir::HirStmt::Function { body, .. } = function_stmt {
+        body.clone()
+    } else {
+        return Err(TurbineError::ExecutionError(format!(
+            "Resolver returned non-function definition for '{}'",
+            function_def.name
+        )));
+    };
+
     let var_map = runmat_hir::remapping::create_complete_function_var_map(
         &function_def.params,
         &function_def.outputs,
-        &function_def.body,
+        &function_body,
     );
     let local_var_count = var_map.len();
 
-    // Remap the function body to use local variable indices
-    let remapped_body = runmat_hir::remapping::remap_function_body(&function_def.body, &var_map);
+    let remapped_body = runmat_hir::remapping::remap_function_body(&function_body, &var_map);
 
-    // Create function variable space and bind parameters
     let func_vars_count = local_var_count.max(function_def.params.len());
     let mut func_vars = vec![Value::Num(0.0); func_vars_count];
 
-    // Bind parameters to function's local variables
     for (i, _param_id) in function_def.params.iter().enumerate() {
         if i < args.len() && i < func_vars.len() {
             func_vars[i] = args[i].clone();
         }
     }
 
-    // Execute the function using Ignition interpreter
     let mut func_var_types = function_def.var_types.clone();
     if func_var_types.len() < local_var_count {
         func_var_types.resize(local_var_count, Type::Unknown);
@@ -677,13 +730,14 @@ fn execute_user_function_isolated(
         body: remapped_body,
         var_types: func_var_types,
     };
-    let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
+    let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions, None)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = match runmat_ignition::interpret_with_vars(
+    let func_result_vars = match runmat_ignition::interpret_with_vars_with_resolver(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
+        Some(function_resolver.clone()),
     ) {
         Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
         Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => Err(TurbineError::ExecutionError(
@@ -953,7 +1007,7 @@ impl TurbineEngine {
 
     /// Execute compiled function
     pub fn execute_compiled(&mut self, hash: u64, vars: &mut [Value]) -> Result<i32> {
-        self.execute_compiled_with_functions(hash, vars, &std::collections::HashMap::new())
+        self.execute_compiled_with_functions_with_resolver(hash, vars, &HashMap::new(), None)
     }
 
     /// Execute compiled function with access to function definitions for user function calls
@@ -963,6 +1017,17 @@ impl TurbineEngine {
         vars: &mut [Value],
         functions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
     ) -> Result<i32> {
+        self.execute_compiled_with_functions_with_resolver(hash, vars, functions, None)
+    }
+
+    /// Execute compiled function with optional resolver to look up user function bodies
+    pub fn execute_compiled_with_functions_with_resolver(
+        &mut self,
+        hash: u64,
+        vars: &mut [Value],
+        functions: &HashMap<String, runmat_ignition::UserFunction>,
+        function_resolver: Option<Arc<dyn FunctionResolver>>,
+    ) -> Result<i32> {
         let func = self
             .cache
             .get(hash)
@@ -971,7 +1036,6 @@ impl TurbineEngine {
         debug!("Executing compiled function {hash}");
 
         // Convert Value array to f64 array for JIT function
-        // Ensure f64_vars has at least vars.len() elements to preserve all variables
         let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
         for value in vars.iter() {
             match value {
@@ -987,11 +1051,13 @@ impl TurbineEngine {
             }
         }
 
+        let resolver = function_resolver.unwrap_or_else(|| Arc::new(EmptyFunctionResolver));
+
         // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(functions.clone());
-        // Note: Using Box::leak to create a 'static reference - this is safe for our use case
-        // but in production we'd want a more sophisticated lifetime management
-        let static_context = Box::leak(Box::new(runtime_context));
+        let guard = RuntimeContextGuard::new(RuntimeContext::new(
+            functions.clone(),
+            Arc::clone(&resolver),
+        ));
 
         // Execute the JIT compiled function
         let result = unsafe {
@@ -999,19 +1065,14 @@ impl TurbineEngine {
                 return Err(TurbineError::InvalidFunctionPointer);
             }
 
-            // Set runtime context for JIT function calls
-            set_runtime_context(static_context);
+            set_runtime_context(guard.as_static());
 
-            // Cast function pointer to correct signature: fn(*mut f64, usize) -> i32
             let jit_fn: extern "C" fn(*mut f64, usize) -> i32 = std::mem::transmute(func.ptr);
 
-            let exec_result = jit_fn(f64_vars.as_mut_ptr(), f64_vars.len());
-
-            // Clear runtime context after execution
-            clear_runtime_context();
-
-            exec_result
+            jit_fn(f64_vars.as_mut_ptr(), f64_vars.len())
         };
+
+        drop(guard);
 
         // Convert results back to Value array
         for (i, &f64_val) in f64_vars.iter().enumerate() {
@@ -1031,6 +1092,16 @@ impl TurbineEngine {
         bytecode: &Bytecode,
         vars: &mut [Value],
     ) -> Result<(i32, bool)> {
+        self.execute_or_compile_with_resolver(bytecode, vars, None)
+    }
+
+    /// Execute or compile bytecode with optional resolver support for user functions
+    pub fn execute_or_compile_with_resolver(
+        &mut self,
+        bytecode: &Bytecode,
+        vars: &mut [Value],
+        function_resolver: Option<Arc<dyn FunctionResolver>>,
+    ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
         let _span = info_span!(
             "turbine.execute_or_compile",
@@ -1039,37 +1110,46 @@ impl TurbineEngine {
         )
         .entered();
 
-        // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
             return self
-                .execute_compiled_with_functions(hash, vars, &bytecode.functions)
+                .execute_compiled_with_functions_with_resolver(
+                    hash,
+                    vars,
+                    &bytecode.functions,
+                    function_resolver.clone(),
+                )
                 .map(|result| (result, true));
         }
 
-        // Check if we should compile this function
         if self.should_compile(hash) {
             match self.compile_bytecode(bytecode) {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
                     return self
-                        .execute_compiled_with_functions(hash, vars, &bytecode.functions)
+                        .execute_compiled_with_functions_with_resolver(
+                            hash,
+                            vars,
+                            &bytecode.functions,
+                            function_resolver.clone(),
+                        )
                         .map(|result| (result, true));
                 }
                 Err(e) => {
                     warn!("JIT compilation failed, falling back to interpreter: {e}");
-                    // Fall through to interpreter execution
                 }
             }
         }
 
-        // Record execution for profiling
         self.profiler.record_execution(hash);
 
-        // Fallback to the main Ignition interpreter which supports all features
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
-        // Use the main Ignition interpreter which has full feature support
-        match runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")) {
+        match runmat_ignition::interpret_with_vars_with_resolver(
+            bytecode,
+            vars,
+            Some("<main>"),
+            function_resolver.clone(),
+        ) {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
             Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => {
                 Err(TurbineError::ExecutionError(

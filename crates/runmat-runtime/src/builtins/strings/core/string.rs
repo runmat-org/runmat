@@ -5,7 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use crate::accel_provider;
 use crate::builtins::common::format::format_variadic;
 use crate::builtins::common::spec::{

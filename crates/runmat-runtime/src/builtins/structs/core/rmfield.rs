@@ -1,9 +1,12 @@
 //! MATLAB-compatible `rmfield` builtin that removes fields from structs and struct arrays.
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::cell_array_from_values;
 use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -371,7 +374,7 @@ fn remove_fields_from_struct_array(
         let revised = remove_fields_from_struct_owned(st.clone(), names)?;
         updated.push(Value::Struct(revised));
     }
-    CellArray::new_with_shape(updated, array.shape.clone())
+    cell_array_from_values(updated, array.shape.clone())
         .map_err(|e| format!("rmfield: failed to rebuild struct array: {e}"))
 }
 
@@ -470,7 +473,7 @@ pub(crate) mod tests {
             .insert("name".to_string(), Value::from("Grace"));
         second.fields.insert("score".to_string(), Value::Num(95.0));
 
-        let array = CellArray::new_with_shape(
+        let array = cell_array_from_values(
             vec![Value::Struct(first), Value::Struct(second)],
             vec![1, 2],
         )
@@ -500,7 +503,7 @@ pub(crate) mod tests {
         second.fields.insert("id".to_string(), Value::Num(2.0));
         second.fields.insert("extra".to_string(), Value::Num(3.0));
 
-        let array = CellArray::new_with_shape(
+        let array = cell_array_from_values(
             vec![Value::Struct(first), Value::Struct(second)],
             vec![1, 2],
         )
@@ -613,10 +616,16 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn rmfield_preserves_gpu_handles() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::structs::core::rmfield::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
         let view = HostTensorView {
             data: &[1.0, 2.0],
             shape: &[2, 1],

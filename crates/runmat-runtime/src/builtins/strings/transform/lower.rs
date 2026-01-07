@@ -3,6 +3,9 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -447,7 +450,9 @@ pub(crate) mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let provider =
+            accel_provider::maybe_provider("builtins::strings::transform::lower::wgpu_regression")
+                .expect("wgpu provider");
         let data = [1.0f64, 2.0];
         let shape = [2usize, 1usize];
         let handle = provider

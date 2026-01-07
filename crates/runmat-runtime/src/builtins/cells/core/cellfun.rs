@@ -5,6 +5,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+#[cfg(all(test, feature = "wgpu"))]
+use crate::accel_provider;
 use crate::builtins::common::shape::{dims_to_row_tensor, value_numel};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1167,10 +1169,16 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn cellfun_with_wgpu_provider_handles_gpu_cells() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) {
+            Ok(provider) => provider,
+            Err(_) => {
+                runmat_accelerate::simple_provider::register_inprocess_provider();
+                accel_provider::maybe_provider("builtins::cells::core::cellfun::wgpu-test")
+                    .expect("accel provider")
+            }
+        };
 
         let value = Tensor::new(vec![0.25], vec![1, 1]).unwrap();
         let view = HostTensorView {
