@@ -126,6 +126,11 @@ function assertStringArray(val: unknown, field: string, slug: string): string[] 
   return val as string[];
 }
 
+function serializeJsonLd(data: JsonLd | JsonLdObject): string {
+  // Escape the closing script sequence to keep the tag intact when injected
+  return JSON.stringify(data).replace(/<\//g, '<\\/');
+}
+
 function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPost['frontmatter'] {
   for (const key of Object.keys(raw)) {
     if (!FRONTMATTER_KEYS.has(key)) {
@@ -351,7 +356,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
   const jsonLdString = (() => {
     try {
       const data = post.frontmatter.jsonLd || fallbackJsonLd;
-      return JSON.stringify(data);
+      return serializeJsonLd(data);
     } catch {
       return undefined;
     }
