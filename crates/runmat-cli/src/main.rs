@@ -13,7 +13,7 @@ mod telemetry;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::RunMatSession;
+use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunMatSession};
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
@@ -22,7 +22,7 @@ use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 use telemetry::{
@@ -1001,6 +1001,21 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
+    let stdin_is_tty = atty::is(atty::Stream::Stdin);
+    if !stdin_is_tty {
+        let mut buffer = String::new();
+        io::stdin()
+            .read_to_string(&mut buffer)
+            .context("Failed to read piped input")?;
+        for raw_line in buffer.lines() {
+            if !process_repl_line(raw_line, &mut engine, config)? {
+                break;
+            }
+        }
+        finalize_repl_session(&engine, config, session_start);
+        return Ok(());
+    }
+
     loop {
         let readline = rl.readline("runmat> ");
         match readline {
@@ -1008,77 +1023,8 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                 let line = line.trim();
                 let _ = rl.add_history_entry(line);
 
-                if line == "exit" || line == "quit" {
+                if !process_repl_line(line, &mut engine, config)? {
                     break;
-                }
-                if line == "help" {
-                    show_repl_help();
-                    continue;
-                }
-                if line == ".info" {
-                    engine.show_system_info();
-                    continue;
-                }
-                if line == ".stats" {
-                    let stats = engine.stats();
-                    println!("Execution Statistics:");
-                    println!(
-                        "  Total: {}, JIT: {}, Interpreter: {}",
-                        stats.total_executions, stats.jit_compiled, stats.interpreter_fallback
-                    );
-                    println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
-                    continue;
-                }
-                if line == ".gc-info" {
-                    let gc_stats = engine.gc_stats();
-                    println!("Garbage Collector Statistics:");
-                    println!("{}", gc_stats.summary_report());
-                    continue;
-                }
-                if line == ".gc" {
-                    let gc_stats = engine.gc_stats();
-                    println!("{}", gc_stats.summary_report());
-                    continue;
-                }
-                if line == ".gc-collect" {
-                    match gc_collect_major() {
-                        Ok(collected) => println!("Collected {collected} objects"),
-                        Err(e) => println!("GC collection failed: {e}"),
-                    }
-                    continue;
-                }
-                if line == ".reset-stats" {
-                    engine.reset_stats();
-                    println!("Statistics reset");
-                    continue;
-                }
-                if line.is_empty() {
-                    continue;
-                }
-
-                // Execute the input using the enhanced engine
-                match engine.execute(line) {
-                    Ok(result) => {
-                        if let Some(error) = result.error {
-                            eprintln!("Error: {error}");
-                        } else if result.value.is_some()
-                            && config.runtime.verbose
-                            && result.execution_time_ms > 10
-                        {
-                            println!(
-                                "  ({}ms {})",
-                                result.execution_time_ms,
-                                if result.used_jit {
-                                    "JIT"
-                                } else {
-                                    "interpreter"
-                                }
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Execution error: {e}");
-                    }
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -1096,6 +1042,97 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         }
     }
 
+    finalize_repl_session(&engine, config, session_start);
+    Ok(())
+}
+
+fn process_repl_line(
+    line: &str,
+    engine: &mut RunMatSession,
+    config: &RunMatConfig,
+) -> Result<bool> {
+    if line == "exit" || line == "quit" {
+        return Ok(false);
+    }
+    if line == "help" {
+        show_repl_help();
+        return Ok(true);
+    }
+    if line == ".info" {
+        engine.show_system_info();
+        return Ok(true);
+    }
+    if line == ".stats" {
+        let stats = engine.stats();
+        println!("Execution Statistics:");
+        println!(
+            "  Total: {}, JIT: {}, Interpreter: {}",
+            stats.total_executions, stats.jit_compiled, stats.interpreter_fallback
+        );
+        println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
+        return Ok(true);
+    }
+    if line == ".gc-info" {
+        let gc_stats = engine.gc_stats();
+        println!("Garbage Collector Statistics:");
+        println!("{}", gc_stats.summary_report());
+        return Ok(true);
+    }
+    if line == ".gc" {
+        let gc_stats = engine.gc_stats();
+        println!("{}", gc_stats.summary_report());
+        return Ok(true);
+    }
+    if line == ".gc-collect" {
+        match gc_collect_major() {
+            Ok(collected) => println!("Collected {collected} objects"),
+            Err(e) => println!("GC collection failed: {e}"),
+        }
+        return Ok(true);
+    }
+    if line == ".reset-stats" {
+        engine.reset_stats();
+        println!("Statistics reset");
+        return Ok(true);
+    }
+    if line.is_empty() {
+        return Ok(true);
+    }
+
+    match engine.execute(line) {
+        Ok(result) => {
+            emit_execution_streams(&result.streams);
+            if let Some(error) = result.error {
+                eprintln!("Error: {error}");
+            } else if result.value.is_some()
+                && config.runtime.verbose
+                && result.execution_time_ms > 10
+            {
+                println!(
+                    "  ({}ms {})",
+                    result.execution_time_ms,
+                    if result.used_jit { "JIT" } else { "interpreter" }
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Execution error: {e}");
+        }
+    }
+
+    Ok(true)
+}
+
+fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
+    for entry in streams {
+        match entry.stream {
+            ExecutionStreamKind::Stdout => println!("{}", entry.text),
+            ExecutionStreamKind::Stderr => eprintln!("{}", entry.text),
+        }
+    }
+}
+
+fn finalize_repl_session(engine: &RunMatSession, config: &RunMatConfig, session_start: Instant) {
     let stats = engine.stats();
     let counters = RuntimeExecutionCounters {
         total_executions: stats.total_executions as u64,
@@ -1115,7 +1152,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     });
 
     info!("RunMat REPL exiting");
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

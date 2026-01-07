@@ -1,5 +1,8 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use once_cell::sync::Lazy;
@@ -613,8 +616,25 @@ struct ActiveContext {
 static PLAN_CACHE: Lazy<RwLock<HashMap<usize, Weak<FusionPlan>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
+}
+#[cfg(target_arch = "wasm32")]
+static ACTIVE_PLAN: Lazy<Mutex<Option<ActiveContext>>> = Lazy::new(|| Mutex::new(None));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
+    ACTIVE_PLAN.with(|ctx| {
+        let mut slot = ctx.borrow_mut();
+        f(&mut slot)
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
+    let mut slot = ACTIVE_PLAN.lock().expect("active plan mutex poisoned");
+    f(&mut slot)
 }
 
 fn fusion_debug_enabled() -> bool {
@@ -651,8 +671,7 @@ pub fn prepare_fusion_plan(
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
-    ACTIVE_PLAN.with(|ctx| {
-        let mut slot = ctx.borrow_mut();
+    with_active_context(|slot| {
         *slot = plan.map(|plan| ActiveContext {
             plan,
             active_group: None,
@@ -661,23 +680,22 @@ pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
 }
 
 pub fn deactivate_fusion_plan() {
-    ACTIVE_PLAN.with(|ctx| {
-        ctx.borrow_mut().take();
+    with_active_context(|slot| {
+        slot.take();
     });
 }
 
 pub fn set_current_pc(pc: usize) {
-    ACTIVE_PLAN.with(|ctx| {
-        if let Some(context) = ctx.borrow_mut().as_mut() {
+    with_active_context(|slot| {
+        if let Some(context) = slot.as_mut() {
             context.active_group = context.plan.group_for_pc(pc);
         }
     });
 }
 
 pub fn active_fusion() -> Option<ActiveFusion> {
-    ACTIVE_PLAN.with(|ctx| {
-        ctx.borrow()
-            .as_ref()
+    with_active_context(|slot| {
+        slot.as_ref()
             .and_then(|context| {
                 context
                     .active_group
@@ -693,8 +711,8 @@ pub fn active_fusion() -> Option<ActiveFusion> {
 }
 
 pub fn active_group_plan_clone() -> Option<FusionGroupPlan> {
-    ACTIVE_PLAN.with(|ctx| {
-        ctx.borrow().as_ref().and_then(|context| {
+    with_active_context(|slot| {
+        slot.as_ref().and_then(|context| {
             context
                 .active_group
                 .and_then(|idx| context.plan.groups.get(idx).cloned())

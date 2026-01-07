@@ -1,9 +1,9 @@
 use once_cell::sync::OnceCell;
 use runmat_builtins::Value;
+use runmat_thread_local::runmat_thread_local;
 use runmat_time::unix_timestamp_ms;
 use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
-use std::thread_local;
 
 /// Identifies the console stream that received the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub struct ConsoleEntry {
 
 type StreamForwarder = dyn Fn(&ConsoleEntry) + Send + Sync + 'static;
 
-thread_local! {
+runmat_thread_local! {
     static THREAD_BUFFER: RefCell<Vec<ConsoleEntry>> = const { RefCell::new(Vec::new()) };
 }
 

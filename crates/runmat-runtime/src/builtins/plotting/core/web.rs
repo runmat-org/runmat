@@ -7,10 +7,11 @@ pub(crate) mod wasm {
     use super::*;
     use log::debug;
     use runmat_plot::web::WebRenderer;
+    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
 
-    thread_local! {
+    runmat_thread_local! {
         static WEB_RENDERERS: RefCell<HashMap<u32, WebRenderer>> = RefCell::new(HashMap::new());
         static DEFAULT_RENDERER: RefCell<Option<WebRenderer>> = RefCell::new(None);
     }

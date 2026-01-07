@@ -24,7 +24,11 @@ use runmat_runtime::{
     call_builtin, gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
+use runmat_thread_local::runmat_thread_local;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::Instant;
+#[cfg(target_arch = "wasm32")]
+type Instant = ();
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -36,7 +40,7 @@ use std::sync::Once;
 use std::sync::OnceLock;
 use tracing::{debug, info_span};
 
-thread_local! {
+runmat_thread_local! {
     static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -60,6 +64,7 @@ impl Drop for FusionPlanGuard {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct InterpreterTiming {
     enabled: bool,
     host_span_start: Option<(Instant, usize)>,
@@ -68,6 +73,7 @@ struct InterpreterTiming {
     seq: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InterpreterTiming {
     fn new() -> Self {
         let enabled = std::env::var("RUNMAT_INTERPRETER_TIMING")
@@ -132,10 +138,30 @@ impl InterpreterTiming {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for InterpreterTiming {
     fn drop(&mut self) {
         self.flush_host_span("drop", None);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct InterpreterTiming;
+
+#[cfg(target_arch = "wasm32")]
+impl InterpreterTiming {
+    fn new() -> Self {
+        Self
+    }
+
+    fn note_host_instr(&mut self, _pc: usize) {}
+
+    fn flush_host_span(&mut self, _reason: &str, _detail: Option<&str>) {}
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for InterpreterTiming {
+    fn drop(&mut self) {}
 }
 
 #[derive(Clone, Copy)]
@@ -951,15 +977,15 @@ fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> Result<Vec<f6
     Ok(out)
 }
 
-thread_local! {
+runmat_thread_local! {
     static GLOBALS: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
 }
 
-thread_local! {
+runmat_thread_local! {
     static PERSISTENTS: RefCell<HashMap<(String, usize), Value>> = RefCell::new(HashMap::new());
 }
 
-thread_local! {
+runmat_thread_local! {
     static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
 }
 
@@ -972,7 +998,7 @@ struct WorkspaceState {
 
 type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
 
-thread_local! {
+runmat_thread_local! {
     static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
     static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
     static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
@@ -1152,7 +1178,7 @@ pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet
     LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
-thread_local! {
+runmat_thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
@@ -10749,10 +10775,12 @@ fn try_execute_fusion_group(
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
         // MATLAB dim is 1-based: dim=1 reduces rows (axis 0), dim=2 reduces cols (axis 1), 'all' reduces all elements.
         let mut axis = 0usize;
+        let mut axis_explicit = false;
         let mut reduce_all = matches!(plan.reduction_axes, Some(ReductionAxes::All));
         if let Some(ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
             if let Some(first) = dims.first().copied() {
                 axis = first.saturating_sub(1);
+                axis_explicit = true;
             }
         }
         // Debug: show input origins for reduction
@@ -10821,6 +10849,7 @@ fn try_execute_fusion_group(
                         Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
                         _ => axis,
                     };
+                    axis_explicit = true;
                 } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
                     if let Some(cv) = plan.constants.get(&input_idx) {
                         axis = match cv {
@@ -10828,6 +10857,7 @@ fn try_execute_fusion_group(
                             Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
                             _ => axis,
                         };
+                        axis_explicit = true;
                     }
                 }
             } else {
@@ -10838,6 +10868,7 @@ fn try_execute_fusion_group(
                         Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
                         _ => axis,
                     };
+                    axis_explicit = true;
                 }
             }
         }
@@ -11146,6 +11177,15 @@ fn try_execute_fusion_group(
                 }
                 (total, 1usize)
             } else {
+                if !axis_explicit {
+                    axis = if r == 1 && c > 1 {
+                        1
+                    } else if r > 1 {
+                        0
+                    } else {
+                        axis
+                    };
+                }
                 if fusion_debug_enabled() {
                     if r == 1 && c == 1 {
                         log::debug!(

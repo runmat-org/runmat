@@ -6146,6 +6146,7 @@ dependencies = [
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-thread-local",
  "runmat-time",
  "serde",
  "tracing",
@@ -6222,6 +6223,7 @@ dependencies = [
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-thread-local",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -6278,6 +6280,7 @@ dependencies = [
  "rfd",
  "runmat-builtins",
  "runmat-macros",
+ "runmat-thread-local",
  "runmat-time",
  "serde",
  "serde_json",
@@ -6330,6 +6333,7 @@ dependencies = [
  "runmat-gc-api",
  "runmat-macros",
  "runmat-plot",
+ "runmat-thread-local",
  "runmat-time",
  "rustfft",
  "serde",
@@ -6395,6 +6399,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-thread-local"
+version = "0.1.0"
+
+[[package]]
 name = "runmat-time"
 version = "0.2.8"
 dependencies = [
@@ -6444,6 +6452,7 @@ dependencies = [
  "runmat-logging",
  "runmat-plot",
  "runmat-runtime",
+ "runmat-thread-local",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

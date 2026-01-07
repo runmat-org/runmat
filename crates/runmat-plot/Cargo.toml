@@ -67,6 +67,7 @@ runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 thiserror = { workspace = true }
 runmat-time = { workspace = true }
+runmat-thread-local = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

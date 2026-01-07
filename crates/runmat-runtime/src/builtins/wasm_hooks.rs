@@ -1,8 +1,10 @@
 #[cfg(target_arch = "wasm32")]
+use runmat_thread_local::runmat_thread_local;
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 
 #[cfg(target_arch = "wasm32")]
-std::thread_local! {
+runmat_thread_local! {
     static REGISTRATIONS: RefCell<Vec<Box<dyn FnOnce()>>> = RefCell::new(Vec::new());
 }
 

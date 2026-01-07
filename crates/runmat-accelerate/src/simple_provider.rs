@@ -3724,38 +3724,41 @@ impl AccelProvider for InProcessProvider {
         let abuf = guard
             .get(&a.buffer_id)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out = if dim <= 1 {
-            // sum over rows -> 1 x cols
-            let mut v = vec![0.0f64; cols];
-            for c in 0..cols {
-                let mut s = 0.0;
-                for r in 0..rows {
-                    s += abuf[r + c * rows];
-                }
-                v[c] = s;
-            }
-            v
-        } else {
-            // sum over cols -> rows x 1
-            let mut v = vec![0.0f64; rows];
-            for r in 0..rows {
-                let mut s = 0.0;
+        let (out, shape) = match dim {
+            0 => {
+                // sum over rows -> 1 x cols
+                let mut v = vec![0.0f64; cols];
                 for c in 0..cols {
-                    s += abuf[r + c * rows];
+                    let mut s = 0.0;
+                    for r in 0..rows {
+                        s += abuf[r + c * rows];
+                    }
+                    v[c] = s;
                 }
-                v[r] = s;
+                (v, vec![1, cols])
             }
-            v
+            1 => {
+                // sum over cols -> rows x 1
+                let mut v = vec![0.0f64; rows];
+                for r in 0..rows {
+                    let mut s = 0.0;
+                    for c in 0..cols {
+                        s += abuf[r + c * rows];
+                    }
+                    v[r] = s;
+                }
+                (v, vec![rows, 1])
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "reduce_sum_dim: only dims 0 or 1 supported"
+                ))
+            }
         };
         drop(guard);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();
         guard2.insert(id, out);
-        let shape = if dim <= 1 {
-            vec![1, cols]
-        } else {
-            vec![rows, 1]
-        };
         Ok(GpuTensorHandle {
             shape,
             device_id: 0,

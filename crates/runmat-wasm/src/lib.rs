@@ -6,16 +6,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
 use js_sys::{Error as JsError, Reflect, Uint8Array};
 use log::warn;
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
 };
-use runmat_accelerate_api::ProviderPrecision;
-#[cfg(target_arch = "wasm32")]
-use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
+use runmat_accelerate_api::{AccelContextHandle, AccelContextKind, ProviderPrecision};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
@@ -26,14 +23,13 @@ use runmat_core::{
     WorkspaceSnapshot,
 };
 use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
+use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
 
 #[cfg(target_arch = "wasm32")]
@@ -137,44 +133,35 @@ struct InitOptions {
     language_compat: Option<String>,
 }
 
-#[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static FIGURE_EVENT_CALLBACK: RefCell<Option<js_sys::Function>> = RefCell::new(None);
 }
-#[cfg(target_arch = "wasm32")]
 static FIGURE_EVENT_OBSERVER: OnceLock<()> = OnceLock::new();
-#[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static JS_STDIN_HANDLER: RefCell<Option<js_sys::Function>> = RefCell::new(None);
 }
-#[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-#[cfg(target_arch = "wasm32")]
 static STDOUT_FORWARDER: OnceLock<
     Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static>,
 > = OnceLock::new();
 static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
-#[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static RUNTIME_LOG_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-#[cfg(target_arch = "wasm32")]
 static RUNTIME_LOG_FORWARDER: OnceLock<
     Arc<dyn Fn(&runmat_logging::RuntimeLogRecord) + Send + Sync + 'static>,
 > = OnceLock::new();
 static RUNTIME_LOG_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
-#[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static TRACE_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
-#[cfg(target_arch = "wasm32")]
 static TRACE_FORWARDER: OnceLock<
     Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
 > = OnceLock::new();

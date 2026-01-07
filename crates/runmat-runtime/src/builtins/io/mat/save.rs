@@ -908,12 +908,13 @@ pub(crate) mod tests {
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::StringArray;
+    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
-    thread_local! {
+    runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 

@@ -11,6 +11,8 @@
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind, WgpuContextHandle};
 #[cfg(target_arch = "wasm32")]
+use runmat_thread_local::runmat_thread_local;
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::fmt;
 
@@ -19,7 +21,7 @@ use std::fmt;
 static SHARED_WGPU_CONTEXT: OnceCell<WgpuContextHandle> = OnceCell::new();
 
 #[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static SHARED_WGPU_CONTEXT: RefCell<Option<WgpuContextHandle>> = RefCell::new(None);
 }
 

@@ -2,9 +2,10 @@ use lsp_types::{
     CompletionList, Diagnostic, DocumentSymbol, Location, Position, SemanticTokens,
     SymbolInformation, TextEdit, Url,
 };
+use runmat_thread_local::runmat_thread_local;
 use serde::Serialize;
 use serde_wasm_bindgen;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Once;
 use wasm_bindgen::prelude::*;
@@ -27,11 +28,11 @@ struct DocEntry {
     analysis: DocumentAnalysis,
 }
 
-thread_local! {
-    static COMPAT_MODE: std::cell::Cell<CompatMode> = std::cell::Cell::new(CompatMode::Matlab);
+runmat_thread_local! {
+    static COMPAT_MODE: Cell<CompatMode> = Cell::new(CompatMode::Matlab);
 }
 
-thread_local! {
+runmat_thread_local! {
     static DOCS: RefCell<DocStore> = RefCell::new(DocStore::default());
 }
 

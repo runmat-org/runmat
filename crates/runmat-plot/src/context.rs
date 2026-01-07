@@ -3,6 +3,8 @@ use once_cell::sync::OnceCell;
 #[cfg(target_arch = "wasm32")]
 use once_cell::unsync::OnceCell;
 #[cfg(target_arch = "wasm32")]
+use runmat_thread_local::runmat_thread_local;
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -22,7 +24,7 @@ pub struct SharedWgpuContext {
 static GLOBAL_CONTEXT: OnceCell<SharedWgpuContext> = OnceCell::new();
 
 #[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static GLOBAL_CONTEXT: RefCell<OnceCell<SharedWgpuContext>> = RefCell::new(OnceCell::new());
 }
 

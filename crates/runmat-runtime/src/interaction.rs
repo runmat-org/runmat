@@ -1,5 +1,6 @@
 use crate::console::{self, ConsoleStream};
 use once_cell::sync::OnceCell;
+use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::IsTerminal;
@@ -42,7 +43,7 @@ type InteractionHandler =
     dyn for<'a> Fn(InteractionPrompt<'a>) -> InteractionDecision + Send + Sync;
 
 static HANDLER: OnceCell<RwLock<Option<Arc<InteractionHandler>>>> = OnceCell::new();
-thread_local! {
+runmat_thread_local! {
     static LAST_PENDING: RefCell<Option<PendingInteraction>> = const { RefCell::new(None) };
     static QUEUED_RESPONSE: RefCell<Option<Result<InteractionResponse, String>>> =
         const { RefCell::new(None) };
