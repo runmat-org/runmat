@@ -45,6 +45,11 @@ interface BlogPost {
     canonical?: string;
     keywords?: string | string[];
     ogType?: string;
+    ogTitle?: string;
+    ogDescription?: string;
+    twitterCard?: string;
+    twitterTitle?: string;
+    twitterDescription?: string;
     jsonLd?: JsonLd;
   };
   content: string;
@@ -66,6 +71,11 @@ const FRONTMATTER_KEYS = new Set([
   'imageAlt',
   'canonical',
   'ogType',
+  'ogTitle',
+  'ogDescription',
+  'twitterCard',
+  'twitterTitle',
+  'twitterDescription',
   'jsonLd',
 ]);
 
@@ -135,6 +145,12 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
         ? raw.keywords
         : assertStringArray(raw.keywords, 'keywords', slug);
   const ogType = raw.ogType === undefined ? undefined : assertString(raw.ogType, 'ogType', slug);
+  const ogTitle = raw.ogTitle === undefined ? undefined : assertString(raw.ogTitle, 'ogTitle', slug);
+  const ogDescription = raw.ogDescription === undefined ? undefined : assertString(raw.ogDescription, 'ogDescription', slug);
+  const twitterCard = raw.twitterCard === undefined ? undefined : assertString(raw.twitterCard, 'twitterCard', slug);
+  const twitterTitle = raw.twitterTitle === undefined ? undefined : assertString(raw.twitterTitle, 'twitterTitle', slug);
+  const twitterDescription =
+    raw.twitterDescription === undefined ? undefined : assertString(raw.twitterDescription, 'twitterDescription', slug);
 
   const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
   const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
@@ -178,6 +194,11 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     canonical,
     keywords,
     ogType,
+    ogTitle,
+    ogDescription,
+    twitterCard,
+    twitterTitle,
+    twitterDescription,
     jsonLd,
   };
 }
