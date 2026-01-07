@@ -8,7 +8,7 @@
           "paths": ["/sandbox"]
         },
         {
-          "paths": ["/_pnext/:path*"]
+          "paths": ["/_p/:path*"]
         }
       ]
     }
