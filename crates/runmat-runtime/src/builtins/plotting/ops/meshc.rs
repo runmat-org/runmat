@@ -61,6 +61,7 @@ tested:
     summary = "Render a MATLAB-compatible mesh with contour overlay.",
     keywords = "meshc,plotting,mesh,contour",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::meshc"
 )]
 pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {

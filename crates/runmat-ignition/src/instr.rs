@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EmitLabel {
+    Ans,
+    Var(usize),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     LoadConst(f64),
     LoadComplex(f64, f64),
@@ -165,6 +171,13 @@ pub enum Instr {
     // New named variants to bind by source names across units
     DeclareGlobalNamed(Vec<usize>, Vec<String>),
     DeclarePersistentNamed(Vec<usize>, Vec<String>),
+    EmitStackTop {
+        label: EmitLabel,
+    },
+    EmitVar {
+        var_index: usize,
+        label: EmitLabel,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

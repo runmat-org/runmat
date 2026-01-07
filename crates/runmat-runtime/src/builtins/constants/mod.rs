@@ -2,54 +2,55 @@
 //! This replaces legacy registrations in `src/constants.rs`.
 
 use runmat_builtins::Value;
+use runmat_macros::register_constant;
 
 // Numeric constants
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "pi", value: Value::Num(std::f64::consts::PI) }
-}
+register_constant!(
+    "pi",
+    Value::Num(std::f64::consts::PI),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "e", value: Value::Num(std::f64::consts::E) }
-}
+register_constant!(
+    "e",
+    Value::Num(std::f64::consts::E),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "eps", value: Value::Num(f64::EPSILON) }
-}
+register_constant!(
+    "eps",
+    Value::Num(f64::EPSILON),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "sqrt2", value: Value::Num(std::f64::consts::SQRT_2) }
-}
+register_constant!(
+    "sqrt2",
+    Value::Num(std::f64::consts::SQRT_2),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "i", value: Value::Complex(0.0, 1.0) }
-}
+register_constant!("i", Value::Complex(0.0, 1.0), "crate::builtins::constants");
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "j", value: Value::Complex(0.0, 1.0) }
-}
+register_constant!("j", Value::Complex(0.0, 1.0), "crate::builtins::constants");
 
 // Infinity and NaN (both lowercase and MATLAB-style capitalised names)
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "inf", value: Value::Num(f64::INFINITY) }
-}
+register_constant!(
+    "inf",
+    Value::Num(f64::INFINITY),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "Inf", value: Value::Num(f64::INFINITY) }
-}
+register_constant!(
+    "Inf",
+    Value::Num(f64::INFINITY),
+    "crate::builtins::constants"
+);
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "nan", value: Value::Num(f64::NAN) }
-}
+register_constant!("nan", Value::Num(f64::NAN), "crate::builtins::constants");
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "NaN", value: Value::Num(f64::NAN) }
-}
+register_constant!("NaN", Value::Num(f64::NAN), "crate::builtins::constants");
 
 // Logical constants
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "true", value: Value::Bool(true) }
-}
+register_constant!("true", Value::Bool(true), "crate::builtins::constants");
 
-runmat_builtins::inventory::submit! {
-    runmat_builtins::Constant { name: "false", value: Value::Bool(false) }
-}
+register_constant!("false", Value::Bool(false), "crate::builtins::constants");

@@ -211,6 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Move or rename files and folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "movefile,rename,move file,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::movefile"
 )]
 fn movefile_builtin(args: Vec<Value>) -> Result<Value, String> {

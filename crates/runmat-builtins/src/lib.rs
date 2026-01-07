@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use indexmap::IndexMap;
+use std::sync::OnceLock;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_registry {
@@ -987,6 +988,7 @@ pub struct BuiltinFunction {
     pub implementation: fn(&[Value]) -> Result<Value, String>,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
+    pub suppress_auto_output: bool,
 }
 
 impl BuiltinFunction {
@@ -1002,6 +1004,7 @@ impl BuiltinFunction {
         implementation: fn(&[Value]) -> Result<Value, String>,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
+        suppress_auto_output: bool,
     ) -> Self {
         Self {
             name,
@@ -1014,6 +1017,7 @@ impl BuiltinFunction {
             implementation,
             accel_tags,
             is_sink,
+            suppress_auto_output,
         }
     }
 }
@@ -1048,6 +1052,40 @@ pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
 #[cfg(target_arch = "wasm32")]
 pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
     wasm_registry::builtin_functions()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static BUILTIN_LOOKUP: OnceLock<HashMap<String, &'static BuiltinFunction>> = OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn builtin_lookup_map() -> &'static HashMap<String, &'static BuiltinFunction> {
+    BUILTIN_LOOKUP.get_or_init(|| {
+        let mut map = HashMap::new();
+        for func in builtin_functions() {
+            map.insert(func.name.to_ascii_lowercase(), func);
+        }
+        map
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> {
+    builtin_lookup_map()
+        .get(&name.to_ascii_lowercase())
+        .copied()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> {
+    wasm_registry::builtin_functions()
+        .into_iter()
+        .find(|f| f.name.eq_ignore_ascii_case(name))
+}
+
+pub fn suppresses_auto_output(name: &str) -> bool {
+    builtin_function_by_name(name)
+        .map(|f| f.suppress_auto_output)
+        .unwrap_or(false)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1516,7 +1554,7 @@ pub struct ClassDef {
     pub methods: HashMap<String, MethodDef>,
 }
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
 static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();

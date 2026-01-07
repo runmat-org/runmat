@@ -654,11 +654,12 @@ pub(crate) mod tests {
     use crate::call_builtin;
     use once_cell::sync::OnceCell;
     use runmat_builtins::{CellArray, CharArray, StructValue as TestStruct, Tensor};
+    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
     use tempfile::tempdir;
 
-    thread_local! {
+    runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
         static TEST_GLOBALS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     }

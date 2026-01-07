@@ -107,6 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render MATLAB-compatible stairs plots.",
     keywords = "stairs,plotting,step",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::stairs"
 )]
 pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {

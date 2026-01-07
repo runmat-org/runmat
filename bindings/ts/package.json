@@ -1,7 +1,7 @@
 {
   "name": "runmat",
-  "version": "0.2.7",
-  "description": "Browser-ready WebAssembly bindings for the RunMat runtime",
+  "version": "0.2.8",
+  "description": "Blazing fast runtime for math. Run MATLAB code on CPU or GPU.",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE.md",
   "homepage": "https://runmat.org",
@@ -16,8 +16,17 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "dist/pkg/runmat_wasm.js",
+    "dist/pkg/runmat_wasm_bg.js",
+    "dist/pkg/runmat_wasm.d.ts",
+    "dist/pkg/runmat_wasm_bg.wasm",
+    "dist/pkg/runmat_wasm_bg.wasm.d.ts",
+    "dist/pkg-web/runmat_wasm_web.js",
+    "dist/pkg-web/runmat_wasm_web.d.ts",
+    "dist/pkg-web/runmat_wasm_web_bg.wasm",
+    "dist/pkg-web/runmat_wasm_web_bg.wasm.d.ts",
+    "dist/pkg-web/runmat_wasm_web_bg.js",
     "dist",
-    "pkg",
     "artifacts",
     "README.md"
   ],
@@ -27,10 +36,11 @@
     "build:wasm": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release",
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:types": "tsc -p tsconfig.json",
-    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:types",
+    "build": "npm run clean && npm run build:registry && npm run build:wasm && npm run build:wasm:web && npm run build:types && npm run sync:wasm",
     "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "sync:wasm": "node ./scripts/sync-wasm-artifacts.cjs",
     "prepublishOnly": "npm run build"
   },
   "exports": {
@@ -46,7 +56,8 @@
       "types": "./dist/fs/*.d.ts",
       "import": "./dist/fs/*.js"
     },
-    "./pkg/*": "./pkg/*"
+    "./pkg/*": "./dist/pkg/*",
+    "./pkg-web/*": "./dist/pkg-web/*"
   },
   "sideEffects": false,
   "engines": {

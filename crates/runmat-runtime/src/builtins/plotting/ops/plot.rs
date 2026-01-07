@@ -114,6 +114,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create MATLAB-compatible 2-D line plots.",
     keywords = "plot,line,2d,visualization",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::plot"
 )]
 pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {

@@ -1,10 +1,11 @@
+use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 
-thread_local! {
+runmat_thread_local! {
     static INTERRUPT_HANDLE: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 

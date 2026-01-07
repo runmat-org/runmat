@@ -1225,6 +1225,7 @@ mod tests {
             |_| Ok(runmat_builtins::Value::Num(0.0)),
             &[],
             false,
+            false,
         );
 
         let metadata = builder.analyze_builtin_function(&builtin).unwrap();

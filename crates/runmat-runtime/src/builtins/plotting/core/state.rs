@@ -1,5 +1,6 @@
 use once_cell::sync::OnceCell;
 use runmat_plot::plots::{Figure, LineStyle};
+use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt;
@@ -9,7 +10,6 @@ use std::sync::MutexGuard;
 #[cfg(test)]
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
-use std::thread_local;
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 use super::engine::render_figure;
@@ -190,7 +190,7 @@ impl Default for PlotRegistry {
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
 
 #[cfg(target_arch = "wasm32")]
-thread_local! {
+runmat_thread_local! {
     static REGISTRY: RefCell<PlotRegistry> = RefCell::new(PlotRegistry::default());
 }
 
@@ -319,7 +319,7 @@ impl FigureObserverRegistry {
 
 static FIGURE_OBSERVERS: OnceCell<FigureObserverRegistry> = OnceCell::new();
 
-thread_local! {
+runmat_thread_local! {
     static RECENT_FIGURES: RefCell<HashSet<FigureHandle>> = RefCell::new(HashSet::new());
     static ACTIVE_AXES_CONTEXT: RefCell<Option<ActiveAxesContext>> = const { RefCell::new(None) };
 }

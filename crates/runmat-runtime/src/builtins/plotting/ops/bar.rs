@@ -110,6 +110,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible bar chart.",
     keywords = "bar,barchart,plotting",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::bar"
 )]
 pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {

@@ -107,6 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible surface plot.",
     keywords = "surf,plotting,3d,surface",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::surf"
 )]
 pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {

@@ -1372,6 +1372,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sum_gpu_row_vector_auto_dim() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
+            let view = HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = sum_builtin(Value::GpuTensor(handle), Vec::new()).expect("sum");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.data, vec![10.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sum_gpu_all_reduction() {
         test_support::with_test_provider(|provider| {
             let tensor =

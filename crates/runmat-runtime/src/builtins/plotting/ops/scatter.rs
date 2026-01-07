@@ -123,6 +123,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create MATLAB-compatible 2-D scatter plots.",
     keywords = "scatter,plotting,2d,markers",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {

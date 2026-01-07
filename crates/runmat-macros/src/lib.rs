@@ -43,6 +43,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut accel_values: Vec<String> = Vec::new();
     let mut builtin_path_lit: Option<LitStr> = None;
     let mut sink_flag = false;
+    let mut suppress_auto_output_flag = false;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
             if path.is_ident("name") {
@@ -75,6 +76,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             } else if path.is_ident("sink") {
                 if let Lit::Bool(lb) = lit {
                     sink_flag = lb.value;
+                }
+            } else if path.is_ident("suppress_auto_output") {
+                if let Lit::Bool(lb) = lit {
+                    suppress_auto_output_flag = lb.value;
                 }
             } else if path.is_ident("builtin_path") {
                 if let Lit::Str(ls) = lit {
@@ -260,6 +265,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { &[#(#accel_tokens),*] }
     };
     let sink_bool = sink_flag;
+    let suppress_auto_output_bool = suppress_auto_output_flag;
 
     let builtin_expr = quote! {
         runmat_builtins::BuiltinFunction::new(
@@ -273,6 +279,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #wrapper_ident,
             #accel_slice,
             #sink_bool,
+            #suppress_auto_output_bool,
         )
     };
 

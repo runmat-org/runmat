@@ -497,6 +497,7 @@ pub(crate) mod tests {
     use super::*;
     use once_cell::sync::{Lazy, OnceCell};
     use runmat_builtins::{CharArray, StringArray, Value};
+    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;
@@ -507,7 +508,7 @@ pub(crate) mod tests {
 
     static WHICH_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    thread_local! {
+    runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 

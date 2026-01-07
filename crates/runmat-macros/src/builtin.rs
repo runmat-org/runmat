@@ -89,10 +89,15 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
             runmat_builtins::BuiltinFunction::new(
                 #name,
                 #description,
-                #category_variant,
+                stringify!(#category_variant),
+                "",
+                "",
                 #param_info,
                 #return_type_info,
-                #fn_name
+                #fn_name,
+                &[],
+                false,
+                false,
             )
         }
     };

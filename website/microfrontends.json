@@ -1,0 +1,13 @@
+{
+    "$schema": "https://openapi.vercel.sh/microfrontends.json",
+    "applications": {
+      "runmat": { },
+      "runmat-desktop": {
+        "routing": [
+          {
+            "paths": ["/sandbox"]
+          }
+        ]
+      }
+    }
+}

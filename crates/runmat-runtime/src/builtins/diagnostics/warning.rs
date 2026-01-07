@@ -201,6 +201,7 @@ where
     keywords = "warning,diagnostics,state,query,backtrace",
     accel = "metadata",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {

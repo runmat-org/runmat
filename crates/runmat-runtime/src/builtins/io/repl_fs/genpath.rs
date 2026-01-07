@@ -201,6 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Generate a MATLAB-style search path string for a folder tree.",
     keywords = "genpath,recursive path,search path,addpath",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 fn genpath_builtin(args: Vec<Value>) -> Result<Value, String> {

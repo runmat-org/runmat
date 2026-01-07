@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::console::{record_console_output, ConsoleStream};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -188,6 +189,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return the absolute path to the folder where RunMat is currently executing.",
     keywords = "pwd,current directory,working folder,present working directory",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
 fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
@@ -196,12 +198,17 @@ fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
     }
     let current = env::current_dir()
         .map_err(|err| format!("pwd: unable to determine current directory ({err})"))?;
+    emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
 
 fn path_to_value(path: &Path) -> Value {
     let text = path.to_string_lossy().into_owned();
     Value::CharArray(CharArray::new_row(&text))
+}
+
+fn emit_path_stdout(path: &Path) {
+    record_console_output(ConsoleStream::Stdout, path.to_string_lossy().into_owned());
 }
 
 #[cfg(test)]

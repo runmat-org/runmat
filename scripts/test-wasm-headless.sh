@@ -8,6 +8,7 @@ export CHROME_BIN="${CHROME_BIN:-${CHROME_WRAPPER}}"
 export CHROMEDRIVER_ARGS="${CHROMEDRIVER_ARGS:---log-level=SEVERE}"
 export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-120}"
 export RUNMAT_GENERATE_WASM_REGISTRY=1
+export RUSTFLAGS="${RUSTFLAGS:-} -Copt-level=1"
 
 echo "==> regenerating wasm registry"
 cargo check -p runmat-runtime --target wasm32-unknown-unknown >/dev/null
