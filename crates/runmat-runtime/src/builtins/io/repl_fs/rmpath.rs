@@ -190,6 +190,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Remove folders from the MATLAB search path used by RunMat.",
     keywords = "rmpath,search path,matlab path,remove folder",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 fn rmpath_builtin(args: Vec<Value>) -> Result<Value, String> {

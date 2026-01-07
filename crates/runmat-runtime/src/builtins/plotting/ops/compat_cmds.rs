@@ -24,6 +24,7 @@ fn accepts_arg(arg: Option<&Value>, allowed: &[&str]) -> bool {
     category = "plotting",
     summary = "Toggle grid lines on current axes.",
     keywords = "grid,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
@@ -38,6 +39,7 @@ pub fn grid_builtin(args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Toggle box outline on current axes.",
     keywords = "box,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
@@ -52,6 +54,7 @@ pub fn box_builtin(args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Adjust axis limits/aspect.",
     keywords = "axis,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
@@ -73,6 +76,7 @@ pub fn axis_builtin(args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Set shading mode for surface/mesh plots.",
     keywords = "shading,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> Result<String, String> {
@@ -87,6 +91,7 @@ pub fn shading_builtin(args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Set colormap.",
     keywords = "colormap,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn colormap_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -98,6 +103,7 @@ pub fn colormap_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Show or hide colorbar.",
     keywords = "colorbar,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn colorbar_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -109,6 +115,7 @@ pub fn colorbar_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Create/select figure.",
     keywords = "figure,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn figure_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -120,6 +127,7 @@ pub fn figure_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Select subplot layout/axes.",
     keywords = "subplot,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn subplot_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -131,6 +139,7 @@ pub fn subplot_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Clear current figure.",
     keywords = "clf,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn clf_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -142,6 +151,7 @@ pub fn clf_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Clear current axes.",
     keywords = "cla,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn cla_builtin(_args: Vec<Value>) -> Result<String, String> {
@@ -153,6 +163,7 @@ pub fn cla_builtin(_args: Vec<Value>) -> Result<String, String> {
     category = "plotting",
     summary = "Close figure.",
     keywords = "close,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::compat_cmds"
 )]
 pub fn close_builtin(_args: Vec<Value>) -> Result<String, String> {

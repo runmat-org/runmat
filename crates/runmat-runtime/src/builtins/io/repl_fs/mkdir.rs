@@ -213,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "mkdir,create directory,folder,filesystem,status,message,messageid",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
 fn mkdir_builtin(args: Vec<Value>) -> Result<Value, String> {

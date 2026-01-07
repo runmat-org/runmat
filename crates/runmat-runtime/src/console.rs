@@ -1,4 +1,5 @@
 use once_cell::sync::OnceCell;
+use runmat_builtins::Value;
 use runmat_time::unix_timestamp_ms;
 use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
@@ -68,4 +69,19 @@ pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {
     if let Ok(mut guard) = lock.write() {
         *guard = forwarder;
     }
+}
+
+/// Convenience helper to record formatted value output (matching MATLAB's `name = value` layout).
+pub fn record_value_output(label: Option<&str>, value: &Value) {
+    let value_text = value.to_string();
+    let text = if let Some(name) = label {
+        if value_text.contains('\n') {
+            format!("{name} =\n{value_text}")
+        } else {
+            format!("{name} = {value_text}")
+        }
+    } else {
+        value_text
+    };
+    record_console_output(ConsoleStream::Stdout, text);
 }

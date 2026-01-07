@@ -35,6 +35,7 @@ fn to_positive_index(value: f64, name: &str) -> Result<usize, String> {
     category = "plotting",
     summary = "Select a subplot grid location.",
     keywords = "subplot,axes,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::subplot"
 )]
 pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> Result<String, String> {

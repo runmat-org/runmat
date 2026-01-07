@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::console::{record_console_output, ConsoleStream};
 use crate::gather_if_needed;
 
 #[cfg_attr(
@@ -201,6 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "List files and folders in the current directory or matching a wildcard pattern.",
     keywords = "ls,list files,folder contents,wildcard listing,dir",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
 fn ls_builtin(args: Vec<Value>) -> Result<Value, String> {
@@ -215,6 +217,7 @@ fn ls_builtin(args: Vec<Value>) -> Result<Value, String> {
         list_current_directory()?
     };
 
+    emit_listing_stdout(&entries);
     rows_to_char_array(&entries)
 }
 
@@ -347,6 +350,14 @@ fn rows_to_char_array(rows: &[String]) -> Result<Value, String> {
 
     let array = CharArray::new(data, rows.len(), width).map_err(|e| format!("ls: {e}"))?;
     Ok(Value::CharArray(array))
+}
+
+fn emit_listing_stdout(rows: &[String]) {
+    if rows.is_empty() {
+        return;
+    }
+    let text = rows.join("\n");
+    record_console_output(ConsoleStream::Stdout, text);
 }
 
 fn patterns_from_value(value: &Value) -> Result<Vec<String>, String> {

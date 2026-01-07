@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::console::{record_console_output, ConsoleStream};
 use crate::gather_if_needed;
 
 #[cfg_attr(
@@ -179,6 +180,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Change the current working folder or query the folder that RunMat is executing in.",
     keywords = "cd,change directory,current folder,working directory,pwd",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::cd"
 )]
 fn cd_builtin(args: Vec<Value>) -> Result<Value, String> {
@@ -193,6 +195,7 @@ fn cd_builtin(args: Vec<Value>) -> Result<Value, String> {
 fn current_directory_value() -> Result<Value, String> {
     let current = env::current_dir()
         .map_err(|err| format!("cd: unable to determine current directory ({err})"))?;
+    emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
 
@@ -204,6 +207,10 @@ fn change_directory(value: &Value) -> Result<Value, String> {
 
     env::set_current_dir(&target)
         .map_err(|err| format!("cd: unable to change directory to '{target_raw}' ({err})"))?;
+
+    let new_path = env::current_dir()
+        .map_err(|err| format!("cd: unable to determine current directory ({err})"))?;
+    emit_path_stdout(&new_path);
 
     Ok(path_to_value(&previous))
 }
@@ -302,6 +309,10 @@ fn path_to_string(path: &Path) -> String {
 
 fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
+}
+
+fn emit_path_stdout(path: &Path) {
+    record_console_output(ConsoleStream::Stdout, path_to_string(path));
 }
 
 #[cfg(test)]

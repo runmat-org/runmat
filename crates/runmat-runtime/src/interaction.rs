@@ -1,3 +1,4 @@
+use crate::console::{self, ConsoleStream};
 use once_cell::sync::OnceCell;
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
@@ -121,6 +122,7 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
                 }
             },
             InteractionDecision::Pending => {
+                console::record_console_output(ConsoleStream::Stdout, prompt);
                 LAST_PENDING.with(|slot| {
                     *slot.borrow_mut() = Some(PendingInteraction {
                         prompt: prompt.to_string(),
@@ -156,6 +158,7 @@ pub fn wait_for_key(prompt: &str) -> Result<(), String> {
                 InteractionResponse::KeyPress => Ok(()),
             },
             InteractionDecision::Pending => {
+                console::record_console_output(ConsoleStream::Stdout, prompt);
                 LAST_PENDING.with(|slot| {
                     *slot.borrow_mut() = Some(PendingInteraction {
                         prompt: prompt.to_string(),

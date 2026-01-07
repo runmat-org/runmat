@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::console::{record_console_output, ConsoleStream};
 use crate::{gather_if_needed, make_cell};
 
 #[cfg_attr(
@@ -218,6 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Return file and folder information in a MATLAB-compatible struct array.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
 fn dir_builtin(args: Vec<Value>) -> Result<Value, String> {
@@ -228,6 +230,7 @@ fn dir_builtin(args: Vec<Value>) -> Result<Value, String> {
         2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
         _ => return Err("dir: too many input arguments".to_string()),
     };
+    emit_dir_stdout(&records);
     records_to_value(records)
 }
 
@@ -455,6 +458,26 @@ fn records_to_value(records: Vec<DirRecord>) -> Result<Value, String> {
         values.push(Value::Struct(st));
     }
     make_cell(values, rows, 1)
+}
+
+fn emit_dir_stdout(records: &[DirRecord]) {
+    if records.is_empty() {
+        return;
+    }
+    let mut lines = Vec::with_capacity(records.len());
+    for record in records {
+        let size_field = if record.is_dir {
+            "<DIR>".to_string()
+        } else {
+            format!("{:>10}", record.bytes as i64)
+        };
+        let mut name = record.name.clone();
+        if record.is_dir && !name.ends_with(std::path::MAIN_SEPARATOR) {
+            name.push(std::path::MAIN_SEPARATOR);
+        }
+        lines.push(format!("{:<20} {:>10} {}", record.date, size_field, name));
+    }
+    record_console_output(ConsoleStream::Stdout, lines.join("\n"));
 }
 
 fn scalar_text(value: &Value, error: &str) -> Result<String, String> {

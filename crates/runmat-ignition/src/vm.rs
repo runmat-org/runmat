@@ -1,6 +1,6 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
-use crate::instr::Instr;
+use crate::instr::{EmitLabel, Instr};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
@@ -1246,6 +1246,19 @@ fn is_pending_interaction(err: &str) -> bool {
     err == runmat_runtime::interaction::PENDING_INTERACTION_ERR
 }
 
+fn resolve_emit_label_text(
+    label: &EmitLabel,
+    var_names: &HashMap<usize, String>,
+) -> Option<String> {
+    match label {
+        EmitLabel::Ans => Some("ans".to_string()),
+        EmitLabel::Var(idx) => var_names
+            .get(idx)
+            .cloned()
+            .or_else(|| Some(format!("var{idx}"))),
+    }
+}
+
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
     match (&a, &b) {
@@ -1466,6 +1479,18 @@ fn run_interpreter(
             );
         }
         match bytecode.instructions[pc].clone() {
+            Instr::EmitStackTop { label } => {
+                if let Some(value) = stack.last() {
+                    let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
+                    runmat_runtime::console::record_value_output(label_text.as_deref(), value);
+                }
+            }
+            Instr::EmitVar { var_index, label } => {
+                if let Some(value) = vars.get(var_index) {
+                    let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
+                    runmat_runtime::console::record_value_output(label_text.as_deref(), value);
+                }
+            }
             Instr::AndAnd(target) => {
                 let lhs: f64 = (&stack
                     .pop()

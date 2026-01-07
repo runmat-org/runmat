@@ -56,6 +56,7 @@ fn parse_string_handle(text: &str) -> Result<Option<FigureHandle>, String> {
     category = "plotting",
     summary = "Create or select a plotting figure.",
     keywords = "figure,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::figure"
 )]
 pub fn figure_builtin(rest: Vec<Value>) -> Result<f64, String> {

@@ -234,6 +234,7 @@ enum Align {
     keywords = "disp,display,print,gpu",
     sink = true,
     accel = "sink",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::disp"
 )]
 fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {

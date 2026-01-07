@@ -1061,19 +1061,19 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                     Ok(result) => {
                         if let Some(error) = result.error {
                             eprintln!("Error: {error}");
-                        } else if let Some(value) = result.value {
-                            println!("ans = {value}");
-                            if config.runtime.verbose && result.execution_time_ms > 10 {
-                                println!(
-                                    "  ({}ms {})",
-                                    result.execution_time_ms,
-                                    if result.used_jit {
-                                        "JIT"
-                                    } else {
-                                        "interpreter"
-                                    }
-                                );
-                            }
+                        } else if result.value.is_some()
+                            && config.runtime.verbose
+                            && result.execution_time_ms > 10
+                        {
+                            println!(
+                                "  ({}ms {})",
+                                result.execution_time_ms,
+                                if result.used_jit {
+                                    "JIT"
+                                } else {
+                                    "interpreter"
+                                }
+                            );
                         }
                     }
                     Err(e) => {

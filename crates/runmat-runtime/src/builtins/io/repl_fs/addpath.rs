@@ -220,6 +220,7 @@ struct AddPathSpec {
     summary = "Add folders to the MATLAB search path used by RunMat.",
     keywords = "addpath,search path,matlab path,-begin,-end,-frozen",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 fn addpath_builtin(args: Vec<Value>) -> Result<Value, String> {

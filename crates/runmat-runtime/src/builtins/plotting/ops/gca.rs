@@ -11,6 +11,7 @@ use super::style::value_as_string;
     category = "plotting",
     summary = "Return the handle for the current axes.",
     keywords = "gca,axes,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> Result<Value, String> {

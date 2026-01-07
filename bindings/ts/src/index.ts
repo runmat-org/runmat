@@ -543,10 +543,21 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     await native.registerPlotCanvas(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
+  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
   const requestedGpu = options.enableGpu ?? true;
-  const effectiveEnableGpu = requestedGpu && supportsWebGpu;
-  if (requestedGpu && !supportsWebGpu) {
-    console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+  let effectiveEnableGpu: boolean;
+  if (hasExplicitEnableFlag) {
+    effectiveEnableGpu = requestedGpu;
+    if (requestedGpu && !supportsWebGpu) {
+      console.warn(
+        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
+      );
+    }
+  } else {
+    effectiveEnableGpu = requestedGpu && supportsWebGpu;
+    if (requestedGpu && !supportsWebGpu) {
+      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+    }
   }
   const session = await native.initRunMat({
     snapshotBytes: snapshotResolution.bytes,
