@@ -60,7 +60,7 @@ jsonLd:
         name: "Dystr Inc."
         logo:
           "@type": "ImageObject"
-          url: "https://runmat.org/logo.png"
+          url: "/runmat-logo.svg"
       about:
         - "@type": "ComputerLanguage"
           name: "Rust"

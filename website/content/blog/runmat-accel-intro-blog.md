@@ -55,7 +55,7 @@ jsonLd:
         name: "Dystr Inc."
         logo:
           "@type": "ImageObject"
-          url: "https://runmat.org/logo.png"
+          url: "/runmat-logo.svg"
           width: 600
           height: 60
       about:
