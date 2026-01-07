@@ -328,7 +328,6 @@ jobs:
 
   wasm-bindings:
     name: wasm + bindings
-    needs: build-and-test
     runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
@@ -339,7 +338,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
           cache: npm
 
       - name: Install Rust toolchain
@@ -359,11 +359,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config libssl-dev build-essential \
-            libgtk-3-0 libnss3 libasound2 libx11-xcb1 libxcomposite1 \
+            libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 \
             libxi6 libxdamage1 libxrandr2 libgdk-pixbuf2.0-0 libdrm2 libgbm1 \
             libpango-1.0-0 libcairo2 libatspi2.0-0 libxss1 libxfixes3 \
             libxkbcommon0 libwayland-client0 libwayland-cursor0 libwayland-egl1 \
             libxshmfence1 fonts-liberation libu2f-udev
+          sudo apt-get install -y libasound2 || sudo apt-get install -y libasound2t64
 
       - name: Setup Chrome
         id: chrome
@@ -373,7 +374,7 @@ jobs:
         uses: nanasess/setup-chromedriver@v2
 
       - name: Install npm dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build wasm32 target
         run: RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
