@@ -19,11 +19,9 @@ twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 twitterDescription: "See how RunMat Accelerate turns a real 4K image pipeline into fused GPU work and stacks up against MATLAB, PyTorch, and Julia as the fastest runtime for your math."
 canonical: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
 
-# --- SCHEMA MARKUP START ---
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
-    # 1. BREADCRUMBS
     - "@type": "BreadcrumbList"
       itemListElement:
         - "@type": "ListItem"
@@ -39,7 +37,6 @@ jsonLd:
           name: "Introducing RunMat Accelerate"
           item: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
 
-    # 2. BLOG POSTING
     - "@type": "BlogPosting"
       "@id": "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math#article"
       headline: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
@@ -61,8 +58,6 @@ jsonLd:
           url: "https://runmat.org/logo.png"
           width: 600
           height: 60
-      
-      # SEMANTIC LINKING: Defines the competitors/tech discussed
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
@@ -80,13 +75,11 @@ jsonLd:
           name: "GPU Acceleration"
           sameAs: "https://en.wikipedia.org/wiki/Hardware_acceleration"
 
-      # PRODUCT DEFINITION: Defining "RunMat Accelerate" as a concept
       mentions:
         "@type": "DefinedTerm"
         name: "RunMat Accelerate"
         description: "An engine feature within RunMat that automatically fuses array operations into optimized kernels and routes them to CPU or GPU based on performance heuristics."
 
-    # 3. FAQ PAGE (Extracted from the bottom of your article)
     - "@type": "FAQPage"
       mainEntity:
         - "@type": "Question"

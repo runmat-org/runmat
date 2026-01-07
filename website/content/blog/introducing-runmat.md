@@ -19,11 +19,9 @@ twitterCard: "summary_large_image"
 twitterTitle: "RunMat: A modern, fast MATLAB code runtime built in Rust"
 twitterDescription: "Slim core, tiered execution, generational GC. Open-source, designed for performance and extensibility."
 canonical: "https://runmat.org/blog/introducing-runmat"
-# --- SCHEMA MARKUP START ---
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
-    # 1. BREADCRUMBS
     - "@type": "BreadcrumbList"
       itemListElement:
         - "@type": "ListItem"
@@ -39,7 +37,6 @@ jsonLd:
           name: "Introducing RunMat"
           item: "https://runmat.org/blog/introducing-runmat"
 
-    # 2. BLOG POSTING
     - "@type": "BlogPosting"
       "@id": "https://runmat.org/blog/introducing-runmat#article"
       headline: "Introducing RunMat: A Fast, Free, Modern MATLAB Code Runtime"
@@ -60,8 +57,6 @@ jsonLd:
           url: "https://runmat.org/logo.png"
           width: 600
           height: 60
-      
-      # ENTITY LINKING: Defining the ecosystem
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
@@ -76,7 +71,6 @@ jsonLd:
           name: "Rust"
           sameAs: "https://en.wikipedia.org/wiki/Rust_(programming_language)"
 
-    # 3. SOFTWARE DEFINITION: Defining the product explicitly
     - "@type": "SoftwareApplication"
       name: "RunMat"
       operatingSystem: ["Linux", "macOS", "Windows"]
@@ -88,7 +82,6 @@ jsonLd:
         price: "0"
         priceCurrency: "USD"
 
-    # 4. FAQ PAGE (Derived from text)
     - "@type": "FAQPage"
       mainEntity:
         - "@type": "Question"

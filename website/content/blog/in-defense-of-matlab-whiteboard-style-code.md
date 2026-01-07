@@ -21,7 +21,6 @@ twitterCard: "summary_large_image"
 twitterTitle: "In Defense of MATLAB: Why Engineers Still Need Whiteboard-Style Code"
 twitterDescription: "Whiteboard-style MATLAB code is still a superpower for engineers. Here’s why readable math matters for safety, code review, and AI-assisted workflows."
 canonical: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code"
-# --- SCHEMA MARKUP START ---
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -60,9 +59,7 @@ jsonLd:
         name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
-          url: "/runmat-logo.png"
-      
-      # SEMANTIC LINKING: Connecting the article to real-world entities
+          url: "/runmat-logo.svg"
       about:
         - "@type": "SoftwareApplication"
           name: "MATLAB"
@@ -74,13 +71,11 @@ jsonLd:
           name: "Python"
           sameAs: "https://en.wikipedia.org/wiki/Python_(programming_language)"
 
-      # DEFINED TERM: Establishing your new concept
       mentions:
         "@type": "DefinedTerm"
         name: "Whiteboard-Style Code"
         description: "A coding style where one line of code corresponds to one line of mathematical derivation, characterized by high density and visual similarity to matrix equations."
 
-      # VOICE SEARCH OPTIMIZATION
       speakable:
         "@type": "SpeakableSpecification"
         cssSelector: ["h1", ".excerpt"]

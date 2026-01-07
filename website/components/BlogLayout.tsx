@@ -9,8 +9,7 @@ interface BlogLayoutProps {
   description: string;
   date: string;
   readTime: string;
-  author?: string;
-  authors?: { name: string; url?: string }[];
+  authors: { name: string; url?: string }[];
   tags: string[];
   rightAside?: React.ReactNode;
   backLink?: { href: string; text: string };
@@ -23,19 +22,13 @@ export function BlogLayout({
   description,
   date,
   readTime,
-  author,
   authors,
   tags,
   rightAside,
   backLink = { href: '/blog', text: 'Back to Blog' },
   descriptionPlacement = 'beforeMeta'
 }: BlogLayoutProps) {
-  const resolvedAuthors =
-    (authors && authors.length > 0
-      ? authors
-      : author
-        ? [{ name: author }]
-        : [{ name: 'RunMat Team' }]);
+  const resolvedAuthors = authors && authors.length > 0 ? authors : [{ name: 'RunMat Team' }];
 
   const descriptionSpacingClass =
     descriptionPlacement === 'afterMeta' ? 'mt-6 mb-6' : 'mb-6';

@@ -22,7 +22,6 @@ twitterTitle: "Rust + LLMs: Why Distribution Matters"
 twitterDescription: "Rust narrows the training distribution and provides strong compiler feedback, enabling more reliable model-written code."
 canonical: "https://runmat.org/blog/rust-llm-training-distribution"
 
-# --- SCHEMA MARKUP START ---
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -62,8 +61,6 @@ jsonLd:
         logo:
           "@type": "ImageObject"
           url: "https://runmat.org/logo.png"
-      
-      # SEMANTIC LINKING: Comparing Rust vs TypeScript for AI
       about:
         - "@type": "ComputerLanguage"
           name: "Rust"
@@ -75,7 +72,6 @@ jsonLd:
           name: "RunMat"
           sameAs: "https://runmat.org"
 
-      # DEFINED TERM: "Training Distribution" in the context of LLMs
       mentions:
         "@type": "DefinedTerm"
         name: "Training Distribution"

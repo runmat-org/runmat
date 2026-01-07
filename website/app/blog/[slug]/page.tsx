@@ -18,6 +18,16 @@ interface AuthorInfo {
   url?: string;
 }
 
+type JsonLdPrimitive = string | number | boolean | null;
+type JsonLdValue = JsonLdPrimitive | JsonLdObject | JsonLdValue[];
+export type JsonLdObject = {
+  "@context"?: string;
+  "@type"?: string | string[];
+  "@id"?: string;
+  [key: string]: JsonLdValue;
+};
+type JsonLd = JsonLdObject | { "@graph": JsonLdObject[] };
+
 interface BlogPost {
   slug: string;
   frontmatter: {
@@ -32,10 +42,127 @@ interface BlogPost {
     image?: string;
     imageAlt?: string;
     canonical?: string;
-    jsonLd?: unknown;
+    jsonLd?: JsonLd;
   };
   content: string;
   authors: AuthorInfo[];
+}
+
+const FRONTMATTER_KEYS = new Set([
+  'title',
+  'description',
+  'date',
+  'author',
+  'authors',
+  'readTime',
+  'tags',
+  'excerpt',
+  'image',
+  'imageAlt',
+  'canonical',
+  'jsonLd',
+]);
+
+function isJsonLdValue(value: unknown): value is JsonLdValue {
+  if (value === null) return true;
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') return true;
+  if (Array.isArray(value)) return value.every(isJsonLdValue);
+  return isJsonLdObject(value);
+}
+
+function isJsonLdObject(value: unknown): value is JsonLdObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every(isJsonLdValue);
+}
+
+function validateJsonLd(jsonLd: unknown, slug: string): JsonLd | undefined {
+  if (jsonLd === undefined) return undefined;
+  if (isJsonLdObject(jsonLd)) return jsonLd;
+  if (
+    typeof jsonLd === 'object' &&
+    jsonLd !== null &&
+    !Array.isArray(jsonLd) &&
+    '@graph' in jsonLd &&
+    Array.isArray((jsonLd as Record<string, unknown>)['@graph']) &&
+    (jsonLd as Record<string, unknown>)['@graph']!.every(isJsonLdObject)
+  ) {
+    return jsonLd as JsonLd;
+  }
+  throw new Error(
+    `Invalid jsonLd in frontmatter for slug "${slug}". jsonLd must be an object or an object with @graph containing objects.`
+  );
+}
+
+function assertString(val: unknown, field: string, slug: string): string {
+  if (typeof val !== 'string' || val.trim() === '') {
+    throw new Error(`Frontmatter field "${field}" must be a non-empty string in slug "${slug}".`);
+  }
+  return val;
+}
+
+function assertStringArray(val: unknown, field: string, slug: string): string[] {
+  if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) {
+    throw new Error(`Frontmatter field "${field}" must be an array of strings in slug "${slug}".`);
+  }
+  return val as string[];
+}
+
+function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPost['frontmatter'] {
+  for (const key of Object.keys(raw)) {
+    if (!FRONTMATTER_KEYS.has(key)) {
+      throw new Error(`Unexpected frontmatter key "${key}" in slug "${slug}". Allowed keys: ${Array.from(FRONTMATTER_KEYS).join(', ')}`);
+    }
+  }
+
+  const title = assertString(raw.title, 'title', slug);
+  const description = assertString(raw.description, 'description', slug);
+  const date = assertString(raw.date, 'date', slug);
+  const readTime = assertString(raw.readTime, 'readTime', slug);
+  const excerpt = assertString(raw.excerpt, 'excerpt', slug);
+  const tags = assertStringArray(raw.tags, 'tags', slug);
+
+  const image = raw.image === undefined ? undefined : assertString(raw.image, 'image', slug);
+  const imageAlt = raw.imageAlt === undefined ? undefined : assertString(raw.imageAlt, 'imageAlt', slug);
+  const canonical = raw.canonical === undefined ? undefined : assertString(raw.canonical, 'canonical', slug);
+
+  const author = raw.author === undefined ? undefined : assertString(raw.author, 'author', slug);
+  const authors = raw.authors;
+  if (authors !== undefined) {
+    if (
+      !Array.isArray(authors) ||
+      authors.some(
+        entry =>
+          !entry ||
+          (typeof entry !== 'string' &&
+            !(
+              typeof entry === 'object' &&
+              'name' in entry &&
+              typeof (entry as { name?: unknown }).name === 'string' &&
+              ((entry as { url?: unknown }).url === undefined || typeof (entry as { url?: unknown }).url === 'string')
+            ))
+      )
+    ) {
+      throw new Error(`Frontmatter field "authors" must be an array of strings or { name, url? } objects in slug "${slug}".`);
+    }
+  }
+
+  const jsonLd = validateJsonLd(raw.jsonLd, slug);
+
+  return {
+    title,
+    description,
+    date,
+    author,
+    authors: authors as BlogPost['frontmatter']['authors'],
+    readTime,
+    tags,
+    excerpt,
+    image,
+    imageAlt,
+    canonical,
+    jsonLd,
+  };
 }
 
 function normalizeAuthors(frontmatter: BlogPost['frontmatter']): AuthorInfo[] {
@@ -69,19 +196,22 @@ function normalizeAuthors(frontmatter: BlogPost['frontmatter']): AuthorInfo[] {
 }
 
 function getBlogPost(slug: string): BlogPost | null {
+  const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
   try {
-    const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
     const fileContent = readFileSync(filePath, 'utf-8');
-    const { data: frontmatter, content } = matter(fileContent);
-    
+    const { data: rawFrontmatter, content } = matter(fileContent);
+    const frontmatter = validateFrontmatter(rawFrontmatter as Record<string, unknown>, slug);
+
     return {
       slug,
-      frontmatter: frontmatter as BlogPost['frontmatter'],
+      frontmatter,
       content,
-      authors: normalizeAuthors(frontmatter as BlogPost['frontmatter']),
+      authors: normalizeAuthors(frontmatter),
     };
-  } catch {
-    return null;
+  } catch (error) {
+    // Surface validation or read errors to fail the build
+    console.error(`Error loading blog post "${slug}":`, error);
+    throw error;
   }
 }
 
@@ -155,7 +285,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     return `${month}/${day}/${year}`;
   };
 
-  const fallbackJsonLd = {
+  const fallbackJsonLd: JsonLdObject = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: post.frontmatter.title,
