@@ -23,6 +23,7 @@
 
 ## Validation
 - `cargo test -p runmat-runtime workspace` (ran with an extended timeout after the first invocation hit the 124 s limit) confirms that the helper changes compile and the workspace/introspection tests still pass.
+- `tests/functions/closure_resolver_script.m` became the regression guard for nested closures and script-defined handles, ensuring the shared resolver still serves HIR bodies when the JIT and interpreter cross the workspace boundary.
 
 ## Next steps before closing the migration
 1. Extend the macro’s `accel_provider` metadata and rebuild the builtin inventory so new helpers automatically get the shared guard.
