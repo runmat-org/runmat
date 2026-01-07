@@ -39,7 +39,7 @@ interface BlogPost {
     authors?: Array<{ name: string; url?: string } | string>;
     readTime: string;
     tags: string[];
-    excerpt: string;
+    excerpt?: string;
     image?: string;
     imageAlt?: string;
     canonical?: string;
@@ -135,7 +135,8 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const description = assertString(raw.description, 'description', slug);
   const date = assertString(raw.date, 'date', slug);
   const readTime = assertString(raw.readTime, 'readTime', slug);
-  const excerpt = assertString(raw.excerpt, 'excerpt', slug);
+  const excerptSource = raw.excerpt ?? raw.description;
+  const excerpt = assertString(excerptSource, 'excerpt', slug);
   const tags = assertStringArray(raw.tags, 'tags', slug);
   const fmSlug = raw.slug === undefined ? undefined : assertString(raw.slug, 'slug', slug);
   const keywords =
