@@ -38,6 +38,10 @@ async function main() {
       src: path.join(repoRoot, "pkg-web"),
       dest: path.join(repoRoot, "dist", "pkg-web"),
     },
+    {
+      src: path.join(repoRoot, "lsp-web"),
+      dest: path.join(repoRoot, "dist", "lsp"),
+    },
   ];
 
   let copiedAny = false;
