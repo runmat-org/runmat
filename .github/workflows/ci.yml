@@ -374,6 +374,7 @@ jobs:
         uses: nanasess/setup-chromedriver@v2
 
       - name: Install npm dependencies
+        working-directory: bindings/ts
         run: npm ci
 
       - name: Build wasm32 target
@@ -385,7 +386,9 @@ jobs:
         run: scripts/test-wasm-headless.sh
 
       - name: Build bindings package
-        run: npm run build --workspace bindings/ts
+        working-directory: bindings/ts
+        run: npm run build
 
       - name: Lint bindings package
-        run: npm run lint --workspace bindings/ts
+        working-directory: bindings/ts
+        run: npm run lint
