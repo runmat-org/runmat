@@ -69,7 +69,10 @@ pub use state::{
     select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError, FigureEventKind,
     FigureEventView, FigureHandle, HoldMode,
 };
-pub use web::{install_web_renderer, install_web_renderer_for_handle, web_renderer_ready};
+pub use web::{
+    install_web_renderer, install_web_renderer_for_handle, render_current_scene,
+    resize_web_renderer, web_renderer_ready,
+};
 
 #[cfg(feature = "plot-core")]
 pub use engine::{render_figure_png_bytes, render_figure_snapshot};

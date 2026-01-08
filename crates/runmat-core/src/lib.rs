@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{self, Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use tracing::{debug, info, info_span, warn};
 
@@ -304,6 +304,14 @@ struct WorkspaceMaterializeTicket {
     name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FinalStmtEmitDisposition {
+    Inline,
+    #[allow(dead_code)]
+    NeedsFallback,
+    Suppressed,
+}
+
 struct ExecutionPlan {
     assigned_this_execution: HashSet<String>,
     id_to_name: HashMap<usize, String>,
@@ -314,6 +322,7 @@ struct ExecutionPlan {
     single_stmt_non_assign: bool,
     is_expression_stmt: bool,
     is_semicolon_suppressed: bool,
+    final_stmt_emit: FinalStmtEmitDisposition,
     result_value: Option<Value>,
     suppressed_value: Option<Value>,
     error: Option<String>,
@@ -335,6 +344,7 @@ struct ExecutionPlanInputs<'a> {
     single_stmt_non_assign: bool,
     is_expression_stmt: bool,
     is_semicolon_suppressed: bool,
+    final_stmt_emit: FinalStmtEmitDisposition,
     result_value: &'a Option<Value>,
     suppressed_value: &'a Option<Value>,
     error: &'a Option<String>,
@@ -344,6 +354,21 @@ struct ExecutionPlanInputs<'a> {
     used_jit: bool,
     stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
     workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
+}
+
+fn determine_display_label_from_context(
+    single_assign_var: Option<usize>,
+    id_to_name: &HashMap<usize, String>,
+    is_expression_stmt: bool,
+    single_stmt_non_assign: bool,
+) -> Option<String> {
+    if let Some(var_id) = single_assign_var {
+        id_to_name.get(&var_id).cloned()
+    } else if is_expression_stmt || single_stmt_non_assign {
+        Some("ans".to_string())
+    } else {
+        None
+    }
 }
 
 /// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
@@ -984,8 +1009,8 @@ impl RunMatSession {
             .map(|instr| matches!(instr, runmat_ignition::Instr::Pop))
             .unwrap_or(false);
 
-        // Detect whether the user's input ends with a semicolon at the token level
-        let ends_with_semicolon = {
+        // Determine whether the final statement ended with a semicolon by inspecting the raw input.
+        let is_semicolon_suppressed = {
             let toks = tokenize_detailed(input);
             toks.into_iter()
                 .rev()
@@ -994,35 +1019,7 @@ impl RunMatSession {
                 .map(|t| matches!(t, LexToken::Semicolon))
                 .unwrap_or(false)
         };
-
-        // Check if this is a semicolon-suppressed statement (expression or assignment)
-        // Control flow statements never return values regardless of semicolons
-        let is_semicolon_suppressed = if hir.body.len() == 1 {
-            match &hir.body[0] {
-                runmat_hir::HirStmt::ExprStmt(_, _) => ends_with_semicolon,
-                runmat_hir::HirStmt::Assign(_, _, _) => ends_with_semicolon,
-                runmat_hir::HirStmt::If { .. }
-                | runmat_hir::HirStmt::While { .. }
-                | runmat_hir::HirStmt::For { .. }
-                | runmat_hir::HirStmt::Break
-                | runmat_hir::HirStmt::Continue
-                | runmat_hir::HirStmt::Return
-                | runmat_hir::HirStmt::Function { .. }
-                | runmat_hir::HirStmt::MultiAssign(_, _, _)
-                | runmat_hir::HirStmt::AssignLValue(_, _, _)
-                | runmat_hir::HirStmt::Switch { .. }
-                | runmat_hir::HirStmt::TryCatch { .. }
-                | runmat_hir::HirStmt::Global(_)
-                | runmat_hir::HirStmt::Persistent(_)
-                | runmat_hir::HirStmt::Import {
-                    path: _,
-                    wildcard: _,
-                }
-                | runmat_hir::HirStmt::ClassDef { .. } => true,
-            }
-        } else {
-            false
-        };
+        let final_stmt_emit = last_displayable_statement_emit_disposition(&hir.body);
 
         if self.verbose {
             debug!("HIR body len: {}", hir.body.len());
@@ -1165,12 +1162,6 @@ impl RunMatSession {
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
                         if let runmat_hir::HirStmt::Assign(var_id, _, _) = &hir.body[0] {
-                            if self.verbose {
-                                debug!(
-                                    "Assignment detected, var_id: {}, ends_with_semicolon: {}",
-                                    var_id.0, ends_with_semicolon
-                                );
-                            }
                             if let Some(name) = id_to_name.get(&var_id.0) {
                                 assigned_this_execution.insert(name.clone());
                             }
@@ -1206,10 +1197,9 @@ impl RunMatSession {
                         let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
                         if temp_var_id < self.variable_array.len() {
                             let expression_value = self.variable_array[temp_var_id].clone();
-                            // Capture for 'ans' update
-                            ans_update = Some((temp_var_id, expression_value.clone()));
-
                             if !is_semicolon_suppressed {
+                                // Capture for 'ans' update when output is not suppressed
+                                ans_update = Some((temp_var_id, expression_value.clone()));
                                 result_value = Some(expression_value);
                                 if self.verbose {
                                     debug!("Expression result from temp var {temp_var_id}: {result_value:?}");
@@ -1247,6 +1237,7 @@ impl RunMatSession {
                         single_stmt_non_assign,
                         is_expression_stmt,
                         is_semicolon_suppressed,
+                        final_stmt_emit,
                         result_value: &result_value,
                         suppressed_value: &suppressed_value,
                         error: &error,
@@ -1358,11 +1349,7 @@ impl RunMatSession {
             debug!("Execution completed in {execution_time_ms}ms (JIT: {used_jit})");
         }
 
-        // Generate type info if we have a suppressed value
-        let type_info = suppressed_value.as_ref().map(format_type_info);
-
-        // Final fallback: if not suppressed and still no value, try last non-zero variable slot
-        if !is_semicolon_suppressed && result_value.is_none() {
+        if !is_expression_stmt && !is_semicolon_suppressed && result_value.is_none() {
             if let Some(v) = self
                 .variable_array
                 .iter()
@@ -1373,6 +1360,23 @@ impl RunMatSession {
                 result_value = Some(v);
             }
         }
+
+        if !is_semicolon_suppressed
+            && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+        {
+            if let Some(value) = result_value.as_ref() {
+                let label = determine_display_label_from_context(
+                    single_assign_var,
+                    &id_to_name,
+                    is_expression_stmt,
+                    single_stmt_non_assign,
+                );
+                runmat_runtime::console::record_value_output(label.as_deref(), value);
+            }
+        }
+
+        // Generate type info if we have a suppressed value
+        let type_info = suppressed_value.as_ref().map(format_type_info);
 
         let streams = runmat_runtime::console::take_thread_buffer()
             .into_iter()
@@ -1413,8 +1417,14 @@ impl RunMatSession {
 
         let warnings = runmat_runtime::warning_store::take_all();
 
+        let public_value = if is_semicolon_suppressed {
+            None
+        } else {
+            result_value
+        };
+
         Ok(ExecutionResult {
-            value: result_value,
+            value: public_value,
             execution_time_ms,
             used_jit,
             error,
@@ -1539,6 +1549,7 @@ impl RunMatSession {
             single_stmt_non_assign: inputs.single_stmt_non_assign,
             is_expression_stmt: inputs.is_expression_stmt,
             is_semicolon_suppressed: inputs.is_semicolon_suppressed,
+            final_stmt_emit: inputs.final_stmt_emit,
             result_value: inputs.result_value.clone(),
             suppressed_value: inputs.suppressed_value.clone(),
             error: inputs.error.clone(),
@@ -1726,6 +1737,23 @@ impl RunMatSession {
             }
         }
 
+        if !plan.is_semicolon_suppressed
+            && matches!(
+                plan.final_stmt_emit,
+                FinalStmtEmitDisposition::NeedsFallback
+            )
+        {
+            if let Some(value) = plan.result_value.as_ref() {
+                let label = determine_display_label_from_context(
+                    plan.single_assign_var,
+                    &plan.id_to_name,
+                    plan.is_expression_stmt,
+                    plan.single_stmt_non_assign,
+                );
+                runmat_runtime::console::record_value_output(label.as_deref(), value);
+            }
+        }
+
         streams.extend(drain_console_streams());
         let workspace_snapshot = self.build_workspace_snapshot(plan.workspace_updates, false);
         let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
@@ -1736,8 +1764,14 @@ impl RunMatSession {
             .unwrap_or_default();
         let warnings = runmat_runtime::warning_store::take_all();
 
+        let public_value = if plan.is_semicolon_suppressed {
+            None
+        } else {
+            plan.result_value.clone()
+        };
+
         Ok(ExecutionResult {
-            value: plan.result_value,
+            value: public_value,
             execution_time_ms,
             used_jit: plan.used_jit,
             error: plan.error,
@@ -1913,6 +1947,34 @@ impl RunMatSession {
             values,
         }
     }
+}
+
+fn last_displayable_statement_emit_disposition(
+    body: &[runmat_hir::HirStmt],
+) -> FinalStmtEmitDisposition {
+    use runmat_hir::HirStmt;
+
+    for stmt in body.iter().rev() {
+        match stmt {
+            HirStmt::ExprStmt(expr, _) => return expr_emit_disposition(expr),
+            HirStmt::Assign(_, _, _) | HirStmt::MultiAssign(_, _, _) => {
+                return FinalStmtEmitDisposition::Inline
+            }
+            HirStmt::AssignLValue(_, _, _) => return FinalStmtEmitDisposition::Suppressed,
+            _ => continue,
+        }
+    }
+    FinalStmtEmitDisposition::Suppressed
+}
+
+fn expr_emit_disposition(expr: &runmat_hir::HirExpr) -> FinalStmtEmitDisposition {
+    use runmat_hir::HirExprKind;
+    if let HirExprKind::FuncCall(name, _) = &expr.kind {
+        if runmat_builtins::suppresses_auto_output(name) {
+            return FinalStmtEmitDisposition::Suppressed;
+        }
+    }
+    FinalStmtEmitDisposition::Inline
 }
 
 const WORKSPACE_PREVIEW_LIMIT: usize = 16;

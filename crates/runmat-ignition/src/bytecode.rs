@@ -17,6 +17,7 @@ pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
         var_count: c.var_count,
         functions: c.functions,
         var_types: c.var_types,
+        var_names: HashMap::new(),
         #[cfg(feature = "native-accel")]
         accel_graph: Some(accel_graph),
         #[cfg(feature = "native-accel")]
@@ -40,6 +41,7 @@ pub fn compile_with_functions(
         var_count: c.var_count,
         functions: c.functions,
         var_types: c.var_types,
+        var_names: HashMap::new(),
         #[cfg(feature = "native-accel")]
         accel_graph: Some(accel_graph),
         #[cfg(feature = "native-accel")]

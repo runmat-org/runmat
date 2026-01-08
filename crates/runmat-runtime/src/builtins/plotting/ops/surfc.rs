@@ -61,6 +61,7 @@ RunMat reuses the same surface renderer as `surf` and complements it with GPU-ge
     summary = "Render a MATLAB-compatible surface with contour overlay.",
     keywords = "surfc,plotting,surface,contour",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::surfc"
 )]
 pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {

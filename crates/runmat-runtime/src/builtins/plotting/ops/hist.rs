@@ -345,6 +345,7 @@ impl HistWeightsInput {
     summary = "Plot a histogram with MATLAB-compatible defaults.",
     keywords = "hist,histogram,frequency",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {

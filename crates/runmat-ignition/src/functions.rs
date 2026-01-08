@@ -47,6 +47,8 @@ pub struct Bytecode {
     pub functions: HashMap<String, UserFunction>,
     #[serde(default)]
     pub var_types: Vec<Type>,
+    #[serde(default)]
+    pub var_names: HashMap<usize, String>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -62,6 +64,7 @@ impl Bytecode {
             var_count: 0,
             functions: HashMap::new(),
             var_types: Vec::new(),
+            var_names: HashMap::new(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]

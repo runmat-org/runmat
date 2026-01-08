@@ -27,7 +27,7 @@ benchmarks/results/
 bindings/ts/node_modules/
 bindings/ts/pkg/
 bindings/ts/pkg-web/
-bindings/ts/dist/
+bindings/ts/dist/**/*
 
 .idea
 *.iml

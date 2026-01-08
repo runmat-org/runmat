@@ -61,6 +61,7 @@ behaviour (10).
     summary = "Render MATLAB-compatible filled contour plots.",
     keywords = "contourf,plotting,filled,contour",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::contourf"
 )]
 pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {

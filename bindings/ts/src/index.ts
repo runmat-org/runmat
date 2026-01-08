@@ -85,26 +85,67 @@ export interface RunMatInitOptions {
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
 
-export interface FigureLegendEntry {
-  label: string;
-  plotType: string;
-  color: [number, number, number, number];
-}
-
 export interface FigureEvent {
   handle: number;
   kind: FigureEventKind;
+  figure?: FigureSnapshot;
+}
+
+export interface FigureSnapshot {
+  layout: FigureLayout;
+  metadata: FigureMetadata;
+  plots: FigurePlotDescriptor[];
+}
+
+export interface FigureLayout {
   axesRows: number;
   axesCols: number;
-  plotCount: number;
   axesIndices: number[];
+}
+
+export interface FigureMetadata {
   title?: string;
   xLabel?: string;
   yLabel?: string;
-  gridEnabled?: boolean;
-  legendEnabled?: boolean;
-  legendEntries?: FigureLegendEntry[];
+  gridEnabled: boolean;
+  legendEnabled: boolean;
+  colorbarEnabled: boolean;
+  axisEqual: boolean;
+  backgroundRgba: [number, number, number, number];
+  colormap?: string;
+  colorLimits?: [number, number];
+  legendEntries: FigureLegendEntry[];
 }
+
+export interface FigureLegendEntry {
+  label: string;
+  plotType: FigurePlotKind;
+  colorRgba: [number, number, number, number];
+}
+
+export interface FigurePlotDescriptor {
+  kind: FigurePlotKind;
+  label?: string;
+  axesIndex: number;
+  colorRgba: [number, number, number, number];
+  visible: boolean;
+}
+
+export type FigurePlotKind =
+  | "line"
+  | "scatter"
+  | "bar"
+  | "error_bar"
+  | "stairs"
+  | "stem"
+  | "area"
+  | "quiver"
+  | "pie"
+  | "image"
+  | "surface"
+  | "scatter3"
+  | "contour"
+  | "contour_fill";
 
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
@@ -356,6 +397,7 @@ export interface RunMatSessionHandle {
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
+  cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
   resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
   pendingStdinRequests(): Promise<PendingStdinRequest[]>;
@@ -396,6 +438,7 @@ interface RunMatNativeSession {
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
+  cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
@@ -434,6 +477,8 @@ interface RunMatNativeModule {
   deregisterPlotCanvas?: () => void;
   plotRendererReady?: () => boolean;
   registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement) => Promise<void>;
+  resizeFigureCanvas?: (handle: number, width: number, height: number) => void;
+  renderCurrentFigureScene?: (handle: number) => void;
   deregisterFigureCanvas?: (handle: number) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
@@ -471,7 +516,8 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
   }
   if (!loadPromise) {
     loadPromise = (async () => {
-      const native = (await import("../pkg/runmat_wasm.js")) as unknown as RunMatNativeModule;
+      const wasmModuleUrl = new URL("./pkg/runmat_wasm.js", import.meta.url);
+      const native = (await import(wasmModuleUrl.href)) as unknown as RunMatNativeModule;
       if (typeof native.default === "function") {
         await native.default(wasmModule);
       }
@@ -498,10 +544,23 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     await native.registerPlotCanvas(options.plotCanvas);
   }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
+  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
   const requestedGpu = options.enableGpu ?? true;
-  const effectiveEnableGpu = requestedGpu && supportsWebGpu;
-  if (requestedGpu && !supportsWebGpu) {
-    console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+  let effectiveEnableGpu: boolean;
+  if (hasExplicitEnableFlag) {
+    if (requestedGpu && !supportsWebGpu) {
+      console.warn(
+        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
+      );
+      effectiveEnableGpu = false;
+    } else {
+      effectiveEnableGpu = requestedGpu;
+    }
+  } else {
+    effectiveEnableGpu = requestedGpu && supportsWebGpu;
+    if (requestedGpu && !supportsWebGpu) {
+      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+    }
   }
   const session = await native.initRunMat({
     snapshotBytes: snapshotResolution.bytes,
@@ -544,6 +603,18 @@ export async function registerFigureCanvas(handle: number, canvas: HTMLCanvasEle
     throw new Error("The loaded runmat-wasm module does not support figure-specific canvases yet.");
   }
   await native.registerFigureCanvas(handle, canvas);
+}
+
+export async function resizeFigureCanvas(handle: number, widthPx: number, heightPx: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resizeFigureCanvas");
+  native.resizeFigureCanvas(handle, widthPx, heightPx);
+}
+
+export async function renderCurrentFigureScene(handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "renderCurrentFigureScene");
+  native.renderCurrentFigureScene(handle);
 }
 
 export async function deregisterPlotCanvas(): Promise<void> {
@@ -771,6 +842,15 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     if (typeof this.native.cancelExecution === "function") {
       this.native.cancelExecution();
+    }
+  }
+
+  cancelPendingRequests(): void {
+    if (this.disposed) {
+      return;
+    }
+    if (typeof this.native.cancelPendingRequests === "function") {
+      this.native.cancelPendingRequests();
     }
   }
 

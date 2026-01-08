@@ -213,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 fn copyfile_builtin(args: Vec<Value>) -> Result<Value, String> {

@@ -316,6 +316,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render MATLAB-compatible contour plots.",
     keywords = "contour,plotting,isolines",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {

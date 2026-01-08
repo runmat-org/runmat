@@ -95,6 +95,12 @@ impl Default for PlotRenderConfig {
     }
 }
 
+/// Target surface information for rendering with optional MSAA resolve.
+pub struct RenderTarget<'a> {
+    pub view: &'a wgpu::TextureView,
+    pub resolve_target: Option<&'a wgpu::TextureView>,
+}
+
 /// Result of rendering operation
 #[derive(Debug)]
 pub struct RenderResult {
@@ -768,10 +774,12 @@ impl PlotRenderer {
     pub fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        target_view: &wgpu::TextureView,
+        target: RenderTarget<'_>,
         config: &PlotRenderConfig,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
+
+        self.wgpu_renderer.ensure_msaa(config.msaa_samples);
 
         // Update camera aspect ratio
         let aspect_ratio = config.width as f32 / config.height as f32;
@@ -861,8 +869,8 @@ impl PlotRenderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Plot Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
+                    view: target.view,
+                    resolve_target: target.resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: config.background_color.x as f64,

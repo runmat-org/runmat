@@ -1,4 +1,4 @@
-use runmat_core::RunMatSession;
+use runmat_core::{ExecutionResult, ExecutionStreamKind, RunMatSession};
 use runmat_gc::gc_test_context;
 
 /// Test basic semicolon suppression behavior
@@ -60,6 +60,15 @@ fn test_mixed_semicolon_behavior() {
     // Same expression with semicolon should suppress output
     let result = engine.execute("a + b;").unwrap();
     assert!(result.value.is_none());
+}
+
+#[test]
+fn test_fprintf_does_not_print_ans() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = engine.execute("fprintf('foo')").unwrap();
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout, vec!["foo"]);
+    assert!(stdout.iter().all(|line| !line.contains("ans =")));
 }
 
 /// Test semicolon suppression with function calls
@@ -172,4 +181,29 @@ fn test_control_flow_not_affected() {
     let result = engine.execute("y").unwrap();
     assert!(result.value.is_some());
     assert_eq!(result.value.unwrap().to_string(), "2");
+}
+
+fn collect_stdout_texts(result: &ExecutionResult) -> Vec<String> {
+    result
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn test_unsuppressed_assignment_and_expression_emit_outputs() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = engine.execute("x = 1\nx").unwrap();
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout, vec!["x = 1", "x = 1"]);
+}
+
+#[test]
+fn test_multi_assign_emits_each_variable() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = engine.execute("[a, b] = deal(1, 2)").unwrap();
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout, vec!["a = 1", "b = 2"]);
 }

@@ -1,6 +1,30 @@
-# runmat
+# RunMat: Blazing Fast Runtime for Math
 
-TypeScript/ESM bindings for the `runmat` crate. The package exposes an async `initRunMat` helper that boots the WASM runtime, streams optional snapshot bytes, and returns a browser-friendly session wrapper.
+RunMat automatically fuses math operations and intelligently routes between CPU and GPU.
+
+Write math in MATLAB syntax, and RunMat runs it blazing fast.
+
+Runs on Windows, macOS, Linux, and Web, across NVIDIA, AMD, Apple Silicon, and Intel GPUs.
+
+## Initialization options
+
+`initRunMat` accepts the following options so hosts can tailor the runtime to their environment:
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `snapshot` | `{ bytes \| url \| stream \| fetcher }` | Preload the standard library. Streams avoid copying large buffers. |
+| `fsProvider` | `RunMatFilesystemProvider` | Install a custom filesystem (remote, IndexedDB, etc.). Defaults to `createDefaultFsProvider()`. |
+| `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
+| `enableJit` | `boolean` | Toggle the JIT tier. |
+| `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
+| `telemetryId` | `string` | Existing analytics client ID to reuse. |
+| `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
+| `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
+| `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
+| `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
+| `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
+| `language.compat` | `"matlab" \| "strict"` | Matches `[language] compat` in `.runmat`. See docs/LANGUAGE.md for more information. |
+
 
 ## Developing
 
@@ -81,25 +105,6 @@ if (gpu.adapter) {
   console.log("GPU backend:", gpu.adapter.name, gpu.adapter.backend, gpu.adapter.precision);
 }
 ```
-
-## Initialization options
-
-`initRunMat` accepts the following options so hosts can tailor the runtime to their environment:
-
-| Option | Type | Description |
-| --- | --- | --- |
-| `snapshot` | `{ bytes \| url \| stream \| fetcher }` | Preload the standard library. Streams avoid copying large buffers. |
-| `fsProvider` | `RunMatFilesystemProvider` | Install a custom filesystem (remote, IndexedDB, etc.). Defaults to `createDefaultFsProvider()`. |
-| `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
-| `enableJit` | `boolean` | Toggle the JIT tier. |
-| `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
-| `telemetryId` | `string` | Existing analytics client ID to reuse. |
-| `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
-| `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |
-| `plotCanvas` | `HTMLCanvasElement` | Register the default plotting surface during initialization. |
-| `scatterTargetPoints` / `surfaceVertexBudget` | `number` | Override GPU LOD heuristics for scatter/surface plots. |
-| `emitFusionPlan` | `boolean` | Include Accelerate fusion DAG + shader metadata in every `ExecuteResult`. Defaults to `false`; toggle later via `session.setFusionPlanEnabled()`. |
-| `language.compat` | `"matlab" \| "strict"` | Matches `[language] compat` in `.runmat`. See docs/LANGUAGE.md for more information. |
 
 ## Telemetry consent
 
@@ -195,7 +200,8 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 
 - `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
 - `deregisterFigureCanvas(handle)` detaches the renderer for a given handle when a tab is hidden or destroyed, freeing GPU resources until the UI reattaches.
-- `onFigureEvent(listener)` registers a callback that now receives rich metadata `{ handle, kind, axesRows, axesCols, plotCount, axesIndices[], title?, xLabel?, yLabel?, gridEnabled?, legendEnabled?, legendEntries[] }` whenever a figure changes. `legendEntries` mirrors MATLAB's legend labels plus RGBA colors so UI sidebars can display labels without re-rendering the plot. Pass `null` to unsubscribe.
+- `renderCurrentFigureScene(handle)` forces the renderer to redraw the most recent scene for that figure handle (handy after host-driven resizes or when reactivating a tab that stayed attached to an OffscreenCanvas).
+- `onFigureEvent(listener)` registers a callback that now receives `FigureEvent { handle, kind, figure?: { layout, metadata, plots[] } }`. Metadata contains axis/grid flags, legend entries (including RGBA + plot kind), background/theme info, and optional labels. Plot descriptors enumerate every series (`kind`, `label`, `axesIndex`, `colorRgba`, `visible`). Pass `null` to unsubscribe.
 
 The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
 

@@ -18,6 +18,7 @@ runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-time = { workspace = true }
+runmat-thread-local = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 log = { workspace = true }
 tracing = "0.1"

@@ -14,6 +14,7 @@ use super::state::{clear_figure, figure_handles, FigureHandle};
     summary = "Clear figure contents, optionally targeting specific handles.",
     keywords = "clf,clear figure,plotting",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> Result<String, String> {

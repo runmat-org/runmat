@@ -169,6 +169,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Query or replace the MATLAB search path used by RunMat.",
     keywords = "path,search path,matlab path,addpath,rmpath",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
 fn path_builtin(args: Vec<Value>) -> Result<Value, String> {

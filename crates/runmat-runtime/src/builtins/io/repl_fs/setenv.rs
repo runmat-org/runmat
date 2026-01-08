@@ -219,6 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Set or clear environment variables with MATLAB-compatible status outputs.",
     keywords = "setenv,environment variable,status,message,unset",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
 fn setenv_builtin(args: Vec<Value>) -> Result<Value, String> {

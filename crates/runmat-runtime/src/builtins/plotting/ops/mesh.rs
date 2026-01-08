@@ -90,6 +90,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible wireframe surface.",
     keywords = "mesh,wireframe,surface,plotting",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::mesh"
 )]
 pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {

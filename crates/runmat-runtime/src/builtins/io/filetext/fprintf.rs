@@ -408,6 +408,7 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     keywords = "fprintf,format,printf,io",
     accel = "cpu",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
 fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {

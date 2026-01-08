@@ -120,6 +120,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Render a MATLAB-compatible 3-D scatter plot.",
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {

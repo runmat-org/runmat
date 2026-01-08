@@ -28,6 +28,7 @@ runmat-lexer = { workspace = true }
 runmat-core = { workspace = true }
 runmat-config = { workspace = true }
 runmat-runtime = { workspace = true }
+runmat-thread-local = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, optional = true }

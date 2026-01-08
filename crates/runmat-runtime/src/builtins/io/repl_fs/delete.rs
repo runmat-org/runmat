@@ -202,6 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "delete,remove file,wildcard delete,cleanup,temporary files,MATLAB delete",
     accel = "cpu",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 fn delete_builtin(args: Vec<Value>) -> Result<Value, String> {

@@ -211,6 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Remove folders with MATLAB-compatible status, message, and message ID outputs.",
     keywords = "rmdir,remove directory,delete folder,filesystem,status,message,messageid,recursive",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
 fn rmdir_builtin(args: Vec<Value>) -> Result<Value, String> {

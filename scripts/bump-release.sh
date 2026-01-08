@@ -62,6 +62,20 @@ cargo workspaces version custom "${NEW_VERSION}" \
   --all \
   --yes
 
+PKG_JSON="bindings/ts/package.json"
+if [ -f "$PKG_JSON" ]; then
+  echo "Updating bindings/ts package.json version to ${NEW_VERSION}..."
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is required to update ${PKG_JSON}" >&2
+    exit 1
+  fi
+  tmpfile=$(mktemp)
+  jq --arg version "$NEW_VERSION" '.version = $version' "$PKG_JSON" > "$tmpfile"
+  mv "$tmpfile" "$PKG_JSON"
+else
+  echo "Warning: ${PKG_JSON} not found; skipping bindings version bump." >&2
+fi
+
 echo "Running a quick build check..."
 cargo check -q
 

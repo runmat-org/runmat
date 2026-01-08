@@ -1,11 +1,14 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
@@ -2137,8 +2140,51 @@ static GLOBAL_PROVIDER: Lazy<RwLock<Option<&'static dyn AccelProvider>>> =
 static PROVIDER_REGISTRY: Lazy<RwLock<HashMap<u32, &'static dyn AccelProvider>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static DEVICE_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static THREAD_PROVIDER: Cell<Option<&'static dyn AccelProvider>> = Cell::new(None);
+}
+
+#[cfg(target_arch = "wasm32")]
+static WASM_THREAD_PROVIDER: Lazy<Mutex<Option<&'static dyn AccelProvider>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn replace_thread_provider(
+    provider: Option<&'static dyn AccelProvider>,
+) -> Option<&'static dyn AccelProvider> {
+    THREAD_PROVIDER.with(|cell| {
+        let prev = cell.get();
+        cell.set(provider);
+        prev
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn replace_thread_provider(
+    provider: Option<&'static dyn AccelProvider>,
+) -> Option<&'static dyn AccelProvider> {
+    let mut slot = WASM_THREAD_PROVIDER
+        .lock()
+        .expect("wasm provider mutex poisoned");
+    let prev = *slot;
+    *slot = provider;
+    prev
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
+    THREAD_PROVIDER.with(|cell| cell.get())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
+    WASM_THREAD_PROVIDER
+        .lock()
+        .expect("wasm provider mutex poisoned")
+        .as_ref()
+        .copied()
 }
 
 /// Register a global acceleration provider.
@@ -2162,7 +2208,7 @@ unsafe fn register_provider_for_device(device_id: u32, provider: &'static dyn Ac
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
-    if let Some(p) = THREAD_PROVIDER.with(|cell| cell.get()) {
+    if let Some(p) = current_thread_provider() {
         return Some(p);
     }
     GLOBAL_PROVIDER
@@ -2203,11 +2249,7 @@ pub struct ThreadProviderGuard {
 
 impl ThreadProviderGuard {
     pub fn set(provider: Option<&'static dyn AccelProvider>) -> Self {
-        let prev = THREAD_PROVIDER.with(|cell| {
-            let old = cell.get();
-            cell.set(provider);
-            old
-        });
+        let prev = replace_thread_provider(provider);
         ThreadProviderGuard { prev }
     }
 }
@@ -2215,12 +2257,12 @@ impl ThreadProviderGuard {
 impl Drop for ThreadProviderGuard {
     fn drop(&mut self) {
         let prev = self.prev.take();
-        THREAD_PROVIDER.with(|cell| cell.set(prev));
+        replace_thread_provider(prev);
     }
 }
 
 pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
-    THREAD_PROVIDER.with(|cell| cell.set(provider));
+    replace_thread_provider(provider);
 }
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None

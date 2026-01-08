@@ -237,6 +237,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
     accel = "cpu",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 fn savepath_builtin(args: Vec<Value>) -> Result<Value, String> {

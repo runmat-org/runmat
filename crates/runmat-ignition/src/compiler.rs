@@ -1,7 +1,7 @@
 use crate::functions::UserFunction;
-use crate::instr::Instr;
+use crate::instr::{EmitLabel, Instr};
 use once_cell::sync::OnceCell;
-use runmat_builtins::Type;
+use runmat_builtins::{self, Type};
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use std::collections::HashMap;
 
@@ -53,6 +53,13 @@ fn is_randn_call(expr: &HirExpr) -> bool {
     match &expr.kind {
         runmat_hir::HirExprKind::FuncCall(name, _) => name.eq_ignore_ascii_case("randn"),
         _ => false,
+    }
+}
+
+fn expr_supports_inline_emit(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::FuncCall(name, _) => !runmat_builtins::suppresses_auto_output(name),
+        _ => true,
     }
 }
 
@@ -137,6 +144,17 @@ impl Compiler {
         self.emit(Instr::StochasticEvolution);
         self.emit(Instr::StoreVar(plan.state.0));
         Ok(())
+    }
+
+    fn emit_multiassign_outputs(&mut self, vars: &[Option<runmat_hir::VarId>]) {
+        for var in vars {
+            if let Some(v) = var {
+                self.emit(Instr::EmitVar {
+                    var_index: v.0,
+                    label: EmitLabel::Var(v.0),
+                });
+            }
+        }
     }
 
     fn detect_stochastic_evolution<'a>(
@@ -559,13 +577,23 @@ impl Compiler {
 
     pub fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), String> {
         match stmt {
-            HirStmt::ExprStmt(expr, _) => {
+            HirStmt::ExprStmt(expr, suppressed) => {
                 self.compile_expr(expr)?;
+                if !suppressed && expr_supports_inline_emit(expr) {
+                    let label = label_for_expr(expr);
+                    self.emit(Instr::EmitStackTop { label });
+                }
                 self.emit(Instr::Pop);
             }
-            HirStmt::Assign(id, expr, _) => {
+            HirStmt::Assign(id, expr, suppressed) => {
                 self.compile_expr(expr)?;
                 self.emit(Instr::StoreVar(id.0));
+                if !suppressed {
+                    self.emit(Instr::EmitVar {
+                        var_index: id.0,
+                        label: EmitLabel::Var(id.0),
+                    });
+                }
             }
             HirStmt::If {
                 cond,
@@ -1556,7 +1584,7 @@ impl Compiler {
                     methods,
                 });
             }
-            HirStmt::MultiAssign(vars, expr, _) => {
+            HirStmt::MultiAssign(vars, expr, suppressed) => {
                 // Compile RHS once; if function call or value, arrange to extract multiple
                 match &expr.kind {
                     HirExprKind::FuncCall(name, args) => {
@@ -1632,6 +1660,9 @@ impl Compiler {
                             }
                         }
                     }
+                }
+                if !suppressed {
+                    self.emit_multiassign_outputs(vars);
                 }
             }
         }
@@ -2632,5 +2663,13 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+}
+
+fn label_for_expr(expr: &HirExpr) -> EmitLabel {
+    if let HirExprKind::Var(var_id) = &expr.kind {
+        EmitLabel::Var(var_id.0)
+    } else {
+        EmitLabel::Ans
     }
 }

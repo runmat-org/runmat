@@ -9,6 +9,7 @@
 pub mod context;
 pub mod core;
 pub mod data;
+pub mod event;
 pub mod gpu;
 
 // High-level plot types and figures
@@ -40,6 +41,10 @@ pub use core::scene::GpuVertexBuffer;
 
 // Core plot types
 // Avoid ambiguous re-exports: explicitly export plot types
+pub use event::{
+    FigureEvent, FigureEventKind, FigureLayout, FigureLegendEntry, FigureMetadata, FigureSnapshot,
+    PlotDescriptor, PlotKind,
+};
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, ImagePlot, LinePlot, PieChart, QuiverPlot,
     Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,

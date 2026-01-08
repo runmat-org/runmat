@@ -9,6 +9,7 @@ use super::state::current_figure_handle;
     category = "plotting",
     summary = "Return the handle of the current figure.",
     keywords = "gcf,figure,plotting",
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::gcf"
 )]
 pub fn gcf_builtin() -> Result<f64, String> {

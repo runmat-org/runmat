@@ -14,6 +14,7 @@ use super::state::{close_figure, figure_handles, FigureHandle};
     summary = "Close figures by handle or the active figure.",
     keywords = "close,figure,plotting",
     sink = true,
+    suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::close"
 )]
 pub fn close_builtin(rest: Vec<Value>) -> Result<String, String> {

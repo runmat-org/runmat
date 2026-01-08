@@ -299,6 +299,11 @@ impl BytecodeCompiler {
                     Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
                         // Ignore; VM manages globals/persistents
                     }
+                    Instr::EmitStackTop { .. } | Instr::EmitVar { .. } => {
+                        return Err(TurbineError::ExecutionError(
+                            "Console emission not supported in JIT; use interpreter".to_string(),
+                        ));
+                    }
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);

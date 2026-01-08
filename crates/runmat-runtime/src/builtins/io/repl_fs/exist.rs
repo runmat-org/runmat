@@ -512,6 +512,7 @@ pub(crate) mod tests {
     use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
+    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;
@@ -520,7 +521,7 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
-    thread_local! {
+    runmat_thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
     }
 
