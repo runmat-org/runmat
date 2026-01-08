@@ -43,7 +43,14 @@ type DocFrontmatter = {
 
 function coerceKeywords(val?: string | string[]) {
   if (!val) return undefined;
-  if (Array.isArray(val)) return val.filter(Boolean);
+  if (Array.isArray(val)) {
+    const normalized = val
+      .filter((k): k is string => typeof k === "string")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    return normalized.length ? normalized : undefined;
+  }
+  if (typeof val !== "string") return undefined;
   const trimmed = val.trim();
   return trimmed ? [trimmed] : undefined;
 }
@@ -87,7 +94,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const parsed = node.file ? readDocSource(node.file) : null;
   const fm = parsed?.data || {};
 
-  const title = fm.title || node.title || baseTitle;
+  const title = fm.title ?? baseTitle;
   const description = fm.description || seo?.description;
   const keywords = coerceKeywords(fm.keywords) ?? seo?.keywords;
   const ogTitle = fm.ogTitle || seo?.ogTitle || title;
