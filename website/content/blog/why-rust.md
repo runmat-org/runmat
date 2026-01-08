@@ -46,8 +46,8 @@ jsonLd:
       alternativeHeadline: "Why Rust Improves LLM-Written Code"
       description: "Why the training distribution of programming languages matters for LLMs, and how Rust improves reliability in model-written code."
       image: "https://runmat.org/rust-blog-image.png"
-      datePublished: "2025-09-12"
-      dateModified: "2025-09-12"
+      datePublished: "2025-09-12T00:00:00Z"
+      dateModified: "2025-09-12T00:00:00Z"
       author:
         - "@type": "Person"
           name: "Fin Watterson"
@@ -71,6 +71,12 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "RunMat"
           sameAs: "https://runmat.org"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
 
       mentions:
         "@type": "DefinedTerm"

@@ -45,8 +45,8 @@ jsonLd:
       alternativeHeadline: "Why readable math matters in an AI coding world"
       description: "MATLAB still shines for math-heavy work. Its whiteboard-style syntax makes code easy to read, review, and run on modern tools like RunMat and fast GPUs."
       image: "https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
-      datePublished: "2025-12-11"
-      dateModified: "2025-12-11"
+      datePublished: "2025-12-11T00:00:00Z"
+      dateModified: "2025-12-11T00:00:00Z"
       author:
         - "@type": "Person"
           name: "Fin Watterson"
@@ -64,21 +64,30 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "MATLAB"
           sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "RunMat"
           sameAs: "https://runmat.org"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "ComputerLanguage"
           name: "Python"
           sameAs: "https://en.wikipedia.org/wiki/Python_(programming_language)"
 
       mentions:
-        "@type": "DefinedTerm"
-        name: "Whiteboard-Style Code"
-        description: "A coding style where one line of code corresponds to one line of mathematical derivation, characterized by high density and visual similarity to matrix equations."
+        - "@type": "DefinedTerm"
+          name: "Whiteboard-Style Code"
+          description: "A coding style where one line of code corresponds to one line of mathematical derivation, characterized by high density and visual similarity to matrix equations."
+          url: "https://runmat.org/blog/in-defense-of-matlab-whiteboard-style-code#whiteboard-style-code"
 
       speakable:
         "@type": "SpeakableSpecification"
-        cssSelector: ["h1", ".excerpt"]
+        cssSelector: ["h1"]
 
 ---
 

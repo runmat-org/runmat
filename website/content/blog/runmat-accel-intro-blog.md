@@ -43,8 +43,8 @@ jsonLd:
       alternativeHeadline: "RunMat vs PyTorch vs Julia: GPU Benchmarks"
       description: "RunMat Accelerate fuses MATLAB-style array math into fast CPU and GPU kernels, eliminating the need for CUDA or manual device management."
       image: "https://web.runmatstatic.com/runmat-4k-image-performance.png"
-      datePublished: "2025-11-18"
-      dateModified: "2025-11-18"
+      datePublished: "2025-11-18T00:00:00Z"
+      dateModified: "2025-11-18T00:00:00Z"
       author:
         "@type": "Person"
         name: "Nabeel Allana"
@@ -62,12 +62,26 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "RunMat"
           sameAs: "https://runmat.org"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "MATLAB"
           sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "PyTorch"
           sameAs: "https://en.wikipedia.org/wiki/PyTorch"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "ComputerLanguage"
           name: "Julia"
           sameAs: "https://en.wikipedia.org/wiki/Julia_(programming_language)"
@@ -76,9 +90,10 @@ jsonLd:
           sameAs: "https://en.wikipedia.org/wiki/Hardware_acceleration"
 
       mentions:
-        "@type": "DefinedTerm"
-        name: "RunMat Accelerate"
-        description: "An engine feature within RunMat that automatically fuses array operations into optimized kernels and routes them to CPU or GPU based on performance heuristics."
+        - "@type": "DefinedTerm"
+          name: "RunMat Accelerate"
+          description: "An engine feature within RunMat that automatically fuses array operations into optimized kernels and routes them to CPU or GPU based on performance heuristics."
+          url: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math#runmat-accelerate"
 
     - "@type": "FAQPage"
       mainEntity:
