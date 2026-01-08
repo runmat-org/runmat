@@ -147,13 +147,11 @@ impl Compiler {
     }
 
     fn emit_multiassign_outputs(&mut self, vars: &[Option<runmat_hir::VarId>]) {
-        for var in vars {
-            if let Some(v) = var {
-                self.emit(Instr::EmitVar {
-                    var_index: v.0,
-                    label: EmitLabel::Var(v.0),
-                });
-            }
+        for v in vars.iter().flatten() {
+            self.emit(Instr::EmitVar {
+                var_index: v.0,
+                label: EmitLabel::Var(v.0),
+            });
         }
     }
 
