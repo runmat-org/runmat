@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
-import Logo from "@/components/Logo";
+import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
 
 export default function Footer() {
@@ -30,12 +30,14 @@ export default function Footer() {
       <div className="container mx-auto flex flex-col md:flex-row items-start justify-between gap-8 py-8 px-4 md:px-6 border-t">
         <div className="hidden md:flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="shrink-0" style={{ minWidth: '47px', width: '47px' }}>
-              <Logo height={24} className="w-full h-auto" />
-            </div>
-            <p className="text-base leading-none md:text-lg">
-              <span className="font-semibold brand-text-sheen">RunMat</span>
-            </p>
+            <Image
+              src="/runmat-logo.svg"
+              alt="RunMat"
+              width={160}
+              height={28}
+              className="h-7 w-auto"
+              priority
+            />
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             The Fastest Runtime for Math

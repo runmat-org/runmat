@@ -43,8 +43,8 @@ jsonLd:
       alternativeHeadline: "RunMat vs GNU Octave: Performance Benchmarks"
       description: "RunMat is a modern, open-source runtime that executes MATLAB code quickly using a Rust-based engine, tiered JIT execution, and automatic GPU acceleration."
       image: "https://runmat.org/plot-example.jpg"
-      datePublished: "2025-08-07"
-      dateModified: "2025-08-07"
+      datePublished: "2025-08-07T00:00:00Z"
+      dateModified: "2025-08-07T00:00:00Z"
       author:
         "@type": "Person"
         name: "Nabeel Allana"
@@ -61,12 +61,26 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "RunMat"
           sameAs: "https://runmat.org"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "MATLAB"
           sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "GNU Octave"
           sameAs: "https://en.wikipedia.org/wiki/GNU_Octave"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "ComputerLanguage"
           name: "Rust"
           sameAs: "https://en.wikipedia.org/wiki/Rust_(programming_language)"
