@@ -198,7 +198,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return (
           <div className="my-8">
             {!skipTryButton && (
-              <div className="mb-4">
+              <div className="mb-4 flex justify-end">
                 <TryInBrowserButton code={code} />
               </div>
             )}
