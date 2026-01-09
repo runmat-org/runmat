@@ -5,6 +5,7 @@ import rehypePrism from 'rehype-prism-plus';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
 import { slugifyHeading } from '@/lib/utils';
 import { HeadingAnchor } from '@/components/HeadingAnchor';
+import { TryInBrowserButton } from './TryInBrowserButton';
 
 type MDXComponent = (props: { children?: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null;
 type MarkdownRendererComponents = Record<string, MDXComponent | ((props: { children: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null)>;
@@ -19,7 +20,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function toPlainText(node: React.ReactNode): string {
     if (node == null) return "";
     if (typeof node === 'string' || typeof node === 'number') return String(node);
-    if (Array.isArray(node)) return node.map(toPlainText).join(' ');
+    if (Array.isArray(node)) return node.map(toPlainText).join('');
     if (React.isValidElement(node)) {
       // recursively extract from element children (handles <code> etc.)
       // Fix: TypeScript error if node.props is not guaranteed to have 'children'
@@ -162,25 +163,49 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       }
 
       // Check if this is a code block (has code child with hljs or language- class, or any code child)
+      // We look deeper or check for common plugin wrappers
       const hasCodeBlock = React.Children.toArray(children).some(child => {
         if (React.isValidElement(child)) {
           const childType = typeof child.type === 'string' ? child.type : null;
+          const childProps = child.props as { className?: string; children?: React.ReactNode };
+          
           if (childType === 'code') {
-            const childProps = child.props as { className?: string };
-            return childProps?.className?.includes('hljs') || 
-                   childProps?.className?.includes('language-') ||
-                   true; // Any code element inside pre should be styled
+            return true; 
+          }
+          
+          // Check for wrappers added by rehype-prism-plus or other plugins
+          if (childProps?.className?.includes('code-highlight') || 
+              childProps?.className?.includes('rehype-code-wrapper')) {
+            return true;
+          }
+
+          // If child has a language class, it's likely a code block
+          if (childProps?.className?.includes('language-') || childProps?.className?.includes('hljs')) {
+            return true;
           }
         }
         return false;
-      });
+      }) || (props as { className?: string })?.className?.includes('language-');
       
       if (hasCodeBlock) {
         const { className, ...rest } = props as { className?: string };
+        const rawCode = toPlainText(children);
+        // Check if the code starts with ZWSP (added in sanitizeMarkdown for expected output)
+        // We trim leading whitespace/newlines that might be added by React/MDX
+        const skipTryButton = rawCode.trimStart().startsWith('\u200B');
+        const code = (skipTryButton ? rawCode.replace('\u200B', '') : rawCode).trim();
+        
         return (
-          <pre className={mergeClassNames("markdown-pre my-6 mx-0 max-w-full overflow-x-auto", className)} {...rest}>
-            {children}
-          </pre>
+          <div className="my-8">
+            {!skipTryButton && (
+              <div className="mb-4">
+                <TryInBrowserButton code={code} />
+              </div>
+            )}
+            <pre className={mergeClassNames("markdown-pre m-0 max-w-full overflow-x-auto", className)} {...rest}>
+              {children}
+            </pre>
+          </div>
         );
       }
       return <pre className="overflow-x-auto max-w-full break-words" {...props}>{children}</pre>;
@@ -192,17 +217,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const isMermaid = classList.some(cls => cls.includes('language-mermaid') || cls === 'mermaid');
       if (isMermaid) {
         // Extract the actual mermaid content - children might be wrapped in additional elements
-        const toPlain = (node: React.ReactNode): string => {
-          if (node == null) return '';
-          if (typeof node === 'string' || typeof node === 'number') return String(node);
-          if (Array.isArray(node)) return node.map(toPlain).join('');
-          if (React.isValidElement(node)) {
-            const props = node.props as { children?: React.ReactNode };
-            return toPlain(props?.children);
-          }
-          return '';
-        };
-        const mermaidContent = toPlain(children);
+        const mermaidContent = toPlainText(children);
         
         return (
           <div className="my-8 w-full">
@@ -249,6 +264,22 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
+        if (!inFence) {
+          // Check for "expected output" followed by 1 or 2 empty lines
+          let j = i - 1;
+          let emptyLines = 0;
+          while (j >= 0 && lines[j].trim() === "") {
+            emptyLines++;
+            j--;
+          }
+          if (j >= 0 && lines[j].toLowerCase().includes("expected output") && emptyLines >= 0 && emptyLines <= 2) {
+            // Inject a Zero-Width Space (U+200B) at the start of the first line of code content
+            // This marker survives MDX/Prism transformations and can be detected in the pre component.
+            if (i + 1 < lines.length) {
+              lines[i+1] = '\u200B' + lines[i+1];
+            }
+          }
+        }
         inFence = !inFence;
         continue;
       }
