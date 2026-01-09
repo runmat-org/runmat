@@ -196,10 +196,14 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         const code = (skipTryButton ? rawCode.replace('\u200B', '') : rawCode).trim();
         
         return (
-          <div className="my-8">
+          <div className="my-8 relative group">
             {!skipTryButton && (
-              <div className="mb-4 flex justify-end">
-                <TryInBrowserButton code={code} />
+              <div className="absolute top-3 right-3 z-10">
+                <TryInBrowserButton 
+                  code={code} 
+                  size="sm" 
+                  className="bg-code-surface/80 backdrop-blur-sm"
+                />
               </div>
             )}
             <pre className={mergeClassNames("markdown-pre m-0 max-w-full overflow-x-auto", className)} {...rest}>
@@ -272,7 +276,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
             emptyLines++;
             j--;
           }
-          if (j >= 0 && lines[j].toLowerCase().includes("expected output") && emptyLines >= 0 && emptyLines <= 2) {
+          if (j >= 0 && (lines[j].toLowerCase().includes("expected output") || lines[j].toLowerCase().includes("returns")) && emptyLines >= 0 && emptyLines <= 2) {
             // Inject a Zero-Width Space (U+200B) at the start of the first line of code content
             // This marker survives MDX/Prism transformations and can be detected in the pre component.
             if (i + 1 < lines.length) {

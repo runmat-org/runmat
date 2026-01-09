@@ -2,8 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { openWorkspace } from "@/lib/desktop";
+import { cn } from "@/lib/utils";
 
-interface TryInBrowserButtonProps extends Omit<React.ComponentProps<typeof Button>, "className"> {
+interface TryInBrowserButtonProps extends React.ComponentProps<typeof Button> {
   code?: string;
 }
 
@@ -11,13 +12,14 @@ export function TryInBrowserButton({
   variant = "outline", 
   size = "lg", 
   code,
+  className,
   ...props 
 }: TryInBrowserButtonProps) {
   return (
       <Button
           variant={variant}
           size={size}
-          className="inline-flex items-center gap-2 font-medium transition-all duration-200 text-sm px-3.5 py-2 rounded-md border border-[#8b5cf6]/50 text-[#a78bfa] hover:bg-[#8b5cf6]/10 hover:border-[#8b5cf6]/80 hover:text-[#c4b5fd]"
+          className={cn("inline-flex items-center gap-2 font-medium transition-all duration-200 text-sm px-3.5 py-2 rounded-md border border-[#8b5cf6]/50 text-[#a78bfa] hover:bg-[#8b5cf6]/10 hover:border-[#8b5cf6]/80 hover:text-[#c4b5fd]", className)}
           onClick={() =>
               openWorkspace(
                   [{path: "/test.m", content: code || "disp('hello from docs');"}],
