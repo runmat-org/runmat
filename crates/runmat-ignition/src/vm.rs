@@ -204,6 +204,136 @@ fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, String>
     Ok(value.clone())
 }
 
+/// Convert a Value to f64, handling GPU tensors by gathering scalar values.
+/// This is needed because `TryFrom<&Value> for f64` in runmat-builtins doesn't
+/// have access to the accelerate provider to download GPU tensors.
+fn value_to_scalar_f64(value: &Value) -> Result<f64, String> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                Ok(t.data[0])
+            } else {
+                Err("value must be scalar".to_string())
+            }
+        }
+        Value::GpuTensor(h) => {
+            let total: usize = h.shape.iter().copied().product();
+            if total != 1 {
+                return Err("GPU tensor must be scalar".to_string());
+            }
+            let gathered = gather_if_needed(value)?;
+            match gathered {
+                Value::Tensor(t) => {
+                    if t.data.is_empty() {
+                        Err("gathered tensor is empty".to_string())
+                    } else {
+                        Ok(t.data[0])
+                    }
+                }
+                Value::Num(n) => Ok(n),
+                _ => Err(format!("unexpected gathered type: {:?}", gathered)),
+            }
+        }
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        _ => value.try_into().map_err(|e: String| e),
+    }
+}
+
+/// Try to load a function from the MATLAB search path.
+/// Returns Some(UserFunction) if found and successfully compiled, None otherwise.
+/// This function caches found functions in a thread-local map.
+fn try_load_function_from_path(name: &str) -> Option<UserFunction> {
+    use runmat_runtime::builtins::common::path_search::{find_file_with_extensions, CLASS_M_FILE_EXTENSIONS};
+    
+    // Check cache first
+    thread_local! {
+        static DYNAMIC_FUNCTION_CACHE: RefCell<HashMap<String, UserFunction>> = RefCell::new(HashMap::new());
+    }
+    
+    if let Some(func) = DYNAMIC_FUNCTION_CACHE.with(|cache| cache.borrow().get(name).cloned()) {
+        return Some(func);
+    }
+    
+    // Search for the .m file on the path
+    let file_path = match find_file_with_extensions(name, CLASS_M_FILE_EXTENSIONS, "dynamic_load") {
+        Ok(Some(path)) => {
+            log::debug!("dynamic_load: found file for '{}': {:?}", name, path);
+            path
+        },
+        Ok(None) => {
+            log::debug!("dynamic_load: no file found for '{}'", name);
+            return None;
+        }
+        Err(e) => {
+            log::debug!("dynamic_load: error searching for '{}': {}", name, e);
+            return None;
+        }
+    };
+    
+    // Read the file contents
+    let source = match std::fs::read_to_string(&file_path) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+    
+    // Parse the source
+    let ast = match runmat_parser::parse(&source) {
+        Ok(ast) => ast,
+        Err(_) => return None,
+    };
+    
+    // Lower to HIR
+    let hir_result = match runmat_hir::lower(&ast) {
+        Ok(hir) => hir,
+        Err(_) => return None,
+    };
+    
+    // Look for function definitions in the HIR
+    for stmt in &hir_result.body {
+        if let runmat_hir::HirStmt::Function {
+            name: func_name,
+            params,
+            outputs,
+            body,
+            has_varargin,
+            has_varargout,
+            ..
+        } = stmt
+        {
+            if func_name == name {
+                // Count local variables in the body
+                let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                    params,
+                    outputs,
+                    body,
+                );
+                let local_var_count = var_map.len();
+                
+                // Build the UserFunction
+                let user_func = UserFunction {
+                    name: func_name.clone(),
+                    params: params.clone(),
+                    outputs: outputs.clone(),
+                    body: body.clone(),
+                    local_var_count,
+                    has_varargin: *has_varargin,
+                    has_varargout: *has_varargout,
+                    var_types: hir_result.var_types.clone(),
+                };
+                // Cache it for future calls
+                DYNAMIC_FUNCTION_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(name.to_string(), user_func.clone());
+                });
+                return Some(user_func);
+            }
+        }
+    }
+    
+    None
+}
+
 #[cfg(feature = "native-accel")]
 fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, String> {
     runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
@@ -1577,9 +1707,11 @@ fn run_interpreter(
                         let func: UserFunction = match context
                             .functions
                             .get(&name)
-                            .or_else(|| bytecode.functions.get(&name))
+                            .cloned()
+                            .or_else(|| bytecode.functions.get(&name).cloned())
+                            .or_else(|| try_load_function_from_path(&name))
                         {
-                            Some(f) => f.clone(),
+                            Some(f) => f,
                             None => vm_bail!(mex(
                                 "UndefinedFunction",
                                 &format!("Undefined function: {name}")
@@ -3042,6 +3174,67 @@ fn run_interpreter(
                             if let Some((_, _, value)) = wildcard_matches.pop() {
                                 stack.push(value);
                             } else {
+                                // Try to load function from path
+                                if let Some(func) = try_load_function_from_path(&name) {
+                                    // Put args back on stack for function call
+                                    for v in prepared_primary.into_iter().rev() {
+                                        stack.push(v);
+                                    }
+                                    // Add function to context for future calls
+                                    context.functions.insert(name.clone(), func.clone());
+                                    // Re-dispatch as user function call
+                                    // For simplicity, we'll inline the function execution here
+                                    let arg_count = args.len();
+                                    let mut call_args = Vec::new();
+                                    for _ in 0..arg_count {
+                                        call_args.push(stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?);
+                                    }
+                                    call_args.reverse();
+                                    
+                                    let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                                        &func.params,
+                                        &func.outputs,
+                                        &func.body,
+                                    );
+                                    let local_var_count = var_map.len();
+                                    let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                                    let func_vars_count = local_var_count.max(func.params.len());
+                                    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                                    for (i, _param_id) in func.params.iter().enumerate() {
+                                        if i < call_args.len() && i < func_vars.len() {
+                                            func_vars[i] = call_args[i].clone();
+                                        }
+                                    }
+                                    let mut func_var_types = func.var_types.clone();
+                                    if func_var_types.len() < local_var_count {
+                                        func_var_types.resize(local_var_count, Type::Unknown);
+                                    }
+                                    let func_program = runmat_hir::HirProgram {
+                                        body: remapped_body,
+                                        var_types: func_var_types,
+                                    };
+                                    let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                                    for (k, v) in func_bytecode.functions.iter() {
+                                        context.functions.insert(k.clone(), v.clone());
+                                    }
+                                    let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                                        Ok(v) => v,
+                                        Err(err) => vm_bail!(err),
+                                    };
+                                    if let Some(output_var_id) = func.outputs.first() {
+                                        let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                                        if local_output_index < func_result_vars.len() {
+                                            stack.push(func_result_vars[local_output_index].clone());
+                                        } else {
+                                            stack.push(Value::Num(0.0));
+                                        }
+                                    } else {
+                                        stack.push(Value::Num(0.0));
+                                    }
+                                    pc += 1;
+                                    continue;
+                                }
+                                
                                 // Special-case: rethrow() without explicit e uses last caught
                                 if name == "rethrow" && args.is_empty() {
                                     if let Some(le) = &last_exception {
@@ -3633,8 +3826,12 @@ fn run_interpreter(
                 }
                 temp.reverse();
                 let args = temp;
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
+                let func: UserFunction = match bytecode.functions.get(&name)
+                    .cloned()
+                    .or_else(|| context.functions.get(&name).cloned())
+                    .or_else(|| try_load_function_from_path(&name))
+                {
+                    Some(f) => f,
                     None => vm_bail!(mex(
                         "UndefinedFunction",
                         &format!("Undefined function: {name}")
@@ -3720,8 +3917,12 @@ fn run_interpreter(
                         stack.push(v);
                     }
                 }
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
+                let func: UserFunction = match bytecode.functions.get(&name)
+                    .cloned()
+                    .or_else(|| context.functions.get(&name).cloned())
+                    .or_else(|| try_load_function_from_path(&name))
+                {
+                    Some(f) => f,
                     None => vm_bail!(mex(
                         "UndefinedFunction",
                         &format!("Undefined function: {name}")
@@ -9385,7 +9586,7 @@ fn run_interpreter(
                     } else {
                         for k in 0..num_indices {
                             let idx_pos = base_pos + k;
-                            match (&stack[idx_pos]).try_into() as Result<f64, _> {
+                            match value_to_scalar_f64(&stack[idx_pos]) {
                                 Ok(v) => indices.push(v as usize),
                                 Err(_) => {
                                     contiguous_ok = false;
@@ -9423,7 +9624,7 @@ fn run_interpreter(
                         if assignable(&stack[idx]) {
                             break;
                         }
-                        if let Ok(v) = (&stack[idx]).try_into() as Result<f64, _> {
+                        if let Ok(v) = value_to_scalar_f64(&stack[idx]) {
                             numeric_above.push((idx, v as usize));
                         }
                         kk -= 1;
