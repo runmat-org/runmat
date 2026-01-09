@@ -7,6 +7,7 @@ export interface BlogPost {
   title: string
   description: string
   date: string
+  dateModified?: string
   readTime: string
   author: string
   authors: AuthorInfo[]
@@ -42,6 +43,7 @@ interface BlogFrontmatter {
   image?: string
   imageAlt?: string
   visibility?: 'public' | 'unlisted'
+  dateModified?: string
   [key: string]: unknown
 }
 
@@ -104,6 +106,7 @@ export function getAllBlogPosts(): BlogPost[] {
         title: frontmatter.title || 'Untitled',
         description: frontmatter.description || frontmatter.excerpt || '',
         date: frontmatter.date || new Date().toISOString(),
+        dateModified: frontmatter.dateModified,
         readTime: frontmatter.readTime || '5 min read',
         author: authors.map(author => author.name).join(', '),
         authors,

@@ -33,9 +33,9 @@ export default function Footer() {
             <Image
               src="/runmat-logo.svg"
               alt="RunMat"
-              width={160}
-              height={28}
-              className="h-7 w-auto"
+              width={136}
+              height={24}
+              className="h-6 w-auto"
               priority
             />
           </div>

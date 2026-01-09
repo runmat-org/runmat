@@ -34,6 +34,7 @@ interface BlogPost {
     title: string;
     description: string;
     date: string;
+    dateModified?: string;
     slug?: string;
     author?: string;
     authors?: Array<{ name: string; url?: string } | string>;
@@ -61,6 +62,7 @@ const FRONTMATTER_KEYS = new Set([
   'title',
   'description',
   'date',
+  'dateModified',
   'slug',
   'author',
   'authors',
@@ -119,6 +121,11 @@ function assertString(val: unknown, field: string, slug: string): string {
   return val;
 }
 
+function assertOptionalString(val: unknown, field: string, slug: string): string | undefined {
+  if (val === undefined) return undefined;
+  return assertString(val, field, slug);
+}
+
 function assertStringArray(val: unknown, field: string, slug: string): string[] {
   if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) {
     throw new Error(`Frontmatter field "${field}" must be an array of strings in slug "${slug}".`);
@@ -141,6 +148,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const title = assertString(raw.title, 'title', slug);
   const description = assertString(raw.description, 'description', slug);
   const date = assertString(raw.date, 'date', slug);
+  const dateModified = assertOptionalString(raw.dateModified, 'dateModified', slug);
   const readTime = assertString(raw.readTime, 'readTime', slug);
   const excerptSource = raw.excerpt ?? raw.description;
   const excerpt = assertString(excerptSource, 'excerpt', slug);
@@ -192,6 +200,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     title,
     description,
     date,
+    dateModified,
     author,
     slug: fmSlug,
     authors: authors as BlogPost['frontmatter']['authors'],
@@ -291,6 +300,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       description: post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
+      modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
       authors: authorNames,
       images: imageUrl ? [imageUrl] : undefined,
     },
@@ -327,10 +337,23 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     notFound();
   }
 
-  // Format date as MM/DD/YYYY without timezone conversion
-  const formatDate = (dateString: string): string => {
-    const [year, month, day] = dateString.split('-');
-    return `${month}/${day}/${year}`;
+  // Format date as MM/DD/YYYY without timezone conversion; fallback to native parsing when needed
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    const datePart = dateString.split('T')[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${month}/${day}/${year}`;
+    }
+    const parsed = new Date(dateString);
+    if (!Number.isNaN(parsed.getTime())) {
+      const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsed.getDate()).padStart(2, '0');
+      const yyyy = parsed.getFullYear();
+      return `${mm}/${dd}/${yyyy}`;
+    }
+    return dateString;
   };
 
   const fallbackJsonLd: JsonLdObject = {
@@ -339,7 +362,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     headline: post.frontmatter.title,
     description: post.frontmatter.description,
     datePublished: post.frontmatter.date,
-    dateModified: post.frontmatter.date,
+    dateModified: post.frontmatter.dateModified || post.frontmatter.date,
     author: post.authors.map(author => ({
       "@type": "Person",
       name: author.name,
@@ -367,6 +390,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
       title={post.frontmatter.title}
       description=""
       date={formatDate(post.frontmatter.date)}
+      dateModified={formatDate(post.frontmatter.dateModified)}
       readTime={post.frontmatter.readTime}
       authors={post.authors}
       tags={post.frontmatter.tags}
