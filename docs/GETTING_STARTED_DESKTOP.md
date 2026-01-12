@@ -173,9 +173,12 @@ More plot types are being added.
 
 ## Sandbox Storage
 
-Your files are stored in memory within your browser tab. This means:
+The sandbox runs entirely in your browser. Your files are stored in memory within your browser tab, and the RunMat runtime executes locally via WebAssembly. In sandbox mode, your code stays on your machine—it's never sent to our servers.
+
+This means:
 
 - ✅ No account required
+- ✅ Your code stays local—we can't see it
 - ⚠️ Files are cleared when you close or refresh the tab
 
 **Tip:** Copy your code to a local file before closing the tab. We'll be adding sign-in and download options soon to make saving easier.
