@@ -852,24 +852,40 @@ extern "C" {
     fn _snprintf(buffer: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
 }
 
-#[cfg(all(windows, target_env = "msvc"))]
+#[cfg(windows)]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: usize,
     fmt: *const c_char,
     value: f64,
 ) -> c_int {
-    _snprintf(buffer, size, fmt, value)
-}
+    // Neither libc::snprintf (GNU) nor _snprintf (MSVC) are reliably available on Windows.
+    // Fall back to Rust formatting for both toolchains.
+    use std::ffi::CStr;
 
-#[cfg(all(windows, target_env = "gnu"))]
-unsafe fn platform_snprintf(
-    buffer: *mut c_char,
-    size: usize,
-    fmt: *const c_char,
-    value: f64,
-) -> c_int {
-    libc::snprintf(buffer, size as libc::size_t, fmt, value)
+    let fmt_str = match CStr::from_ptr(fmt).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    // Handle common format specifiers
+    let formatted = if fmt_str.contains("%e") || fmt_str.contains("%E") {
+        format!("{:e}", value)
+    } else if fmt_str.contains("%f") || fmt_str.contains("%g") || fmt_str.contains("%G") {
+        format!("{}", value)
+    } else {
+        format!("{}", value)
+    };
+
+    let bytes = formatted.as_bytes();
+    let write_len = std::cmp::min(bytes.len(), size.saturating_sub(1));
+
+    if write_len > 0 {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer as *mut u8, write_len);
+    }
+    *(buffer.add(write_len)) = 0; // null terminate
+
+    write_len as c_int
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
