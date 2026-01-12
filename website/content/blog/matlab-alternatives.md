@@ -22,7 +22,7 @@ canonical: "https://runmat.org/blog/free-matlab-alternatives"
 
 ![Matlab Alternatives in 2025](https://web.runmatstatic.com/best-matlab-alternatives-2025.png)
 
-
+*This article was originally published in September 2025 and has been updated for 2026 with new sections on Browser-Based Computing and GPU Acceleration.*
 
 ## 🫰 Why are engineers searching for MATLAB alternatives?
 MATLAB is powerful but expensive, with licenses costing over $2,000 per seat. For engineers in mechanical, electrical, and aerospace fields, that barrier drives the search for free alternatives. This guide compares the top four options, RunMat, Octave, Julia, and Python, with a focus on real engineering use cases, performance, compatibility, and ecosystem support.
@@ -103,9 +103,6 @@ For workloads where GPU acceleration matters, RunMat's automatic cross-vendor ap
 
 - Monte Carlo simulations (5M paths): ~2.8x faster than PyTorch, ~130x faster than NumPy
 - Elementwise chains (1B elements): ~100x+ faster than PyTorch when fusion eliminates memory traffic
-
-<!-- TODO: Visual - GPU backend support matrix showing NVIDIA/AMD/Intel/Apple support by platform -->
-<!-- TODO: Visual - Benchmark bar chart showing Monte Carlo and elementwise speedups -->
 
 ---
 
@@ -188,8 +185,6 @@ For engineers who need to run computations without installing software—on lock
 - **Julia** currently has no production-ready browser runtime. There's no official WebAssembly version—any browser-based Julia experience (like Pluto notebooks) requires a backend server. Experimental WebAssembly efforts exist, but Julia's JIT compiler and task runtime make this challenging. To use Julia via browser, you must run your own server or use a cloud service like JuliaHub.
 
 **Key Insight**: RunMat is currently the only option that combines browser-native execution, GPU acceleration, and MATLAB syntax—without server dependencies or usage quotas.
-
-<!-- TODO: Visual - Browser comparison table infographic (RunMat, MATLAB Online, Octave Online, Python Colab, Python Pyodide, Julia) -->
 
 ## 🤝 Compatibility with Existing MATLAB Code
 One of the biggest concerns when migrating away from MATLAB is simple: Can I keep running my old .m files, or will I have to rewrite everything? Each alternative handles compatibility differently.
