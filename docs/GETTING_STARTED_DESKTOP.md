@@ -23,7 +23,7 @@ Visit **[runmat.org/sandbox](https://runmat.org/sandbox)** to launch the desktop
 
 No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
-> **Note:** For maximum GPU performance, Chrome or Edge on macOS/Windows is recommended. These browsers support WebGPU, which enables full hardware acceleration.
+> **Note:** For GPU acceleration, use a browser that supports WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+). Resource limits may vary by browser—some browsers are more conservative to preserve battery life.
 
 ---
 
@@ -46,7 +46,7 @@ When you open RunMat Desktop, you'll see three main areas:
 
 ### Editor (Center)
 
-- Full code editor with syntax highlighting for `.m` files
+- Full code editor with syntax highlighting and language services (e.g., red underlines for errors)
 - Multiple file tabs (click a file to open, double-click to pin)
 - Unsaved changes shown with a dot indicator
 - **Cmd/Ctrl+S** to save
@@ -173,14 +173,12 @@ More plot types are being added.
 
 ## Sandbox Storage
 
-Your files are stored in your browser's local storage (IndexedDB). This means:
+Your files are stored in memory within your browser tab. This means:
 
-- ✅ Files persist across page refreshes
 - ✅ No account required
-- ⚠️ Files are specific to this browser
-- ⚠️ Clearing browser data will delete your files
+- ⚠️ Files are cleared when you close or refresh the tab
 
-**Tip:** For important work, copy your code to a local file on your computer.
+**Tip:** Copy your code to a local file before closing the tab. We'll be adding sign-in and download options soon to make saving easier.
 
 ---
 
@@ -193,12 +191,10 @@ The first execution includes compilation time. Subsequent runs are faster becaus
 ### Why don't I see GPU acceleration?
 
 GPU acceleration requires:
-- A browser that supports WebGPU (Chrome 113+, Edge 113+)
+- A browser that supports WebGPU (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+)
 - A compatible GPU with up-to-date drivers
 
 If WebGPU isn't available, RunMat falls back to CPU execution. You can still run all the same scripts—they just won't get GPU speedups.
-
-Check the sidebar's runtime status indicator to see if GPU is enabled.
 
 ### Can I use my existing MATLAB files?
 
@@ -219,7 +215,7 @@ When your script calls `input()`, the console prompts you for input.
 
 ### What if I want full desktop performance?
 
-The browser-based sandbox has some GPU performance limits due to browser security sandboxing. For maximum performance:
+Browsers limit how much GPU and CPU a website can use to preserve battery life. For maximum performance:
 
 1. **Download RunMat CLI** — Run scripts from your terminal with full native GPU access
 2. **Use RunMat Desktop App** — Coming soon, provides native performance in a desktop window
