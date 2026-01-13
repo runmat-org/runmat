@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use libc::{c_char, size_t};
+use libc::{c_char, c_int, size_t};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -829,24 +829,182 @@ extern "C" {
     fn _snprintf(buffer: *mut c_char, size: size_t, fmt: *const c_char, ...) -> libc::c_int;
 }
 
-#[cfg(all(windows, target_env = "msvc"))]
+#[cfg(windows)]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: size_t,
     fmt: *const c_char,
     value: f64,
 ) -> libc::c_int {
-    _snprintf(buffer, size, fmt, value)
+    use std::ffi::CStr;
+
+    let fmt_str = match CStr::from_ptr(fmt).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    let formatted = match parse_float_format(fmt_str) {
+        Some((spec, precision)) => format_with_spec(value, spec, precision),
+        None => format!("{}", value),
+    };
+
+    let bytes = formatted.as_bytes();
+    let total_len = bytes.len();
+    let buffer_size = size as usize;
+
+    if buffer_size > 0 {
+        let limit = buffer_size.saturating_sub(1);
+        let write_len = std::cmp::min(total_len, limit);
+        if write_len > 0 {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer as *mut u8, write_len);
+        }
+        *buffer.add(write_len) = 0;
+    }
+
+    if total_len > c_int::MAX as usize {
+        c_int::MAX
+    } else {
+        total_len as c_int
+    }
 }
 
-#[cfg(all(windows, target_env = "gnu"))]
-unsafe fn platform_snprintf(
-    buffer: *mut c_char,
-    size: size_t,
-    fmt: *const c_char,
-    value: f64,
-) -> libc::c_int {
-    libc::snprintf(buffer, size, fmt, value)
+#[cfg(windows)]
+fn parse_float_format(fmt: &str) -> Option<(char, Option<usize>)> {
+    let bytes = fmt.as_bytes();
+    let mut idx = bytes.iter().position(|&b| b == b'%')? + 1;
+    while idx < bytes.len() && matches!(bytes[idx], b'+' | b'-' | b' ' | b'0' | b'#') {
+        idx += 1;
+    }
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+
+    let precision = if idx < bytes.len() && bytes[idx] == b'.' {
+        idx += 1;
+        let start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if start == idx {
+            Some(0)
+        } else {
+            let digits_str = std::str::from_utf8(&bytes[start..idx]).ok()?;
+            Some(digits_str.parse().ok()?)
+        }
+    } else {
+        None
+    };
+
+    let spec = *bytes.get(idx)? as char;
+    match spec {
+        'e' | 'E' | 'f' | 'F' | 'g' | 'G' => Some((spec, precision)),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn format_with_spec(value: f64, spec: char, precision: Option<usize>) -> String {
+    match spec {
+        'e' => format!("{:.*e}", precision.unwrap_or(6), value),
+        'E' => format!("{:.*E}", precision.unwrap_or(6), value),
+        'f' | 'F' => format!("{:.*}", precision.unwrap_or(6), value),
+        'g' => format_general(value, precision.unwrap_or(6).max(1), false),
+        'G' => format_general(value, precision.unwrap_or(6).max(1), true),
+        _ => format!("{}", value),
+    }
+}
+
+#[cfg(windows)]
+fn format_general(value: f64, precision: usize, uppercase: bool) -> String {
+    if value.is_nan() {
+        return if uppercase { "NAN" } else { "nan" }.to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            if uppercase { "-INF" } else { "-inf" }.to_string()
+        } else if uppercase {
+            "INF".to_string()
+        } else {
+            "inf".to_string()
+        };
+    }
+
+    let precision = precision.max(1);
+    let exp_char = if uppercase { 'E' } else { 'e' };
+    let exp_precision = precision.saturating_sub(1);
+    let formatted = if uppercase {
+        format!("{:.*E}", exp_precision, value)
+    } else {
+        format!("{:.*e}", exp_precision, value)
+    };
+
+    let exp_pos = formatted.find(exp_char).unwrap_or(formatted.len());
+    let mantissa = &formatted[..exp_pos];
+    let exponent_part = if exp_pos < formatted.len() {
+        &formatted[exp_pos..]
+    } else {
+        ""
+    };
+
+    let exponent_value = exponent_part
+        .get(1..)
+        .and_then(|exp_digits| exp_digits.parse::<i32>().ok())
+        .unwrap_or(0);
+
+    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    let sign = if mantissa.starts_with('-') { "-" } else { "" };
+
+    let use_exponent = {
+        let abs = value.abs();
+        abs != 0.0 && (exponent_value < -4 || exponent_value >= precision as i32)
+    };
+
+    let exponent_string = if exponent_part.is_empty() {
+        mantissa.to_string()
+    } else {
+        let mut mantissa_trimmed = mantissa.to_string();
+        trim_trailing_decimal(&mut mantissa_trimmed);
+        format!("{mantissa_trimmed}{exponent_part}")
+    };
+
+    if use_exponent {
+        return exponent_string;
+    }
+
+    let mut fixed = if exponent_value >= 0 {
+        let int_digits = (exponent_value + 1) as usize;
+        if int_digits >= digits.len() {
+            let mut digits_full = digits.clone();
+            digits_full.extend(std::iter::repeat('0').take(int_digits - digits.len()));
+            format!("{sign}{digits_full}")
+        } else {
+            let (int_part, frac_part) = digits.split_at(int_digits);
+            format!("{sign}{int_part}.{frac_part}")
+        }
+    } else {
+        let zeros = std::iter::repeat('0')
+            .take((-exponent_value - 1) as usize)
+            .collect::<String>();
+        format!("{sign}0.{zeros}{digits}")
+    };
+
+    trim_trailing_decimal(&mut fixed);
+    if fixed == sign {
+        fixed.push('0');
+    }
+    fixed
+}
+
+#[cfg(windows)]
+fn trim_trailing_decimal(text: &mut String) {
+    if let Some(_) = text.find('.') {
+        while text.ends_with('0') {
+            text.pop();
+        }
+        if text.ends_with('.') {
+            text.pop();
+        }
+    }
 }
 
 #[cfg(test)]
