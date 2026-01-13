@@ -231,3 +231,5 @@ Engineers working on the next generation of renewable energy grids, autonomous v
 
 The future doesn't need to copy the business models of the past. But it should absolutely keep the best part of the legacy: code that looks like the math on the board.
 
+Want to see how close RunMat stays to MATLAB semantics? Check the [Language Coverage guide](/docs/language-coverage).
+

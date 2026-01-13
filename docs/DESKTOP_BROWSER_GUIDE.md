@@ -1,4 +1,4 @@
-# Getting Started with RunMat Desktop
+# Desktop & Browser Guide
 
 RunMat Desktop is a browser-based development environment for writing and running MATLAB-style code with GPU acceleration. It provides a full IDE experience—code editor, file explorer, console output, and live plotting—all running locally in your browser.
 

@@ -138,3 +138,5 @@ You can re-enable at any time by clearing the env var or setting `telemetry.enab
 ---
 
 Questions or feedback? Open an issue or reach us at team@dystr.com. We review this document regularly to keep it accurate and easy to read.
+
+New to MATLAB? See the primer: [What is MATLAB? The Language, The Runtime, and RunMat](/blog/what-is-matlab).

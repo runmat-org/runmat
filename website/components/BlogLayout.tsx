@@ -43,14 +43,6 @@ export function BlogLayout({
 
   const headerContent = (
     <>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {tags.map((tag) => (
-          <Badge key={tag} variant="secondary">
-            {tag}
-          </Badge>
-        ))}
-      </div>
-      
       <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
         {title}
       </h1>

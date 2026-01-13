@@ -69,13 +69,6 @@ export default function BlogPage() {
               <div className="flex flex-col md:flex-row">
                 <div className="flex-1 p-6">
                   <CardHeader className="p-0">
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {post.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
                     <CardTitle className="text-2xl leading-tight sm:text-3xl break-words">
                       <Link
                         href={`/blog/${post.slug}`}

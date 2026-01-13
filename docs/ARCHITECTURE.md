@@ -14,6 +14,8 @@ The architecture is guided by a few key principles:
 4.  **Fast Startup**: A key pain point of traditional MATLAB environments is slow startup time. RunMat addresses this with a sophisticated snapshotting system that pre-compiles and serializes the entire standard library into a binary blob that can be loaded into memory nearly instantaneously.
 5.  **Excellent Ergonomics**: From the evolving GPU-accelerated plotting layer to the helpful REPL and configuration system, the goal is to provide a powerful and pleasant user experience even while the project is in pre-release.
 
+Curious why Rust was chosen for this architecture? See the blog post [Choosing Rust for LLM-Generated Code](/blog/rust-llm-training-distribution).
+
 ---
 
 ## The Execution Pipeline: A Code's Journey

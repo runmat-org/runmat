@@ -7,11 +7,14 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { HeadingsNav } from '@/components/HeadingsNav';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
+import { getPublicBlogPosts } from '@/lib/blog';
 
 interface AuthorInfo {
   name: string;
@@ -336,6 +339,17 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
   if (!post) {
     notFound();
   }
+  const normalizeTags = (tags: string[] = []) => tags.map(t => t.toLowerCase());
+  const postTags = normalizeTags(post.frontmatter.tags);
+  const allPublic = getPublicBlogPosts()
+    .filter(p => p.slug !== slug)
+    .map(p => ({ ...p, _normTags: normalizeTags(p.tags) }));
+  const relatedByTag = allPublic.filter(p => p._normTags.some(tag => postTags.includes(tag)));
+  const needed = Math.max(0, 3 - relatedByTag.length);
+  const filler = allPublic
+    .filter(p => !relatedByTag.some(r => r.slug === p.slug))
+    .slice(0, needed);
+  const relatedPosts = [...relatedByTag, ...filler].slice(0, 3);
 
   // Format date as MM/DD/YYYY without timezone conversion; fallback to native parsing when needed
   const formatDate = (dateString?: string): string => {
@@ -403,6 +417,43 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
         />
       )}
       <MarkdownRenderer source={post.content} />
+
+      {relatedPosts.length > 0 && (
+        <div className="mt-16 not-prose">
+          <h2 className="text-2xl font-semibold mb-4">Related posts</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {relatedPosts.map((related) => (
+              <Link
+                key={related.slug}
+                href={`/blog/${related.slug}`}
+                className="group block h-full rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden hover:bg-muted/50 transition-colors"
+              >
+                <div className="relative w-full h-48">
+                  {related.image ? (
+                    <Image
+                      src={related.image}
+                      alt={related.imageAlt || related.title}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 1024px) 100vw, 33vw"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+                  )}
+                </div>
+                <div className="p-4 space-y-3">
+                  <h3 className="text-lg font-semibold leading-snug group-hover:underline">
+                    {related.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground line-clamp-3">
+                    {related.description}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* Newsletter CTA specific to blog posts */}
       <div className="mt-16">

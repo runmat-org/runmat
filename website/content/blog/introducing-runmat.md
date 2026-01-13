@@ -123,6 +123,7 @@ jsonLd:
 - Core built-ins are **canonical** (e.g., `sin`, `cos`, `sum`, and `printf`-style formatting like `fprintf`/`sprintf`) and match the expected, documented behavior. When semantics are domain-specific or ambiguous, they live in packages.
 - Built in **Rust**, with **tiered execution** (interpreter first, JIT for hot code) and a **generational GC** tuned for numerics.
 - Benchmarks show **150x–180x speedups** vs GNU Octave on representative workloads; see Performance below.
+- New to MATLAB? Start with our primer: [What is MATLAB? The Language, The Runtime, and RunMat](/blog/what-is-matlab).
 
 ---
 
@@ -198,6 +199,9 @@ cd benchmarks
 ./run_benchmarks.sh
 cat results/benchmark_YYYYMMDD_HHMMSS.yaml
 ```
+
+For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and Python in the
+[MATLAB alternatives guide](/blog/matlab-alternatives-runmat-vs-octave-julia-python).
 
 ---
 
