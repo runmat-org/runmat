@@ -199,7 +199,7 @@ export default function HomePage() {
             </h2>
             <p className="max-w-[46rem] text-muted-foreground">
               Comparing options? Read our{" "}
-              <Link href="/blog/matlab-alternatives-runmat-vs-octave-julia-python" className="underline">
+              <Link href="/blog/free-matlab-alternatives" className="underline">
                 MATLAB alternatives guide
               </Link>{" "}
               and why{" "}

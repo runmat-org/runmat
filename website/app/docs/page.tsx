@@ -11,7 +11,9 @@ export const metadata: Metadata = {
     title: "RunMat Documentation - Complete Guides and API Reference",
     description: "Complete guides and API reference to get you started with RunMat.",
     type: "website",
+    url: "https://runmat.org/docs",
   },
+  alternates: { canonical: "https://runmat.org/docs" },
 };
 
 export default function DocsPage() {

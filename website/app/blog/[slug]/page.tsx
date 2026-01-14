@@ -1,6 +1,6 @@
 import React, { use } from 'react';
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
-import { getPublicBlogPosts } from '@/lib/blog';
+import { getAllBlogPosts, getPublicBlogPosts, resolveBlogFilePath } from '@/lib/blog';
 
 interface AuthorInfo {
   name: string;
@@ -256,20 +256,24 @@ function normalizeAuthors(frontmatter: BlogPost['frontmatter']): AuthorInfo[] {
 }
 
 function getBlogPost(slug: string): BlogPost | null {
-  const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
+  const filePath = resolveBlogFilePath(slug);
+  if (!filePath) {
+    return null;
+  }
+
   try {
     const fileContent = readFileSync(filePath, 'utf-8');
     const { data: rawFrontmatter, content } = matter(fileContent);
     const frontmatter = validateFrontmatter(rawFrontmatter as Record<string, unknown>, slug);
+    const resolvedSlug = frontmatter.slug ?? slug;
 
     return {
-      slug,
+      slug: resolvedSlug,
       frontmatter,
       content,
       authors: normalizeAuthors(frontmatter),
     };
   } catch (error) {
-    // Surface validation or read errors to fail the build
     console.error(`Error loading blog post "${slug}":`, error);
     throw error;
   }
@@ -318,18 +322,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 // Generate static params for all blog posts
 export async function generateStaticParams() {
-  const contentDirectory = join(process.cwd(), 'content/blog');
-  try {
-    const files = readdirSync(contentDirectory);
-    return files
-      .filter(file => file.endsWith('.md'))
-      .map(file => ({
-        slug: file.replace('.md', '')
-      }));
-  } catch (error) {
-    console.warn('Could not read blog directory:', error);
-    return [];
-  }
+  return getAllBlogPosts().map(post => ({ slug: post.slug }));
 }
 
 export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -342,7 +335,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
   const normalizeTags = (tags: string[] = []) => tags.map(t => t.toLowerCase());
   const postTags = normalizeTags(post.frontmatter.tags);
   const allPublic = getPublicBlogPosts()
-    .filter(p => p.slug !== slug)
+    .filter(p => p.slug !== post.slug)
     .map(p => ({ ...p, _normTags: normalizeTags(p.tags) }));
   const relatedByTag = allPublic.filter(p => p._normTags.some(tag => postTags.includes(tag)));
   const needed = Math.max(0, 3 - relatedByTag.length);

@@ -9,7 +9,7 @@ authors:
     url: "https://www.linkedin.com/in/finbarrwatterson/"
   - name: "Nabeel Allana"
     url: "https://x.com/nabeelallana"
-slug: "matlab-alternatives-runmat-vs-octave-julia-python"
+slug: "free-matlab-alternatives"
 tags: ["MATLAB", "RunMat", "Octave", "Julia", "Python", "scientific computing", "open source"]
 keywords: " Free MATLAB alternatives, free MATLAB, Octave comparison, Julia vs MATLAB, Python vs MATLAB, RunMat"
 excerpt: "We compare four leading MATLAB alternatives (RunMat, Octave, Julia, and Python) focusing on speed, compatibility, and real engineering workflows."

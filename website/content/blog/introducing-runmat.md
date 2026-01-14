@@ -201,7 +201,7 @@ cat results/benchmark_YYYYMMDD_HHMMSS.yaml
 ```
 
 For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and Python in the
-[MATLAB alternatives guide](/blog/matlab-alternatives-runmat-vs-octave-julia-python).
+[MATLAB alternatives guide](/blog/free-matlab-alternatives).
 
 ---
 
