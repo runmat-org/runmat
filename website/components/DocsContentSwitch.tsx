@@ -11,7 +11,7 @@ export function DocsContentSwitch({ source }: { source: string }) {
   const params = useSearchParams();
   const q = (params.get("q") || "").trim();
   if (q) {
-    return <DocsSearchResults source={source} />;
+    return <DocsSearchResults />;
   }
   // On client path, when no query present, render nothing here (server-rendered copy is visible)
   return <ClientMarkdown source={source} />;
