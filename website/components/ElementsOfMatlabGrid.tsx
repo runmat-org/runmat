@@ -252,8 +252,7 @@ function GridView({
               {/* "View All" tile - only show if there are more items than displayed and not expanded */}
               {showViewAll && (
                 <ViewAllTile 
-                  category={group.category} 
-                  subcategories={group.subcategories}
+                  category={group.category}
                   totalCount={group.totalCount}
                   onClick={() => onToggleExpand(group.category)}
                 />
