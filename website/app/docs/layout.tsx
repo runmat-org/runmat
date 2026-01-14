@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { docsTree, DocsNode, flatten } from "@/content/docs";
+import { docsTree, DocsNode } from "@/content/docs";
 import { Menu } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";

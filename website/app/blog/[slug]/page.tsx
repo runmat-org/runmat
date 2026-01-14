@@ -11,7 +11,6 @@ import Image from 'next/image';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
 import { getAllBlogPosts, getPublicBlogPosts, resolveBlogFilePath } from '@/lib/blog';

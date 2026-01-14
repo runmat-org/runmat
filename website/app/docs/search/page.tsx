@@ -12,7 +12,7 @@ export default function DocsSearchPage() {
   return (
     <div className="min-h-screen">
       <div className="text-sm text-muted-foreground mb-4">Documentation / Search</div>
-      <DocsSearchResults source={''} />
+      <DocsSearchResults />
     </div>
   );
 }
