@@ -193,7 +193,9 @@ fn horzcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut forwarded = Vec::with_capacity(args.len() + 1);
     forwarded.push(Value::Int(IntValue::I32(2)));
     forwarded.extend(args);
-    crate::call_builtin("cat", &forwarded).map_err(adapt_cat_error)
+    crate::call_builtin("cat", &forwarded)
+        .map_err(crate::dispatcher::flow_to_string)
+        .map_err(adapt_cat_error)
 }
 
 fn empty_double() -> Result<Value, String> {

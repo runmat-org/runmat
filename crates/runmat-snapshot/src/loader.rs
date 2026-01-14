@@ -526,7 +526,11 @@ impl SnapshotLoader {
                 );
                 // Use a placeholder function that returns an error
                 dispatch_table
-                    .push(|_args| Err("Function not available in current runtime".to_string()));
+                    .push(|_args| {
+                        Err(runmat_async::RuntimeControlFlow::Error(
+                            "Function not available in current runtime".to_string(),
+                        ))
+                    });
             }
         }
 

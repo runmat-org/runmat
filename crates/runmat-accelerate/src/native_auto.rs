@@ -1508,7 +1508,7 @@ fn compare_elemwise(
     };
     let a = Value::Tensor(template.clone());
     let b = Value::Tensor(template.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
+    let cpu_time = time(|| Ok(runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])?))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -1577,7 +1577,8 @@ fn compare_reduction(
         }
     };
     let value = Value::Tensor(template.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("sum", std::slice::from_ref(&value)))?;
+    let cpu_time =
+        time(|| Ok(runmat_runtime::call_builtin("sum", std::slice::from_ref(&value))?))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {

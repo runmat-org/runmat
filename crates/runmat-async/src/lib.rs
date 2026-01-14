@@ -1,12 +1,18 @@
-use thiserror::Error;
 use std::fmt;
 
+use thiserror::Error;
+
+/// Narrow set of interaction kinds that can suspend execution.
+///
+/// Note: this is transitional scaffolding for Phase 1. It will evolve into a richer typed
+/// awaitable/pending-request model once `ExecuteFuture` lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionKind {
     Line { echo: bool },
     KeyPress,
-    /// Internal suspension point (e.g. wasm WebGPU readback). The prompt/label carries debug info.
-    Internal,
+    /// Internal suspension used while waiting for a WebGPU map/readback completion.
+    /// The prompt/label carries debug info.
+    GpuMapRead,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,10 +44,24 @@ impl From<&str> for RuntimeControlFlow {
 impl fmt::Display for RuntimeControlFlow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RuntimeControlFlow::Suspend(pending) => {
-                write!(f, "suspend: {}", pending.prompt)
-            }
+            RuntimeControlFlow::Suspend(pending) => write!(f, "suspend: {}", pending.prompt),
             RuntimeControlFlow::Error(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl From<RuntimeControlFlow> for String {
+    fn from(value: RuntimeControlFlow) -> Self {
+        match value {
+            RuntimeControlFlow::Error(e) => e,
+            RuntimeControlFlow::Suspend(pending) => {
+                let kind = match pending.kind {
+                    InteractionKind::Line { .. } => "line",
+                    InteractionKind::KeyPress => "keypress",
+                    InteractionKind::GpuMapRead => "internal",
+                };
+                format!("__RUNMAT_SUSPEND__:{kind}:{}", pending.prompt)
+            }
         }
     }
 }
@@ -58,7 +78,7 @@ pub struct SuspendMarker {
 impl SuspendMarker {
     pub fn internal(prompt: impl Into<String>) -> Self {
         Self {
-            kind: InteractionKind::Internal,
+            kind: InteractionKind::GpuMapRead,
             prompt: prompt.into(),
         }
     }

@@ -13,6 +13,7 @@ runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, optional = true }
 runmat-accelerate = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, optional = true }
+runmat-async = { workspace = true }
 runmat-lexer = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }

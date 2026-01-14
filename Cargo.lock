@@ -6042,6 +6042,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-async"
+version = "0.2.8"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-builtins"
 version = "0.2.8"
 dependencies = [
@@ -6049,7 +6056,7 @@ dependencies = [
  "inventory",
  "once_cell",
  "runmat-accelerate-api",
- "runmat-control-flow",
+ "runmat-async",
  "runmat-gc-api",
  "runmat-macros",
  "serde",
@@ -6072,13 +6079,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "runmat-control-flow"
-version = "0.2.8"
-dependencies = [
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6168,6 +6168,7 @@ dependencies = [
  "once_cell",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -6355,8 +6356,8 @@ dependencies = [
  "reqwest 0.12.23",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
- "runmat-control-flow",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
@@ -6410,6 +6411,7 @@ dependencies = [
  "lz4_flex",
  "memmap2",
  "parking_lot",
+ "runmat-async",
  "runmat-builtins",
  "runmat-filesystem",
  "runmat-gc",

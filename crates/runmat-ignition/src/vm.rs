@@ -216,7 +216,7 @@ fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, String>
 
 fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, String> {
     let prepared = accel_prepare_args(name, args)?;
-    runmat_runtime::call_builtin(name, &prepared)
+    Ok(runmat_runtime::call_builtin(name, &prepared)?)
 }
 
 #[cfg(feature = "native-accel")]
@@ -1268,8 +1268,8 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn is_suspend_flow(flow: &runmat_control_flow::RuntimeControlFlow) -> bool {
-    matches!(flow, runmat_control_flow::RuntimeControlFlow::Suspend(_))
+fn is_suspend_flow(flow: &runmat_async::RuntimeControlFlow) -> bool {
+    matches!(flow, runmat_async::RuntimeControlFlow::Suspend(_))
 }
 
 fn resolve_emit_label_text(
@@ -2955,13 +2955,13 @@ fn run_interpreter(
                                 stack.push(arg.clone());
                             }
                             match e {
-                                runmat_control_flow::RuntimeControlFlow::Suspend(pending) => {
+                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
                                     suspend_pending!({}, pending);
                                 }
-                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                                runmat_async::RuntimeControlFlow::Error(_) => {}
                             }
                         }
-                        let runmat_control_flow::RuntimeControlFlow::Error(e) = e else {
+                        let runmat_async::RuntimeControlFlow::Error(e) = e else {
                             unreachable!("suspend handled above");
                         };
                         // Specific-import matches: import pkg.foo; name == foo
@@ -2981,12 +2981,10 @@ fn run_interpreter(
                                                 stack.push(arg.clone());
                                             }
                                             match err {
-                                                runmat_control_flow::RuntimeControlFlow::Suspend(
-                                                    pending,
-                                                ) => {
+                                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
                                                     suspend_pending!({}, pending);
                                                 }
-                                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                                                runmat_async::RuntimeControlFlow::Error(_) => {}
                                             }
                                         }
                                     }
@@ -3032,12 +3030,10 @@ fn run_interpreter(
                                                 stack.push(arg.clone());
                                             }
                                             match err {
-                                                runmat_control_flow::RuntimeControlFlow::Suspend(
-                                                    pending,
-                                                ) => {
+                                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
                                                     suspend_pending!({}, pending);
                                                 }
-                                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                                                runmat_async::RuntimeControlFlow::Error(_) => {}
                                             }
                                         }
                                     }

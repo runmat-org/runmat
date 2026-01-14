@@ -766,11 +766,11 @@ impl RunMatSession {
                 match frame.pending.interaction.kind {
                     runmat_runtime::interaction::InteractionKind::Line { .. }
                     | runmat_runtime::interaction::InteractionKind::KeyPress => Some(PendingInput {
-                        id: *id,
-                        request: pending_interaction_to_request(&frame.pending.interaction),
-                        waiting_ms: now
-                            .saturating_duration_since(frame.pending_since)
-                            .as_millis() as u64,
+                id: *id,
+                request: pending_interaction_to_request(&frame.pending.interaction),
+                waiting_ms: now
+                    .saturating_duration_since(frame.pending_since)
+                    .as_millis() as u64,
                     }),
                     runmat_runtime::interaction::InteractionKind::GpuMapRead => None,
                 }

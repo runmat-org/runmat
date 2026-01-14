@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/runmat-control-flow",
+    "crates/runmat-async",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -62,7 +62,7 @@ runmat-lexer = { version = "=0.2.8", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.2.8", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.2.8", path = "crates/runmat-hir" }
 runmat-ignition = { version = "=0.2.8", path = "crates/runmat-ignition" }
-runmat-control-flow = { version = "=0.2.8", path = "crates/runmat-control-flow" }
+runmat-async = { version = "=0.2.8", path = "crates/runmat-async" }
 runmat-core = { version = "=0.2.8", path = "crates/runmat-core", default-features = false }
 runmat-plot = { version = "=0.2.8", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.2.8", path = "crates/runmat-macros" }

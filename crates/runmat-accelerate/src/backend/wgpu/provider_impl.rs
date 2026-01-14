@@ -16343,8 +16343,8 @@ impl AccelProvider for WgpuProvider {
         // Shared post-map readback logic: decode mapped bytes, unmap, record telemetry,
         // apply transpose metadata, and return host tensor.
         let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
-            let slice = staging.slice(..);
-            let data = slice.get_mapped_range();
+        let slice = staging.slice(..);
+        let data = slice.get_mapped_range();
             log::trace!(
                 "wgpu download copying data id={} len={} bytes={}",
                 h.buffer_id,
@@ -16352,47 +16352,47 @@ impl AccelProvider for WgpuProvider {
                 size_bytes
             );
 
-            let mut out = vec![0.0f64; entry.len];
-            match entry.precision {
+        let mut out = vec![0.0f64; entry.len];
+        match entry.precision {
                 NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
-                NumericPrecision::F32 => {
-                    let f32_slice: &[f32] = cast_slice(&data);
-                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                        *dst = *src as f64;
-                    }
+            NumericPrecision::F32 => {
+                let f32_slice: &[f32] = cast_slice(&data);
+                for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                    *dst = *src as f64;
                 }
             }
-            drop(data);
-            staging.unmap();
+        }
+        drop(data);
+        staging.unmap();
             log::trace!("wgpu download finished copy id={}", h.buffer_id);
-            self.telemetry.record_download_bytes(size_bytes);
+        self.telemetry.record_download_bytes(size_bytes);
 
-            let mut shape = h.shape.clone();
-            if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
-                let base_rows = info.base_rows;
-                let base_cols = info.base_cols;
-                if base_rows * base_cols != out.len() {
-                    return Err(anyhow!(
-                        "download: transpose metadata mismatch for buffer {}",
-                        h.buffer_id
-                    ));
-                }
-                if shape.len() == 2 {
-                    let rows_t = base_cols;
-                    let cols_t = base_rows;
-                    let mut transposed = vec![0.0f64; out.len()];
-                    for col in 0..base_cols {
-                        for row in 0..base_rows {
-                            let src_idx = row + col * base_rows;
-                            let dst_idx = col + row * base_cols;
-                            transposed[dst_idx] = out[src_idx];
-                        }
-                    }
-                    out = transposed;
-                    shape[0] = rows_t;
-                    shape[1] = cols_t;
-                }
+        let mut shape = h.shape.clone();
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
+            let base_rows = info.base_rows;
+            let base_cols = info.base_cols;
+            if base_rows * base_cols != out.len() {
+                return Err(anyhow!(
+                    "download: transpose metadata mismatch for buffer {}",
+                    h.buffer_id
+                ));
             }
+            if shape.len() == 2 {
+                let rows_t = base_cols;
+                let cols_t = base_rows;
+                let mut transposed = vec![0.0f64; out.len()];
+                for col in 0..base_cols {
+                    for row in 0..base_rows {
+                        let src_idx = row + col * base_rows;
+                        let dst_idx = col + row * base_cols;
+                        transposed[dst_idx] = out[src_idx];
+                    }
+                }
+                out = transposed;
+                shape[0] = rows_t;
+                shape[1] = cols_t;
+            }
+        }
 
             log::trace!(
                 "wgpu download complete id={} final_shape={:?}",
@@ -16400,7 +16400,7 @@ impl AccelProvider for WgpuProvider {
                 shape
             );
 
-            Ok(HostTensorOwned { data: out, shape })
+        Ok(HostTensorOwned { data: out, shape })
         };
 
         // wasm/WebGPU: never block waiting for map_async. Instead, schedule the map once and

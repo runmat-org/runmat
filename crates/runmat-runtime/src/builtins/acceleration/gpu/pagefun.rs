@@ -13,6 +13,7 @@ use crate::gather_if_needed;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_async::RuntimeControlFlow;
 
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 
@@ -214,7 +215,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
     let all_gpu = operands.iter().all(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
-        host_values.push(gather_if_needed(&value)?);
+        host_values.push(gather_if_needed(&value).map_err(flow_to_string)?);
     }
 
     let mut page_inputs = Vec::with_capacity(host_values.len());
@@ -298,7 +299,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
         }
 
         let mut evaluated = operation.evaluate(&page_args)?;
-        evaluated = gather_if_needed(&evaluated)?;
+        evaluated = gather_if_needed(&evaluated).map_err(flow_to_string)?;
         match output_kind {
             OutputKind::Real => {
                 let (data, rows, cols) = tensor_matrix_data(evaluated)?;
@@ -352,6 +353,13 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
     };
 
     output.into_value(all_gpu)
+}
+
+fn flow_to_string(flow: RuntimeControlFlow) -> String {
+    match flow {
+        RuntimeControlFlow::Error(e) => e,
+        RuntimeControlFlow::Suspend(pending) => format!("__RUNMAT_SUSPEND__:internal:{}", pending.prompt),
+    }
 }
 
 fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Option<Value>, String> {
@@ -906,7 +914,7 @@ impl PageOperation {
 
     fn evaluate(&self, args: &[Value]) -> Result<Value, String> {
         match self {
-            Self::Mtimes => crate::call_builtin("mtimes", args),
+            Self::Mtimes => crate::call_builtin("mtimes", args).map_err(flow_to_string),
         }
     }
 

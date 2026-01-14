@@ -202,7 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
-        host_args.push(gather_if_needed(value)?);
+        host_args.push(gather_if_needed(value).map_err(crate::dispatcher::flow_to_string)?);
     }
 
     let default_path = Value::from("matlab.mat");
@@ -438,7 +438,7 @@ fn collect_workspace_entries() -> Result<Vec<(String, Value)>, String> {
         workspace::snapshot().ok_or_else(|| "save: workspace state unavailable".to_string())?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
-        let gathered = gather_if_needed(&value)?;
+        let gathered = gather_if_needed(&value).map_err(crate::dispatcher::flow_to_string)?;
         entries.push((name, gathered));
     }
     Ok(entries)
@@ -492,7 +492,8 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
         }
         other => {
             // Gather once, then require a string-like scalar to avoid infinite recursion.
-            let gathered = gather_if_needed(other)?;
+            let gathered =
+                gather_if_needed(other).map_err(crate::dispatcher::flow_to_string)?;
             if let Some(text) = value_to_string_scalar(&gathered) {
                 return Ok(vec![text]);
             }
@@ -520,7 +521,8 @@ fn append_struct_fields(
         for field in names {
             match value.fields.get(field) {
                 Some(val) => {
-                    let gathered = gather_if_needed(val)?;
+                    let gathered =
+                        gather_if_needed(val).map_err(crate::dispatcher::flow_to_string)?;
                     out.push((field.clone(), gathered));
                 }
                 None => {
@@ -533,7 +535,8 @@ fn append_struct_fields(
         }
     } else {
         for (field, val) in &value.fields {
-            let gathered = gather_if_needed(val)?;
+            let gathered =
+                gather_if_needed(val).map_err(crate::dispatcher::flow_to_string)?;
             out.push((field.clone(), gathered));
         }
     }
@@ -559,7 +562,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
 fn lookup_workspace(name: &str) -> Result<Value, String> {
     workspace::lookup(name)
         .ok_or_else(|| format!("save: variable '{}' was not found in the workspace", name))
-        .and_then(|value| gather_if_needed(&value))
+        .and_then(|value| gather_if_needed(&value).map_err(Into::into))
 }
 
 fn normalise_path(path: &Value) -> Result<PathBuf, String> {
@@ -689,7 +692,8 @@ fn convert_value(value: &Value) -> Result<MatArray, String> {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
                     let element = unsafe { &*cell.data[idx].as_raw() };
-                    let gathered = gather_if_needed(element)?;
+                    let gathered =
+                        gather_if_needed(element).map_err(crate::dispatcher::flow_to_string)?;
                     elements.push(convert_value(&gathered)?);
                 }
             }
@@ -708,7 +712,8 @@ fn convert_value(value: &Value) -> Result<MatArray, String> {
                     .fields
                     .get(field)
                     .ok_or_else(|| format!("save: missing struct field '{field}'"))?;
-                let gathered = gather_if_needed(val)?;
+                let gathered =
+                    gather_if_needed(val).map_err(crate::dispatcher::flow_to_string)?;
                 field_values.push(convert_value(&gathered)?);
             }
             Ok(MatArray {

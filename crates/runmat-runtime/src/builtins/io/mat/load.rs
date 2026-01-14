@@ -225,7 +225,7 @@ struct LoadRequest {
 pub fn evaluate(args: &[Value]) -> Result<LoadEval, String> {
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
-        host_args.push(gather_if_needed(arg)?);
+        host_args.push(gather_if_needed(arg).map_err(crate::dispatcher::flow_to_string)?);
     }
 
     let invocation = parse_invocation(&host_args)?;
@@ -800,7 +800,8 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
             Ok(names)
         }
         other => {
-            let gathered = gather_if_needed(other)?;
+            let gathered =
+                gather_if_needed(other).map_err(crate::dispatcher::flow_to_string)?;
             extract_names(&gathered)
         }
     }

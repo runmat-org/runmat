@@ -4,7 +4,7 @@
 //! zeros, ones, eye, etc. These functions are optimized for performance and memory efficiency.
 
 use runmat_builtins::Value;
-use runmat_control_flow::RuntimeControlFlow;
+use runmat_async::RuntimeControlFlow;
 
 /// Create a range vector (equivalent to start:end or start:step:end)
 pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, RuntimeControlFlow> {

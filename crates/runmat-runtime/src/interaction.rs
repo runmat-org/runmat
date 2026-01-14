@@ -10,14 +10,7 @@ use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-#[derive(Clone, Copy)]
-pub enum InteractionKind {
-    Line { echo: bool },
-    KeyPress,
-    /// Internal suspension used by the wasm runtime while waiting for a WebGPU map/readback
-    /// completion. The `PendingInteraction.prompt` carries a human-readable label.
-    GpuMapRead,
-}
+pub use runmat_async::InteractionKind;
 
 pub struct InteractionPrompt<'a> {
     pub prompt: &'a str,
@@ -32,11 +25,7 @@ pub enum InteractionResponse {
     GpuMapReady,
 }
 
-#[derive(Clone)]
-pub struct PendingInteraction {
-    pub prompt: String,
-    pub kind: InteractionKind,
-}
+pub use runmat_async::PendingInteraction;
 
 #[derive(Clone)]
 pub enum InteractionDecision {

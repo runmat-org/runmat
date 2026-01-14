@@ -482,7 +482,7 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
     } else if row_matrices.len() == 1 {
         Ok(row_matrices.into_iter().next().unwrap())
     } else {
-        crate::call_builtin("vertcat", &row_matrices)
+        Ok(crate::call_builtin("vertcat", &row_matrices)?)
     }
 }
 

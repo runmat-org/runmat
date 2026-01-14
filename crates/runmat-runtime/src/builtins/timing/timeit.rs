@@ -299,7 +299,7 @@ impl TimeitCallable {
             drop(value);
             Ok(Value::Num(0.0))
         } else {
-            crate::call_builtin("feval", std::slice::from_ref(&self.handle))
+            Ok(crate::call_builtin("feval", std::slice::from_ref(&self.handle))?)
         }
     }
 }

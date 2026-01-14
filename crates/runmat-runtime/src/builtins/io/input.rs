@@ -174,7 +174,7 @@ fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
 }
 
 fn parse_prompt(value: &Value) -> Result<String, String> {
-    let gathered = gather_if_needed(value)?;
+    let gathered = gather_if_needed(value).map_err(crate::dispatcher::flow_to_string)?;
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
@@ -196,7 +196,7 @@ fn parse_prompt(value: &Value) -> Result<String, String> {
 }
 
 fn parse_string_flag(value: &Value) -> Result<bool, String> {
-    let gathered = gather_if_needed(value)?;
+    let gathered = gather_if_needed(value).map_err(crate::dispatcher::flow_to_string)?;
     let text = match gathered {
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect::<String>(),
         Value::String(s) => s,

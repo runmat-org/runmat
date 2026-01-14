@@ -1,7 +1,26 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
-use runmat_control_flow::{PendingInteraction, RuntimeControlFlow, SuspendMarker};
+use runmat_async::{PendingInteraction, RuntimeControlFlow, SuspendMarker};
 
 use crate::{make_cell_with_shape, new_object_builtin};
+
+/// Convert typed runtime control-flow into a legacy `String` error.
+///
+/// Transitional helper: this is used in a handful of builtins that still return `Result<_, String>`
+/// while calling into control-flow-aware helpers (`call_builtin`, `gather_if_needed`). Suspension is
+/// encoded using a marker string that `call_builtin` decodes back into `RuntimeControlFlow::Suspend`.
+pub fn flow_to_string(flow: RuntimeControlFlow) -> String {
+    match flow {
+        RuntimeControlFlow::Error(e) => e,
+        RuntimeControlFlow::Suspend(pending) => {
+            let kind = match pending.kind {
+                runmat_async::InteractionKind::Line { .. } => "line",
+                runmat_async::InteractionKind::KeyPress => "keypress",
+                runmat_async::InteractionKind::GpuMapRead => "internal",
+            };
+            format!("__RUNMAT_SUSPEND__:{kind}:{}", pending.prompt)
+        }
+    }
+}
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -163,6 +182,21 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlF
             Err(flow) => match flow {
                 RuntimeControlFlow::Suspend(pending) => return Err(RuntimeControlFlow::Suspend(pending)),
                 RuntimeControlFlow::Error(err) => {
+                    // Transitional: allow suspensions to bubble through legacy `Result<_, String>` call
+                    // stacks (e.g., GPU gather fallbacks) by encoding them as a marker string.
+                    if let Some(rest) = err.strip_prefix("__RUNMAT_SUSPEND__:") {
+                        if let Some((kind, prompt)) = rest.split_once(':') {
+                            let kind = match kind {
+                                "line" => runmat_async::InteractionKind::Line { echo: true },
+                                "keypress" => runmat_async::InteractionKind::KeyPress,
+                                "internal" | _ => runmat_async::InteractionKind::GpuMapRead,
+                            };
+                            return Err(RuntimeControlFlow::Suspend(PendingInteraction {
+                                prompt: prompt.to_string(),
+                                kind,
+                            }));
+                        }
+                    }
                     if should_retry_with_gpu_gather(&err, args) {
                         match gather_args_for_retry(args) {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args) {

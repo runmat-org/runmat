@@ -14,6 +14,7 @@ use crate::{gather_if_needed, make_cell_with_shape};
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_async::RuntimeControlFlow;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -305,7 +306,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
             return Err("arrayfun: struct inputs are not supported".to_string());
         }
 
-        let host_value = gather_if_needed(&raw)?;
+        let host_value = gather_if_needed(&raw).map_err(flow_to_string)?;
         let data = ArrayData::from_value(host_value)?;
         let len = data.len();
         let is_scalar = len == 1;
@@ -410,7 +411,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
             }
         };
 
-        let host_result = gather_if_needed(&result)?;
+        let host_result = gather_if_needed(&result).map_err(flow_to_string)?;
 
         if let Some(collector) = collector.as_mut() {
             collector.push(&host_result)?;
@@ -424,6 +425,13 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
         maybe_upload_uniform(uniform, has_gpu_input, gpu_device_id)
     } else {
         make_cell_with_shape(cell_outputs, base_shape).map_err(|e| format!("arrayfun: {e}"))
+    }
+}
+
+fn flow_to_string(flow: RuntimeControlFlow) -> String {
+    match flow {
+        RuntimeControlFlow::Error(e) => e,
+        RuntimeControlFlow::Suspend(pending) => format!("__RUNMAT_SUSPEND__:internal:{}", pending.prompt),
     }
 }
 
@@ -718,11 +726,11 @@ impl Callable {
 
     fn call(&self, args: &[Value]) -> Result<Value, String> {
         match self {
-            Callable::Builtin { name } => crate::call_builtin(name, args),
+            Callable::Builtin { name } => crate::call_builtin(name, args).map_err(flow_to_string),
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
-                crate::call_builtin(&c.function_name, &merged)
+                crate::call_builtin(&c.function_name, &merged).map_err(flow_to_string)
             }
         }
     }

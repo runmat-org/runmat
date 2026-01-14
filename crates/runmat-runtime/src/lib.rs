@@ -168,7 +168,7 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
                 return Ok(v);
             }
             // Fallback to global method name
-            crate::call_builtin(&method, &args)
+            Ok(crate::call_builtin(&method, &args)?)
         }
         Value::HandleObject(h) => {
             // Methods on handle classes dispatch to the underlying target's class namespace
@@ -185,7 +185,7 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
             if let Ok(v) = crate::call_builtin(&qualified, &args) {
                 return Ok(v);
             }
-            crate::call_builtin(&method, &args)
+            Ok(crate::call_builtin(&method, &args)?)
         }
         other => Err(format!(
             "call_method unsupported on {other:?} for method '{method}'"
@@ -204,7 +204,7 @@ fn subsasgn_dispatch(
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsasgn", o.class_name);
-            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
+            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -213,7 +213,7 @@ fn subsasgn_dispatch(
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsasgn");
-            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
+            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])?)
         }
         other => Err(format!("subsasgn: receiver must be object, got {other:?}")),
     }
@@ -224,7 +224,7 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsref", o.class_name);
-            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
+            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])?)
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -233,7 +233,7 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.subsref");
-            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
+            Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])?)
         }
         other => Err(format!("subsref: receiver must be object, got {other:?}")),
     }
@@ -965,7 +965,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
         // Current handles are strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
-                crate::call_builtin(name, &rest)
+                Ok(crate::call_builtin(name, &rest)?)
             } else {
                 Err(format!(
                     "feval: expected function handle string starting with '@', got {s}"
@@ -977,7 +977,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
                 if let Some(name) = s.strip_prefix('@') {
-                    crate::call_builtin(name, &rest)
+                    Ok(crate::call_builtin(name, &rest)?)
                 } else {
                     Err(format!(
                         "feval: expected function handle string starting with '@', got {s}"
@@ -990,7 +990,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
-            crate::call_builtin(&c.function_name, &args)
+            Ok(crate::call_builtin(&c.function_name, &args)?)
         }
         // Future: support Value::Function variants
         other => Err(format!("feval: unsupported function value {other:?}")),

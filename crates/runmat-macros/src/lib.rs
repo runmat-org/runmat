@@ -203,7 +203,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> Result<runmat_builtins::Value, runmat_control_flow::RuntimeControlFlow> {
+        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> Result<runmat_builtins::Value, runmat_async::RuntimeControlFlow> {
             #![allow(unused_variables)]
             if #is_last_variadic {
                 if args.len() < #param_len - 1 { return Err(format!("expected at least {} args, got {}", #param_len - 1, args.len()).into()); }

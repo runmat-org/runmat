@@ -771,8 +771,9 @@ fn get_object_field(obj: &ObjectInstance, name: &str) -> Result<Value, String> {
             match call_builtin(&getter, &[Value::Object(obj.clone())]) {
                 Ok(value) => return Ok(value),
                 Err(err) => {
-                    if !err.contains("MATLAB:UndefinedFunction") {
-                        return Err(err);
+                    let message: String = err.into();
+                    if !message.contains("MATLAB:UndefinedFunction") {
+                        return Err(message);
                     }
                 }
             }
