@@ -226,6 +226,8 @@ RunMat’s GPU acceleration is best understood as a system that:
 
 By working at this higher level, RunMat gives you the throughput benefits of modern GPUs while preserving the simplicity of MATLAB-syntax array programming. You focus on the math; RunMat operates the accelerator.
 
+Next, see the [Fusion Guide](/docs/fusion-guide) for detailed fusion patterns and GPU residency rules.
+
 ---
  
 ## Advanced — Managing memory and transfers

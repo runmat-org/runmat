@@ -24,6 +24,17 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
+        title: "Desktop & Browser Guide",
+        slug: ["desktop-browser-guide"],
+        file: "docs/DESKTOP_BROWSER_GUIDE.md",
+        seo: {
+          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
+          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
+          ogTitle: "Desktop & Browser Guide",
+          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+        },
+      },
+      {
         title: "Design Philosophy",
         slug: ["design-philosophy"],
         file: "docs/DESIGN_PHILOSOPHY.md",

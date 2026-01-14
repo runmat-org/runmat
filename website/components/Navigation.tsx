@@ -28,9 +28,9 @@ export default function Navigation() {
             <Image
               src="/runmat-logo.svg"
               alt="RunMat"
-              width={160}
-              height={28}
-              className="h-7 w-auto"
+              width={136}
+              height={24}
+              className="h-6 w-auto"
               priority
             />
           </Link>
@@ -66,9 +66,9 @@ export default function Navigation() {
               <Image
                 src="/runmat-logo.svg"
                 alt="RunMat"
-                width={140}
-                height={24}
-                className="h-6 w-auto"
+                width={120}
+                height={20}
+                className="h-5 w-auto"
                 priority
               />
             </Link>

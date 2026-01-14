@@ -227,7 +227,7 @@ Key properties about RunMat Fusion:
 - **Cross-platform GPU backend** via `wgpu`, targeting **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)**.
 - **Residency awareness**: keep arrays on device when it’s faster, and avoid unnecessary transfers.
 
-To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](../INTRODUCTION_TO_RUNMAT_GPU.md).
+To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](/docs/accelerate/fusion-intro).
 
 ### Tiered CPU execution (fast startup + fast hot loops)
 
@@ -257,7 +257,7 @@ runmat benchmark my_script.m --iterations 5 --jit
 runmat accel-info
 ```
 
-For the full CLI reference, see [CLI](../CLI.md).
+For the full CLI reference, see [CLI](/docs/cli).
 
 ---
 

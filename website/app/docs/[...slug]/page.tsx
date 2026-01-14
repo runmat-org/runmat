@@ -90,6 +90,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const base: Metadata = { title: baseTitle };
   if (!node) return base;
 
+  const baseUrl = "https://runmat.org";
+  const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
+  const pageUrl = `${baseUrl}${path}`;
   const seo = (node as DocsNode).seo;
   const parsed = node.file ? readDocSource(node.file) : null;
   const fm = parsed?.data || {};
@@ -104,7 +107,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
     title,
     description,
     keywords,
-    openGraph: (ogTitle || ogDescription) ? { title: ogTitle, description: ogDescription } : undefined,
+    alternates: { canonical: pageUrl },
+    openGraph: (ogTitle || ogDescription)
+      ? { title: ogTitle, description: ogDescription, url: pageUrl }
+      : { url: pageUrl },
     twitter: (ogTitle || ogDescription) ? { card: 'summary_large_image', title: ogTitle, description: ogDescription } : undefined,
   };
 }

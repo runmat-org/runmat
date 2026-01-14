@@ -117,6 +117,13 @@ export default function HowItWorksPage() {
           <p className="text-lg leading-relaxed mb-6 text-muted-foreground">
             RunMat&apos;s fusion engine automatically:
           </p>
+          <p className="text-sm text-muted-foreground mb-4">
+            For a product overview, read the{" "}
+            <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
+              RunMat Accelerate announcement
+            </Link>
+            .
+          </p>
           <ul className="space-y-4 mb-6 text-lg leading-relaxed">
             <li className="flex items-start">
               <span className="text-green-600 mr-3 mt-1">•</span>
@@ -554,6 +561,9 @@ export default function HowItWorksPage() {
           <p className="text-lg text-muted-foreground mb-6">
             RunMat keeps the core minimal. New functions, types, and accelerators ship as packages — native (Rust)
             for maximum performance, or source (MATLAB) for portability.
+          </p>
+          <p className="text-sm text-muted-foreground mb-4">
+            See the draft <Link href="/docs/package-manager" className="underline">Package Manager design</Link> for how registries, semver, and native/source packages will work.
           </p>
           
           <div className="space-y-6">

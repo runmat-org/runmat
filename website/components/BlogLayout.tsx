@@ -8,6 +8,7 @@ interface BlogLayoutProps {
   title: string;
   description: string;
   date: string;
+  dateModified?: string;
   readTime: string;
   authors: { name: string; url?: string }[];
   tags: string[];
@@ -21,6 +22,7 @@ export function BlogLayout({
   title,
   description,
   date,
+  dateModified,
   readTime,
   authors,
   tags,
@@ -41,14 +43,6 @@ export function BlogLayout({
 
   const headerContent = (
     <>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {tags.map((tag) => (
-          <Badge key={tag} variant="secondary">
-            {tag}
-          </Badge>
-        ))}
-      </div>
-      
       <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
         {title}
       </h1>
@@ -58,8 +52,17 @@ export function BlogLayout({
       <div className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4" />
-          {date}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-foreground font-medium">Published</span>
+            <span>{date}</span>
+          </div>
         </div>
+        {dateModified && dateModified !== date && (
+          <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-sm font-medium text-foreground/80">
+            <Calendar className="h-4 w-4" />
+            <span>Updated {dateModified}</span>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4" />
           {readTime}

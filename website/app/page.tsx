@@ -197,6 +197,17 @@ export default function HomePage() {
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
               Why Use RunMat?
             </h2>
+            <p className="max-w-[46rem] text-muted-foreground">
+              Comparing options? Read our{" "}
+              <Link href="/blog/free-matlab-alternatives" className="underline">
+                MATLAB alternatives guide
+              </Link>{" "}
+              and why{" "}
+              <Link href="/blog/in-defense-of-matlab-whiteboard-style-code" className="underline">
+                MATLAB-style syntax still matters
+              </Link>
+              .
+            </p>
           </div>
           <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-3 md:max-w-[80rem]">
             <Card>

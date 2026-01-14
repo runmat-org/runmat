@@ -1,17 +1,20 @@
 import React, { use } from 'react';
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { HeadingsNav } from '@/components/HeadingsNav';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
+import { getAllBlogPosts, getPublicBlogPosts, resolveBlogFilePath } from '@/lib/blog';
 
 interface AuthorInfo {
   name: string;
@@ -34,6 +37,7 @@ interface BlogPost {
     title: string;
     description: string;
     date: string;
+    dateModified?: string;
     slug?: string;
     author?: string;
     authors?: Array<{ name: string; url?: string } | string>;
@@ -61,6 +65,7 @@ const FRONTMATTER_KEYS = new Set([
   'title',
   'description',
   'date',
+  'dateModified',
   'slug',
   'author',
   'authors',
@@ -119,6 +124,11 @@ function assertString(val: unknown, field: string, slug: string): string {
   return val;
 }
 
+function assertOptionalString(val: unknown, field: string, slug: string): string | undefined {
+  if (val === undefined) return undefined;
+  return assertString(val, field, slug);
+}
+
 function assertStringArray(val: unknown, field: string, slug: string): string[] {
   if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) {
     throw new Error(`Frontmatter field "${field}" must be an array of strings in slug "${slug}".`);
@@ -141,6 +151,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const title = assertString(raw.title, 'title', slug);
   const description = assertString(raw.description, 'description', slug);
   const date = assertString(raw.date, 'date', slug);
+  const dateModified = assertOptionalString(raw.dateModified, 'dateModified', slug);
   const readTime = assertString(raw.readTime, 'readTime', slug);
   const excerptSource = raw.excerpt ?? raw.description;
   const excerpt = assertString(excerptSource, 'excerpt', slug);
@@ -192,6 +203,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     title,
     description,
     date,
+    dateModified,
     author,
     slug: fmSlug,
     authors: authors as BlogPost['frontmatter']['authors'],
@@ -244,20 +256,24 @@ function normalizeAuthors(frontmatter: BlogPost['frontmatter']): AuthorInfo[] {
 }
 
 function getBlogPost(slug: string): BlogPost | null {
-  const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
+  const filePath = resolveBlogFilePath(slug);
+  if (!filePath) {
+    return null;
+  }
+
   try {
     const fileContent = readFileSync(filePath, 'utf-8');
     const { data: rawFrontmatter, content } = matter(fileContent);
     const frontmatter = validateFrontmatter(rawFrontmatter as Record<string, unknown>, slug);
+    const resolvedSlug = frontmatter.slug ?? slug;
 
     return {
-      slug,
+      slug: resolvedSlug,
       frontmatter,
       content,
       authors: normalizeAuthors(frontmatter),
     };
   } catch (error) {
-    // Surface validation or read errors to fail the build
     console.error(`Error loading blog post "${slug}":`, error);
     throw error;
   }
@@ -291,6 +307,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       description: post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
+      modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
       authors: authorNames,
       images: imageUrl ? [imageUrl] : undefined,
     },
@@ -305,18 +322,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 // Generate static params for all blog posts
 export async function generateStaticParams() {
-  const contentDirectory = join(process.cwd(), 'content/blog');
-  try {
-    const files = readdirSync(contentDirectory);
-    return files
-      .filter(file => file.endsWith('.md'))
-      .map(file => ({
-        slug: file.replace('.md', '')
-      }));
-  } catch (error) {
-    console.warn('Could not read blog directory:', error);
-    return [];
-  }
+  return getAllBlogPosts().map(post => ({ slug: post.slug }));
 }
 
 export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -326,11 +332,35 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
   if (!post) {
     notFound();
   }
+  const normalizeTags = (tags: string[] = []) => tags.map(t => t.toLowerCase());
+  const postTags = normalizeTags(post.frontmatter.tags);
+  const allPublic = getPublicBlogPosts()
+    .filter(p => p.slug !== post.slug)
+    .map(p => ({ ...p, _normTags: normalizeTags(p.tags) }));
+  const relatedByTag = allPublic.filter(p => p._normTags.some(tag => postTags.includes(tag)));
+  const needed = Math.max(0, 3 - relatedByTag.length);
+  const filler = allPublic
+    .filter(p => !relatedByTag.some(r => r.slug === p.slug))
+    .slice(0, needed);
+  const relatedPosts = [...relatedByTag, ...filler].slice(0, 3);
 
-  // Format date as MM/DD/YYYY without timezone conversion
-  const formatDate = (dateString: string): string => {
-    const [year, month, day] = dateString.split('-');
-    return `${month}/${day}/${year}`;
+  // Format date as MM/DD/YYYY without timezone conversion; fallback to native parsing when needed
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    const datePart = dateString.split('T')[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${month}/${day}/${year}`;
+    }
+    const parsed = new Date(dateString);
+    if (!Number.isNaN(parsed.getTime())) {
+      const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsed.getDate()).padStart(2, '0');
+      const yyyy = parsed.getFullYear();
+      return `${mm}/${dd}/${yyyy}`;
+    }
+    return dateString;
   };
 
   const fallbackJsonLd: JsonLdObject = {
@@ -339,7 +369,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
     headline: post.frontmatter.title,
     description: post.frontmatter.description,
     datePublished: post.frontmatter.date,
-    dateModified: post.frontmatter.date,
+    dateModified: post.frontmatter.dateModified || post.frontmatter.date,
     author: post.authors.map(author => ({
       "@type": "Person",
       name: author.name,
@@ -367,6 +397,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
       title={post.frontmatter.title}
       description=""
       date={formatDate(post.frontmatter.date)}
+      dateModified={formatDate(post.frontmatter.dateModified)}
       readTime={post.frontmatter.readTime}
       authors={post.authors}
       tags={post.frontmatter.tags}
@@ -379,6 +410,43 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
         />
       )}
       <MarkdownRenderer source={post.content} />
+
+      {relatedPosts.length > 0 && (
+        <div className="mt-16 not-prose">
+          <h2 className="text-2xl font-semibold mb-4">Related posts</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {relatedPosts.map((related) => (
+              <Link
+                key={related.slug}
+                href={`/blog/${related.slug}`}
+                className="group block h-full rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden hover:bg-muted/50 transition-colors"
+              >
+                <div className="relative w-full h-48">
+                  {related.image ? (
+                    <Image
+                      src={related.image}
+                      alt={related.imageAlt || related.title}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 1024px) 100vw, 33vw"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+                  )}
+                </div>
+                <div className="p-4 space-y-3">
+                  <h3 className="text-lg font-semibold leading-snug group-hover:underline">
+                    {related.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground line-clamp-3">
+                    {related.description}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* Newsletter CTA specific to blog posts */}
       <div className="mt-16">
