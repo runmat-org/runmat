@@ -1,0 +1,134 @@
+{
+  "title": "timeit",
+  "category": "timing",
+  "keywords": [
+    "timeit",
+    "benchmark",
+    "timing",
+    "performance",
+    "gpu"
+  ],
+  "summary": "Measure the execution time of a zero-argument function handle.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs purely on the host CPU; GPU work inside the timed function executes through the active provider."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::timeit::tests",
+    "integration": "builtins::timing::timeit::tests::timeit_measures_time"
+  },
+  "description": "`t = timeit(f)` evaluates the zero-argument function handle `f` repeatedly and returns the median runtime (in seconds). RunMat accepts the optional `numOutputs` argument for MATLAB compatibility; today the handle executes with its default output arity (or none when you pass `0`) and all returned values are discarded.",
+  "behaviors": [
+    "Executes `f` repeatedly, adjusting the inner loop count until a single batch takes at least a few milliseconds or the function is slow enough.",
+    "Collects multiple samples (at least seven batches) and returns the median per-invocation time, which is robust against outliers.",
+    "Drops the outputs produced by `f`; you should perform any validation that depends on those outputs inside the handle. Multi-output dispatch will route through this helper once the runtime exposes multi-return `feval`.",
+    "Leaves GPU residency untouched\u2014if `f` launches GPU kernels, they execute on the active provider. Insert `wait(gpuDevice)` inside the handle if you need explicit synchronisation."
+  ],
+  "examples": [
+    {
+      "description": "Timing a simple anonymous function",
+      "input": "f = @() sin(rand(1000, 1));\nt = timeit(f);"
+    },
+    {
+      "description": "Comparing two implementations",
+      "input": "A = rand(1e5, 1);\nslow = @() sum(A .* A);\nfast = @() sumsq(A);\n\nslowTime = timeit(slow);\nfastTime = timeit(fast);"
+    },
+    {
+      "description": "Timing a function that returns no outputs",
+      "input": "logMessage = @() fprintf(\"Iteration complete\\n\");\nt = timeit(logMessage, 0);"
+    },
+    {
+      "description": "Timing a multiple-output function",
+      "input": "svdTime = timeit(@() svd(rand(256)), 3);"
+    },
+    {
+      "description": "Measuring GPU-bound work",
+      "input": "gfun = @() gather(sin(gpuArray.rand(4096, 1)));\ntgpu = timeit(gfun);"
+    },
+    {
+      "description": "Timing a preallocation helper",
+      "input": "makeMatrix = @() zeros(2048, 2048);\nt = timeit(makeMatrix);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `timeit` return?",
+      "answer": "\u2014 A scalar double containing the median runtime per invocation in seconds."
+    },
+    {
+      "question": "How many runs does `timeit` perform?",
+      "answer": "\u2014 It automatically selects a loop count so each batch lasts a few milliseconds, collecting at least seven batches."
+    },
+    {
+      "question": "Does `timeit` synchronise GPU kernels?",
+      "answer": "\u2014 No. Insert `wait(gpuDevice)` inside the handle when you need explicit synchronisation."
+    },
+    {
+      "question": "Can I time functions that require inputs?",
+      "answer": "\u2014 Yes. Capture them in the handle, for example `timeit(@() myfun(A, B))`."
+    },
+    {
+      "question": "How do I time a function with multiple outputs?",
+      "answer": "\u2014 Pass `timeit(@() svd(A), 3)` to mirror MATLAB\u2019s call signature. RunMat currently ignores values greater than zero until multi-output dispatch lands, but the handle still executes."
+    },
+    {
+      "question": "Why do successive runs differ slightly?",
+      "answer": "\u2014 Normal system jitter, cache effects, and GPU scheduling can change runtimes slightly; the median mitigates outliers."
+    },
+    {
+      "question": "Can `timeit` time scripts?",
+      "answer": "\u2014 Wrap the script body in a function handle so it becomes zero-argument, then call `timeit` on that handle."
+    },
+    {
+      "question": "Does `timeit` participate in fusion or JIT tiers?",
+      "answer": "\u2014 It simply executes the provided handle; any tiering or fusion happens inside the timed function."
+    },
+    {
+      "question": "What happens if the function errors?",
+      "answer": "\u2014 The error is propagated immediately and timing stops, matching MATLAB behaviour."
+    },
+    {
+      "question": "Is there a limit on runs?",
+      "answer": "\u2014 Yes. `timeit` caps the inner loop at about one million iterations to avoid runaway measurements."
+    }
+  ],
+  "links": [
+    {
+      "label": "tic",
+      "url": "./tic"
+    },
+    {
+      "label": "toc",
+      "url": "./toc"
+    },
+    {
+      "label": "feval",
+      "url": "./feval"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/timeit.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timeit.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "t = timeit(f)\nt = timeit(f, numOutputs)"
+    },
+    "points": [
+      "`f` is a zero-argument function handle (for example, `@() myOp(A)`).",
+      "`numOutputs` is an optional nonnegative integer kept for MATLAB compatibility. Passing `0` suppresses outputs entirely; any other value currently executes the handle with its default output arity while discarding the result."
+    ]
+  }
+}

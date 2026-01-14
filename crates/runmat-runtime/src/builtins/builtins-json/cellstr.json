@@ -1,0 +1,117 @@
+{
+  "title": "cellstr",
+  "category": "cells/core",
+  "keywords": [
+    "cellstr",
+    "cell array",
+    "character vectors",
+    "string conversion",
+    "text",
+    "gpu fallback"
+  ],
+  "summary": "Convert character arrays, string arrays, or cell arrays of text into cell arrays of character vectors with MATLAB-compatible trimming semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/cellstr.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. GPU-resident inputs are gathered automatically and the result is always a host cell array."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::cellstr::tests",
+    "integration": "builtins::cells::core::cellstr::tests::doc_examples_present"
+  },
+  "description": "`cellstr` converts character arrays, string arrays, or cell arrays of character vectors into a cell array whose elements are character vectors (1-by-N char arrays). Trailing spaces in character array rows are trimmed to match MATLAB behaviour.",
+  "behaviors": [
+    "`cellstr(A)` with a character array `A` returns an `m \u00d7 1` cell array whose entries correspond to the rows of `A`, with trailing spaces removed from each row.",
+    "`cellstr(S)` with a string array `S` returns a cell array of the same size; each string scalar is converted to a character vector.",
+    "`cellstr(C)` with a cell array `C` normalises the contents so that every element becomes a character vector. String scalars are converted, existing character vectors are preserved, and any other type triggers an error just like MATLAB.",
+    "String arrays of any dimensionality preserve their exact shape. Ordering follows MATLAB's column-major semantics so downstream indexing sees the expected elements.",
+    "Empty character arrays result in empty cell arrays (for example, `0 \u00d7 n` char arrays map to `0 \u00d7 1` cells). Empty strings become `\"\"` character vectors stored in single-cell outputs.",
+    "Missing string scalars are rendered as the literal `'<missing>'`, matching MATLAB's textual representation.",
+    "Inputs that are not text (numeric tensors, logical arrays, structs, GPU tensors, etc.) raise a MATLAB-compatible usage error.",
+    "Cell elements must already be text. Any numeric, logical, or GPU value inside the cell raises an error so that downstream code never sees non-text rows."
+  ],
+  "examples": [
+    {
+      "description": "Converting a character matrix into a column cell array",
+      "input": "A = ['apple '; 'berry '; 'citrus'];\nC = cellstr(A);",
+      "output": "C =\n  3x1 cell array\n    {'apple'}\n    {'berry'}\n    {'citrus'}"
+    },
+    {
+      "description": "Removing trailing spaces automatically",
+      "input": "words = ['a   '; 'b   '; 'c   '];\nC = cellstr(words);",
+      "output": "C =\n  3x1 cell array\n    {'a'}\n    {'b'}\n    {'c'}"
+    },
+    {
+      "description": "Converting a string array while preserving shape",
+      "input": "S = [\"north\" \"south\"; \"east\" \"west\"];\nC = cellstr(S);",
+      "output": "C =\n  2x2 cell array\n    {'north'}    {'south'}\n    {'east'}     {'west'}"
+    },
+    {
+      "description": "Normalising a cell array that mixes strings and character vectors",
+      "input": "C = {\"left\", 'right'};\nout = cellstr(C);",
+      "output": "out =\n  1x2 cell array\n    {'left'}    {'right'}"
+    },
+    {
+      "description": "Handling empty character arrays",
+      "input": "emptyChars = char.empty(0, 5);\nC = cellstr(emptyChars);\nsize(C)",
+      "output": "ans =\n     0     1"
+    },
+    {
+      "description": "Converting a single string scalar",
+      "input": "single = \"RunMat\";\nC = cellstr(single);",
+      "output": "C =\n  1x1 cell array\n    {'RunMat'}"
+    },
+    {
+      "description": "Validating non-text inputs",
+      "input": "try\n    cellstr(42);\ncatch ME\n    disp(ME.message)\nend",
+      "output": "cellstr: input must be a character array, string array, or cell array of character vectors"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cellstr` trim whitespace inside the text?",
+      "answer": "No. Only trailing spaces added by rectangular character arrays are removed. Interior spaces and tabs are preserved exactly as supplied."
+    },
+    {
+      "question": "What happens when a cell element is not text?",
+      "answer": "`cellstr` raises an error: every element must be a character vector or string scalar. This matches MATLAB and prevents silent conversion of unsupported data such as numeric arrays."
+    },
+    {
+      "question": "Can the output stay on the GPU?",
+      "answer": "Not yet. The resulting cell array always lives on the host. Future versions may add GPU-backed cell containers, in which case the GPU metadata in this builtin will be updated accordingly without breaking user code."
+    },
+    {
+      "question": "Are string arrays with missing values supported?",
+      "answer": "Yes. Missing string scalars (rendered as `<missing>`) convert to the character vector `'<missing>'` in the output cell array."
+    },
+    {
+      "question": "How are empty inputs handled?",
+      "answer": "Empty character arrays become empty cell arrays (`0\u00d71`). Empty string arrays return empty cell arrays matching their size. Empty strings become single cells that contain a 1\u00d70 character vector."
+    },
+    {
+      "question": "Does `cellstr` copy existing cell arrays?",
+      "answer": "Yes. The builtin returns a fresh cell array where each element is normalised to a character vector. Elements that are already character vectors are cloned so that downstream code can modify the result without mutating the source cell."
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "No. `cellstr` executes on the host. If the input originates from the GPU (for example, a cell array whose elements were gathered lazily), RunMat performs the gather automatically before formatting the text. The output always resides on the CPU heap, mirroring MATLAB where cell arrays of text are CPU-managed containers.",
+  "gpu_behavior": [
+    "`cellstr` is a host-only builtin. If the input or any nested cell elements contain GPU tensors, RunMat gathers them to the host before conversion (including nested elements inside cell arrays). The resulting cell array is always allocated in host memory. No provider hooks are required at this stage, but the GPU metadata keeps the runtime aware that residency does not propagate past this builtin."
+  ]
+}

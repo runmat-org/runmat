@@ -1,0 +1,128 @@
+{
+  "title": "isfinite",
+  "category": "logical/tests",
+  "keywords": [
+    "isfinite",
+    "finite mask",
+    "numeric predicate",
+    "gpuArray isfinite",
+    "MATLAB isfinite"
+  ],
+  "summary": "Return a logical mask indicating which elements of the input are finite.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs on the GPU when the provider exposes `logical_isfinite`; otherwise the runtime gathers to the host transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::isfinite::tests",
+    "integration": "builtins::logical::tests::isfinite::tests::isfinite_gpu_roundtrip",
+    "gpu": "builtins::logical::tests::isfinite::tests::isfinite_wgpu_matches_host_path"
+  },
+  "description": "`mask = isfinite(x)` returns a logical scalar or array indicating which elements of `x` are finite (not `NaN`, `+Inf`, or `-Inf`). The output matches MATLAB's semantics for scalars, matrices, higher-dimensional tensors, and `gpuArray` values.",
+  "behaviors": [
+    "Numeric scalars return a logical scalar (`true`/`false`).",
+    "Numeric arrays return a logical array of the same size, with `true` wherever the corresponding element is finite.",
+    "Complex inputs report `true` when both the real and imaginary components are finite.",
+    "Logical inputs return `true` because logical values (0 or 1) are finite by construction.",
+    "Character arrays return logical arrays of ones (characters map to finite Unicode code points).",
+    "String scalars return `false`; string arrays return logical arrays of zeros, mirroring MATLAB behavior.",
+    "When the input is a `gpuArray`, RunMat keeps the computation on the device if the active acceleration provider implements the `logical_isfinite` hook; otherwise the runtime gathers the data back to the host automatically."
+  ],
+  "examples": [
+    {
+      "description": "Check if a scalar is finite",
+      "input": "result = isfinite(42);",
+      "output": "result =\n     1"
+    },
+    {
+      "description": "Create a finite mask for a numeric matrix",
+      "input": "A = [1 NaN; Inf 4];\nmask = isfinite(A);",
+      "output": "mask =\n  2\u00d72 logical array\n     1     0\n     0     1"
+    },
+    {
+      "description": "Identify finite components in a complex array",
+      "input": "Z = [1+2i Inf+0i 3+NaNi];\nmask = isfinite(Z);",
+      "output": "mask =\n  1\u00d73 logical array\n     1     0     0"
+    },
+    {
+      "description": "Apply `isfinite` to character data",
+      "input": "chars = ['R' 'u' 'n'];\nmask = isfinite(chars);",
+      "output": "mask =\n  1\u00d73 logical array\n     1     1     1"
+    },
+    {
+      "description": "Run `isfinite` directly on the GPU",
+      "input": "G = gpuArray([1 -Inf 5]);\nmask_gpu = isfinite(G);\nmask = gather(mask_gpu);",
+      "output": "mask =\n  1\u00d73 logical array\n     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isfinite` treat `NaN` or `Inf` values as finite?",
+      "answer": "No. `isfinite` only returns `true` for values that are neither `NaN` nor infinite. Use `isnan` or `isinf` if you need to distinguish between those cases."
+    },
+    {
+      "question": "What does `isfinite` return for logical inputs?",
+      "answer": "Logical inputs always produce `true` because logical values are limited to 0 or 1, which are finite."
+    },
+    {
+      "question": "How does `isfinite` handle complex numbers?",
+      "answer": "It returns `true` only when both the real and imaginary components of the element are finite, matching MATLAB semantics."
+    },
+    {
+      "question": "What happens with string or character inputs?",
+      "answer": "String scalars return `false`, and string arrays return logical zeros. Character arrays return logical ones because their Unicode code points are finite."
+    },
+    {
+      "question": "Can I fuse `isfinite` with other elementwise operations?",
+      "answer": "Yes. The fusion planner treats `isfinite` as an elementwise operation, so expressions like `isfinite(A ./ B)` remain eligible for GPU fusion when the provider advertises support."
+    },
+    {
+      "question": "Is there a performance difference between `isfinite`, `isnan`, and `isinf`?",
+      "answer": "Each predicate performs a single elementwise test. Performance is dominated by memory bandwidth, so they have comparable cost on both CPU and GPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "isreal",
+      "url": "./isreal"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner keeps tensors on the GPU across fused expressions when that improves performance. You can still seed residency manually with `gpuArray` for compatibility with MATLAB scripts or when you want fine-grained control over data movement.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, `isfinite` looks for the provider hook `logical_isfinite`. Providers that implement the hook execute the finite test entirely on the GPU, producing a logical `gpuArray` result without any host transfers. If the hook is absent, RunMat gathers the input tensor back to the CPU, computes the mask on the host, and returns a regular logical array so the builtin always succeeds."
+  ]
+}

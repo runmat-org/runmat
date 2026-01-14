@@ -1,0 +1,147 @@
+{
+  "title": "logical",
+  "category": "logical",
+  "keywords": [
+    "logical",
+    "boolean conversion",
+    "truth mask",
+    "gpuArray",
+    "mask array"
+  ],
+  "summary": "Convert scalars, arrays, and gpuArray values to MATLAB-compatible logical values.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers a device-side elem\\_ne(X, 0) cast when the provider supports elem_ne and zeros_like; otherwise gathers to the host, converts, and re-uploads the logical result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::ops::tests",
+    "integration": "builtins::logical::ops::tests::logical_gpu_roundtrip"
+  },
+  "description": "`logical(X)` converts numeric, logical, character, and gpuArray inputs into MATLAB logical values (booleans). Any non-zero (or `NaN`/`Inf`) element maps to `true`, while zero maps to `false`. Logical inputs are returned unchanged.",
+  "behaviors": [
+    "`logical` accepts scalars, dense arrays, N-D tensors, and gpuArrays. Shapes are preserved bit-for-bit.",
+    "Non-zero numeric values, `NaN`, and `Inf` map to `true`; `0` and `-0` map to `false`.",
+    "Complex inputs are considered `true` when either the real or imaginary component is non-zero.",
+    "Character arrays are converted elementwise by interpreting code points (so `'A'` becomes `true`, `'\\0'` becomes `false`).",
+    "Strings, structs, cells, objects, and other non-numeric types raise MATLAB-compatible errors (`\"Conversion to logical from <type> is not possible\"`).",
+    "Scalar results become logical scalars (`true`/`false`); higher-rank arrays produce dense logical arrays."
+  ],
+  "examples": [
+    {
+      "description": "Creating a logical mask from numeric data",
+      "input": "values = [0 2 -3 0];\nmask = logical(values);",
+      "output": "mask =\n  1\u00d74 logical array\n     0     1     1     0"
+    },
+    {
+      "description": "Building a logical mask from a matrix",
+      "input": "M = [-4 0 8; 0 1 0];\nmask = logical(M);",
+      "output": "mask =\n  2\u00d73 logical array\n     1     0     1\n     0     1     0"
+    },
+    {
+      "description": "Treating NaN and Inf values as true",
+      "input": "flags = logical([NaN Inf 0]);",
+      "output": "flags =\n  1\u00d73 logical array\n     1     1     0"
+    },
+    {
+      "description": "Converting complex numbers to logical scalars",
+      "input": "z = logical(3 + 4i);\nw = logical(0 + 0i);",
+      "output": "z =\n     1\nw =\n     0"
+    },
+    {
+      "description": "Converting character arrays to logical values",
+      "input": "chars = ['A' 0 'C'];\nmask = logical(chars);",
+      "output": "mask =\n  1\u00d73 logical array\n     1     0     1"
+    },
+    {
+      "description": "Keeping gpuArray inputs on the device",
+      "input": "G = gpuArray([0 1 2]);\nmaskGPU = logical(G);\nhostMask = gather(maskGPU);",
+      "output": "hostMask =\n  1\u00d73 logical array\n     0     1     1"
+    },
+    {
+      "description": "Preserving empty shapes through logical conversion",
+      "input": "emptyVec = zeros(0, 3);\nlogicalEmpty = logical(emptyVec);",
+      "output": "logicalEmpty =\n  0\u00d73 logical array\n     []"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which input types does `logical` support?",
+      "answer": "Numeric, logical, complex, character, and gpuArray values are accepted. Strings, structs, cells, objects, and function handles are rejected with MATLAB-compatible error messages."
+    },
+    {
+      "question": "How are NaN or Inf values treated?",
+      "answer": "They evaluate to `true`. MATLAB defines logical conversion as \u201cnon-zero\u201d, and `NaN` / `Inf` both satisfy that rule."
+    },
+    {
+      "question": "How does `logical` handle complex numbers?",
+      "answer": "The result is `true` when either the real or imaginary component is non-zero (or `NaN`/`Inf`). Only `0 + 0i` converts to `false`."
+    },
+    {
+      "question": "Does the builtin change array shapes?",
+      "answer": "No. Shapes are preserved exactly, including empty dimensions and higher-rank tensors."
+    },
+    {
+      "question": "What happens to existing logical arrays?",
+      "answer": "They are returned verbatim. Logical gpuArrays remain on the device without triggering new allocations."
+    },
+    {
+      "question": "Can I convert strings with `logical`?",
+      "answer": "No. MATLAB rejects string inputs, and RunMat mirrors that behaviour: `\"logical: conversion to logical from string is not possible\"`."
+    },
+    {
+      "question": "What about structs, cells, or objects?",
+      "answer": "They raise the same conversion error as MATLAB. Use functions like `~cellfun(@isempty, ...)` to derive masks instead."
+    },
+    {
+      "question": "Does the GPU path allocate new buffers?",
+      "answer": "Only when the provider cannot operate in-place. The preferred path performs `elem_ne` against a zero tensor and reuses the resulting buffer. Fallback paths allocate a new gpuArray after gathering to the host."
+    },
+    {
+      "question": "Where can I learn more?",
+      "answer": "See the references below and the RunMat source for implementation details."
+    }
+  ],
+  "links": [
+    {
+      "label": "`islogical`",
+      "url": "./islogical"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    },
+    {
+      "label": "`find`",
+      "url": "./find"
+    }
+  ],
+  "source": {
+    "label": "https://github.com/runmat-org/runmat/issues/new/choose",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "You rarely need to call `gpuArray` manually. When the acceleration provider is active, RunMat keeps logical conversions on the GPU by issuing `elem_ne(X, 0)` kernels (backed by `zeros_like` allocations) and flagging the handle as logical metadata. Explicit `gpuArray` calls are available for MATLAB compatibility or when you want to pin residency before interacting with external libraries. When the provider lacks the necessary hook, RunMat documents the fallback: it gathers the data, converts it on the host, and\u2014if a provider is still available\u2014re-uploads the logical mask so downstream GPU code continues to work without residency surprises.",
+  "gpu_behavior": [
+    "When a GPU provider implements `elem_ne` and `zeros_like`, RunMat performs the conversion in-place on the device by evaluating `elem_ne(X, 0)`, then marks the resulting handle as logical so predicates like `islogical` work without downloads.",
+    "If the provider cannot service the request (missing hooks, unsupported dtype, or allocation failure), the value is transparently gathered to the host, converted, and\u2014when a provider is still available\u2014re-uploaded as a logical gpuArray. The fallback is documented so users understand potential host/device transitions.",
+    "Handles that are already flagged as logical (`gpuArray.logical`) are returned without modification.",
+    "Scalars remain scalars: converting a `gpuArray` scalar preserves the residency and returns a logical gpuArray scalar."
+  ]
+}

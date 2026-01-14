@@ -1,0 +1,143 @@
+{
+  "title": "strrep",
+  "category": "strings/transform",
+  "keywords": [
+    "strrep",
+    "string replace",
+    "character array replace",
+    "text replacement",
+    "substring replace"
+  ],
+  "summary": "Replace substring occurrences in strings, character arrays, and cell arrays while mirroring MATLAB semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strrep.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. RunMat gathers GPU-resident text inputs before performing replacements."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::strrep::tests",
+    "integration": "builtins::strings::transform::strrep::tests::strrep_cell_array_char_vectors, builtins::strings::transform::strrep::tests::strrep_wgpu_provider_fallback"
+  },
+  "description": "`strrep(str, old, new)` replaces every non-overlapping instance of the substring `old` that appears in `str` with the text provided in `new`. The builtin accepts string scalars, string arrays, character arrays, and cell arrays of character vectors, matching MATLAB behaviour exactly.",
+  "behaviors": [
+    "String scalars remain strings. Missing string values (`<missing>`) propagate unchanged.",
+    "String arrays are processed element-wise while preserving their full shape and orientation.",
+    "Character arrays are handled row by row. Rows expand or shrink as needed and are padded with spaces so the result stays a rectangular char array, just like MATLAB.",
+    "Cell arrays must contain character vectors or string scalars. The result is a cell array of identical size where each element has had the replacement applied.",
+    "The `old` and `new` arguments must be string scalars or character vectors of the same data type.",
+    "`old` can be empty. In that case, `strrep` inserts `new` before the first character, between existing characters, and after the final character."
+  ],
+  "examples": [
+    {
+      "description": "Replacing a word inside a string scalar",
+      "input": "txt = \"RunMat turbo mode\";\nresult = strrep(txt, \"turbo\", \"accelerate\");",
+      "output": "result = \"RunMat accelerate mode\""
+    },
+    {
+      "description": "Updating every element of a string array",
+      "input": "labels = [\"GPU planner\", \"CPU planner\"];\nupdated = strrep(labels, \"planner\", \"pipeline\");",
+      "output": "updated = 2\u00d71 string\n    \"GPU pipeline\"\n    \"CPU pipeline\""
+    },
+    {
+      "description": "Preserving rectangular shape in character arrays",
+      "input": "chars = char(\"alpha\", \"beta \");\nout = strrep(chars, \"a\", \"A\");",
+      "output": "out =\n\n  2\u00d75 char array\n\n    'AlphA'\n    'betA '"
+    },
+    {
+      "description": "Applying replacements inside a cell array of character vectors",
+      "input": "C = {'Kernel Fusion', 'GPU Planner'};\nrenamed = strrep(C, ' ', '_');",
+      "output": "renamed = 1\u00d72 cell array\n    {'Kernel_Fusion'}    {'GPU_Planner'}"
+    },
+    {
+      "description": "Inserting text with an empty search pattern",
+      "input": "stub = \"abc\";\nexpanded = strrep(stub, \"\", \"-\");",
+      "output": "expanded = \"-a-b-c-\""
+    },
+    {
+      "description": "Leaving missing string values untouched",
+      "input": "vals = [\"RunMat\", \"<missing>\", \"Accelerate\"];\nout = strrep(vals, \"RunMat\", \"RUNMAT\");",
+      "output": "out = 1\u00d73 string\n    \"RUNMAT\"    <missing>    \"Accelerate\""
+    },
+    {
+      "description": "Replacing substrings gathered from GPU inputs",
+      "input": "g = gpuArray(\"Turbine\");\nhost = strrep(g, \"bine\", \"bo\");",
+      "output": "host = \"Turbo\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which input types does `strrep` accept?",
+      "answer": "String scalars, string arrays, character vectors, character arrays, and cell arrays of character vectors. The `old` and `new` arguments must be string scalars or character vectors of the same data type."
+    },
+    {
+      "question": "Does `strrep` support multiple search terms at once?",
+      "answer": "No. Use the newer `replace` builtin if you need to substitute several search terms in a single call."
+    },
+    {
+      "question": "How does `strrep` handle missing strings?",
+      "answer": "Missing string scalars remain `<missing>` and are returned unchanged, even when the search pattern matches ordinary text."
+    },
+    {
+      "question": "Will rows of a character array stay aligned?",
+      "answer": "Yes. Each row is replaced individually, then padded with spaces so that the overall array stays rectangular, matching MATLAB exactly."
+    },
+    {
+      "question": "What happens when `old` is empty?",
+      "answer": "RunMat mirrors MATLAB: `new` is inserted before the first character, between every existing character, and after the last character."
+    },
+    {
+      "question": "Does `strrep` run on the GPU?",
+      "answer": "Not today. The builtin gathers GPU-resident data to host memory automatically before performing the replacement logic."
+    },
+    {
+      "question": "Can I mix strings and character vectors for `old` and `new`?",
+      "answer": "No. MATLAB requires `old` and `new` to share the same data type. RunMat enforces the same rule and raises a descriptive error when they differ."
+    },
+    {
+      "question": "How do I replace text stored inside cell arrays?",
+      "answer": "`strrep` traverses the cell array, applying the replacement to each character vector or string scalar element and returning a cell array of the same shape."
+    }
+  ],
+  "links": [
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "No. `strrep` registers as a sink with RunMat Accelerate, so the fusion planner never keeps its inputs or outputs on the GPU. Even if you start with GPU data, the runtime gathers it automatically\u2014manual `gpuArray` or `gather` calls are unnecessary.",
+  "gpu_behavior": [
+    "RunMat treats text replacement as a CPU-first workflow:\n\n1. The builtin is registered as an Accelerate *sink*, so the planner gathers any GPU-resident inputs (string arrays, char arrays, or cell contents) back to host memory before work begins. 2. Replacements are computed entirely on the CPU, mirroring MATLAB\u2019s behaviour and avoiding GPU/device divergence in string handling. 3. Results are returned as host values (string array, char array, or cell array). Residency is never pushed back to the GPU, keeping semantics deterministic regardless of the active provider."
+  ]
+}

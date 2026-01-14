@@ -1,0 +1,143 @@
+{
+  "title": "repmat",
+  "category": "array/shape",
+  "keywords": [
+    "repmat",
+    "tile",
+    "replicate",
+    "array",
+    "gpu"
+  ],
+  "summary": "Replicate arrays by tiling an input across one or more dimensions.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider tiling hooks when available; otherwise gathers to host memory and re-uploads to preserve GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::repmat::tests",
+    "integration": "builtins::array::shape::repmat::tests::repmat_gpu_roundtrip"
+  },
+  "description": "`repmat(A, reps)` tiles the array `A` so that it repeats according to `reps`. RunMat mirrors MATLAB semantics, supporting scalars, matrices, tensors, logical, string, char, cell, and GPU-resident arrays.",
+  "behaviors": [
+    "`repmat(A, m, n)` or `repmat(A, [m n])` repeats `A` `m` times along rows and `n` times along columns.",
+    "A size vector `[r1 r2 \u2026 rN]` can be given as a row or column; trailing dimensions default to `1`, letting you replicate only the axes you care about.",
+    "Supplying a scalar replication factor (e.g., `repmat(A, k)`) duplicates `A` across every dimension, ensuring the first two dimensions are replicated even when the input is a row vector.",
+    "Zero replication factors produce empty dimensions, e.g., `repmat(A, 0, 3)` yields an empty array with shape `[0 size(A,2)]`.",
+    "Char and cell arrays follow MATLAB by supporting row/column tiling; additional dimensions must be `1`, while numeric, logical, complex, and string arrays support full N-D replication.",
+    "Replication factors must be finite, non-negative integers; RunMat raises descriptive errors for negative, fractional, or excessively large sizes.",
+    "GPU arrays remain on the device when the acceleration provider implements the tiling hook; otherwise, RunMat gathers to host memory, tiles in software, and re-uploads the replicated tensor so downstream GPU work keeps residency."
+  ],
+  "examples": [
+    {
+      "description": "Tiling a matrix across rows and columns",
+      "input": "A = [1 2; 3 4];\nB = repmat(A, 2, 3);",
+      "output": "B =\n     1     2     1     2     1     2\n     3     4     3     4     3     4\n     1     2     1     2     1     2\n     3     4     3     4     3     4"
+    },
+    {
+      "description": "Using a scalar replication factor",
+      "input": "row = 1:4;\nTiled = repmat(row, 3);\nsize(Tiled)",
+      "output": "ans =\n     3    12"
+    },
+    {
+      "description": "Replicating into three dimensions",
+      "input": "A = reshape(1:6, [1 3 2]);\nT = repmat(A, [2 1 4]);\nsize(T)",
+      "output": "ans =\n     2     3     8"
+    },
+    {
+      "description": "Repeating logical masks with zero dimensions",
+      "input": "mask = logical([1 0 1]);\nemptyMask = repmat(mask, 0, 3);\nsize(emptyMask)",
+      "output": "ans =\n     0     3"
+    },
+    {
+      "description": "Replicating string scalars into string arrays",
+      "input": "name = \"runmat\";\nnames = repmat(name, 2, 2);",
+      "output": "names =\n  2x2 string array\n    \"runmat\"    \"runmat\"\n    \"runmat\"    \"runmat\""
+    },
+    {
+      "description": "Replicating data that lives on the GPU",
+      "input": "G = gpuArray(magic(3));\nT = repmat(G, [2 1]);\nresult = gather(T);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are replication factors required to be integers?",
+      "answer": "Yes. RunMat follows MATLAB and requires every replication factor to be a non-negative integer. Non-integers raise the descriptive error `repmat: replication factor <n> must be an integer`."
+    },
+    {
+      "question": "What happens when I pass a scalar replication factor?",
+      "answer": "RunMat duplicates the input along every dimension, ensuring at least the first two dimensions receive the factor so matrices tile both rows and columns."
+    },
+    {
+      "question": "Can I request zero replication along a dimension?",
+      "answer": "Yes. Zero factors produce empty dimensions while preserving the remaining sizes, which is useful when constructing placeholder tensors or short-circuiting loops."
+    },
+    {
+      "question": "Does `repmat` work with char, string, or cell arrays?",
+      "answer": "Yes. Char arrays and cell arrays tile across rows and columns (extra dimensions must currently be `1`), while string arrays, numeric tensors, logical arrays, and complex tensors support full N-D replication."
+    },
+    {
+      "question": "How does `repmat` handle GPU tensors today?",
+      "answer": "The runtime asks the provider for a device implementation. If none exists (for example, the in-process test provider), RunMat gathers to the host, tiles there, and re-uploads the result so downstream GPU kernels still see the replicated tensor."
+    },
+    {
+      "question": "Does the result reuse backing storage from the input?",
+      "answer": "No. `repmat` always creates a new array so modifying the result never mutates the original input."
+    },
+    {
+      "question": "Can replication overflow memory?",
+      "answer": "RunMat checks for overflow when multiplying shape dimensions. If the requested size cannot fit in native address space, the builtin raises a descriptive error before attempting allocation."
+    },
+    {
+      "question": "Does `repmat` preserve data ordering?",
+      "answer": "Yes. Column-major ordering is maintained for numeric, logical, string, and complex arrays, while char and cell arrays respect their row-major storage conventions within RunMat."
+    }
+  ],
+  "links": [
+    {
+      "label": "reshape",
+      "url": "./reshape"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    },
+    {
+      "label": "squeeze",
+      "url": "./squeeze"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` directly. RunMat's planner keeps values on the GPU when it detects that further operations benefit from staying there. Explicit `gpuArray` calls remain available for compatibility with legacy MATLAB code and when you want to steer residency manually.",
+  "gpu_behavior": [
+    "RunMat first calls `AccelProvider::repmat`, giving the backend a chance to tile directly on the device. Providers that have not yet implemented this hook fall back to a safe path that gathers the tensor, performs tiling on the host, and uploads the replicated data back to the GPU. The fallback preserves correct behaviour today while enabling backend authors to drop in optimized kernels as they become available."
+  ]
+}

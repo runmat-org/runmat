@@ -1,0 +1,138 @@
+{
+  "title": "fread",
+  "category": "io/filetext",
+  "keywords": [
+    "fread",
+    "binary read",
+    "io",
+    "precision",
+    "machine format",
+    "skip"
+  ],
+  "summary": "Read binary data from a file identifier with MATLAB-compatible size, precision, skip, and machine-format semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When arguments reside on the GPU, RunMat gathers them first; providers do not implement hooks for fread."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fread::tests",
+    "integration": [
+      "builtins::io::filetext::fread::tests::fread_big_endian_machine_format",
+      "builtins::io::filetext::fread::tests::fread_like_gpu_provider_roundtrip"
+    ]
+  },
+  "description": "`fread` reads binary data from a file identifier returned by `fopen`. It mirrors MATLAB's handling of size, precision, skip, and machine-format arguments so existing MATLAB code can be ported without changes. The builtin tracks the file position, honours the machine format recorded by `fopen`, and returns both the data array and the number of elements successfully read.",
+  "behaviors": [
+    "`A = fread(fid)` reads to the end of the file, returning a column vector of doubles.",
+    "`A = fread(fid, sizeA)` reads at most `prod(sizeA)` elements, filling the result in column-major order. Use `[m n]` to request a matrix or `[m Inf]` to keep filling columns until EOF.",
+    "`A = fread(fid, precision)` controls how many bytes each element consumes and how the result is typed. RunMat supports the common precisions from MATLAB: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`. When no output class is specified, data is converted to double; `char` (and `*char`) return a MATLAB-style character array.",
+    "`A = fread(fid, sizeA, precision, skip, machinefmt)` honours optional byte skipping and machine-format overrides (`'native'`, `'ieee-le'`, `'ieee-be'`). The machine format defaults to the value recorded by `fopen`.",
+    "`[A, count] = fread(...)` returns the number of elements successfully read before encountering EOF.",
+    "If MATLAB requests more elements than available, `fread` pads matrix outputs with zeros (or `'\\0'` for character data) to satisfy the requested dimensions; the `count` output always reflects the number of real elements read from the file.",
+    "`A = fread(___, 'like', prototype)` matches the residency and logical or numeric flavour of `prototype`. GPU prototypes trigger an upload after reading so the result remains on the device, while logical prototypes convert the output using MATLAB's non-zero rule.",
+    "RunMat executes the builtin entirely on the host CPU. Arguments that reside on a GPU are gathered automatically before any I/O occurs."
+  ],
+  "examples": [
+    {
+      "description": "Reading double-precision values from a binary file",
+      "input": "fid = fopen('numbers.bin', 'w+b');\nfwrite(fid, [1 2 3], 'double');\nfrewind(fid);\n\n[values, count] = fread(fid);      % defaults to double precision\n% values is a 3x1 column vector [1; 2; 3], count == 3\n\nfclose(fid);\ndelete('numbers.bin');"
+    },
+    {
+      "description": "Reading bytes with a specific element count",
+      "input": "fid = fopen('payload.bin', 'w+b');\nfwrite(fid, uint8(1:6), 'uint8');\nfrewind(fid);\n\n[bytes, count] = fread(fid, 4, 'uint8');\n% bytes == [1; 2; 3; 4], count == 4\n\nfclose(fid);\ndelete('payload.bin');"
+    },
+    {
+      "description": "Loading a two-dimensional block of `uint8` data",
+      "input": "fid = fopen('frame.bin', 'w+b');\npayload = uint8(reshape(1:12, 3, 4));\nfwrite(fid, payload, 'uint8');\nfrewind(fid);\n\n[frame, count] = fread(fid, [3 4], 'uint8');\nframe = uint8(frame);              % convert back to uint8 if needed\n\nfclose(fid);\ndelete('frame.bin');"
+    },
+    {
+      "description": "Reading characters using the `*char` precision form",
+      "input": "fid = fopen('message.txt', 'w+b');\nfwrite(fid, 'RunMat', 'char');\nfrewind(fid);\n\n[text, count] = fread(fid, '*char');\ntext = text.';                      % row string 'RunMat'\n\nfclose(fid);\ndelete('message.txt');"
+    },
+    {
+      "description": "Skipping bytes between samples",
+      "input": "fid = fopen('interleaved.bin', 'w+b');\nfwrite(fid, uint8(1:12), 'uint8');\nfrewind(fid);\n\n[every_other, count] = fread(fid, 5, 'uint8', 1);   % read one byte, skip one byte\n% every_other == [1; 3; 5; 7; 9]\n\nfclose(fid);\ndelete('interleaved.bin');"
+    },
+    {
+      "description": "Respecting big-endian machine formats",
+      "input": "fid = fopen('sensors.be', 'w+b', 'ieee-be');\nfwrite(fid, uint16([258 772]), 'uint16');\nfrewind(fid);\n\n[values, count] = fread(fid, [2 1], 'uint16');\n% values == [258; 772], count == 2\n\nfclose(fid);\ndelete('sensors.be');"
+    },
+    {
+      "description": "Matching GPU residency with `'like'`",
+      "input": "fid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What precision strings are supported?",
+      "answer": "RunMat implements the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`. The short form `*char` is also recognised. When an output class is not specified explicitly (with `=>` or the `*class` syntax), the result is converted to double precision."
+    },
+    {
+      "question": "How are partial reads handled?",
+      "answer": "`fread` stops when it encounters EOF. Matrices requested with `[m n]` are padded with zeros (or `'\\0'`) when the file does not contain enough elements to fill every column. The `count` output records the number of real elements read before padding."
+    },
+    {
+      "question": "How do size arguments work?",
+      "answer": "Pass a scalar `N` to request a column vector with up to `N` elements, `[M N]` to request a matrix with `M` rows and `N` columns, or `[M Inf]` to keep reading additional columns until EOF. Omitting the size argument is equivalent to using `Inf` (read everything)."
+    },
+    {
+      "question": "How does the skip parameter behave?",
+      "answer": "`skip` specifies the number of bytes to skip after reading each element. It must be a non-negative integer. The file position advances by the element size plus the skip value for every element that is successfully read."
+    },
+    {
+      "question": "What does the `'like'` prototype control?",
+      "answer": "The `'like', prototype` pair matches the output residency and high-level type of `prototype`. Pass a GPU tensor to receive a GPU tensor, use a logical array to obtain logical output (non-zero becomes `true`), or use a character prototype together with a character precision to obtain a `CharArray`."
+    },
+    {
+      "question": "Which machine formats are supported?",
+      "answer": "The builtin recognises `'native'`, `'ieee-le'`, and `'ieee-be'` (including their MATLAB aliases such as `'little-endian'`, `'pc'`, `'big-endian'`, and `'mac'`). Unsupported formats (`'vaxd'`, `'cray'`, etc.) raise descriptive errors."
+    },
+    {
+      "question": "Can `fread` operate on standard input?",
+      "answer": "Standard input/output/error identifiers (0, 1, 2) are currently not supported by RunMat's `fread`. Open files explicitly with `fopen` before calling `fread`."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/filetext/fread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fread.rs"
+  },
+  "gpu_residency": "```matlab\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
+  "gpu_behavior": [
+    "`fread` is a host-only operation. When the file identifier or optional arguments (size vectors, precision strings, skip counts) live on the GPU, RunMat gathers them to the host first. File handles are managed by the shared registry established by `fopen`, and GPU providers never participate in file I/O. When a `'like'` prototype is a GPU tensor, the builtin uploads the host result after the read so that the output mirrors the prototype's residency. Providers that fail the upload silently fall back to returning the host tensor."
+  ]
+}

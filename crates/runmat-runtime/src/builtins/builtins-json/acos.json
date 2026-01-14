@@ -1,0 +1,131 @@
+{
+  "title": "acos",
+  "category": "math/trigonometry",
+  "keywords": [
+    "acos",
+    "inverse cosine",
+    "arccos",
+    "trigonometry",
+    "gpu"
+  ],
+  "summary": "Element-wise inverse cosine with MATLAB-compatible complex promotion and GPU fallbacks.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses the provider's unary_acos hook when reduce_min / reduce_max confirm every element stays within [-1, 1]; gathers to host for complex promotion or when hooks are unavailable."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::acos::tests",
+    "integration": "builtins::math::trigonometry::acos::tests::acos_gpu_provider_roundtrip"
+  },
+  "description": "`Y = acos(X)` computes the inverse cosine (in radians) of every element of `X`. Results match MATLAB semantics for real, logical, character, and complex inputs. Real values outside the interval `[-1, 1]` promote to complex outputs automatically so the mathematical definition remains valid over the complex plane.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors using MATLAB broadcasting rules.",
+    "Logical inputs convert to double precision (`true \u2192 1`, `false \u2192 0`) before applying inverse cosine.",
+    "Character arrays are interpreted as their numeric code points and return dense double or complex tensors that mirror MATLAB\u2019s output.",
+    "Real inputs with magnitude greater than `1` yield complex results (`acos(2) \u2192 0 - 1.3170i`), matching MATLAB\u2019s principal branch.",
+    "Complex inputs follow MATLAB's definition `acos(z) = -i log(z + i sqrt(1 - z^2))`, ensuring identical behaviour for branch cuts and special values.",
+    "NaNs and Infs propagate in the same way MATLAB does, including complex infinities when necessary."
+  ],
+  "examples": [
+    {
+      "description": "Computing the inverse cosine of a scalar angle",
+      "input": "y = acos(0.5);",
+      "output": "y = 1.0472"
+    },
+    {
+      "description": "Handling values outside [-1, 1] that produce complex results",
+      "input": "z = acos(2);",
+      "output": "z = 0.0000 - 1.3170i"
+    },
+    {
+      "description": "Applying inverse cosine to every element of a matrix",
+      "input": "A = [0 -0.5 0.75; 1 0.25 -0.8];\nY = acos(A);",
+      "output": "Y =\n    1.5708    2.0944    0.7227\n         0    1.3181    2.4981"
+    },
+    {
+      "description": "Using logical input with automatic double promotion",
+      "input": "mask = logical([0 1 0 1]);\nangles = acos(mask);",
+      "output": "angles = [1.5708 0 1.5708 0]"
+    },
+    {
+      "description": "Running `acos` on a GPU array without explicit transfers",
+      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult_gpu = acos(G);\nresult = gather(result_gpu);",
+      "output": "result = [3.1416 2.0944 1.5708 1.0472 0.0000]"
+    },
+    {
+      "description": "Evaluating inverse cosine of complex numbers",
+      "input": "vals = [0.5 + 1i, -0.2 + 0.75i];\nw = acos(vals);",
+      "output": "w =\n   1.2214 - 0.9261i\n   1.7307 - 0.7009i"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `acos` sometimes return complex numbers?",
+      "answer": "Inputs with magnitude greater than `1` lie outside the real domain, so MATLAB (and RunMat) return complex results computed from the principal branch of the inverse cosine."
+    },
+    {
+      "question": "Does `acos` support GPU execution?",
+      "answer": "Yes. When the provider implements `unary_acos` and exposes min/max reductions for the domain check, the runtime executes `acos` entirely on the GPU. Otherwise, it gathers to the host transparently."
+    },
+    {
+      "question": "How are logical or integer inputs handled?",
+      "answer": "Logical arrays convert to doubles before evaluation. Integers also promote to double precision so the computation matches MATLAB and avoids overflow concerns."
+    },
+    {
+      "question": "What happens with NaN or Inf values?",
+      "answer": "NaNs propagate through the computation. Inputs of `\u00b1Inf` produce complex infinities exactly as in MATLAB."
+    },
+    {
+      "question": "Can I keep the result on the GPU if it becomes complex?",
+      "answer": "Complex results are currently returned on the host because GPU tensor handles represent real data. The runtime gathers automatically and returns `Value::Complex` or `Value::ComplexTensor`, preserving correctness."
+    },
+    {
+      "question": "Does `acos` fuse with other element-wise operations?",
+      "answer": "Yes. The fusion planner can emit WGSL kernels that include `acos` when the provider supports the generated path, allowing fused GPU execution without intermediate buffers."
+    }
+  ],
+  "links": [
+    {
+      "label": "asin",
+      "url": "./asin"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/acos.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/acos.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes `unary_acos` and the values remain within the real domain. When complex promotion is necessary, RunMat gathers the tensor automatically and returns the MATLAB-compatible complex result. Manual residency control remains available for workflows that require it.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements `unary_acos` as well as the extremum reductions used to confirm the input domain. 2. Every element is provably within the real domain `[-1, 1]`.\n\nIf either condition fails (for example, when a complex result is required or the provider lacks supporting reductions), the runtime gathers the data to the host, computes the MATLAB-compatible answer, and returns the correct result without user intervention. Manual `gpuArray` / `gather` calls remain optional for explicit residency control."
+  ]
+}

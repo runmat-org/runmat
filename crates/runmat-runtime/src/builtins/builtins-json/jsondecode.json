@@ -1,0 +1,150 @@
+{
+  "title": "jsondecode",
+  "category": "io/json",
+  "keywords": [
+    "jsondecode",
+    "json",
+    "parse json",
+    "struct from json",
+    "gpu gather"
+  ],
+  "summary": "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/jsondecode.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "jsondecode gathers GPU-resident text operands to host memory before parsing and executes entirely on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::json::jsondecode::tests",
+    "integration": [
+      "builtins::io::json::jsondecode::tests::jsondecode_matrix_to_tensor",
+      "builtins::io::json::jsondecode::tests::jsondecode_object_to_struct",
+      "builtins::io::json::jsondecode::tests::jsondecode_string_array",
+      "builtins::io::json::jsondecode::tests::jsondecode_mixed_array_returns_cell",
+      "builtins::io::json::jsondecode::tests::jsondecode_rectangular_cell_array_preserves_layout",
+      "builtins::io::json::jsondecode::tests::jsondecode_array_of_objects_returns_cell",
+      "builtins::io::json::jsondecode::tests::jsondecode_null_returns_empty_double",
+      "builtins::io::json::jsondecode::tests::jsondecode_round_trip_with_jsonencode",
+      "builtins::io::json::jsondecode::tests::jsondecode_doc_examples_present"
+    ]
+  },
+  "description": "`jsondecode` converts UTF-8 JSON text into MATLAB-compatible data. Numbers become doubles, logicals become `logical`, character vectors become char arrays, objects become structs, and arrays expand to numeric/logical/string arrays when rectangular or cell arrays when heterogeneous.",
+  "behaviors": [
+    "Accepts a character vector or string scalar containing UTF-8 JSON data; leading and trailing whitespace is ignored.",
+    "JSON numbers decode to double-precision scalars or dense tensors that follow MATLAB's column-major layout.",
+    "JSON booleans decode to logical scalars or logical arrays with the same shape as the source JSON array.",
+    "JSON strings decode to char row vectors; homogeneous JSON arrays of strings become string arrays with matching dimensions.",
+    "JSON objects decode to scalar structs whose field names match the JSON keys; arrays of objects become cell arrays of structs that preserve element order.",
+    "JSON arrays decode to numeric, logical, or string arrays when every element shares the same type and the array is perfectly rectangular. Rectangular heterogeneous arrays (including those that mix `null` with other types) become cell arrays that preserve the original row/column layout, while irregular arrays fall back to 1-by-N cell vectors that keep element order.",
+    "JSON `null` decodes to the empty double `[]`. When it appears inside a heterogeneous array it becomes a cell element containing `[]`.",
+    "Invalid JSON raises `jsondecode: invalid JSON text (...)` with the underlying parser message."
+  ],
+  "examples": [
+    {
+      "description": "Parsing a scalar number",
+      "input": "value = jsondecode(\"42\");",
+      "output": "value = 42"
+    },
+    {
+      "description": "Decoding a matrix of doubles",
+      "input": "text = \"[[1,2,3],[4,5,6]]\";\nmatrix = jsondecode(text);",
+      "output": "matrix =\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Converting a JSON object into a struct",
+      "input": "person = jsondecode('{\"name\":\"Ada\",\"age\":37}');\ndisp(person.name);\ndisp(person.age);",
+      "output": "Ada\n    37"
+    },
+    {
+      "description": "Decoding an array of objects into a cell array",
+      "input": "text = '[{\"name\":\"Ada\",\"role\":\"Researcher\"},{\"name\":\"Grace\",\"role\":\"Engineer\"}]';\npeople = jsondecode(text);\npeople{1}.name\npeople{2}.role",
+      "output": "people =\n  1x2 cell array\n    {1x1 struct}    {1x1 struct}\n\nans = 'Ada'\nans = 'Engineer'"
+    },
+    {
+      "description": "Handling heterogeneous arrays with cell arrays",
+      "input": "text = '[\"RunMat\", 42, true]';\ndata = jsondecode(text);",
+      "output": "data =\n  1x3 cell array\n    {\"RunMat\"}    {[42]}    {[1]}"
+    },
+    {
+      "description": "Working with null and empty JSON values",
+      "input": "value = jsondecode(\"null\");\ndisp(value);\nisempty(value)",
+      "output": "[]\nans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What encodings does `jsondecode` support?",
+      "answer": "JSON text must be UTF-8. RunMat preserves surrogate pairs and Unicode code points exactly as provided."
+    },
+    {
+      "question": "How are JSON objects represented?",
+      "answer": "As scalar structs. Array-of-object JSON values become cell arrays of structs to preserve ordering."
+    },
+    {
+      "question": "What happens with JSON numbers that overflow double?",
+      "answer": "Values must fit in the IEEE-754 double range. When a literal exceeds that range, the parser reports `number out of range`, which surfaces as a `jsondecode: invalid JSON text (...)` error."
+    },
+    {
+      "question": "Does `jsondecode` support comments or trailing commas?",
+      "answer": "No. The JSON must adhere to RFC 8259. The builtin reports an error when encountering comments or other non-standard extensions."
+    },
+    {
+      "question": "How are JSON arrays of strings represented?",
+      "answer": "Rectangular arrays of strings become `string` arrays. Mixed content falls back to cell arrays."
+    },
+    {
+      "question": "How does `jsondecode` treat `null`?",
+      "answer": "`null` decodes to the empty double `[]`. When it appears inside an otherwise homogeneous numeric array, the array is promoted to a cell array so that the `[]` value can be preserved alongside other elements."
+    },
+    {
+      "question": "Can I decode deeply nested arrays?",
+      "answer": "Yes. Rectangular arrays of numbers, logicals, or strings produce dense tensors/string arrays with the appropriate dimensionality. Irregular arrays return nested cell arrays."
+    },
+    {
+      "question": "What if the input is not valid JSON?",
+      "answer": "The builtin raises `jsondecode: invalid JSON text (...)` with the parser error message."
+    },
+    {
+      "question": "Does whitespace or newlines matter?",
+      "answer": "Leading and trailing whitespace is ignored, and embedded newlines are permitted as long as the text remains valid JSON."
+    }
+  ],
+  "links": [
+    {
+      "label": "jsonencode",
+      "url": "./jsonencode"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "cell",
+      "url": "./cell"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "You rarely need to manage residency manually. The auto-offload planner gathers GPU-resident text for `jsondecode` automatically. For MATLAB compatibility, you can still call `gather` yourself, but it is not required, and fusion graphs terminate at `jsondecode` so downstream results always live on the host.",
+  "gpu_behavior": [
+    "`jsondecode` does not execute on the GPU. Because the builtin registers as `accel = \"sink\"` and uses `ResidencyPolicy::GatherImmediately`, any `gpuArray` input is synchronously gathered to host memory through the active provider before parsing. Providers do not expose specialised hooks for JSON parsing, so all work stays on the CPU."
+  ]
+}

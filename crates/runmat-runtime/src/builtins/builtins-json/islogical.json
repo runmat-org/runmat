@@ -1,0 +1,132 @@
+{
+  "title": "islogical",
+  "category": "logical/tests",
+  "keywords": [
+    "islogical",
+    "logical type",
+    "boolean predicate",
+    "gpuArray logical",
+    "MATLAB islogical"
+  ],
+  "summary": "Return true when a value is stored as MATLAB logical data (scalar or array).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Checks provider metadata via `logical_islogical`; falls back to host inspection when unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::islogical::tests",
+    "integration": "builtins::logical::tests::islogical::tests::gpu_handles_use_metadata_when_available",
+    "gpu": "builtins::logical::tests::islogical::tests::islogical_wgpu_elem_eq_sets_metadata",
+    "doc": "builtins::logical::tests::islogical::tests::doc_examples_present"
+  },
+  "description": "`tf = islogical(x)` returns a logical scalar that is `true` when `x` is stored as MATLAB logical data (either a scalar logical or an N-D logical array). All other value kinds, including doubles, integers, characters, structs, and objects, return `false`.",
+  "behaviors": [
+    "Logical scalars (`true`, `false`) return `true`.",
+    "Instances of `logical` arrays return `true`, regardless of dimensionality.",
+    "Numeric, complex, string, character, struct, cell, and object inputs return `false`.",
+    "`gpuArray` values return `true` when their residency metadata marks them as logical; the builtin never gathers device buffers just to answer the query unless metadata is absent.",
+    "The result is always a logical scalar."
+  ],
+  "examples": [
+    {
+      "description": "Checking a logical scalar",
+      "input": "flag = islogical(true);",
+      "output": "flag =\n     1"
+    },
+    {
+      "description": "Verifying a logical array constructed with `logical`",
+      "input": "mask = logical([1 0 1 0]);\nis_mask_logical = islogical(mask);",
+      "output": "is_mask_logical =\n     1"
+    },
+    {
+      "description": "Numeric arrays are not logical",
+      "input": "values = [1 2 3];\nis_logical = islogical(values);",
+      "output": "is_logical =\n     0"
+    },
+    {
+      "description": "Character arrays return false",
+      "input": "chars = ['R' 'u' 'n'];\nis_char_logical = islogical(chars);",
+      "output": "is_char_logical =\n     0"
+    },
+    {
+      "description": "gpuArray comparisons yield logical gpuArrays",
+      "input": "G = gpuArray([1 2 3]);\nmask = G > 1;\ntf = islogical(mask);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Containers and structs are not logical",
+      "input": "items = {true, 1};\nperson = struct(\"name\", \"Ada\");\ntf_cell = islogical(items);\ntf_struct = islogical(person);",
+      "output": "tf_cell =\n     0\n\ntf_struct =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `islogical` ever return an array?",
+      "answer": "No. The builtin always returns a logical scalar, even when the input is an array."
+    },
+    {
+      "question": "Does `islogical` convert numeric data to logical?",
+      "answer": "No. It only reports whether the storage is already logical. Use the `logical` builtin to convert numeric data explicitly."
+    },
+    {
+      "question": "How does `islogical` behave with `gpuArray` inputs?",
+      "answer": "If the provider exposes `logical_islogical`, the check happens entirely on the GPU. When the hook is absent, RunMat consults residency metadata and, if needed, gathers the value to host memory to inspect its storage kind."
+    },
+    {
+      "question": "Are character or string arrays considered logical?",
+      "answer": "No. Character vectors, string scalars, and string arrays are not logical values and therefore return `false`."
+    },
+    {
+      "question": "Do cell arrays or structs ever count as logical?",
+      "answer": "No. Containers such as cell arrays, structs, tables, and objects always return `false`."
+    },
+    {
+      "question": "Does a logical `gpuArray` gathered back to the host stay logical?",
+      "answer": "Yes. When residency metadata marks the handle as logical, gathering produces a host `logical` array, and `islogical` continues to report `true`."
+    }
+  ],
+  "links": [
+    {
+      "label": "isreal",
+      "url": "./isreal"
+    },
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/islogical.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/islogical.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. RunMat's auto-offload planner keeps logical masks resident on the GPU when downstream expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency explicitly.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, `islogical` first asks the registered acceleration provider for the `logical_islogical` hook. Providers that implement the hook respond using device metadata without copying data back to the CPU. If the hook is missing, RunMat consults its own residency metadata and only gathers device buffers as a last resort, ensuring that the builtin always succeeds while minimizing host\u2194device transfers."
+  ]
+}

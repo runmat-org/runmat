@@ -1,0 +1,147 @@
+{
+  "title": "sub2ind",
+  "category": "array/indexing",
+  "keywords": [
+    "sub2ind",
+    "linear index",
+    "column major",
+    "gpu indexing",
+    "nd indexing"
+  ],
+  "summary": "Convert N-D subscripts into MATLAB-style column-major linear indices.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "When a GPU provider exposes the `sub2ind` hook (WGPU today), the conversion runs on the device with bounds and integrality checks; other providers fall back to the host implementation and reupload the result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::indexing::sub2ind::tests",
+    "integration": "builtins::array::indexing::sub2ind::tests::sub2ind_gpu_roundtrip"
+  },
+  "description": "`sub2ind(sz, s1, s2, ...)` converts row/column (or higher-dimensional) subscripts into MATLAB's column-major linear indexing form. The size vector `sz` defines the extents of the target array, and you must supply one subscript array per dimension.",
+  "behaviors": [
+    "Subscripts can be scalars or arrays. When arrays are provided, they must share the same size. Scalars broadcast to that common shape.",
+    "All subscripts must be positive integers within the corresponding dimension's range.",
+    "The size vector can be a row or column vector. Each element must be a positive integer.",
+    "Complex, NaN, or infinite values are rejected.",
+    "The result uses the same shape as the subscript arrays. Scalars produce a scalar double.",
+    "When any input is a GPU tensor, RunMat computes on the host (to reuse integer semantics) and uploads the resulting indices back to the GPU so fusion and downstream kernels keep operating on device."
+  ],
+  "examples": [
+    {
+      "description": "Converting a single matrix subscript to a linear index",
+      "input": "idx = sub2ind([3 4], 2, 3);",
+      "output": "idx = 8;"
+    },
+    {
+      "description": "Mapping multiple subscripts into one-dimensional indices",
+      "input": "rows = [1; 2; 3];\ncols = [3; 3; 3];\nidx = sub2ind([3 5], rows, cols);",
+      "output": "idx =\n     7\n     8\n     9"
+    },
+    {
+      "description": "Handling higher-dimensional array subscripts",
+      "input": "row = [1 1];\ncol = [2 3];\npage = [1 2];\nidx = sub2ind([2 3 4], row, col, page);",
+      "output": "idx = [3 11];"
+    },
+    {
+      "description": "Broadcasting scalar subscripts across array inputs",
+      "input": "rows = [1 2 3];\nidx = sub2ind([3 4], rows, 4);",
+      "output": "idx = [10 11 12];"
+    },
+    {
+      "description": "Retaining GPU residency for batched index conversions",
+      "input": "rows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);",
+      "output": "% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305"
+    },
+    {
+      "description": "Detecting invalid out-of-range subscripts",
+      "input": "try\n    idx = sub2ind([3 4], 4, 1);\ncatch ME\n    disp(ME.message);\nend",
+      "output": "Index exceeds the number of rows in dimension 1."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What data types does `sub2ind` accept?",
+      "answer": "Numeric and logical inputs are accepted. Logical values are converted to doubles before validation. Complex, NaN, and infinite values are rejected with a descriptive error."
+    },
+    {
+      "question": "Can the size vector contain zeros?",
+      "answer": "No. Every dimension size must be a positive integer. This matches MATLAB's behavior for index conversion."
+    },
+    {
+      "question": "Do subscripts have to be the same size?",
+      "answer": "Yes. All non-scalar subscripts must share the same size (shape). Scalars broadcast to that common shape."
+    },
+    {
+      "question": "What happens when subscripts are out of range?",
+      "answer": "`sub2ind` throws an error explaining which dimension failed the bounds check. This mirrors MATLAB's run-time error."
+    },
+    {
+      "question": "Does the function support GPU arrays?",
+      "answer": "Yes. With the WGPU provider the conversion happens entirely on device, including validation. Other providers gather the data to the host, compute the indices, and upload them back to the device automatically."
+    },
+    {
+      "question": "Are fractional subscripts rounded?",
+      "answer": "No. Non-integer, NaN, or infinite subscripts raise an error."
+    },
+    {
+      "question": "How is the linear index computed?",
+      "answer": "The output uses MATLAB's column-major convention: `1 + sum((s_k - 1) * stride_k)` where `stride_k` is the product of the preceding dimensions."
+    },
+    {
+      "question": "Can I call `sub2ind` with more subscripts than dimensions?",
+      "answer": "No. You must pass exactly one subscript per dimension listed in the size vector."
+    },
+    {
+      "question": "What about empty outputs?",
+      "answer": "If the subscript arrays are empty, `sub2ind` returns an empty double array with the same shape."
+    },
+    {
+      "question": "Does `sub2ind` change the orientation of row/column vectors?",
+      "answer": "No. The output preserves the orientation (shape) of the subscript arrays, so row vectors stay row vectors and column vectors stay column vectors."
+    }
+  ],
+  "links": [
+    {
+      "label": "ind2sub",
+      "url": "./ind2sub"
+    },
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/sub2ind.rs"
+  },
+  "gpu_residency": "```matlab\nrows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);\n```\n\nExpected behavior:\n\n```matlab\n% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305\n```",
+  "gpu_behavior": [
+    "When a WGPU-backed provider is active, `sub2ind` executes entirely on the GPU. The shader mirrors MATLAB's validation rules: it rejects non-finite values, non-integer subscripts, and out-of-range indices, surfacing the same diagnostic messages as the CPU path. Providers that do not yet implement the hook fall back to the host implementation; after the indices are computed they are uploaded back to the active provider so downstream fused kernels continue operating on device data."
+  ]
+}

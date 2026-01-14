@@ -1,0 +1,137 @@
+{
+  "title": "isnan",
+  "category": "logical/tests",
+  "keywords": [
+    "isnan",
+    "nan mask",
+    "numeric predicate",
+    "gpuArray isnan",
+    "MATLAB isnan"
+  ],
+  "summary": "Return a logical mask indicating which elements of the input are NaN.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs on the GPU when the provider exposes `logical_isnan`; otherwise data gathers to the host transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::isnan::tests",
+    "integration": "builtins::logical::tests::isnan::tests::isnan_gpu_roundtrip",
+    "gpu": "builtins::logical::tests::isnan::tests::isnan_wgpu_matches_host_path"
+  },
+  "description": "`mask = isnan(x)` returns a logical scalar or array indicating which elements of `x` are IEEE NaN (Not-a-Number) values. The output matches MATLAB's semantics for scalars, matrices, higher-dimensional tensors, and gpuArray values.",
+  "behaviors": [
+    "Numeric scalars return a logical scalar (`true`/`false`).",
+    "Numeric arrays return a logical array of the same size, with `true` wherever the corresponding element is `NaN`.",
+    "Complex inputs report `true` when either the real or imaginary component is `NaN`.",
+    "Logical inputs return `false` because logical values are finite by definition.",
+    "Character arrays return logical arrays of zeros (characters map to finite code points).",
+    "String arrays return logical arrays of zeros, mirroring MATLAB's behavior.",
+    "`string` scalars (string objects) return a logical scalar `false`.",
+    "When the input is a `gpuArray`, RunMat keeps the computation on the device if the active acceleration provider implements the `logical_isnan` hook; otherwise the runtime gathers the data back to the host automatically."
+  ],
+  "examples": [
+    {
+      "description": "Check if a scalar is NaN",
+      "input": "result = isnan(NaN);",
+      "output": "result =\n     1"
+    },
+    {
+      "description": "Create a NaN mask for a numeric matrix",
+      "input": "A = [1 NaN 2; 3 4 NaN];\nmask = isnan(A);",
+      "output": "mask =\n  2\u00d73 logical array\n     0     1     0\n     0     0     1"
+    },
+    {
+      "description": "Identify NaNs inside a complex array",
+      "input": "Z = [1+2i NaN+0i 3+NaNi];\nmask = isnan(Z);",
+      "output": "mask =\n  1\u00d73 logical array\n     0     1     1"
+    },
+    {
+      "description": "Use `isnan` with character data",
+      "input": "chars = ['R' 'u' 'n'];\nmask = isnan(chars);",
+      "output": "mask =\n  1\u00d73 logical array\n     0     0     0"
+    },
+    {
+      "description": "Run `isnan` directly on the GPU",
+      "input": "G = gpuArray([1 0/0 3]);\nmask_gpu = isnan(G);\nmask = gather(mask_gpu);",
+      "output": "mask =\n  1\u00d73 logical array\n     0     1     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isnan` modify the input array?",
+      "answer": "No. It returns a logical mask and leaves the input unchanged, whether the data lives on the host or the GPU."
+    },
+    {
+      "question": "How does `isnan` treat complex numbers?",
+      "answer": "It returns `true` when either the real or the imaginary component of the element is `NaN`, matching MATLAB semantics."
+    },
+    {
+      "question": "What does `isnan` return for logical inputs?",
+      "answer": "Logical inputs always produce `false` because logical values (0 or 1) are finite."
+    },
+    {
+      "question": "Does `isnan` support string or character arrays?",
+      "answer": "Yes. Character arrays return logical zeros with the same shape. String arrays return logical zeros per element."
+    },
+    {
+      "question": "What happens when `isnan` runs on a gpuArray without provider support?",
+      "answer": "RunMat gathers the data to the host, computes the mask on the CPU, and returns a host logical array. This guarantees that the builtin never fails even when the GPU backend lacks the specialised kernel."
+    },
+    {
+      "question": "Can I fuse `isnan` with other elementwise operations?",
+      "answer": "Yes. The fusion planner treats `isnan` as an elementwise operation, so expressions like `isnan(A ./ B)` remain eligible for GPU fusion when the provider advertises support."
+    },
+    {
+      "question": "Are there performance differences between `isnan` and `isfinite`/`isinf`?",
+      "answer": "Each predicate performs a single elementwise test. Performance is dominated by memory bandwidth; all three functions have comparable cost on both CPU and GPU."
+    },
+    {
+      "question": "How does `isnan` behave on empty arrays?",
+      "answer": "It returns an empty logical array with the same size metadata as the input, matching MATLAB behavior."
+    }
+  ],
+  "links": [
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isreal",
+      "url": "./isreal"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner keeps tensors on the GPU across fused expressions when that improves performance. You can still seed residency manually with `gpuArray` for compatibility with MATLAB scripts or when you want fine-grained control over data movement.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, `isnan` looks for the provider hook `logical_isnan`. Providers that implement the hook execute the NaN test entirely on the GPU, producing a logical gpuArray result without any host transfers. If the hook is absent, RunMat gathers the input tensor back to the CPU, computes the mask on the host, and returns a regular logical array so the builtin always succeeds."
+  ]
+}

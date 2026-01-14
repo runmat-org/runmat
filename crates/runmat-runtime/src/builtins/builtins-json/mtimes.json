@@ -1,0 +1,147 @@
+{
+  "title": "mtimes",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "mtimes",
+    "matrix multiplication",
+    "linear algebra",
+    "gpu"
+  ],
+  "summary": "Matrix multiplication (A * B) with MATLAB-compatible semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/mtimes.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Dispatches to the active acceleration provider via the matmul hook; otherwise gathers inputs and executes the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::mtimes::tests",
+    "integration": "builtins::math::linalg::ops::mtimes::tests::mtimes_gpu_roundtrip",
+    "gpu_scalar": "builtins::math::linalg::ops::mtimes::tests::gpu_scalar_matrix_product",
+    "wgpu": "builtins::math::linalg::ops::mtimes::tests::mtimes_wgpu_matches_cpu",
+    "doc": "builtins::math::linalg::ops::mtimes::tests::doc_examples_present"
+  },
+  "description": "`mtimes(A, B)` implements MATLAB's matrix multiplication operator (`A * B`). It supports scalars, vectors, matrices, and complex tensors while preserving MATLAB's column-major layout and dimension rules.",
+  "behaviors": [
+    "The inner dimensions must match: `size(A, 2) == size(B, 1)` for 2-D arrays. N-D tensors flatten the leading two dimensions into a matrix slice so MATLAB-style broadcasting semantics stay intact.",
+    "Row vectors (`1\u00d7N`) times column vectors (`N\u00d71`) evaluate to a scalar; column-by-row produces the familiar outer product (`N\u00d71` \u00b7 `1\u00d7M` \u2192 `N\u00d7M`).",
+    "Scalars multiply every element of the other operand without changing shape; logical inputs are first converted to double precision (`true \u2192 1`, `false \u2192 0`).",
+    "Complex scalars, matrices, and tensors use full complex arithmetic, including real/complex mixes that promote the result to a complex tensor when necessary.",
+    "Empty matrices follow MATLAB semantics: multiplying an `m\u00d70` by `0\u00d7n` yields an `m\u00d7n` zero matrix and any mismatch in inner dimensions raises `Inner matrix dimensions must agree`.",
+    "When either input is GPU-resident, RunMat consults the active acceleration provider; if its `matmul` hook supports the operands the computation stays on device, otherwise the runtime gathers inputs and executes the CPU fallback transparently."
+  ],
+  "examples": [
+    {
+      "description": "Multiply two 2-D matrices",
+      "input": "A = [1 2 3; 4 5 6];\nB = [7 8; 9 10; 11 12];\nC = A * B;",
+      "output": "C = [58 64; 139 154];"
+    },
+    {
+      "description": "Compute a dot product with row and column vectors",
+      "input": "u = [1 2 3];\nv = [4; 5; 6];\ndotVal = u * v;",
+      "output": "dotVal = 32;"
+    },
+    {
+      "description": "Scale a matrix by a scalar using `mtimes`",
+      "input": "S = 0.5 * eye(3);",
+      "output": "S =\n    0.5000         0         0\n         0    0.5000         0\n         0         0    0.5000"
+    },
+    {
+      "description": "Multiply complex matrices",
+      "input": "A = [1+2i 3-4i; 5+6i 7+8i];\nB = [1-1i; 2+2i];\nC = A * B;",
+      "output": "C =\n   17 - 1i\n    9 + 31i"
+    },
+    {
+      "description": "Perform matrix multiplication on GPU arrays",
+      "input": "G1 = gpuArray([1 2; 3 4]);\nG2 = gpuArray([5; 6]);\nG = G1 * G2;\nresult = gather(G);",
+      "output": "isa(G, 'gpuArray')   % logical 1\n\nresult =\n    17\n    39"
+    },
+    {
+      "description": "Dimension mismatch raises a MATLAB-style error",
+      "input": "A = rand(2, 3);\nB = rand(4, 2);\nC = A * B;",
+      "output": "Error using  *\nInner matrix dimensions must agree."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `mtimes` different from `times` (`.*`)?",
+      "answer": "`mtimes` performs matrix multiplication (dot products, GEMM). Use `.*` for element-wise products with implicit expansion."
+    },
+    {
+      "question": "What happens when inner dimensions do not match?",
+      "answer": "RunMat raises `Inner matrix dimensions must agree`, matching MATLAB's error identifier and message."
+    },
+    {
+      "question": "Does `mtimes` support scalars and matrices together?",
+      "answer": "Yes. Scalars multiply every element of the matrix, returning a matrix of the same size."
+    },
+    {
+      "question": "Are complex numbers fully supported?",
+      "answer": "Yes. Mixed real/complex operands produce complex outputs using MATLAB's arithmetic rules."
+    },
+    {
+      "question": "Will results stay on the GPU?",
+      "answer": "When a provider implements `matmul`, results remain device-resident. Otherwise RunMat gathers data, computes on the CPU, and returns a host tensor."
+    },
+    {
+      "question": "Do vectors need to be explicitly shaped?",
+      "answer": "Like MATLAB, row vectors must be `1\u00d7N` and column vectors `N\u00d71`. Use `.'` or `(:)` to reshape when needed."
+    },
+    {
+      "question": "Does RunMat use BLAS?",
+      "answer": "Yes. The host implementation uses RunMat's optimized inner loops today and will leverage BLAS/LAPACK when the optional feature is enabled."
+    },
+    {
+      "question": "Can `mtimes` fuse with other GPU ops?",
+      "answer": "Providers may fuse GEMM with adjacent operations; otherwise fusion falls back to the standard kernels."
+    }
+  ],
+  "links": [
+    {
+      "label": "eye",
+      "url": "./eye"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mtimes.rs"
+  },
+  "gpu_residency": "When both operands already live on the GPU, the provider keeps intermediate buffers and the final result on the device. If RunMat needs to fall back to the CPU it gathers any gpuArray inputs, performs the multiplication, and returns a host tensor\u2014apply `gpuArray` to the result if subsequent steps must stay on the device. Auto-offload heuristics will continue to expand, so explicit residency control is rarely required.",
+  "gpu_behavior": [
+    "1. The native auto-offload planner checks the active acceleration provider. When a backend with a `matmul` hook (for example, the WGPU provider) is registered, RunMat dispatches the operation there, keeping gpuArray inputs and the result resident on the device. 2. Mixed-residency calls automatically upload host tensors to the provider before invoking `matmul`, while pure scalar operands use the provider's `scalar_mul` hook to avoid unnecessary transfers. 3. If no GPU provider is registered or the backend declines the request (unsupported precision, shape, or size), RunMat gathers any gpuArray inputs, executes the CPU fallback in this module, and returns a host tensor. Reapply `gpuArray` if you need the result back on the device."
+  ]
+}

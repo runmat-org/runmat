@@ -1,0 +1,141 @@
+{
+  "title": "kron",
+  "category": "array/shape",
+  "keywords": [
+    "kron",
+    "kronecker product",
+    "tensor product",
+    "block matrix",
+    "gpu"
+  ],
+  "summary": "Compute the Kronecker (tensor) product of two scalars, vectors, matrices, or N-D arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Providers may implement the kron hook to execute entirely on the device; the runtime gathers and evaluates on the host when the hook is missing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::kron::tests",
+    "integration": "builtins::array::shape::kron::tests::kron_gpu_roundtrip"
+  },
+  "description": "`kron(A, B)` forms the Kronecker (tensor) product of arrays `A` and `B`. Every element of `A` scales a copy of `B`, yielding a block-structured array whose size is `size(A) .* size(B)` when interpreted with MATLAB's column-major ordering.",
+  "behaviors": [
+    "Works with scalars, vectors, matrices, and higher-rank tensors; trailing singleton dimensions are honoured.",
+    "If either input is complex, the output is complex and uses MATLAB's complex arithmetic rules.",
+    "Logical and char inputs are promoted to double precision before multiplication.",
+    "Scalar arguments act as uniform scalars (`kron(a, B)` behaves like `a * B`).",
+    "Empty dimensions propagate; if any replicated dimension is zero, the result is empty along that axis.",
+    "Invalid inputs (non-numeric/non-logical, or values that would overflow the maximum size) raise descriptive MATLAB-style errors."
+  ],
+  "examples": [
+    {
+      "description": "Computing the Kronecker product of two matrices",
+      "input": "A = [1 2; 3 4];\nB = [0 5; 6 7];\nC = kron(A, B);",
+      "output": "C =\n     0     5     0    10\n     6     7    12    14\n     0    15     0    20\n    18    21    24    28"
+    },
+    {
+      "description": "Kronecker product with row and column vectors",
+      "input": "row = [1 2 3];\ncol = (1:3)';\nK = kron(row, col);\nsize(K)",
+      "output": "ans =\n     3     9"
+    },
+    {
+      "description": "Scaling a matrix with a scalar using `kron`",
+      "input": "A = [1 2; 3 4];\nS = kron(2, A);",
+      "output": "S =\n     2     4\n     6     8"
+    },
+    {
+      "description": "Building block-diagonal systems with `kron`",
+      "input": "I = eye(3);\nM = [1 0; 0 -1];\nblockDiag = kron(I, M);"
+    },
+    {
+      "description": "Kronecker product of complex matrices",
+      "input": "A = [1+2i 0; 0 3-1i];\nB = [0 1; 2 3i];\nC = kron(A, B);"
+    },
+    {
+      "description": "Using `kron` with logical masks",
+      "input": "mask = logical([1 0; 0 1]);\ntile = kron(mask, ones(2));"
+    },
+    {
+      "description": "Running `kron` on GPU-resident tensors",
+      "input": "G = gpuArray(rand(2));\nH = gpuArray([1 -1; -1 1]);\nK = kron(G, H);\nisgpuarray(K)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use `kron` instead of standard matrix multiplication?",
+      "answer": "Use `kron` when you need block matrices built from every combination of two operands. Matrix multiplication collapses dimensions, while `kron` expands them."
+    },
+    {
+      "question": "Does `kron` preserve sparsity?",
+      "answer": "The current dense runtime converts inputs to dense double or complex tensors. Sparse fidelity is on the roadmap; today, sparse inputs are first densified."
+    },
+    {
+      "question": "Can I mix real and complex inputs?",
+      "answer": "Yes. If either operand is complex, the output is complex, with MATLAB-compatible real/imaginary components."
+    },
+    {
+      "question": "What happens with logical or boolean inputs?",
+      "answer": "Logical arrays are converted to doubles (0 and 1) before the Kronecker product, mirroring MATLAB's behaviour."
+    },
+    {
+      "question": "Are character arrays supported?",
+      "answer": "Yes. Character arrays are converted to their Unicode code points (double precision) before forming the product."
+    },
+    {
+      "question": "How big can the result be?",
+      "answer": "`kron` checks for overflow when multiplying dimension sizes. If the result would exceed the maximum addressable size, the builtin raises a descriptive error before allocating memory."
+    },
+    {
+      "question": "Does the GPU path always stay on-device?",
+      "answer": "When the provider supplies a `kron` hook, execution stays on-device. Otherwise RunMat gathers to the host, computes the product, and re-uploads the result when a provider is available."
+    }
+  ],
+  "links": [
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "reshape",
+      "url": "./reshape"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "matmul",
+      "url": "./matmul"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/kron.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/kron.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's planner keeps values resident on the GPU whenever it is profitable. Explicit `gpuArray` calls remain supported for MATLAB compatibility and for users who want direct control over residency.",
+  "gpu_behavior": [
+    "When a GPU provider is active, RunMat first consults the provider's `kron` hook so the operation can run entirely on the device. Providers that have not implemented this hook fall back to a safe path: the runtime gathers both operands to host memory, performs the Kronecker product in Rust, and then attempts to upload the result back to the originating device so downstream GPU work can continue without additional copies."
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "title": "size",
+  "category": "array/introspection",
+  "keywords": [
+    "size",
+    "dimensions",
+    "shape",
+    "gpu",
+    "introspection"
+  ],
+  "summary": "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads tensor metadata from handles; no device kernels are dispatched."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::size::tests",
+    "integration": "builtins::array::introspection::size::tests::size_gpu_tensor_uses_handle_shape"
+  },
+  "description": "`size(A)` reports the length of every dimension of `A`. The return value is always a row vector describing the current shape, with scalars reported as `1\u00d71`. This matches MathWorks MATLAB semantics for scalars, vectors, matrices, N-D arrays, strings, chars, tables, and cells.",
+  "behaviors": [
+    "`size(A)` returns a `1\u00d7N` row vector listing the extents of each dimension.",
+    "`size(A, dim)` returns the extent of the specified dimension as a scalar. Dimensions outside the current rank return `1`.",
+    "`size(A, dims)` accepts a vector of dimensions and returns the corresponding extents.",
+    "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m\u00d7n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
+    "Character arrays return `[rows cols]`; string scalars return `[1 1]`.",
+    "Cell arrays and struct scalars follow MATLAB's array semantics.",
+    "Empty dimensions (zeros) are preserved in the output vector.",
+    "Multiple output variables follow MATLAB rules: `[m, n, p] = size(A)` peels off leading dimensions, padding with `1`s when the array has fewer than the requested outputs."
+  ],
+  "examples": [
+    {
+      "description": "Find the size of a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nshape = size(A);",
+      "output": "shape = [2 3];"
+    },
+    {
+      "description": "Determine the number of rows in a matrix",
+      "input": "A = randn(8, 4);\nm = size(A, 1);",
+      "output": "m = 8;"
+    },
+    {
+      "description": "Query multiple dimensions at once",
+      "input": "A = rand(5, 4, 3);\nselected = size(A, [1 3]);",
+      "output": "selected = [5 3];"
+    },
+    {
+      "description": "Inspect a gpuArray without gathering",
+      "input": "G = gpuArray(ones(256, 512));\nshape = size(G);",
+      "output": "shape = [256 512];"
+    },
+    {
+      "description": "Check the size of a cell array",
+      "input": "C = {1, 2, 3; 4, 5, 6};\ngrid = size(C);",
+      "output": "grid = [2 3];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `size` different from `length`?",
+      "answer": "`length(A)` returns the length of the largest dimension, whereas `size(A)` returns every dimension."
+    },
+    {
+      "question": "What happens when I request a dimension larger than the array rank?",
+      "answer": "MATLAB semantics apply: `size(A, dim)` returns `1` when `dim` exceeds the number of stored dimensions."
+    },
+    {
+      "question": "Can I pass a vector of dimensions?",
+      "answer": "Yes. `size(A, [1 3])` returns a row vector with the size of the first and third dimensions."
+    },
+    {
+      "question": "Does `size` gather GPU data?",
+      "answer": "No. The runtime reads shape metadata stored alongside the GPU buffer. Gathering only happens if a provider fails to report the shape, in which case RunMat downloads the tensor before continuing."
+    },
+    {
+      "question": "How are row and column vectors reported?",
+      "answer": "Row vectors are `[1 n]`, column vectors are `[n 1]`, matching MATLAB."
+    },
+    {
+      "question": "What about empty arrays?",
+      "answer": "Empty dimensions (0-length) are preserved exactly in the returned vector."
+    },
+    {
+      "question": "Can I pass non-integer dimensions?",
+      "answer": "No. The dimension argument must be positive integers; fractions or negatives raise an error."
+    },
+    {
+      "question": "How can I check multiple dimensions and keep the result on the GPU?",
+      "answer": "`size` always returns a host double array because it is metadata. Use the values to plan GPU computations, but no GPU array is produced."
+    }
+  ],
+  "links": [
+    {
+      "label": "length (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/length.html"
+    },
+    {
+      "label": "ndims (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/ndims.html"
+    },
+    {
+      "label": "numel (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/numel.html"
+    },
+    {
+      "label": "MathWorks size reference",
+      "url": "https://www.mathworks.com/help/matlab/ref/size.html"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_behavior": [
+    "When a value already resides on the GPU, `size` reads the shape metadata carried by the GPU tensor handle. No kernels are launched and no device data is gathered. If a provider does not populate the shape field on its handles, RunMat falls back to materialising the tensor on the host so the answer stays correct. The builtin never allocates device memory and always returns a host double array, making it safe to call inside fused GPU expressions without breaking residency."
+  ]
+}

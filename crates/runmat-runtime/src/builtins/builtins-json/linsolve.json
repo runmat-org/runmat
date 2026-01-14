@@ -1,0 +1,130 @@
+{
+  "title": "linsolve",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "linsolve",
+    "linear solve",
+    "triangular system",
+    "posdef",
+    "gpu"
+  ],
+  "summary": "Solve linear systems A * X = B with optional structural hints (triangular, symmetric, positive-definite, or transposed).",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/linsolve.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Prefers the accel provider's linsolve hook; the current WGPU backend downloads operands to the host, runs the shared solver, then re-uploads the result to preserve GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "uniform"
+  },
+  "requires_feature": "wgpu",
+  "tested": {
+    "unit": "builtins::math::linalg::solve::linsolve::tests",
+    "gpu": "builtins::math::linalg::solve::linsolve::tests::gpu_round_trip_matches_cpu",
+    "wgpu": "builtins::math::linalg::solve::linsolve::tests::wgpu_round_trip_matches_cpu",
+    "doc": "builtins::math::linalg::solve::linsolve::tests::doc_examples_present"
+  },
+  "description": "`X = linsolve(A, B)` solves the linear system `A * X = B`. The optional `opts` structure lets you declare that `A` is lower- or upper-triangular, symmetric, positive-definite, rectangular, or that the transposed system should be solved instead. These hints mirror MATLAB and allow the runtime to skip unnecessary factorizations.",
+  "behaviors": [
+    "Inputs must behave like 2-D matrices (trailing singleton dimensions are accepted). `size(A, 1)` must match `size(B, 1)` after accounting for `opts.TRANSA`.",
+    "When `opts.LT` or `opts.UT` are supplied, `linsolve` performs forward/back substitution instead of a full factorization. Singular pivots trigger the MATLAB error `\"linsolve: matrix is singular to working precision.\"`",
+    "`opts.TRANSA = 'T'` or `'C'` solves `A\u1d40 * X = B` (conjugate transpose for complex matrices).",
+    "`opts.POSDEF` and `opts.SYM` are accepted for compatibility; the current implementation still falls back to the SVD-based dense solver when a specialised route is not yet wired in.",
+    "The optional second output `[X, rcond_est] = linsolve(...)` (exposed via the VM multi-output path) returns the estimated reciprocal condition number used to honour `opts.RCOND`.",
+    "Logical and integer inputs are promoted to double precision. Complex inputs are handled in complex arithmetic."
+  ],
+  "examples": [
+    {
+      "description": "Solving a 2\u00d72 linear system",
+      "input": "A = [4 -2; 1 3];\nb = [6; 7];\nx = linsolve(A, b);",
+      "output": "x =\n     2\n     1"
+    },
+    {
+      "description": "Using a lower-triangular hint",
+      "input": "L = [3 0 0; -1 2 0; 4 1 5];\nb = [9; 1; 12];\nopts.LT = true;\nx = linsolve(L, b, opts);",
+      "output": "x =\n     3\n     2\n     1"
+    },
+    {
+      "description": "Solving the transposed system",
+      "input": "A = [2 1 0; 0 3 4; 0 0 5];\nb = [3; 11; 5];\nopts.UT = true;\nopts.TRANSA = 'T';\nx = linsolve(A, b, opts);",
+      "output": "x =\n     1\n     2\n     1"
+    },
+    {
+      "description": "Complex triangular solve",
+      "input": "U = [2+1i  -1i; 0  4-2i];\nb = [3+2i; 7];\nopts.UT = true;\nx = linsolve(U, b, opts);",
+      "output": "x =\n   2.0000 + 0.0000i\n   1.7500 + 0.8750i"
+    },
+    {
+      "description": "Estimating the reciprocal condition number",
+      "input": "A = [1 1; 1 1+1e-12];\nb = [2; 2+1e-12];\n[x, rcond_est] = linsolve(A, b);",
+      "output": "x =\n     1\n     1\n\nrcond_est =\n    4.4409e-12"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens if I pass both `opts.LT` and `opts.UT`?",
+      "answer": "RunMat raises the MATLAB error `\"linsolve: LT and UT are mutually exclusive.\"`\u2014a matrix cannot be simultaneously strictly lower- and upper-triangular."
+    },
+    {
+      "question": "Does `opts.TRANSA` accept lowercase characters?",
+      "answer": "Yes. `opts.TRANSA` is case-insensitive and accepts `'N'`, `'T'`, `'C'`, or their lowercase variants. `'C'` and `'T'` are equivalent for real matrices; `'C'` takes the conjugate transpose for complex matrices (mirroring MATLAB)."
+    },
+    {
+      "question": "How is `opts.RCOND` used?",
+      "answer": "`opts.RCOND` provides a lower bound on the acceptable reciprocal condition number. If the estimated `rcond` falls below the requested threshold the builtin raises `\"linsolve: matrix is singular to working precision.\"`"
+    },
+    {
+      "question": "Do `opts.SYM` or `opts.POSDEF` change the algorithm today?",
+      "answer": "They are accepted for MATLAB compatibility. The current implementation still uses the dense SVD solver when no specialised routine is wired in; future work will route positive-definite systems to Cholesky-based kernels."
+    },
+    {
+      "question": "Can I use higher-dimensional arrays?",
+      "answer": "Inputs must behave like matrices. Trailing singleton dimensions are permitted, but other higher-rank arrays should be reshaped before calling `linsolve`, just like in MATLAB."
+    }
+  ],
+  "links": [
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "mrdivide",
+      "url": "./mrdivide"
+    },
+    {
+      "label": "lu",
+      "url": "./lu"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "No additional residency management is required. When both operands already reside on the GPU, RunMat executes the provider's `linsolve` hook. The current WGPU backend gathers the data to the host, runs the shared solver, and re-uploads the output automatically, so downstream GPU work keeps its residency. Providers that implement an on-device kernel can execute entirely on the GPU without any MATLAB-level changes.",
+  "gpu_behavior": [
+    "When a gpuArray provider is active, RunMat offers the solve to its `linsolve` hook. The current WGPU backend downloads the operands to the host, executes the shared CPU solver, and uploads the result back to the device so downstream kernels retain their residency. If no provider is registered\u2014or a provider declines the hook\u2014RunMat gathers inputs to the host and returns a host tensor."
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "title": "squeeze",
+  "category": "array/shape",
+  "keywords": [
+    "squeeze",
+    "singleton dimensions",
+    "array reshape",
+    "gpu"
+  ],
+  "summary": "Remove singleton (size-one) dimensions while preserving MATLAB vector semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Backends reuse the reshape hook to update device metadata; runtimes fall back to host metadata updates when unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::squeeze::tests",
+    "integration": "builtins::array::shape::squeeze::tests::squeeze_gpu_roundtrip"
+  },
+  "description": "`squeeze(A)` removes singleton (dimension size equal to one) dimensions from `A`. The result keeps MATLAB's row/column vector semantics\u20142-D matrices stay 2-D, and higher-rank arrays collapse down until only meaningful axes remain.",
+  "behaviors": [
+    "Dimensions greater than two drop all size-one axes. If exactly one dimension remains, the output becomes an `N \u00d7 1` column vector.",
+    "Two-dimensional inputs (row/column vectors and matrices) are returned unchanged.",
+    "Zero-length dimensions are preserved; only length-one axes are removed.",
+    "Scalar values remain scalars.",
+    "GPU arrays stay resident on the device where possible; the runtime only gathers when it cannot infer the shape."
+  ],
+  "examples": [
+    {
+      "description": "Removing Singleton Dimensions from a 3-D Matrix",
+      "input": "A = reshape(1:12, [1, 3, 4]);\nB = squeeze(A);\nsize(B)",
+      "output": "ans = [3 4]"
+    },
+    {
+      "description": "Turning 1x1xN Slices into Column Vectors",
+      "input": "T = zeros(1, 1, 5);\nT(:, :, 3) = 7;\nvec = squeeze(T);\nsize(vec)",
+      "output": "ans = [5 1]"
+    },
+    {
+      "description": "Keeping Row Vectors Unchanged After Squeeze",
+      "input": "row = rand(1, 8);\nout = squeeze(row);\nsize(out)",
+      "output": "ans = [1 8]"
+    },
+    {
+      "description": "Squeezing Logical Masks from Simulations",
+      "input": "mask = false(1, 10, 1, 1);\nmask(1, 4, 1, 1) = true;\nflat = squeeze(mask);",
+      "output": "flat = [0 0 0 1 0 0 0 0 0 0]'"
+    },
+    {
+      "description": "Using Squeeze on GPU-Resident Data",
+      "input": "G = gpuArray(rand(1, 64, 1));\nH = squeeze(G);\nisgpuarray(H)",
+      "output": "ans = logical 1"
+    },
+    {
+      "description": "Squeezing String Arrays While Preserving Layout",
+      "input": "S = strings(1, 1, 3);\nS(1, 1, 1) = \"run\";\nS(1, 1, 2) = \"mat\";\nS(1, 1, 3) = \"gpu\";\nT = squeeze(S);\nsize(T)",
+      "output": "ans = [3 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `squeeze` keep 2-D matrices unchanged?",
+      "answer": "MATLAB treats row and column vectors as 2-D objects. Preserving those dimensions avoids turning row vectors into column vectors or scalars unintentionally."
+    },
+    {
+      "question": "What happens when every dimension is singleton?",
+      "answer": "The result becomes a `1 \u00d7 1` array. Scalars (e.g., plain doubles) remain scalars."
+    },
+    {
+      "question": "Does `squeeze` affect zero-length dimensions?",
+      "answer": "No. Only size-one dimensions are removed. Zero-length dimensions are preserved exactly."
+    },
+    {
+      "question": "Can I `squeeze` character or cell arrays?",
+      "answer": "Yes. They already store up to two dimensions in RunMat, so `squeeze` leaves them unchanged but still validates inputs."
+    },
+    {
+      "question": "How does `squeeze` interact with GPU tensors?",
+      "answer": "The runtime updates GPU tensor metadata via the provider's reshape hook. Data stays on the device unless a provider cannot report shape information, in which case RunMat gathers once to infer dimensions."
+    },
+    {
+      "question": "What if I need to remove a specific dimension?",
+      "answer": "Use `reshape`, `permute`, or indexing to reorganize axes manually before calling `squeeze`."
+    },
+    {
+      "question": "Does `squeeze` change data ordering?",
+      "answer": "No. It only alters metadata. Element order in memory remains unchanged."
+    },
+    {
+      "question": "Will `squeeze` ever increase the number of dimensions?",
+      "answer": "No. It either returns the same number or fewer. The only exception is padding with a trailing singleton to maintain MATLAB's column-vector convention when exactly one dimension remains."
+    },
+    {
+      "question": "Is `squeeze` safe to run before GPU fusion?",
+      "answer": "Yes. Since it only updates shapes, it integrates cleanly with fusion and does not impede kernel generation."
+    },
+    {
+      "question": "How do I undo a squeeze?",
+      "answer": "Use `reshape` with the original size vector (for example, captured via `size(A)`) to restore the previous dimension layout."
+    }
+  ],
+  "links": [
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`ndims`",
+      "url": "./ndims"
+    },
+    {
+      "label": "`size`",
+      "url": "./size"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_behavior": [
+    "When a GPU provider is active, RunMat calls the provider's `reshape` hook to update tensor metadata without copying data. Providers that do not override `reshape` fall back to the in-process behaviour, simply updating the handle shape locally. If a handle advertises no shape, RunMat downloads metadata once to infer dimensions before applying `squeeze`."
+  ]
+}

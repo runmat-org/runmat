@@ -1,0 +1,129 @@
+{
+  "title": "expm1",
+  "category": "math/elementwise",
+  "keywords": [
+    "expm1",
+    "exp(x)-1",
+    "exponential",
+    "elementwise",
+    "gpu",
+    "precision"
+  ],
+  "summary": "Accurate element-wise computation of exp(x) - 1 for scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the active provider lacks unary_expm1."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::expm1::tests",
+    "integration": "builtins::math::elementwise::expm1::tests::expm1_gpu_provider_roundtrip"
+  },
+  "description": "`Y = expm1(X)` evaluates `exp(X) - 1` element-wise while maintaining high accuracy for values of `X` that are close to zero. It mirrors MATLAB semantics across scalars, vectors, matrices, logical arrays, character arrays, and complex inputs.",
+  "behaviors": [
+    "Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution.",
+    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Complex values follow MATLAB's definition by computing `exp(z) - 1` using complex arithmetic.",
+    "Existing GPU tensors remain on the device when the registered provider implements `unary_expm1`; otherwise RunMat gathers the data, computes on the CPU, and returns the result."
+  ],
+  "examples": [
+    {
+      "description": "Maintaining precision for tiny growth rates",
+      "input": "x = 1e-12;\ny = expm1(x);",
+      "output": "y = 1.0000000000005e-12;"
+    },
+    {
+      "description": "Applying expm1 to model percentage growth",
+      "input": "rates = [-0.10 -0.05 0 0.05 0.10];\nfactors = expm1(rates);",
+      "output": "factors = [-0.0952 -0.0488 0 0.0513 0.1052];"
+    },
+    {
+      "description": "Running expm1 on GPU arrays",
+      "input": "G = gpuArray(linspace(-1, 1, 5));\nresult = expm1(G);\nout = gather(result);",
+      "output": "out = [-0.6321 -0.3935 0 0.6487 1.7183];"
+    },
+    {
+      "description": "Using expm1 with complex numbers",
+      "input": "z = [1+1i, -1+pi*1i];\nw = expm1(z);",
+      "output": "w = [0.4687 + 2.2874i, -1.3679 + 0.0000i];"
+    },
+    {
+      "description": "Applying expm1 to character data",
+      "input": "C = 'ABC';\nY = expm1(C);",
+      "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I prefer `expm1` over `exp(x) - 1`?",
+      "answer": "Use `expm1` whenever `x` can be very close to zero. It avoids catastrophic cancellation and matches MATLAB's high-accuracy results for tiny magnitudes."
+    },
+    {
+      "question": "Does `expm1` change my tensor's shape?",
+      "answer": "No. The output has the same shape as the input, subject to MATLAB broadcasting semantics."
+    },
+    {
+      "question": "How are logical arrays handled?",
+      "answer": "Logical values convert to doubles before applying `expm1`, so `expm1([true false])` yields a double array `[e - 1, 0]`."
+    },
+    {
+      "question": "What about complex inputs?",
+      "answer": "Complex scalars and tensors use MATLAB's complex exponential formula and subtract one from the result, keeping both real and imaginary parts accurate."
+    },
+    {
+      "question": "What happens if the GPU provider lacks `unary_expm1`?",
+      "answer": "RunMat gathers the tensor to the host, computes with double precision, and returns the correct result. Subsequent fused kernels still see accurate residency metadata."
+    },
+    {
+      "question": "Can I expect double precision?",
+      "answer": "Yes. RunMat stores dense numeric tensors in double precision (`f64`). GPU providers may choose single precision internally but convert back to double when returning data to the runtime."
+    },
+    {
+      "question": "How does `expm1` interact with fusion?",
+      "answer": "The fusion planner recognises `expm1` as an element-wise op. Providers that support fused kernels can materialise `expm1` directly in generated WGSL."
+    }
+  ],
+  "links": [
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "log1p",
+      "url": "./log1p"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/expm1.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/expm1.rs"
+  },
+  "gpu_residency": "In most workflows you do **not** need to call `gpuArray` manually. RunMat's auto-offload planner and fusion engine keep data on the GPU when beneficial. You can still call `gpuArray` to mirror MathWorks MATLAB workflows or to pin data on the device explicitly.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_expm1` hook. When the hook is missing or errors, RunMat automatically gathers the tensor, performs the computation on the host using `f64::expm1` for the real components, and returns the result while preserving residency metadata. This ensures users always observe MATLAB-compatible behaviour without manual residency management."
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "title": "le",
+  "category": "logical/rel",
+  "keywords": [
+    "le",
+    "<=",
+    "less than or equal",
+    "logical comparison",
+    "gpuArray less-equal"
+  ],
+  "summary": "Element-wise less-than-or-equal comparison for scalars, arrays, strings, and gpuArray inputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_le kernels when available; otherwise inputs gather back to host memory transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::rel::le::tests",
+    "integration": "builtins::logical::rel::le::tests::le_gpu_provider_roundtrip",
+    "gpu": "builtins::logical::rel::le::tests::le_wgpu_matches_host"
+  },
+  "description": "`le(A, B)` (or the infix `A <= B`) performs an element-wise less-than-or-equal comparison. The result is a logical scalar when the broadcasted shape contains one element, or a logical array otherwise.",
+  "behaviors": [
+    "Numeric, logical, and character inputs compare element-wise using MATLAB's implicit expansion rules.",
+    "Character arrays compare by Unicode code point; mixing them with numeric arrays behaves like comparing numeric codes (`'A' <= 65`).",
+    "String scalars and string arrays compare lexically; implicit expansion works across string dimensions.",
+    "Complex inputs are not supported, matching MATLAB's behaviour.",
+    "Mixed numeric/string inputs raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Check Whether A Scalar Value Meets A Maximum",
+      "input": "flag = le(17, 42);",
+      "output": "flag =\n     1"
+    },
+    {
+      "description": "Create A Mask For Matrix Values Below Or Equal To A Threshold",
+      "input": "M = [1 2 3; 4 5 6];\nmask = le(M, 3);",
+      "output": "mask =\n  2\u00d73 logical array\n     1     1     1\n     0     0     0"
+    },
+    {
+      "description": "Apply Less-Equal With Implicit Expansion",
+      "input": "v = [1 3 5 7];\nmask = le(v, [2 6]);",
+      "output": "mask =\n  1\u00d74 logical array\n     1     1     0     0"
+    },
+    {
+      "description": "Compare Character Data To Numeric Codes With Equality Support",
+      "input": "letters = ['A' 'B' 'C'];\nisBeforeOrB = le(letters, 66);",
+      "output": "isBeforeOrB =\n  1\u00d73 logical array\n     1     1     1"
+    },
+    {
+      "description": "Compare String Arrays Lexicographically Allowing Equality",
+      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nearlierOrSame = le(names, \"bob\");",
+      "output": "earlierOrSame =\n  1\u00d73 logical array\n     1     0     1"
+    },
+    {
+      "description": "Run `le` Directly On `gpuArray` Inputs",
+      "input": "G1 = gpuArray([1 4 7]);\nG2 = gpuArray([2 4 8]);\ndeviceResult = le(G1, G2);\nhostResult = gather(deviceResult);",
+      "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     1     1\nhostResult =\n  1\u00d73 logical array\n     1     1     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `le` return logical values?",
+      "answer": "Yes. Scalars return `true` or `false`. Arrays return logical arrays, and `gpuArray` inputs return `gpuArray` logical outputs."
+    },
+    {
+      "question": "How are NaN values treated?",
+      "answer": "Any comparison involving `NaN` returns `false`, matching MATLAB behaviour."
+    },
+    {
+      "question": "Can I compare complex numbers with `le`?",
+      "answer": "No. MATLAB does not define relational ordering for complex numbers, so RunMat raises a MATLAB-compatible error when complex inputs are supplied."
+    },
+    {
+      "question": "How are strings compared?",
+      "answer": "String scalars and arrays compare lexicographically using Unicode code points, with full support for implicit expansion against scalar strings."
+    },
+    {
+      "question": "Are character vectors treated as numbers or text?",
+      "answer": "Character arrays participate as numeric code points when compared to numeric inputs, and they are converted to strings when compared against string scalars or arrays."
+    },
+    {
+      "question": "Do I need to gather results manually after a GPU comparison?",
+      "answer": "No. When both inputs are `gpuArray` values and the provider supports `elem_le`, the result stays on the GPU. Otherwise, RunMat gathers inputs transparently and returns a host logical array."
+    },
+    {
+      "question": "Does implicit expansion apply to string arrays?",
+      "answer": "Yes. String arrays support MATLAB-style implicit expansion, so you can compare against scalar strings without manual replication."
+    },
+    {
+      "question": "Can I fuse `le` inside GPU expressions?",
+      "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations."
+    }
+  ],
+  "links": [
+    {
+      "label": "lt",
+      "url": "./lt"
+    },
+    {
+      "label": "eq",
+      "url": "./eq"
+    },
+    {
+      "label": "ne",
+      "url": "./ne"
+    },
+    {
+      "label": "ge",
+      "url": "./ge"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/rel/le.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/le.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_behavior": [
+    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_le` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+  ]
+}

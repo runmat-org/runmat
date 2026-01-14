@@ -1,0 +1,130 @@
+{
+  "title": "fgets",
+  "category": "io/filetext",
+  "keywords": [
+    "fgets",
+    "text file",
+    "line input",
+    "newline"
+  ],
+  "summary": "Read the next line from a file, keeping newline characters in the result.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fgets.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When arguments live on the GPU, RunMat gathers them before performing host I/O."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fgets::tests"
+  },
+  "description": "`fgets(fid)` returns the next line from the text file associated with `fid`, preserving any newline characters that terminate the line. It mirrors MATLAB's behaviour for optional length limits, line-terminator reporting, and end-of-file handling so existing scripts work without modification.",
+  "behaviors": [
+    "`tline = fgets(fid)` reads from the current position to the next newline (including the newline) or to end-of-file when no terminator is found. The result is a character row vector with MATLAB's column-major semantics.",
+    "`tline = fgets(fid, nchar)` limits the read to at most `nchar` characters (rounded toward zero). The call stops early if a newline is encountered before the limit. When the newline appears beyond the limit, the delimiter is left unread for the next call.",
+    "`[tline, ltout] = fgets(___)` additionally returns the line terminators as a row vector of doubles. For Windows newlines (`\\r\\n`) the second output is `[13 10]`, for Unix newlines (`\\n`) it is `10`, and it is empty when the line has no terminator.",
+    "When the file is empty or the file position indicator is already at end-of-file, `tline` (and `ltout`, if requested) return `-1`.",
+    "Lines are decoded using the text encoding recorded by `fopen`. UTF-8, US-ASCII, ISO-8859-1 (`latin1`), Windows-1252, Shift_JIS, and binary mode are recognised without additional user work."
+  ],
+  "examples": [
+    {
+      "description": "Read the first line of a file",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'RunMat\\nSecond line\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ndouble(line)",
+      "output": "ans =\n    82   117   110    77    97   116    10"
+    },
+    {
+      "description": "Limit the number of characters returned",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'Example line\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\nsnippet = fgets(fid, 5);\nfclose(fid);\ndelete(fname);\n\nsnippet\ndouble(snippet)",
+      "output": "snippet =\n    'Exam'\nans =\n    69   120    97   109"
+    },
+    {
+      "description": "Retrieve line terminators separately",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'Windows line\\r\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\n[line, ltout] = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ncontent = line(1:end-numel(ltout));\nterminators = double(ltout);\n\ncontent\nterminators",
+      "output": "content =\n    'Windows line'\nterminators =\n    13    10"
+    },
+    {
+      "description": "Handle lines without a trailing newline",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'last line');\nfclose(fid);\n\nfid = fopen(fname, 'r');\n[line1, lt1] = fgets(fid);\nline2 = fgets(fid);\nfclose(fid);\ndelete(fname);\n\nline1\nlt1\nline2",
+      "output": "line1 =\n    'last line'\nlt1 =\n     []\nline2 =\n    -1"
+    },
+    {
+      "description": "Detect end of file using the return value",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'one\\n');\nfprintf(fid, 'two\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\ntline = fgets(fid);\nwhile tline ~= -1\n    fprintf('> %s', tline);\n    tline = fgets(fid);\nend\nfclose(fid);\ndelete(fname);",
+      "output": "> one\n> two"
+    },
+    {
+      "description": "Read Latin-1 encoded text",
+      "input": "fname = tempname;\nfid = fopen(fname, 'w', 'n', 'latin1');\nfprintf(fid, 'Espa\u00f1ol\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r', 'n', 'latin1');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ntext = line(1:end-1);\ncodes = double(text);\n\ntext\ncodes",
+      "output": "text =\n    'Espa\u00f1ol'\ncodes =\n    69   115   112    97   241   111   108"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `fgets` return at end-of-file?",
+      "answer": "When no characters can be read because the file position indicator is at end-of-file, `fgets` returns the numeric value `-1`. If you request two outputs, `ltout` is also `-1` in this case."
+    },
+    {
+      "question": "Does `fgets` strip newline characters?",
+      "answer": "No. Unlike `fgetl`, `fgets` keeps any newline bytes in the returned character vector so you can distinguish empty lines from lines that end in a newline."
+    },
+    {
+      "question": "How do I interpret the second output `ltout`?",
+      "answer": "`ltout` contains the numeric codes for the terminators that ended the line. Use `char(ltout)` or `double(ltout)` to inspect them. On Windows you typically see `[13 10]`, on Unix-like platforms `10`, `[]` when the line has no terminator, and `-1` when end-of-file is reached."
+    },
+    {
+      "question": "What happens if I specify an `nchar` limit?",
+      "answer": "RunMat reads at most `nchar` characters. If the newline characters appear before reaching the limit, they are included in the output. If the limit is reached first, the newline remains unread and `ltout` is empty."
+    },
+    {
+      "question": "Which encodings are supported?",
+      "answer": "`fgets` honours the encoding recorded by `fopen`. UTF-8, US-ASCII, Latin-1 (ISO-8859-1), Windows-1252, Shift_JIS, and binary mode are recognised. On most Unix-like systems the `system` encoding resolves to UTF-8; on Windows it defaults to Windows-1252."
+    },
+    {
+      "question": "How does `fgets` differ from `fgetl`?",
+      "answer": "`fgetl` removes newline characters, while `fgets` keeps them. Use `fgetl` when you want newline-free strings and `fgets` when you need to preserve the exact bytes that appear in the file."
+    },
+    {
+      "question": "Can I call `fgets` on files opened for writing only?",
+      "answer": "No. The file must be opened with read permission (for example `'r'`, `'r+'`, or `'w+'`). Calling `fgets` on a write-only identifier raises an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_behavior": [
+    "`fgets` is a host-only operation. File identifiers live in the host registry created by `fopen`, so arguments that arrive as GPU-resident scalars are gathered back to the CPU before the read occurs. The returned line and optional terminator vector are regular host values; no GPU residency is tracked."
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "title": "gamma",
+  "category": "math/elementwise",
+  "keywords": [
+    "gamma",
+    "factorial",
+    "special function",
+    "elementwise",
+    "gpu",
+    "complex"
+  ],
+  "summary": "Element-wise gamma function for scalars, vectors, matrices, and complex inputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses the provider unary_gamma hook (Lanczos approximation on WGPU); falls back to host evaluation when the hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::gamma::tests",
+    "integration": "builtins::math::elementwise::gamma::tests::gamma_gpu_provider_fallback"
+  },
+  "description": "`Y = gamma(X)` evaluates the Euler gamma function element-by-element. For positive integers the result is `(n-1)!`, half-integers map to scaled square-roots of \u03c0, and complex arguments follow the analytic continuation `\u0393(z) = \u222b_0^\u221e t^{z-1} e^{-t} dt`.",
+  "behaviors": [
+    "Respects MATLAB\u2019s broadcasting rules for all dense tensor inputs.",
+    "Promotes logical and integer values to double precision before evaluation; character arrays are converted through their Unicode code points.",
+    "Computes complex values with a Lanczos approximation and the reflection identity so results match MATLAB for every quadrant.",
+    "Returns `Inf` at non-positive integers, mirroring the poles in the analytic definition.",
+    "Keeps real-valued GPU tensors on device when the provider implements `unary_gamma`; otherwise it gathers to the host, evaluates, and reapplies any requested residency via `'like'`."
+  ],
+  "examples": [
+    {
+      "description": "Converting integers to factorials automatically",
+      "input": "gamma(5)",
+      "output": "ans = 24"
+    },
+    {
+      "description": "Evaluating half-integer inputs",
+      "input": "gamma(0.5)",
+      "output": "ans = 1.7725"
+    },
+    {
+      "description": "Handling negative non-integers",
+      "input": "gamma(-0.5)",
+      "output": "ans = -3.5449"
+    },
+    {
+      "description": "Applying gamma element-wise to arrays",
+      "input": "A = [1 2; 3 4];\nB = gamma(A);",
+      "output": "B =\n     1     1\n     2     6"
+    },
+    {
+      "description": "Working with complex numbers",
+      "input": "z = 0.5 + 1i;\ng = gamma(z);",
+      "output": "g = 0.8182 - 0.7633i"
+    },
+    {
+      "description": "Using `gamma` with GPU tensors",
+      "input": "G = gpuArray([0.5 1.5 2.5]);\nout = gamma(G);\nresult = gather(out);",
+      "output": "result = [1.7725 0.8862 1.3293]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `gamma(n)` related to factorials?",
+      "answer": "For positive integers `n`, `gamma(n) = (n-1)!`. This identity underpins the factorial extension used throughout probability, statistics, and combinatorics."
+    },
+    {
+      "question": "What happens at non-positive integers?",
+      "answer": "`gamma` has simple poles at `0, -1, -2, ...`. RunMat mirrors MATLAB by returning `Inf` at those points and signalling the singularity without throwing an error."
+    },
+    {
+      "question": "Are half-integers supported exactly?",
+      "answer": "Yes. Values such as `gamma(0.5) = sqrt(pi)` are computed with a Lanczos approximation that provides double-precision accuracy consistent with MATLAB."
+    },
+    {
+      "question": "Do complex inputs work?",
+      "answer": "Absolutely. RunMat evaluates the analytic continuation using the reflection identity `\u0393(z) = \u03c0 / (sin(\u03c0z) \u0393(1-z))` for `Re(z) < 0.5`, so complex arguments behave the same as in MATLAB."
+    },
+    {
+      "question": "Can I keep results on the GPU?",
+      "answer": "Yes for real-valued outputs whenever the active provider exposes `unary_gamma` (including the WGPU backend). If the provider lacks the hook, RunMat falls back to the host but re-uploads the tensor when you request a real-valued GPU prototype via `'like'`. Complex outputs stay on the host for now."
+    },
+    {
+      "question": "What about overflow?",
+      "answer": "Large positive inputs eventually overflow to `Inf`, just like MATLAB. Negative inputs near poles produce signed infinities consistent with the analytic behaviour."
+    },
+    {
+      "question": "Does `gamma` accept `'like'` prototypes?",
+      "answer": "Yes. Provide `'like', T` to control residency and numeric class. Complex prototypes are honoured on the host; GPU prototypes must be real."
+    }
+  ],
+  "links": [
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "sqrt",
+      "url": "./sqrt"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs"
+  },
+  "gpu_residency": "Usually not. Accelerate keeps tensors on the GPU when the provider exposes a `unary_gamma` kernel (the default WGPU backend does). Otherwise RunMat gathers the tensor, evaluates the gamma function on the CPU, and uploads the result again only when you explicitly request GPU residency via `'like', gpuArray(...)`. Complex results remain on the host because today\u2019s GPU providers operate on real buffers.",
+  "gpu_behavior": [
+    "RunMat Accelerate first calls the active provider\u2019s `unary_gamma` hook. With the WGPU backend this kernel runs entirely on device using a Lanczos approximation. Providers that decline the hook trigger an automatic gather to the host. After computing the double-precision result, RunMat re-uploads the tensor when you pass `'like', gpuArray(...)`. Complex outputs always stay on the host because current providers expose real-valued buffers only."
+  ]
+}

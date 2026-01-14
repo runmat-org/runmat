@@ -1,0 +1,145 @@
+{
+  "title": "csvread",
+  "category": "io/tabular",
+  "keywords": [
+    "csvread",
+    "csv",
+    "comma-separated values",
+    "numeric import",
+    "range",
+    "header"
+  ],
+  "summary": "Read numeric data from a comma-separated text file with MATLAB-compatible zero-based ranges.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/csvread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Performs host-side file I/O and parsing. Acceleration providers are not involved, and results remain on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::csvread::tests",
+    "integration": "builtins::io::tabular::csvread::tests::csvread_basic_csv_roundtrip"
+  },
+  "description": "`csvread(filename)` reads numeric data from a comma-separated text file and returns a dense double-precision matrix. It is a legacy convenience wrapper preserved for MATLAB compatibility, and RunMat intentionally mirrors the original zero-based semantics.",
+  "behaviors": [
+    "Accepts character vectors or string scalars for the file name. String arrays must contain exactly one element.",
+    "`csvread(filename, row, col)` starts reading at the zero-based row `row` and column `col`, skipping any data before that offset.",
+    "`csvread(filename, row, col, range)` reads only the rectangle described by `range`. Numeric ranges must contain four elements `[r1 c1 r2 c2]` (zero-based, inclusive). Excel-style ranges use the familiar `\"B2:D6\"` A1 notation, which RunMat converts to zero-based indices internally.",
+    "Empty fields (two consecutive commas or a trailing comma) are interpreted as `0`. Tokens such as `NaN`, `Inf`, and `-Inf` are accepted (case-insensitive).",
+    "Any other nonnumeric token raises an error that identifies the offending row and column.",
+    "Results are dense double-precision tensors using column-major layout. An empty file produces a `0\u00d70` tensor.",
+    "Paths can contain `~` to reference the home directory; RunMat expands the token before opening the file."
+  ],
+  "examples": [
+    {
+      "description": "Import Entire CSV File",
+      "input": "writematrix([1 2 3; 4 5 6], \"scores.csv\");\nM = csvread(\"scores.csv\");\ndelete(\"scores.csv\");",
+      "output": "M =\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Skip Header Row And Column Using Zero-Based Offsets",
+      "input": "fid = fopen(\"with_header.csv\", \"w\");\nfprintf(fid, \"Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = csvread(\"with_header.csv\", 1, 1);\ndelete(\"with_header.csv\");",
+      "output": "M =\n     1     2\n     3     4"
+    },
+    {
+      "description": "Read A Specific Range With Numeric Vector Syntax",
+      "input": "fid = fopen(\"measurements.csv\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n22,23,24,25\\n\");\nfclose(fid);\n\nblock = csvread(\"measurements.csv\", 0, 0, [1 1 2 3]);\ndelete(\"measurements.csv\");",
+      "output": "block =\n    15    16    17\n    19    20    21"
+    },
+    {
+      "description": "Read A Block Using Excel-Style Range Notation",
+      "input": "fid = fopen(\"measurements2.csv\", \"w\");\nfprintf(fid, \"10,11,12\\n14,15,16\\n18,19,20\\n\");\nfclose(fid);\n\nsub = csvread(\"measurements2.csv\", 0, 0, \"B2:C3\");\ndelete(\"measurements2.csv\");",
+      "output": "sub =\n    15    16\n    19    20"
+    },
+    {
+      "description": "Handle Empty Fields As Zeros",
+      "input": "fid = fopen(\"with_blanks.csv\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = csvread(\"with_blanks.csv\");\ndelete(\"with_blanks.csv\");",
+      "output": "M =\n     1     0     3\n     0     5     0\n     7     8     0"
+    },
+    {
+      "description": "Read Numeric Data From A File In The Home Directory",
+      "input": "homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\n\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"));\ndelete(homePath);",
+      "output": "M =\n     9    10\n    11    12"
+    },
+    {
+      "description": "Detect Errors When Text Appears In Numeric Columns",
+      "input": "fid = fopen(\"bad.csv\", \"w\");\nfprintf(fid, \"1,2,3\\n4,error,6\\n\");\nfclose(fid);\n\ntry\n    csvread(\"bad.csv\");\ncatch err\n    disp(err.message);\nend\ndelete(\"bad.csv\");",
+      "output": "csvread: nonnumeric token 'error' at row 2, column 2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `csvread` complain about text data?",
+      "answer": "`csvread` is limited to numeric CSV content. If a field contains letters, quoted strings, or other tokens that cannot be parsed as numbers, the builtin raises an error. Switch to `readmatrix` or `readtable` when the file mixes text and numbers."
+    },
+    {
+      "question": "Are the row and column offsets zero-based?",
+      "answer": "Yes. `csvread(filename, row, col)` treats `row` and `col` as zero-based counts to skip from the start of the file before reading results."
+    },
+    {
+      "question": "How are Excel-style ranges interpreted?",
+      "answer": "Excel ranges such as `\"B2:D5\"` use the familiar 1-based row numbering and column letters. The builtin converts them internally to zero-based indices and includes both endpoints."
+    },
+    {
+      "question": "Can I read files with quoted numeric fields?",
+      "answer": "Quoted numeric fields are not supported. Remove quotes before calling `csvread`, or switch to `readmatrix`, which has full CSV parsing support."
+    },
+    {
+      "question": "What happens to empty cells?",
+      "answer": "Empty cells (two consecutive commas or a trailing delimiter) become zero, matching MATLAB's `csvread` behaviour."
+    },
+    {
+      "question": "Does `csvread` support custom delimiters?",
+      "answer": "No. `csvread` always uses comma separation. Use `dlmread` or `readmatrix` for other delimiters."
+    },
+    {
+      "question": "How do I keep the results on the GPU?",
+      "answer": "`csvread` returns a host tensor. Call `gpuArray(csvread(...))` after reading, or prefer `readmatrix` with `'Like', gpuArray.zeros(1)` to keep residency on the GPU automatically."
+    },
+    {
+      "question": "What if the file is empty?",
+      "answer": "An empty file results in a `0\u00d70` double tensor. MATLAB behaves the same way."
+    },
+    {
+      "question": "Does `csvread` change the working directory?",
+      "answer": "No. Relative paths are resolved against the current working directory and do not modify it."
+    }
+  ],
+  "links": [
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/csvread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread.rs"
+  },
+  "gpu_residency": "`csvread` always returns a host-resident tensor because it performs file I/O and parsing on the CPU. If you need the data on the GPU, wrap the call with `gpuArray(csvread(...))` or switch to `readmatrix` with the `'Like'` option so that RunMat can place the result directly on the desired device.",
+  "gpu_behavior": [
+    "`csvread` performs all work on the host CPU. Arguments are gathered from the GPU when necessary, and the resulting tensor is returned in host memory. To keep data on the GPU, call `gpuArray` on the output or switch to `readmatrix` with the `'Like'` option. No provider hooks are required."
+  ]
+}

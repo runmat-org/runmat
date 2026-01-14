@@ -1,0 +1,139 @@
+{
+  "title": "rcond",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "rcond",
+    "reciprocal condition",
+    "condition number",
+    "linear algebra",
+    "gpu"
+  ],
+  "summary": "Estimate the reciprocal condition number of a square matrix (1 / cond(A)) with MATLAB-compatible behaviour.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rcond.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When a provider exposes a dense solver hook it may reuse that path; the shipping backends gather to the host, run the shared SVD-based estimator, and optionally re-upload the scalar."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::rcond::tests",
+    "gpu": "builtins::math::linalg::solve::rcond::tests::rcond_gpu_round_trip_matches_cpu",
+    "wgpu": "builtins::math::linalg::solve::rcond::tests::rcond_wgpu_matches_cpu",
+    "doc": "builtins::math::linalg::solve::rcond::tests::doc_examples_present"
+  },
+  "description": "`rc = rcond(A)` returns an estimate of the reciprocal of the condition number of a square matrix `A` in the 1-norm. Well-conditioned matrices yield values close to `1`, whereas singular or numerically singular matrices yield values near zero. The estimate mirrors MATLAB: it is based on the ratio of the smallest to largest singular values.",
+  "behaviors": [
+    "Inputs must be square matrices (scalars count as `1 \u00d7 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
+    "For the empty matrix (`0 \u00d7 0`) the reciprocal condition number is `Inf`.",
+    "`rcond(0)` returns `0`. Non-zero scalars return `1`.",
+    "Logical and integer arrays are promoted to double precision before analysis.",
+    "Complex matrices are supported; the singular values are computed in complex arithmetic.",
+    "The implementation runs an SVD and computes `min(s) / max(s)`, honouring MATLAB's tolerance logic."
+  ],
+  "examples": [
+    {
+      "description": "Reciprocal condition of the identity matrix",
+      "input": "A = eye(3);\nrc = rcond(A);",
+      "output": "rc = 1"
+    },
+    {
+      "description": "Detecting a nearly singular matrix",
+      "input": "A = diag([1, 1e-8]);\nrc = rcond(A);",
+      "output": "rc = 1e-8"
+    },
+    {
+      "description": "Reciprocal condition of a singular matrix",
+      "input": "A = [1 2; 2 4];\nrc = rcond(A);",
+      "output": "rc = 0"
+    },
+    {
+      "description": "Reciprocal condition for a complex matrix",
+      "input": "A = [1+2i 0; 3i 2-1i];\nrc = rcond(A);",
+      "output": "rc = 0.1887"
+    },
+    {
+      "description": "Handling the empty matrix",
+      "input": "rc = rcond([]);",
+      "output": "rc = Inf"
+    },
+    {
+      "description": "Estimating conditioning on GPU data",
+      "input": "G = gpuArray([2 0; 0 0.5]);\nrc_gpu = rcond(G);\nrc = gather(rc_gpu);",
+      "output": "rc = 0.25"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What range of values should I expect from `rcond`?",
+      "answer": "`rcond` returns a value in `[0, 1]`. Values near `1` indicate a well-conditioned matrix. Values near `0` indicate singular or ill-conditioned matrices."
+    },
+    {
+      "question": "Why does `rcond` return `Inf` for the empty matrix?",
+      "answer": "The empty matrix is perfectly conditioned by convention, so the reciprocal condition number is `Inf` (`1 / 0`)."
+    },
+    {
+      "question": "Does `rcond` warn me about singular systems automatically?",
+      "answer": "`rcond` itself does not issue warnings. Use the value to decide whether the matrix is singular to working precision, similar to MATLAB workflows (`if rcond(A) < eps, ...`)."
+    },
+    {
+      "question": "Is the SVD tolerance the same as MATLAB?",
+      "answer": "Yes. The estimator matches MATLAB's definition by deriving the result from the singular values. The same tolerance logic is shared with `pinv` and `rank`."
+    },
+    {
+      "question": "Will calling `rcond` move my data off the GPU?",
+      "answer": "Only if the active provider lacks a dedicated implementation. In that case RunMat transparently downloads the matrix, computes the estimate on the host, and re-uploads the scalar."
+    }
+  ],
+  "links": [
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "det",
+      "url": "./det"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "Manually calling `gpuArray` is rarely necessary. When matrices already live on the device, RunMat invokes the provider hook if one exists, or automatically gathers, evaluates, and re-uploads the scalar result. This preserves MATLAB compatibility while keeping the runtime efficient and ergonomic.",
+  "gpu_behavior": [
+    "When the input resides on a GPU, RunMat first invokes the active provider's `rcond` hook that this builtin registers. When that hook is unavailable the runtime attempts to reuse the provider's `linsolve` factorisations to recover the reciprocal condition number. If neither path is implemented the matrix is gathered to the host, the shared SVD-based estimator is executed, and the scalar result is uploaded back to the device so subsequent GPU work keeps residency."
+  ]
+}

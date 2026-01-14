@@ -1,0 +1,142 @@
+{
+  "title": "tempname",
+  "category": "io/repl_fs",
+  "keywords": [
+    "tempname",
+    "temporary file",
+    "unique name",
+    "filesystem",
+    "temp directory"
+  ],
+  "summary": "Return a unique temporary file path in the system temp folder or a user-specified directory.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tempname.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. When callers provide GPU-resident strings, RunMat gathers them before computing the file name."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::tempname::tests",
+    "integration": "builtins::io::repl_fs::tempname::tests::tempname_generates_unique_names"
+  },
+  "description": "`tempname` returns a unique path that you can reserve for a temporary file or folder. By default it chooses the system temporary directory. When you provide a folder argument, the path is generated inside that folder instead.",
+  "behaviors": [
+    "`tempname()` returns a character row vector (`1\u00d7N`) containing an absolute path inside the system temporary directory.",
+    "`tempname(folder)` returns a path inside `folder`, which can be absolute or relative. RunMat expands leading `~` to the home directory for convenience.",
+    "The returned path never corresponds to an existing file or directory at the time of the call.",
+    "`tempname` does not create files or directories. Use the returned value with builtins such as `fopen`, `mkdir`, or `movefile`.",
+    "The generated token begins with the MATLAB-compatible `tp` prefix followed by hexadecimal entropy, making it human-recognisable while avoiding collisions.",
+    "Providing more than one input argument raises `tempname: too many input arguments`. Non-text inputs raise a descriptive type error."
+  ],
+  "examples": [
+    {
+      "description": "Generate A Unique Temporary File Name",
+      "input": "fname = tempname();\nfprintf(\"Saving intermediate results to %s\\n\", fname);",
+      "output": "% Prints the unique file name inside the system temporary folder."
+    },
+    {
+      "description": "Create A Temporary File Name In A Custom Folder",
+      "input": "logDir = fullfile(pwd(), \"logs\");\nfname = tempname(logDir);",
+      "output": "% fname starts with the logs folder and ends with a tp******** token."
+    },
+    {
+      "description": "Append A File Extension To Tempname Results",
+      "input": "csvPath = [tempname(), \".csv\"];",
+      "output": "% csvPath is a unique .csv file path you can pass to writematrix or fprintf."
+    },
+    {
+      "description": "Reserve A Temporary Folder Path",
+      "input": "scratch = tempname();\nmkdir(scratch);\ncleanupObj = onCleanup(@() rmdir(scratch, \"s\"));",
+      "output": "% scratch now exists on disk and is removed automatically via onCleanup."
+    },
+    {
+      "description": "Use Tempname With fopen To Write Temporary Data",
+      "input": "tmpFile = tempname();\n[fid, message] = fopen(tmpFile, \"w\");\nif fid == -1\n    error(\"Failed to open temp file: %s\", message);\nend\nfprintf(fid, \"Temporary output\\n\");\nfclose(fid);",
+      "output": "% Creates a file, writes text, and leaves it for later processing."
+    },
+    {
+      "description": "Combine Tempname With gpuArray Inputs",
+      "input": "folder = gpuArray(\"scratch\");\nfname = tempname(folder);",
+      "output": "% RunMat gathers the string and returns a host-side character vector."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `tempname` create the file or folder for me?",
+      "answer": "No. It only reserves a unique path. Call `fopen`, `mkdir`, or other functions to create the resource."
+    },
+    {
+      "question": "Can I call `tempname` with relative folders?",
+      "answer": "Yes. RunMat honours relative paths and joins the generated token using the platform\u2019s path separator."
+    },
+    {
+      "question": "What happens if the target folder does not exist yet?",
+      "answer": "`tempname` still returns a path under that folder. It is up to your code to create intermediate directories if needed."
+    },
+    {
+      "question": "Why does the result start with `tp`?",
+      "answer": "MATLAB prefixes the token with `tp` for temporary paths. RunMat follows the same convention for familiarity."
+    },
+    {
+      "question": "Is the result guaranteed to be unique?",
+      "answer": "The builtin combines monotonic process-wide counters with high-resolution timestamps and the process ID. The result does not exist at the moment of generation; collisions are exceedingly unlikely."
+    },
+    {
+      "question": "Can I request multiple names at once?",
+      "answer": "Call `tempname` repeatedly. Each invocation returns a fresh token."
+    },
+    {
+      "question": "Does `tempname` support Unicode folder names?",
+      "answer": "Yes. Paths are stored as UTF-16 internally on Windows and UTF-8 on Unix-like systems. RunMat converts between encodings automatically."
+    },
+    {
+      "question": "How do I convert the result to a string scalar?",
+      "answer": "Wrap the output in `string(tempname())` or `string(tempname(folder))`."
+    },
+    {
+      "question": "Will GPU acceleration change the output?",
+      "answer": "No. The builtin is host-only and ignores GPU providers entirely."
+    }
+  ],
+  "links": [
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/tempname.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/tempname.rs"
+  },
+  "gpu_residency": "No. `tempname` only manipulates paths and never benefits from GPU execution. It always returns a host-resident character array. If you accidentally store a folder name on the GPU, RunMat gathers it transparently.",
+  "gpu_behavior": [
+    "`tempname` performs all computation on the CPU. When scripts pass GPU-resident strings (for example, `gpuArray(\"scratch\")`), RunMat automatically gathers those scalars to host memory before determining the result. Acceleration providers do not implement hooks for this builtin, and there is no GPU kernel to warm up."
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "title": "isvector",
+  "category": "array/introspection",
+  "keywords": [
+    "isvector",
+    "vector detection",
+    "metadata query",
+    "gpu",
+    "logical"
+  ],
+  "summary": "Return true when an array is 1-by-N or N-by-1 (including scalars).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads tensor metadata directly from GPU handles; gathers only when shape metadata is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::isvector::tests",
+    "integration": "builtins::array::introspection::isvector::tests::isvector_gpu_tensor_uses_handle_shape"
+  },
+  "description": "`isvector(A)` returns logical `true` when the input is 1-by-`N` or `N`-by-1 (including scalars) and has at most two dimensions. The builtin mirrors MATLAB semantics across numeric arrays, logical arrays, characters, strings, cells, structs, objects, and GPU-resident tensors.",
+  "behaviors": [
+    "`isvector` is `true` for 1-by-`N` and `N`-by-1 arrays (with `N \u2265 0`), including scalars (`1\u00d71`).",
+    "Arrays with more than two dimensions always return `false`, even when all trailing dimensions are singleton (for example, `1\u00d71\u00d71`).",
+    "Empty arrays follow MATLAB rules: size `0\u00d71` or `1\u00d70` is a vector, but size `0\u00d73` is not.",
+    "Character arrays, string arrays, cell arrays, structs, objects, and handle objects follow the same dimension check.",
+    "GPU tensors use metadata stored in their `GpuTensorHandle`. If metadata is missing, RunMat gathers once to inspect dimensions.",
+    "Sparse matrices currently follow dense semantics; when sparse support lands, `isvector` will continue to rely on reported dimensions."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a row vector input is a vector",
+      "input": "tf = isvector([1 2 3]);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Detecting that a matrix is not a vector",
+      "input": "tf = isvector([1 2 3; 4 5 6]);",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Verifying that a scalar counts as a vector",
+      "input": "tf = isvector(42);",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Handling empty dimensions exactly like MATLAB",
+      "input": "tf_zero_col = isvector(zeros(1,0));\ntf_zero_row = isvector(zeros(0,1));\ntf_zero_by_three = isvector(zeros(0,3));",
+      "output": "tf_zero_col = logical(1)\ntf_zero_row = logical(1)\ntf_zero_by_three = logical(0)"
+    },
+    {
+      "description": "Working with character and string arrays",
+      "input": "tf_char = isvector('RunMat');\ntf_string_row = isvector([\"a\",\"b\",\"c\"]);",
+      "output": "tf_char = logical(1)\ntf_string_row = logical(1)"
+    },
+    {
+      "description": "Confirming GPU tensor metadata without gathering",
+      "input": "G = gpuArray((1:5)');\ntf_gpu = isvector(G);",
+      "output": "tf_gpu = logical(1)"
+    },
+    {
+      "description": "Rejecting higher-dimensional arrays",
+      "input": "tf = isvector(ones(1,1,4));",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Trailing singleton dimensions are still rejected",
+      "input": "tf = isvector(ones(1,1,1));",
+      "output": "tf = logical(0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isvector` treat scalars as vectors?",
+      "answer": "Yes. Scalars are 1-by-1 arrays, so they are vectors."
+    },
+    {
+      "question": "How does `isvector` handle empty dimensions?",
+      "answer": "It follows MATLAB rules: size 0-by-1 or 1-by-0 is a vector, but other empty shapes such as 0-by-3 return `false`."
+    },
+    {
+      "question": "Are higher-dimensional arrays ever considered vectors?",
+      "answer": "No. Any array with more than two dimensions returns `false`, even if the trailing dimensions equal one (for example, `1\u00d71\u00d7N`)."
+    },
+    {
+      "question": "Do character vectors and string scalars count as vectors?",
+      "answer": "Yes. Character vectors are 1-by-N arrays, and string scalars are 1-by-1 string arrays, so both return `true`."
+    },
+    {
+      "question": "What happens with GPU arrays?",
+      "answer": "RunMat reads the shape metadata from the `GpuTensorHandle`. If the provider does not populate that metadata, the runtime gathers the tensor once to inspect its dimensions."
+    },
+    {
+      "question": "Are cell arrays and structs supported?",
+      "answer": "Yes. `isvector` uses the MATLAB-visible dimensions, so any 1-by-N or N-by-1 cell/struct array returns `true`."
+    },
+    {
+      "question": "Will `isvector` launch GPU kernels?",
+      "answer": "No. The builtin is purely a metadata query and never dispatches GPU work."
+    },
+    {
+      "question": "Can I rely on `isvector` inside fused expressions?",
+      "answer": "Yes. The builtin returns a host logical scalar, so fusion planning treats it as a metadata operation."
+    },
+    {
+      "question": "Does sparse support change the semantics?",
+      "answer": "Sparse inputs will follow the same dimension check once sparse tensors are introduced; no behavioural change is expected."
+    },
+    {
+      "question": "How does `isvector` interact with `isscalar` and `ismatrix`?",
+      "answer": "`isscalar(A)` implies `isvector(A)` but not vice versa. Conversely, `ismatrix(A)` can be `true` even when `isvector(A)` is `false`."
+    }
+  ],
+  "links": [
+    {
+      "label": "isscalar",
+      "url": "./isscalar"
+    },
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "numel",
+      "url": "./numel"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "`isvector` performs its checks on whatever residency the input already uses. It will happily accept a GPU tensor without the caller moving it to the CPU first, because the builtin only needs the tensor's metadata. When a provider fully populates tensor shapes (as the WGPU provider does), the runtime never downloads the data. If metadata is missing, the runtime gathers once to recover the shape and then continues on the host. Users can still call `gpuArray` for compatibility with MathWorks MATLAB, but it is not required for this builtin.",
+  "gpu_behavior": [
+    "`isvector` never launches GPU kernels. For `gpuArray` inputs the builtin first inspects the shape metadata on the `GpuTensorHandle`. If a provider omits that metadata, RunMat downloads the tensor once to obtain it and then computes the result on the host. The builtin always returns a host logical scalar, so fusion planning treats it as a metadata query instead of a device-side kernel."
+  ]
+}

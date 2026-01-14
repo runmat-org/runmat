@@ -1,0 +1,125 @@
+{
+  "title": "lower",
+  "category": "strings/transform",
+  "keywords": [
+    "lower",
+    "lowercase",
+    "convert to lowercase",
+    "string case",
+    "character arrays"
+  ],
+  "summary": "Convert strings, character arrays, and cell arrays of character vectors to lowercase.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/lower.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU; if any element lives on the GPU, RunMat gathers it before converting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::lower::tests",
+    "integration": "builtins::strings::transform::lower::tests::lower_cell_array_mixed_content"
+  },
+  "description": "`lower(text)` converts every alphabetic character in `text` to lowercase. It accepts string scalars, string arrays, character arrays, and cell arrays of character vectors, mirroring MATLAB behaviour. Non-alphabetic characters are returned unchanged.",
+  "behaviors": [
+    "String inputs stay as strings. String arrays preserve their size, orientation, and missing values.",
+    "Character arrays are processed row by row. The result remains a rectangular char array; if any row grows after lowercasing (for example because `'\u0130'` expands), the array widens and shorter rows are padded with spaces.",
+    "Cell arrays must contain string scalars or character vectors. The result is a cell array of the same size with each element converted to lowercase, and other types raise MATLAB-compatible errors.",
+    "Missing string scalars (`string(missing)`) remain missing and are returned as `<missing>`.",
+    "Inputs that are numeric, logical, structs, or GPU tensors raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Convert A String Scalar To Lowercase",
+      "input": "txt = \"RunMat\";\nresult = lower(txt);",
+      "output": "result = \"runmat\""
+    },
+    {
+      "description": "Lowercase Each Element Of A String Array",
+      "input": "labels = [\"NORTH\" \"South\"; \"EaSt\" \"WEST\"];\nlowered = lower(labels);",
+      "output": "lowered = 2\u00d72 string\n    \"north\"    \"south\"\n    \"east\"     \"west\""
+    },
+    {
+      "description": "Lowercase Character Array Rows While Preserving Shape",
+      "input": "animals = char(\"CAT\", \"DOGE\");\nresult = lower(animals);",
+      "output": "result =\n\n  2\u00d74 char array\n\n    'cat '\n    'doge'"
+    },
+    {
+      "description": "Lowercase A Cell Array Of Character Vectors",
+      "input": "C = {'HELLO', 'World'};\nout = lower(C);",
+      "output": "out = 1\u00d72 cell array\n    {'hello'}    {'world'}"
+    },
+    {
+      "description": "Keep Missing Strings As Missing",
+      "input": "vals = string([\"DATA\" \"<missing>\" \"GPU\"]);\nconverted = lower(vals);",
+      "output": "converted = 1\u00d73 string\n    \"data\"    <missing>    \"gpu\""
+    },
+    {
+      "description": "Lowercase Text Stored On A GPU Input",
+      "input": "codes = gpuArray(uint16('RUNMAT'));\ntxt = char(gather(codes));\nresult = lower(txt);",
+      "output": "result = 'runmat'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `lower` change non-alphabetic characters?",
+      "answer": "No. Digits, punctuation, whitespace, and symbols remain untouched. Only alphabetic code points that have distinct lowercase forms are converted."
+    },
+    {
+      "question": "What happens to character array dimensions?",
+      "answer": "RunMat lowers each row independently and pads with spaces when a lowercase mapping increases the row length. This mirrors MATLAB\u2019s behaviour so the result always has rectangular dimensions."
+    },
+    {
+      "question": "Can I pass numeric arrays to `lower`?",
+      "answer": "No. Passing numeric, logical, or struct inputs raises a MATLAB-compatible error. Convert the data to a string or character array first (for example with `string` or `char`)."
+    },
+    {
+      "question": "How are missing strings handled?",
+      "answer": "Missing string scalars remain `<missing>` and are returned unchanged. This matches MATLAB\u2019s handling of missing values in text processing functions."
+    },
+    {
+      "question": "Will `lower` ever execute on the GPU?",
+      "answer": "Not today. The builtin gathers GPU-resident data automatically and performs the conversion on the CPU so the results match MATLAB exactly. Providers may add device-side kernels in the future, but the behaviour will stay compatible."
+    }
+  ],
+  "links": [
+    {
+      "label": "upper",
+      "url": "./upper"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "strcmpi",
+      "url": "./strcmpi"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/lower.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/lower.rs"
+  },
+  "gpu_residency": "RunMat automatically keeps string data on the host for now. If text originates from GPU-based computations (for example as numeric code points stored on the device), `lower` gathers those values before applying the transformation, so you never need to call `gpuArray` explicitly for this builtin.",
+  "gpu_behavior": [
+    "`lower` executes on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it to host memory before performing the conversion so results remain identical to MATLAB. Providers do not need to implement custom kernels for this builtin."
+  ]
+}

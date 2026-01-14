@@ -1,0 +1,130 @@
+{
+  "title": "num2str",
+  "category": "strings/core",
+  "keywords": [
+    "num2str",
+    "number to string",
+    "format",
+    "precision",
+    "gpu"
+  ],
+  "summary": "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/num2str.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Always formats on the CPU. GPU tensors are gathered to host memory before conversion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::num2str::tests",
+    "integration": "builtins::strings::core::num2str::tests::num2str_gpu_tensor_roundtrip"
+  },
+  "description": "`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can provide a precision or an explicit format specifier to control the output. Complex inputs produce `a \u00b1 bi` strings, and logical data is converted to `0` or `1`.",
+  "behaviors": [
+    "Default formatting uses up to 15 significant digits with MATLAB-style `g` behaviour (switching to scientific notation when needed).",
+    "`num2str(x, p)` formats using `p` significant digits (`0 \u2264 p \u2264 52`).",
+    "`num2str(x, fmt)` accepts a single-number `printf`-style format such as `'%0.3f'`, `'%10.4e'`, or `'%.5g'`. Width, `+`, `-`, and `0` flags are supported.",
+    "A trailing `'local'` argument switches the decimal separator to the one inferred from the active locale (or the `RUNMAT_DECIMAL_SEPARATOR` environment variable).",
+    "Vector inputs return single-row character arrays; matrices return one textual row per numeric row.",
+    "Empty matrices return empty character arrays that match MATLAB's dimension rules.",
+    "Non-numeric types raise MATLAB-compatible errors."
+  ],
+  "examples": [
+    {
+      "description": "Converting A Scalar With Default Precision",
+      "input": "label = num2str(pi);",
+      "output": "label =\n    '3.14159265358979'"
+    },
+    {
+      "description": "Formatting With A Specific Number Of Significant Digits",
+      "input": "digits = num2str(pi, 4);",
+      "output": "digits =\n    '3.142'"
+    },
+    {
+      "description": "Using A Custom Format String",
+      "input": "row = num2str([1.234 5.678], '%.2f');",
+      "output": "row =\n    '1.23  5.68'"
+    },
+    {
+      "description": "Displaying A Matrix With Column Alignment",
+      "input": "block = num2str([1 23 456; 78 9 10]);",
+      "output": "block =\n    ' 1  23  456'\n    '78   9   10'"
+    },
+    {
+      "description": "Formatting Complex Numbers",
+      "input": "z = num2str([3+4i 5-6i]);",
+      "output": "z =\n    '3 + 4i  5 - 6i'"
+    },
+    {
+      "description": "Respecting Locale-Specific Decimal Separators",
+      "input": "text = num2str(0.125, 'local');"
+    },
+    {
+      "description": "Converting GPU-Resident Data",
+      "input": "G = gpuArray([10.5 20.5]);\ntxt = num2str(G, '%.1f');",
+      "output": "txt =\n    '10.5  20.5'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I request more than 15 digits?",
+      "answer": "Yes. Pass a precision between 0 and 52 to control the number of significant digits, e.g. `num2str(x, 20)`."
+    },
+    {
+      "question": "What format strings are supported?",
+      "answer": "RunMat supports single-value `printf` conversions using `%f`, `%e`, `%E`, `%g`, and `%G`, including optional width, `+`, `-`, and `0` flags. Unsupported flags raise descriptive errors."
+    },
+    {
+      "question": "Does `num2str` alter the size of my array?",
+      "answer": "No. The textual result has the same number of rows as the input and aligns each column with spaces."
+    },
+    {
+      "question": "How are complex numbers rendered?",
+      "answer": "Real and imaginary components are formatted separately using the selected precision. The result is `a + bi` or `a - bi`, with zero real parts simplifying to `bi`."
+    },
+    {
+      "question": "How does the `'local'` flag work?",
+      "answer": "`num2str(..., 'local')` replaces the decimal point with the separator inferred from the active locale. You can override the detected character with `RUNMAT_DECIMAL_SEPARATOR`, e.g. `RUNMAT_DECIMAL_SEPARATOR=,`."
+    },
+    {
+      "question": "What happens with non-numeric inputs?",
+      "answer": "Passing structs, objects, handles, or text raises a MATLAB-compatible error. Convert the data to numeric form first or use `string` for rich text conversions."
+    }
+  ],
+  "links": [
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "mat2str",
+      "url": "./mat2str"
+    },
+    {
+      "label": "str2double",
+      "url": "./str2double"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_behavior": [
+    "When the input resides on the GPU, RunMat gathers the data back to host memory using the active RunMat Accelerate provider before applying the formatting logic. The formatted character array always lives on the CPU, so providers do not need to implement specialised kernels."
+  ]
+}

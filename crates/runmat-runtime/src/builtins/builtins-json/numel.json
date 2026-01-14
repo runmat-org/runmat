@@ -1,0 +1,122 @@
+{
+  "title": "numel",
+  "category": "array/introspection",
+  "keywords": [
+    "numel",
+    "number of elements",
+    "array length",
+    "gpu metadata",
+    "dimensions"
+  ],
+  "summary": "Count the number of elements in scalars, vectors, matrices, and N-D arrays.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Reads tensor metadata from handles; falls back to host inspection when provider metadata is incomplete."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::introspection::numel::tests",
+    "integration": "builtins::array::introspection::numel::tests::numel_gpu_tensor_uses_shape"
+  },
+  "description": "`numel(A)` returns the number of elements contained in `A`, matching MATLAB semantics for dense arrays, logical arrays, cell arrays, structs, strings, and character arrays. The result is always a double-precision scalar.",
+  "behaviors": [
+    "`numel(A)` counts every stored element; for matrices this is `prod(size(A))`.",
+    "`numel(A, dim1, dim2, ...)` multiplies the extents of the requested dimensions. Each dimension argument must be a positive integer. Dimensions beyond the array rank contribute a factor of `1`.",
+    "Passing a numeric vector of dimensions (for example `numel(A, [1 3])`) is equivalent to listing them separately.",
+    "Scalars return `1`, character arrays report `rows \u00d7 cols`, and cell arrays count the number of cells.",
+    "Empty arrays return `0` when any dimension is zero.",
+    "GPU-resident arrays use metadata stored on the device handle; when unavailable, RunMat gathers the data to maintain correctness."
+  ],
+  "examples": [
+    {
+      "description": "Counting elements in a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nn = numel(A);",
+      "output": "n = 6;"
+    },
+    {
+      "description": "Checking the number of elements in a cell array",
+      "input": "C = {1, 2, 3; 4, 5, 6};\ncells = numel(C);",
+      "output": "cells = 6;"
+    },
+    {
+      "description": "Getting the number of elements along selected dimensions",
+      "input": "T = rand(4, 3, 2);\nplane = numel(T, 1, 2);   % product of the first two dimensions",
+      "output": "plane = 12;"
+    },
+    {
+      "description": "Using `numel` with gpuArray data",
+      "input": "G = gpuArray(ones(256, 4));\ncount = numel(G);",
+      "output": "count = 1024;"
+    },
+    {
+      "description": "Confirming the number of characters in a char array",
+      "input": "name = ['R' 'u' 'n' 'M' 'a' 't'];\nchars = numel(name);",
+      "output": "chars = 6;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `numel` different from `length`?",
+      "answer": "`numel(A)` counts every element in `A`, whereas `length(A)` returns the size of the largest single dimension."
+    },
+    {
+      "question": "What happens when I specify dimensions?",
+      "answer": "`numel(A, dim1, dim2, ...)` multiplies the lengths of the listed dimensions. Missing dimensions (for example, requesting the fourth dimension of a matrix) contribute a factor of `1`, matching MATLAB."
+    },
+    {
+      "question": "Does `numel` gather GPU data?",
+      "answer": "Usually no. The runtime reads shape metadata from the GPU tensor handle. It gathers only when the provider fails to populate that metadata."
+    },
+    {
+      "question": "What does `numel` return for empty arrays?",
+      "answer": "If any dimension is zero, `numel` returns `0`. This behaviour matches MATLAB for empty matrices, cell arrays, and logical arrays."
+    },
+    {
+      "question": "Can I use `numel` on strings and character arrays?",
+      "answer": "Yes. Character arrays return the total number of characters (`rows \u00d7 cols`). String arrays are treated as ordinary arrays with MATLAB-compatible dimensions."
+    },
+    {
+      "question": "Is `numel` safe inside fused GPU expressions?",
+      "answer": "Yes. The builtin returns a host double scalar and does not allocate device buffers, so fusion plans remain intact."
+    },
+    {
+      "question": "Does `numel` accept non-integer dimensions?",
+      "answer": "No. Dimension arguments must be positive integers. Fractional, negative, or non-numeric values raise an error that mirrors MATLAB."
+    }
+  ],
+  "links": [
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "MathWorks numel reference",
+      "url": "https://www.mathworks.com/help/matlab/ref/numel.html"
+    },
+    {
+      "label": "MathWorks size reference",
+      "url": "https://www.mathworks.com/help/matlab/ref/size.html"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_behavior": [
+    "`numel` does not launch GPU kernels or register provider hooks. When the input is a GPU tensor, the runtime consults the shape metadata stored in the handle to compute the count. If the active provider omits this metadata, RunMat downloads the tensor once to recover the correct answer. The builtin always returns a host double scalar and never allocates device memory, so it can safely be used inside fused GPU expressions without breaking residency."
+  ]
+}

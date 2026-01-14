@@ -1,0 +1,135 @@
+{
+  "title": "eye",
+  "category": "array/creation",
+  "keywords": [
+    "eye",
+    "identity",
+    "matrix",
+    "gpu",
+    "like",
+    "logical"
+  ],
+  "summary": "Create identity matrices and N-D identity tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider identity allocation hooks when available; otherwise materialises the identity tensor on the host and uploads it."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::eye::tests",
+    "integration": "builtins::array::creation::eye::tests::eye_gpu_like_alloc"
+  },
+  "description": "`eye` creates identity matrices (and higher-dimensional identity tensors) containing ones along the leading diagonal and zeros everywhere else. RunMat mirrors MATLAB semantics across scalar, vector, matrix, and N-D inputs, including `'logical'` and `'like'` options.",
+  "behaviors": [
+    "`eye()` returns the scalar `1`.",
+    "`eye(n)` returns an `n \u00d7 n` double-precision identity matrix.",
+    "`eye(m, n, ...)` returns an `m \u00d7 n \u00d7 ...` tensor whose first two dimensions form an identity slice that is replicated across all trailing dimensions.",
+    "`eye(sz)` accepts a size vector (row or column) and returns an array with `size(I) == sz`.",
+    "`eye(A)` matches the size of `A`. Logical, complex, and GPU prototypes preserve their logical/complex/device traits; other inputs default to double precision for MATLAB parity.",
+    "`eye(___, 'logical')` returns a logical identity tensor instead of double precision.",
+    "`eye(___, 'like', prototype)` matches the numeric flavour and device residency of `prototype`, including GPU handles."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 3-by-3 identity matrix",
+      "input": "I = eye(3);",
+      "output": "I =\n     1     0     0\n     0     1     0\n     0     0     1"
+    },
+    {
+      "description": "Generating a rectangular identity matrix",
+      "input": "J = eye(2, 4);",
+      "output": "J =\n     1     0     0     0\n     0     1     0     0"
+    },
+    {
+      "description": "Replicating an identity matrix across pages",
+      "input": "K = eye(2, 3, 2);   % Two 2x3 identity slices stacked along the third dimension",
+      "output": "K(:, :, 1) =\n     1     0     0\n     0     1     0\n\nK(:, :, 2) =\n     1     0     0\n     0     1     0"
+    },
+    {
+      "description": "Creating a logical identity mask",
+      "input": "mask = eye(4, 'logical');",
+      "output": "mask =\n     1     0     0     0\n     0     1     0     0\n     0     0     1     0\n     0     0     0     1"
+    },
+    {
+      "description": "Matching type and residency with `'like'`",
+      "input": "G = gpuArray(rand(128));     % Prototype on the GPU\nI = eye(size(G, 1), 'like', G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `eye` function?",
+      "answer": "Use `eye` whenever you need an identity matrix\u2014for example, when solving linear systems, creating initial values for iterative methods, or building block-diagonal structures."
+    },
+    {
+      "question": "Does `eye` produce double arrays by default?",
+      "answer": "Yes. Unless you request `'logical'` or use `'like'`, the result is a dense double-precision array."
+    },
+    {
+      "question": "How do I create an identity matrix that matches another array's type or residency?",
+      "answer": "Use the `'like'` syntax: `I = eye(size(A, 1), 'like', A);`. The result adopts the same type and device residency as `A`."
+    },
+    {
+      "question": "Can `eye` generate higher-dimensional identity tensors?",
+      "answer": "Yes. Extra dimensions replicate the identity slice. For example, `eye(2, 3, 4)` creates four `2 \u00d7 3` identity matrices stacked along the third dimension."
+    },
+    {
+      "question": "What happens if I request zero-sized dimensions?",
+      "answer": "If any leading dimension is zero, the result contains zero elements (consistent with MATLAB)."
+    },
+    {
+      "question": "Is single precision supported?",
+      "answer": "Not yet. Requesting `'single'` currently reports an error. Use `'like'` with a single-precision prototype once single-precision support lands."
+    },
+    {
+      "question": "Does `eye(A)` match the class of `A`?",
+      "answer": "For logical, complex, and GPU prototypes, yes\u2014`eye(A)` behaves like `eye(size(A), 'like', A)`. Other numeric inputs produce double precision to mirror MATLAB's default."
+    },
+    {
+      "question": "How efficient is the GPU path?",
+      "answer": "Providers with dedicated identity allocation avoid host involvement entirely. Providers without the hook fall back to a single host upload, which is still efficient for typical sizes."
+    }
+  ],
+  "links": [
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/eye.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. The fusion planner keeps data on the GPU whenever it determines that downstream work will benefit from staying on the device. The `eye` builtin respects that residency: if the planner or user requests GPU output (via `'like'`), it will either construct the identity tensor directly on the device (when the provider implements `eye`) or generate it on the host and upload it as a single transfer.",
+  "gpu_behavior": [
+    "When the result should live on a GPU (either because the prototype is a GPU tensor or the `'like'` argument references one), RunMat first asks the active acceleration provider for an identity buffer via the `eye` / `eye_like` hooks. The WGPU backend implements these hooks directly; simpler providers may return `Err`, in which case the runtime materialises the identity tensor on the host, performs a single upload, and returns a `GpuTensorHandle`. Because the allocation happens in one step, the auto-offload planner can keep subsequent fused expressions resident on the device without extra gathers."
+  ]
+}

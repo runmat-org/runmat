@@ -1,0 +1,122 @@
+{
+  "title": "strtrim",
+  "category": "strings/transform",
+  "keywords": [
+    "strtrim",
+    "trim whitespace",
+    "leading spaces",
+    "trailing spaces",
+    "character arrays",
+    "string arrays"
+  ],
+  "summary": "Remove leading and trailing whitespace from strings, character arrays, and cell arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strtrim.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically before trimming."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::strtrim::tests",
+    "integration": "builtins::strings::transform::strtrim::tests::strtrim_cell_array_mixed_content"
+  },
+  "description": "`strtrim(text)` removes leading and trailing whitespace characters from `text`. The input can be a string scalar, string array, character array, or a cell array of character vectors, mirroring MATLAB behaviour. Internal whitespace is preserved exactly as provided.",
+  "behaviors": [
+    "Whitespace is defined via MATLAB's `isspace`, so spaces, tabs, newlines, and other Unicode whitespace code points are removed from both ends of each element.",
+    "String scalars and arrays keep their type and shape. Missing string scalars (`<missing>`) remain missing and are returned unchanged.",
+    "Character arrays are trimmed row by row. The result keeps the original number of rows and shrinks the column count to the longest trimmed row, padding shorter rows with spaces so the output stays rectangular.",
+    "Cell arrays must contain string scalars or character vectors. Results preserve the original cell layout with each element trimmed.",
+    "Numeric, logical, or structured inputs raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Trim Leading And Trailing Spaces From A String Scalar",
+      "input": "name = \"   RunMat   \";\nclean = strtrim(name);",
+      "output": "clean = \"RunMat\""
+    },
+    {
+      "description": "Remove Extra Whitespace From Each Element Of A String Array",
+      "input": "labels = [\"  Alpha  \"; \"Beta   \"; \"   Gamma\"];\ntrimmed = strtrim(labels);",
+      "output": "trimmed = 3\u00d71 string\n    \"Alpha\"\n    \"Beta\"\n    \"Gamma\""
+    },
+    {
+      "description": "Trim Character Array Rows While Preserving Shape",
+      "input": "animals = char('  cat   ', 'dog', ' cow ');\nresult = strtrim(animals);",
+      "output": "result =\n\n  3\u00d73 char array\n\n    'cat'\n    'dog'\n    'cow'"
+    },
+    {
+      "description": "Trim Tabs And Newlines Alongside Spaces",
+      "input": "text = \"\\tMetrics \" + newline;\nclean = strtrim(text);",
+      "output": "clean = \"Metrics\""
+    },
+    {
+      "description": "Trim Each Element Of A Cell Array Of Character Vectors",
+      "input": "pieces = {'  GPU  ', \" Accelerate\", 'RunMat   '};\nout = strtrim(pieces);",
+      "output": "out = 1\u00d73 cell array\n    {'GPU'}    {\"Accelerate\"}    {'RunMat'}"
+    },
+    {
+      "description": "Preserve Missing String Scalars",
+      "input": "vals = [\" ok \"; \"<missing>\"; \" trimmed \"];\ntrimmed = strtrim(vals);",
+      "output": "trimmed = 1\u00d73 string\n    \"ok\"\n    <missing>\n    \"trimmed\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `strtrim` modify internal whitespace?",
+      "answer": "No. Only leading and trailing whitespace is removed; interior spacing remains intact."
+    },
+    {
+      "question": "Which characters count as whitespace?",
+      "answer": "`strtrim` removes code points that MATLAB's `isspace` recognises, including spaces, tabs, newlines, carriage returns, and many Unicode space separators."
+    },
+    {
+      "question": "How are character arrays resized?",
+      "answer": "Each row is trimmed independently. The output keeps the same number of rows and shrinks the width to match the longest trimmed row, padding shorter rows with spaces if necessary."
+    },
+    {
+      "question": "What happens to missing strings?",
+      "answer": "Missing string scalars (`string(missing)`) remain `<missing>` exactly as in MATLAB."
+    },
+    {
+      "question": "Can I pass numeric or logical arrays to `strtrim`?",
+      "answer": "No. Passing non-text inputs raises a MATLAB-compatible error indicating that text input is required."
+    },
+    {
+      "question": "How does `strtrim` differ from `strip`?",
+      "answer": "`strtrim` always removes leading and trailing whitespace. `strip` is newer and adds options for custom characters and directional trimming; use it when you need finer control."
+    }
+  ],
+  "links": [
+    {
+      "label": "strip",
+      "url": "./strip"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
+    },
+    {
+      "label": "lower",
+      "url": "./lower"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs"
+  },
+  "gpu_residency": "You do not need to call `gpuArray` or `gather` manually. RunMat automatically gathers any GPU-resident text data before applying `strtrim`, so the builtin behaves the same regardless of where the data lives.",
+  "gpu_behavior": [
+    "`strtrim` runs on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it to host memory before trimming so the output matches MATLAB exactly. Providers do not need to implement device kernels for this builtin today."
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "title": "gpuDevice",
+  "category": "acceleration/gpu",
+  "keywords": [
+    "gpuDevice",
+    "gpu",
+    "device info",
+    "accelerate",
+    "provider"
+  ],
+  "summary": "Query metadata about the active GPU provider and return it as a MATLAB struct.",
+  "references": [
+    "https://www.mathworks.com/help/parallel-computing/gpudevice.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Pure query builtin; it never enqueues GPU kernels. Providers that omit metadata simply leave the corresponding struct fields absent."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::acceleration::gpu::gpudevice::tests::gpu_device_returns_struct",
+    "doc": "builtins::acceleration::gpu::gpudevice::tests::gpu_device_doc_examples_present",
+    "integration": "tests::gpu::gpu_device_returns_struct",
+    "wgpu": "builtins::acceleration::gpu::gpudevice::tests::gpu_device_wgpu_reports_metadata"
+  },
+  "description": "`info = gpuDevice()` queries the active accelerator provider and returns a MATLAB struct that describes the GPU (or GPU-like backend) that RunMat is currently using. The struct mirrors MathWorks MATLAB's `gpuDevice` metadata, exposing identifiers, vendor information, memory hints, and precision support so you can adapt algorithms at runtime.\n\nThe returned struct contains a subset of these fields (providers may omit ones they cannot populate):\n\n- `device_id` \u2014 zero-based identifier reported by the provider. - `index` \u2014 MATLAB-style one-based index derived from `device_id`. - `name` \u2014 human-readable adapter name. - `vendor` \u2014 provider-reported vendor or implementation name. - `backend` \u2014 backend identifier such as `inprocess` or `Vulkan` (optional). - `memory_bytes` \u2014 total device memory in bytes when known (optional). - `precision` \u2014 string describing the scalar precision used for kernels (`\"double\"` or `\"single\"`). - `supports_double` \u2014 logical flag that is `true` when double precision kernels are available.\n\nThe builtin raises `gpuDevice: no acceleration provider registered` when no provider is active.",
+  "behaviors": [
+    "Requires an acceleration provider that implements RunMat Accelerate's `AccelProvider` trait.",
+    "Returns a struct so you can access fields with dot notation: `gpuDevice().name`.",
+    "Does not mutate GPU state or enqueue kernels\u2014it is safe to call frequently.",
+    "Accepts a scalar device index; `gpuDevice(1)` returns the active provider, while any other index raises the MATLAB-style error `gpuDevice: GPU device with index N not available`.",
+    "Requests to reset the provider using `gpuDevice('reset')` or `gpuDevice([])` currently raise `gpuDevice: reset is not supported by the active provider`.",
+    "Hooks into `gpuInfo` so the string-form summary stays in sync with the struct fields."
+  ],
+  "examples": [
+    {
+      "description": "Inspecting the active GPU provider",
+      "input": "info = gpuDevice();\ndisp(info.name);",
+      "output": "InProcess"
+    },
+    {
+      "description": "Displaying vendor and backend metadata",
+      "input": "info = gpuDevice();\nfprintf(\"Vendor: %s (backend: %s)\\n\", info.vendor, info.backend);",
+      "output": "Vendor: RunMat (backend: inprocess)"
+    },
+    {
+      "description": "Checking whether double precision is supported",
+      "input": "info = gpuDevice();\nif info.supports_double\n    disp(\"Double precision kernels are available.\");\nelse\n    disp(\"Provider only exposes single precision.\");\nend"
+    },
+    {
+      "description": "Formatting a user-facing status message",
+      "input": "summary = gpuInfo();\ndisp(\"Active GPU summary:\");\ndisp(summary);",
+      "output": "Active GPU summary:\nGPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
+    },
+    {
+      "description": "Handling missing providers gracefully",
+      "input": "try\n    info = gpuDevice();\ncatch ex\n    warning(\"GPU unavailable: %s\", ex.message);\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Do I need to call `gpuDevice` before using other GPU builtins?",
+      "answer": "No. RunMat initialises the active provider during startup. `gpuDevice` is purely informational and can be called at any time to inspect the current provider."
+    },
+    {
+      "question": "Why are some fields missing from the struct?",
+      "answer": "Providers only fill metadata they can reliably supply. For example, the in-process test provider does not report `memory_bytes`. Real GPU backends typically populate additional fields."
+    },
+    {
+      "question": "What happens if there is no GPU provider?",
+      "answer": "RunMat raises `gpuDevice: no acceleration provider registered`. You can catch this error and fall back to CPU code, as shown in the examples above."
+    },
+    {
+      "question": "Does `gpuDevice` support selecting or resetting devices?",
+      "answer": "RunMat currently exposes a single provider. `gpuDevice(1)` returns that provider, matching MATLAB's first-device semantics, while any other index raises `gpuDevice: GPU device with index N not available`. Reset requests (`gpuDevice('reset')` or `gpuDevice([])`) are not implemented yet and return `gpuDevice: reset is not supported by the active provider`."
+    },
+    {
+      "question": "How can I get a quick string summary instead of a struct?",
+      "answer": "Use `gpuInfo()`. It internally calls `gpuDevice` and formats the struct fields into a concise status string that is convenient for logging or display."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    },
+    {
+      "label": "gpuInfo",
+      "url": "./gpuinfo"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "`gpuDevice` purely reports metadata and does not change residency. Arrays remain on the GPU or CPU exactly as they were prior to the call. Use `gpuArray`, `gather`, and the planner-controlled automatic residency features to move data as needed."
+}

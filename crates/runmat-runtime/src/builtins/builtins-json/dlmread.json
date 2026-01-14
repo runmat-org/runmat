@@ -1,0 +1,146 @@
+{
+  "title": "dlmread",
+  "category": "io/tabular",
+  "keywords": [
+    "dlmread",
+    "delimiter",
+    "numeric import",
+    "ascii",
+    "range"
+  ],
+  "summary": "Read numeric data from a delimiter-separated text file with MATLAB-compatible zero-based offsets.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/dlmread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "All parsing occurs on the CPU. Acceleration providers are not involved and the result remains in host memory."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::dlmread::tests",
+    "integration": "builtins::io::tabular::dlmread::tests::dlmread_semicolon_roundtrip"
+  },
+  "description": "`dlmread(filename)` reads numeric data from an ASCII text file that uses a consistent delimiter between fields. Unlike `csvread`, `dlmread` lets you supply any single-character delimiter (including tabs or semicolons) or an ASCII code.",
+  "behaviors": [
+    "Accepts character vectors or string scalars for `filename`. String arrays must contain exactly one element.",
+    "The delimiter is optional; when omitted, a comma (`,`) is used. Supply a character (for example `';'`), a string scalar (`\"\\t\"`), or a numeric ASCII code (`9` for tab). Empty delimiter inputs are not allowed.",
+    "`dlmread(filename, R, C)` and `dlmread(filename, delimiter, R, C)` start reading at zero-based offsets `R` and `C`, skipping any earlier rows or columns.",
+    "`dlmread(filename, range)` and `dlmread(filename, delimiter, range)` accept a numeric vector `[r1 c1 r2 c2]` or `[r1 c1]` describing a rectangular slice. The indices are zero-based and inclusive. Excel-style addresses such as `\"B2:D6\"` are also accepted for compatibility with `csvread`.",
+    "Empty fields (for example two adjacent delimiters) are interpreted as `0`. Tokens such as `NaN`, `Inf`, and `-Inf` are accepted (case-insensitive).",
+    "Any other nonnumeric token raises an error that identifies the offending row and column using one-based indices (matching MATLAB diagnostic messages).",
+    "Results are dense double-precision tensors laid out in column-major order. Empty files yield a `0\u00d70` tensor.",
+    "Leading UTF-8 byte order marks (BOM) are stripped automatically to match MATLAB's handling of spreadsheets that emit BOM-prefixed text files.",
+    "Paths may include `~` to reference the home directory; RunMat expands the token before opening the file."
+  ],
+  "examples": [
+    {
+      "description": "Reading comma-delimited data by default",
+      "input": "writematrix([1 2 3; 4 5 6], \"samples.csv\");\nM = dlmread(\"samples.csv\");\ndelete(\"samples.csv\");",
+      "output": "M =\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Importing semicolon-separated values",
+      "input": "fid = fopen(\"scores.txt\", \"w\");\nfprintf(fid, \"1;2;3\\n4;5;6\\n\");\nfclose(fid);\n\nM = dlmread(\"scores.txt\", \";\");\ndelete(\"scores.txt\");",
+      "output": "M =\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Using tab characters as the delimiter",
+      "input": "fid = fopen(\"tabs.txt\", \"w\");\nfprintf(fid, \"10\\t11\\t12\\n13\\t14\\t15\\n\");\nfclose(fid);\n\nM = dlmread(\"tabs.txt\", \"\\t\");\ndelete(\"tabs.txt\");",
+      "output": "M =\n    10    11    12\n    13    14    15"
+    },
+    {
+      "description": "Skipping a header row and column (zero-based offsets)",
+      "input": "fid = fopen(\"with_header.txt\", \"w\");\nfprintf(fid, \"Label,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n\");\nfclose(fid);\n\nM = dlmread(\"with_header.txt\", \",\", 1, 1);\ndelete(\"with_header.txt\");",
+      "output": "M =\n     1     2\n     3     4"
+    },
+    {
+      "description": "Extracting a rectangular range",
+      "input": "fid = fopen(\"block.txt\", \"w\");\nfprintf(fid, \"10,11,12,13\\n14,15,16,17\\n18,19,20,21\\n\");\nfclose(fid);\n\nsub = dlmread(\"block.txt\", \",\", [1 1 2 3]);\ndelete(\"block.txt\");",
+      "output": "sub =\n    15    16    17\n    19    20    21"
+    },
+    {
+      "description": "Treating empty fields as zeros",
+      "input": "fid = fopen(\"blanks.txt\", \"w\");\nfprintf(fid, \"1,,3\\n,5,\\n7,8,\\n\");\nfclose(fid);\n\nM = dlmread(\"blanks.txt\");\ndelete(\"blanks.txt\");",
+      "output": "M =\n     1     0     3\n     0     5     0\n     7     8     0"
+    },
+    {
+      "description": "Using a numeric ASCII code for the delimiter",
+      "input": "fid = fopen(\"pipe.txt\", \"w\");\nfprintf(fid, \"5|6|7\\n8|9|10\\n\");\nfclose(fid);\n\nM = dlmread(\"pipe.txt\", double('|'));\ndelete(\"pipe.txt\");",
+      "output": "M =\n     5     6     7\n     8     9    10"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I omit the delimiter argument?",
+      "answer": "Yes. When you omit the delimiter, `dlmread` assumes a comma. If you need another delimiter, pass it explicitly as a character, string scalar, or numeric ASCII code."
+    },
+    {
+      "question": "Are row and column offsets zero-based like MATLAB?",
+      "answer": "Yes. The `R` and `C` arguments count from zero. `dlmread(filename, delimiter, 1, 2)` skips the first row and the first two columns before reading data."
+    },
+    {
+      "question": "How do I specify a range?",
+      "answer": "Provide a numeric vector `[r1 c1 r2 c2]` (zero-based, inclusive) or an Excel-style address such as `\"B2:D5\"`. You can pass the range with or without a delimiter argument."
+    },
+    {
+      "question": "What happens if the file contains text tokens?",
+      "answer": "Non-numeric fields trigger an error that includes the one-based row and column number of the offending token. Use `readmatrix` or `readtable` when you need to mix text and numbers."
+    },
+    {
+      "question": "How does `dlmread` treat empty cells?",
+      "answer": "Empty cells evaluate to `0`, matching MATLAB behavior. This includes consecutive delimiters and trailing delimiters."
+    },
+    {
+      "question": "Can I use whitespace as the delimiter?",
+      "answer": "Yes. Pass `\" \"` (space), `\"\\t\"` (tab), or the corresponding ASCII code. Multiple consecutive delimiters produce zeros where the values are missing."
+    },
+    {
+      "question": "Does `dlmread` respect locale-specific decimal separators?",
+      "answer": "No. Parsing always uses `.` as the decimal separator, consistent with MATLAB."
+    },
+    {
+      "question": "Does `dlmread` change the working directory?",
+      "answer": "No. Relative paths are resolved against the current working directory. `dlmread` never mutates global process state."
+    },
+    {
+      "question": "Why does the output stay on the CPU?",
+      "answer": "`dlmread` performs synchronous file I/O, so the result resides in host memory. Wrap the result with `gpuArray` if you want a device-resident tensor."
+    }
+  ],
+  "links": [
+    {
+      "label": "csvread",
+      "url": "./csvread"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/dlmread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/dlmread.rs"
+  },
+  "gpu_residency": "`dlmread` always creates a CPU-resident tensor because the function performs file I/O synchronously on the host. If you need the data on the GPU, call `gpuArray(dlmread(...))` or switch to `readmatrix` with the `'Like'` option to direct the result to a device.",
+  "gpu_behavior": [
+    "`dlmread` performs file I/O and parsing on the CPU. Arguments are gathered from the GPU when needed, and the output tensor lives in host memory. Wrap the result in `gpuArray` if you need residency on a device. No provider hooks are involved."
+  ]
+}

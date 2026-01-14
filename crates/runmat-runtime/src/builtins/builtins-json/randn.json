@@ -1,0 +1,137 @@
+{
+  "title": "randn",
+  "category": "array/creation",
+  "keywords": [
+    "randn",
+    "random",
+    "normal",
+    "gaussian",
+    "gpu",
+    "like"
+  ],
+  "summary": "Standard normal random numbers that mirror MATLAB semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider random_normal hooks when available; otherwise generates samples on the host and uploads them to keep GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::randn::tests",
+    "integration": "builtins::array::creation::randn::tests::randn_gpu_like_roundtrip"
+  },
+  "description": "`randn` draws pseudorandom samples from the standard normal distribution (`\u03bc = 0`, `\u03c3 = 1`). RunMat matches MATLAB call patterns for scalars, explicit dimension lists, size vectors, and `'like'` prototypes while honouring GPU residency whenever an acceleration provider is active.",
+  "behaviors": [
+    "`randn()` returns a scalar double drawn from `\ud835\udca9(0, 1)`.",
+    "`randn(n)` returns an `n \u00d7 n` dense double matrix.",
+    "`randn(m, n, ...)` accepts an arbitrary number of dimension arguments.",
+    "`randn(sz)` accepts a size vector (row or column) and returns an array with shape `sz`.",
+    "`randn(A)` or `randn(___, 'like', A)` matches both the shape and residency of `A`, including GPU tensors and complex prototypes.",
+    "Complex prototypes yield complex Gaussian samples with independent `\ud835\udca9(0, 1)` real and imaginary parts.",
+    "Class specifiers currently support `'double'`; other classes (e.g., `'single'`) emit descriptive errors until native representations land."
+  ],
+  "examples": [
+    {
+      "description": "Drawing a single standard normal variate",
+      "input": "rng(0);\nz = randn();",
+      "output": "z = 1.8179"
+    },
+    {
+      "description": "Creating a matrix of Gaussian noise",
+      "input": "rng(0);\nE = randn(2, 3);",
+      "output": "E =\n    1.8179    0.3895    0.9838\n   -1.1645    0.4175    0.1386"
+    },
+    {
+      "description": "Specifying dimensions with a size vector",
+      "input": "rng(0);\nshape = [2 2 2];\nT = randn(shape);",
+      "output": "T(:, :, 1) =\n    1.8179    0.3895\n   -1.1645    0.4175\n\nT(:, :, 2) =\n    0.9838   -1.1226\n    0.1386    2.7430"
+    },
+    {
+      "description": "Matching an existing `gpuArray` prototype",
+      "input": "rng(0);\nG = gpuArray.zeros(512, 512);\nnoise = randn('like', G);\nstats = [mean(gather(noise(:))) std(gather(noise(:)))];",
+      "output": "size(noise)\nans =\n       512   512\n\nstats =\n   -0.0009    0.9986"
+    },
+    {
+      "description": "Generating complex Gaussian samples",
+      "input": "rng(0);\nz = randn(3, 1, 'like', 1 + 1i);",
+      "output": "z =\n   1.8179 - 1.1645i\n   0.3895 + 0.4175i\n   0.9838 + 0.1386i"
+    },
+    {
+      "description": "Producing reproducible noise for Monte Carlo tests",
+      "input": "rng(0);\nsamples = randn(1, 5);",
+      "output": "samples = [1.8179  -1.1645   0.3895   0.4175   0.9838]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What distribution does `randn` use?",
+      "answer": "`randn` returns samples from the standard normal distribution with mean `0` and standard deviation `1`."
+    },
+    {
+      "question": "How is `randn` different from `rand`?",
+      "answer": "`randn` draws from a Gaussian distribution, whereas `rand` draws from the uniform distribution over `(0, 1)`."
+    },
+    {
+      "question": "How do I control reproducibility?",
+      "answer": "Use the MATLAB-compatible `rng` builtin before calling `randn` to seed the global generator."
+    },
+    {
+      "question": "Does `randn(___, 'like', A)` work with complex prototypes?",
+      "answer": "Yes. When `A` is complex, RunMat emits complex Gaussian samples whose real and imaginary parts are independent `\ud835\udca9(0, 1)` variates."
+    },
+    {
+      "question": "What happens if I request `'single'` precision?",
+      "answer": "RunMat currently supports double precision. Supplying `'single'` raises a descriptive error until native single-precision tensors land."
+    },
+    {
+      "question": "How does `randn` behave on the GPU?",
+      "answer": "If the active acceleration provider implements normal RNG hooks, samples are generated directly on device. Otherwise RunMat produces them on the host, uploads once, and continues execution on the GPU."
+    },
+    {
+      "question": "Can I request zero-sized dimensions?",
+      "answer": "Yes. Any dimension argument equal to zero yields an empty array, matching MATLAB semantics."
+    },
+    {
+      "question": "Does `randn` fuse with other operations?",
+      "answer": "No. Random generation is treated as a sink operation and excluded from fusion planning to preserve statistical properties."
+    }
+  ],
+  "links": [
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randi",
+      "url": "./randi"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/randn.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randn.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly in RunMat. The fusion planner keeps results on the GPU when downstream work benefits from device residency. However, for MATLAB compatibility\u2014and when you want deterministic control\u2014you can still use `gpuArray` to seed GPU execution manually.\n\nMathWorks MATLAB lacks an integrated fusion planner and ships GPU acceleration as a separate toolbox, so MATLAB users move data manually. RunMat automates this to streamline accelerated workflows.",
+  "gpu_behavior": [
+    "When the output or `'like'` prototype lives on the GPU, RunMat calls into the active acceleration provider via `random_normal` / `random_normal_like`. Providers without these hooks fall back to host generation followed by a single upload, ensuring the resulting tensor still resides on device even if samples were produced on the CPU."
+  ]
+}

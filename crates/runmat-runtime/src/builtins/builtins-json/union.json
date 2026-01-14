@@ -1,0 +1,138 @@
+{
+  "title": "union",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "union",
+    "set",
+    "stable",
+    "rows",
+    "indices",
+    "gpu"
+  ],
+  "summary": "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/union.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When no provider hook is available, tensors are gathered to the host and processed with the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::union::tests",
+    "integration": "builtins::array::sorting_sets::union::tests::union_gpu_roundtrip"
+  },
+  "description": "`union(A, B)` creates the set-theoretic union of inputs `A` and `B`, returning a value array `C` that contains every distinct element (or row) appearing in either input. Optional second and third outputs provide indices back into `A` and `B` that identify which original elements contribute to each value in `C`.",
+  "behaviors": [
+    "`union(A, B)` flattens the inputs column-major, removes duplicates, and returns the sorted union of their values.",
+    "`[C, IA, IB] = union(A, B)` also returns index vectors where `IA` points to the elements in `A` that contribute to `C` and `IB` refers to the elements in `B` that only appear in `B`.",
+    "`union(A, B, 'stable')` preserves the first-seen order: unique values from `A` appear first, followed by new values appearing in `B`.",
+    "`union(A, B, 'rows')` treats each row as a record. Inputs must share the same number of columns.",
+    "Character arrays and string arrays are fully supported in both element and row modes.",
+    "Complex values follow MATLAB's ordering rules (magnitude first, then real/imaginary parts).",
+    "Legacy compatibility flags (`'legacy'` or `'R2012a'`) are not supported in RunMat."
+  ],
+  "examples": [
+    {
+      "description": "Combining Two Numeric Vectors",
+      "input": "A = [5 7 1];\nB = [3 1 1];\n[C, IA, IB] = union(A, B);",
+      "output": "C =\n     1\n     3\n     5\n     7\nIA =\n     3\n     1\n     2\nIB =\n     1"
+    },
+    {
+      "description": "Preserving Input Order with `'stable'`",
+      "input": "A = [5 7 1];\nB = [3 2 4];\nC = union(A, B, 'stable');",
+      "output": "C =\n     5\n     7\n     1\n     3\n     2\n     4"
+    },
+    {
+      "description": "Union of Matrix Rows",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6];\n[C, IA, IB] = union(A, B, 'rows');",
+      "output": "C =\n     1     2\n     3     4\n     5     6\nIA =\n     1\n     2\nIB =\n     2"
+    },
+    {
+      "description": "Working with Character Arrays",
+      "input": "A = ['m','z'; 'm','a'];\nB = ['a','x'; 'm','a'];\nunion(A, B);",
+      "output": "ans =\n  4x1 char array\n    a\n    m\n    x\n    z"
+    },
+    {
+      "description": "Union on GPU Data",
+      "input": "G = gpuArray([1 4 2 5]);\nH = gpuArray([2 6]);\n[C, IA, IB] = union(G, H);",
+      "output": "C =\n     1\n     2\n     4\n     5\n     6\nIA =\n     1\n     3\n     4\nIB =\n     2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are the index outputs defined?",
+      "answer": "`IA` lists the positions in `A` that contribute to `C`. `IB` lists the positions in `B` for union values that do not already appear in `A`. Both use MATLAB's one-based indexing."
+    },
+    {
+      "question": "What happens if I request `'stable'` ordering?",
+      "answer": "The output keeps the first occurrence order: all unique values from `A` appear first, followed by new values from `B` in the order they are encountered."
+    },
+    {
+      "question": "Can I use `'rows'` with string or character arrays?",
+      "answer": "Yes. `union` accepts string arrays and character arrays with the `'rows'` option, provided the inputs share the same number of columns."
+    },
+    {
+      "question": "How does `union` treat `NaN` values?",
+      "answer": "All `NaN` values are considered equal. Sorted unions place them at the end, while stable unions keep the first-seen `NaN`."
+    },
+    {
+      "question": "Does GPU execution change the behaviour?",
+      "answer": "No. When a provider does not implement a GPU kernel, RunMat automatically gathers inputs to the host, performs the union there, and returns host-resident outputs that match MATLAB semantics exactly."
+    },
+    {
+      "question": "What if the inputs have different shapes?",
+      "answer": "Element-wise unions accept any shapes; both inputs are flattened column-major. Row-wise unions require matching column counts and two-dimensional inputs."
+    },
+    {
+      "question": "Can I mix data types?",
+      "answer": "No. Inputs must belong to the same class (numeric/logical, complex, char, or string). Mixing classes produces a descriptive error."
+    },
+    {
+      "question": "Are scalar outputs returned as vectors?",
+      "answer": "Scalars follow MATLAB's behaviour: a `1\u00d71` union result is represented as a scalar double."
+    },
+    {
+      "question": "Do trailing spaces matter for character data?",
+      "answer": "Yes. Character arrays treat every character, including trailing spaces, as significant\u2014matching MATLAB's behaviour."
+    },
+    {
+      "question": "Is the `'legacy'` flag supported?",
+      "answer": "No. RunMat only implements the modern MATLAB semantics. Passing `'legacy'` or `'R2012a'` raises an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/union.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/union.rs"
+  },
+  "gpu_behavior": [
+    "`union` is registered as a residency sink. When tensors live on a GPU and the active provider does not expose a dedicated `union` hook, the runtime gathers them to host memory and executes the CPU implementation to guarantee MATLAB-compatible output.",
+    "Future providers may implement `ProviderHook::Custom(\"union\")` to keep data on the device."
+  ]
+}

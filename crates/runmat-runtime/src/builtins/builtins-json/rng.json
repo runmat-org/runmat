@@ -1,0 +1,128 @@
+{
+  "title": "rng",
+  "category": "stats/random",
+  "keywords": [
+    "rng",
+    "seed",
+    "twister",
+    "shuffle",
+    "random state"
+  ],
+  "summary": "Seed, shuffle, and query the global random number generator.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Synchronizes the active acceleration provider's RNG state when supported."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::rng::tests",
+    "integration": null
+  },
+  "description": "`rng` queries or reconfigures the global pseudorandom number generator that powers `rand`, `randn`, `randi`, and `randperm`. RunMat mirrors MATLAB's semantics: you can reset to the default generator, seed with a specific integer, shuffle based on the system clock, or save/restore the full generator state.",
+  "behaviors": [
+    "`rng()` returns a structure describing the current generator (fields `Type`, `Seed`, and `State`).",
+    "`rng(seed)` switches to the default generator with the supplied non-negative integer seed. Passing `0` reproduces MATLAB's `rng('default')`.",
+    "`rng('default')` restores the default generator and seed (`twister`, seed `0`).",
+    "`rng('shuffle')` seeds the generator with entropy derived from the current time.",
+    "`rng(seed, 'twister')` explicitly names the generator. RunMat currently supports `twister`, matching MATLAB's default stream.",
+    "`rng(S)` restores a state structure previously returned by `rng`.\n\nWhenever an acceleration provider is active, RunMat also pushes the new seed to the provider so GPU-resident random calls remain in sync with CPU sampling. Providers that lack `set_rng_state` simply fall back to their existing behaviour, which is documented below."
+  ],
+  "examples": [
+    {
+      "description": "Resetting the generator for reproducible simulation runs",
+      "input": "rng(0);\nrand(1, 4)",
+      "output": "    0.3969    0.8408    0.4221    0.6260"
+    },
+    {
+      "description": "Saving and restoring RNG state around a computation",
+      "input": "s = rng;\nrng(1337);\nA = randn(2, 2);\nrng(s);            % restore original stream\nB = randn(2, 2);   % continues from the saved state",
+      "output": "A =\n    0.6406   -0.8022\n    0.2222   -0.7161\n\nB =\n    0.3969    0.8408\n    0.4221    0.6260"
+    },
+    {
+      "description": "Scrambling the generator with the system clock",
+      "input": "rng('shuffle');\nu = rand(1, 3);",
+      "output": "u =\n    0.1378    0.7086    0.8463"
+    },
+    {
+      "description": "Keeping CPU and GPU random draws in sync",
+      "input": "rng(2024);\nG = gpuArray(rand(1, 3));\nC = gather(G);\nH = rand(1, 3);         % same values as C",
+      "output": "C =\n    0.6554    0.7501    0.6046\n\nH =\n    0.6554    0.7501    0.6046"
+    },
+    {
+      "description": "Creating deterministic permutations with `rng` and `randperm`",
+      "input": "rng(42);\np = randperm(6);\nrng(42);\nq = randperm(6);",
+      "output": "p =\n     6     2     1     4     3     5\n\nq =\n     6     2     1     4     3     5"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What generators does RunMat support?",
+      "answer": "RunMat currently exposes MATLAB's default `'twister'` stream. Additional generators (`'philox'`, `'combRecursive'`, etc.) will surface as the underlying engines land."
+    },
+    {
+      "question": "What numeric range is valid for seeds?",
+      "answer": "Any finite, non-negative integer representable exactly in double precision (`0 <= seed <= 2^53`) is accepted. Values outside this range produce an error."
+    },
+    {
+      "question": "How can I force a specific seed for `rng('shuffle')` in tests?",
+      "answer": "Set the environment variable `RUNMAT_RNG_SHUFFLE_SEED` to an unsigned integer before calling `rng('shuffle')`. RunMat uses that value instead of system time."
+    },
+    {
+      "question": "Does `rng` affect GPU random numbers?",
+      "answer": "Yes\u2014if the active acceleration provider implements `set_rng_state`. The bundled in-process reference provider and the WGPU backend both honour this hook."
+    },
+    {
+      "question": "How do I restore a saved state structure?",
+      "answer": "Pass the structure back to `rng`: `s = rng; ...; rng(s);` resumes where the original state left off, matching MATLAB behaviour."
+    },
+    {
+      "question": "What is stored in the `State` field?",
+      "answer": "RunMat serialises the 64-bit internal state into a 1\u00d72 double tensor containing the low and high 32-bit words. Feeding that tensor back to `rng` recreates the exact state."
+    },
+    {
+      "question": "Can I create independent streams?",
+      "answer": "Not yet. RunMat exposes MATLAB-compatible `RandStream` APIs in a separate roadmap item; for now `rng` operates on the single global stream."
+    },
+    {
+      "question": "Does `rng` change automatically when I call other random functions?",
+      "answer": "No. Only explicit calls to `rng`, `RandStream`, or provider-specific utilities reconfigure the seed. Sampling routines (`rand`, `randn`, `randperm`, etc.) consume the current stream but do not reseed it."
+    }
+  ],
+  "links": [
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "randi",
+      "url": "./randi"
+    },
+    {
+      "label": "randperm",
+      "url": "./randperm"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/rng.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/rng.rs"
+  },
+  "gpu_residency": "RunMat pushes the configured seed to the active acceleration provider whenever `rng` changes the host generator. Providers that expose `set_rng_state` (`runmat-accelerate`'s in-process and WGPU backends) therefore produce the same sequences as CPU `rand`/`randn` when seeded via `rng`. If a provider omits this hook, RunMat logs a debug message and continues with the provider's internal seed stream; in that case GPU draws may differ from CPU draws even after calling `rng`. You do not need to call `gpuArray` explicitly for residency purposes\u2014RunMat keeps GPU streams in sync automatically whenever the provider supports RNG state injection."
+}

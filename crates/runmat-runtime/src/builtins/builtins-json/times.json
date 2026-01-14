@@ -1,0 +1,160 @@
+{
+  "title": "times",
+  "category": "math/elementwise",
+  "keywords": [
+    "times",
+    "element-wise multiply",
+    ".*",
+    "gpu",
+    "implicit expansion"
+  ],
+  "summary": "Element-wise multiplication A .* B with MATLAB-compatible implicit expansion, complex support, and GPU fallbacks.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/times.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_mul when both operands share a shape, scalar_mul when exactly one operand is a scalar, and gathers to host for implicit expansion or unsupported operand types."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::times::tests::times_scalar_numbers",
+    "integration": "builtins::math::elementwise::times::tests::times_row_column_broadcast",
+    "gpu": "builtins::math::elementwise::times::tests::times_gpu_pair_roundtrip",
+    "wgpu": "builtins::math::elementwise::times::tests::times_wgpu_matches_cpu_elementwise",
+    "doc": "builtins::math::elementwise::times::tests::doc_examples_present",
+    "like_gpu": "builtins::math::elementwise::times::tests::times_like_gpu_prototype_keeps_residency",
+    "like_host": "builtins::math::elementwise::times::tests::times_like_host_gathers_gpu_value",
+    "like_complex": "builtins::math::elementwise::times::tests::times_like_complex_prototype_yields_complex"
+  },
+  "description": "`times(A, B)` (or the operator form `A .* B`) multiplies corresponding elements of `A` and `B`, honouring MATLAB's implicit expansion rules so that scalars and singleton dimensions broadcast automatically.",
+  "behaviors": [
+    "Supports real, complex, logical, and character inputs; logical and character data are promoted to double precision before multiplication.",
+    "Implicit expansion works across any dimension, provided the non-singleton extents match. Size mismatches raise the standard MATLAB-compatible error.",
+    "Complex operands follow the analytic rule `(a + ib) .* (c + id) = (ac - bd) + i(ad + bc)`.",
+    "Empty dimensions propagate naturally\u2014if either operand has a zero-sized dimension after broadcasting, the result is empty with the broadcasted shape.",
+    "Integer inputs currently promote to double precision, mirroring the behaviour of other RunMat arithmetic builtins.",
+    "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, which is particularly useful for keeping implicit-expansion expressions on the device."
+  ],
+  "examples": [
+    {
+      "description": "Multiply two matrices element-wise",
+      "input": "A = [1 2 3; 4 5 6];\nB = [7 8 9; 1 2 3];\nP = times(A, B);",
+      "output": "P =\n    7   16   27\n    4   10   18"
+    },
+    {
+      "description": "Scale a matrix by a scalar",
+      "input": "A = magic(3);\nscaled = times(A, 0.5);",
+      "output": "scaled =\n    4.5    0.5    3.5\n    1.5    5.0    9.0\n    8.0    6.5    2.0"
+    },
+    {
+      "description": "Use implicit expansion between a column and row vector",
+      "input": "col = (1:3)';\nrow = [10 20 30];\nm = times(col, row);",
+      "output": "m =\n    10    20    30\n    20    40    60\n    30    60    90"
+    },
+    {
+      "description": "Multiply complex inputs element-wise",
+      "input": "z1 = [1+2i, 3-4i];\nz2 = [2-1i, -1+1i];\nprod = times(z1, z2);",
+      "output": "prod =\n    4 + 3i   1 + 7i"
+    },
+    {
+      "description": "Multiply character codes by a numeric scalar",
+      "input": "letters = 'ABC';\ncodes = times(letters, 2);",
+      "output": "codes = [130 132 134]"
+    },
+    {
+      "description": "Execute `times` directly on gpuArray inputs",
+      "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([4 5 6]);\ndeviceProd = times(G1, G2);\nresult = gather(deviceProd);",
+      "output": "deviceProd =\n  1x3 gpuArray\n     4     10     18\nresult =\n     4    10    18"
+    },
+    {
+      "description": "Keep the result on the GPU with a `'like'` prototype",
+      "input": "proto = gpuArray.zeros(1, 1);\nA = [1 2 3];\nB = [4 5 6];\nC = times(A, B, 'like', proto);  % stays on the GPU for downstream work",
+      "output": "C =\n  1x3 gpuArray\n      4     10     18"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `times` support MATLAB implicit expansion?",
+      "answer": "Yes. Any singleton dimensions expand automatically. If a dimension has incompatible non-singleton extents, `times` raises the standard size-mismatch error."
+    },
+    {
+      "question": "What numeric type does `times` return?",
+      "answer": "Results are double precision for real inputs and complex double when either operand is complex. Logical and character inputs are promoted to double before multiplication."
+    },
+    {
+      "question": "Can I multiply gpuArrays and host scalars?",
+      "answer": "Yes. RunMat keeps the computation on the GPU when the scalar is numeric. For other host operand types, the runtime gathers the gpuArray and computes on the CPU."
+    },
+    {
+      "question": "Does `times` preserve gpuArray residency after a fallback?",
+      "answer": "When a fallback occurs (for example, implicit expansion that the provider does not implement), the current result remains on the host. Subsequent operations may move it back to the GPU when auto-offload decides it is profitable."
+    },
+    {
+      "question": "How can I force the result to stay on the GPU?",
+      "answer": "Provide a `'like'` prototype: `times(A, B, 'like', gpuArray.zeros(1, 1))` keeps the result on the device even if one of the inputs originated on the host."
+    },
+    {
+      "question": "How are empty arrays handled?",
+      "answer": "Empty dimensions propagate. If either operand has an extent of zero in the broadcasted shape, the result is empty with the broadcasted dimensions."
+    },
+    {
+      "question": "Are integer inputs supported?",
+      "answer": "Yes. Integers promote to double precision during the multiplication, matching other RunMat arithmetic builtins."
+    },
+    {
+      "question": "Can I mix complex and real operands?",
+      "answer": "Absolutely. The result is complex, with broadcasting rules identical to MATLAB."
+    },
+    {
+      "question": "What about string arrays?",
+      "answer": "String arrays are not numeric and therefore raise an error when passed to `times`."
+    }
+  ],
+  "links": [
+    {
+      "label": "mtimes",
+      "url": "./mtimes"
+    },
+    {
+      "label": "rdivide",
+      "url": "./rdivide"
+    },
+    {
+      "label": "ldivide",
+      "url": "./ldivide"
+    },
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/times.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/times.rs"
+  },
+  "gpu_residency": "RunMat's auto-offload planner keeps tensors on the GPU whenever fused expressions benefit from device execution. Explicit `gpuArray` / `gather` calls are still supported for MATLAB code that manages residency manually. When the active provider lacks the kernels needed for a particular call (for example, implicit expansion between gpuArrays of different shapes), RunMat gathers back to the host, computes the MATLAB-accurate result, and resumes execution seamlessly.",
+  "gpu_behavior": [
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_mul` hook. 2. If one operand is a scalar (host or device) and the other is a gpuArray, the runtime calls `scalar_mul` to keep the result on the device. 3. The fusion planner treats `times` as a fusible elementwise node, so adjacent elementwise producers/consumers can execute inside a single WGSL kernel or provider-optimised pipeline, avoiding spurious host\u2194device transfers. 4. Implicit-expansion workloads (e.g., mixing row and column vectors) or unsupported operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor. The documentation callouts below flag this fallback behaviour explicitly."
+  ]
+}

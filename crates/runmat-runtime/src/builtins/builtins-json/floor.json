@@ -1,0 +1,157 @@
+{
+  "title": "floor",
+  "category": "math/rounding",
+  "keywords": [
+    "floor",
+    "rounding",
+    "digits",
+    "significant digits",
+    "gpu",
+    "like"
+  ],
+  "summary": "Round scalars, vectors, matrices, or N-D tensors toward negative infinity or to specified digits.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the active provider lacks unary_floor."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::rounding::floor::tests",
+    "integration": "builtins::math::rounding::floor::tests::floor_gpu_provider_roundtrip"
+  },
+  "description": "`floor(X)` rounds each element of `X` toward negative infinity, returning the greatest integer less than or equal to the input. Optional arguments match MATLAB's extended syntax for rounding to fixed decimal places, significant digits, and prototype-based residency.",
+  "behaviors": [
+    "Works on scalars, vectors, matrices, and higher-dimensional tensors with MATLAB broadcasting semantics.",
+    "`floor(X, N)` rounds toward negative infinity with `N` decimal digits (positive `N`) or powers of ten (negative `N`).",
+    "`floor(X, N, 'significant')` rounds to `N` significant digits; `N` must be a positive integer.",
+    "Logical inputs are promoted to doubles (`false \u2192 0`, `true \u2192 1`) before flooring.",
+    "Character arrays are interpreted numerically (their Unicode code points) and return dense double tensors.",
+    "Complex inputs are floored component-wise: `floor(a + bi) = floor(a) + i\u00b7floor(b)`.",
+    "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged.",
+    "Empty arrays return empty arrays of the appropriate shape.",
+    "Appending `'like', prototype` forces the result to match the residency of `prototype` (CPU or GPU). Currently prototypes must be numeric."
+  ],
+  "examples": [
+    {
+      "description": "Flooring positive and negative scalars",
+      "input": "x = [-2.7, -0.3, 0, 0.8, 3.9];\ny = floor(x);",
+      "output": "y = [-3, -1, 0, 0, 3];"
+    },
+    {
+      "description": "Flooring every element of a matrix",
+      "input": "A = [1.2 4.7; -3.4 5.0];\nB = floor(A);",
+      "output": "B = [1 4; -4 5];"
+    },
+    {
+      "description": "Flooring fractions stored in a tensor",
+      "input": "t = reshape([-1.8, -0.2, 0.4, 1.9, 2.1, 3.6], [3, 2]);\nfloored = floor(t);",
+      "output": "floored =\n    [-2  1;\n     -1  2;\n      0  3]"
+    },
+    {
+      "description": "Flooring values to a fixed number of decimal places",
+      "input": "temps = [21.456 19.995 22.501];\nfloored = floor(temps, 2);",
+      "output": "floored = [21.45 19.99 22.50];"
+    },
+    {
+      "description": "Flooring to significant digits",
+      "input": "measurements = [0.001234 12.3456 98765];\nsig2 = floor(measurements, 2, 'significant');",
+      "output": "sig2 = [0.0012 12.0 98000];"
+    },
+    {
+      "description": "Flooring complex numbers component-wise",
+      "input": "z = [1.7 + 2.1i, -0.2 - 3.9i];\nresult = floor(z);",
+      "output": "result = [1 + 2i, -1 - 4i];"
+    },
+    {
+      "description": "Keeping GPU data on device when the provider supports `unary_floor`",
+      "input": "G = gpuArray([1.8 -0.2 0.0; -1.1 2.5 -3.4]);\nfloored = floor(G);\nH = gather(floored);",
+      "output": "H =\n    [ 1 -1  0;\n     -2  2 -4]"
+    },
+    {
+      "description": "Forcing GPU residency with a `'like'` prototype",
+      "input": "A = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = floor(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);",
+      "output": "result =\n    [ 1 -1;\n      2  3]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `floor` always round toward negative infinity?",
+      "answer": "Yes\u2014positive values round down toward zero, while negative values round to the more negative integer (e.g., `floor(-0.1) = -1`)."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "The real and imaginary parts are floored independently, matching MATLAB's component-wise definition."
+    },
+    {
+      "question": "Can I round to decimal digits or significant digits?",
+      "answer": "Yes. Use `floor(X, N)` for decimal digits or `floor(X, N, 'significant')` for significant digits. Negative `N` values round to powers of ten."
+    },
+    {
+      "question": "What happens with logical arrays?",
+      "answer": "Logical values promote to doubles (`0` or `1`) before flooring, so the outputs remain 0 or 1."
+    },
+    {
+      "question": "Can I pass character arrays to `floor`?",
+      "answer": "Yes. Character data is treated as its numeric code points, producing a double tensor of the same size."
+    },
+    {
+      "question": "Do `NaN` and `Inf` values change?",
+      "answer": "No. Non-finite inputs propagate unchanged."
+    },
+    {
+      "question": "Will GPU execution change floating-point results?",
+      "answer": "No. Providers implement IEEE-compliant flooring; when a provider lacks `unary_floor`, RunMat falls back to the CPU to preserve MATLAB-compatible behaviour."
+    },
+    {
+      "question": "Does `'like'` work with `floor`?",
+      "answer": "Yes. Append `'like', prototype` to request output that matches the prototype's residency. Currently prototypes must be numeric (scalars or dense tensors, host or GPU)."
+    },
+    {
+      "question": "Can fusion keep `floor` on the GPU?",
+      "answer": "Yes. `floor` participates in elementwise fusion, so fused graphs can stay resident on the device when supported."
+    }
+  ],
+  "links": [
+    {
+      "label": "ceil",
+      "url": "./ceil"
+    },
+    {
+      "label": "round",
+      "url": "./round"
+    },
+    {
+      "label": "fix",
+      "url": "./fix"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/rounding/floor.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/floor.rs"
+  },
+  "gpu_residency": "```matlab\nA = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = floor(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);\n```\n\nExpected output:\n\n```matlab\nresult =\n    [ 1 -1;\n      2  3]\n```",
+  "gpu_behavior": [
+    "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_floor` hook, `floor(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested\u2014or when the provider lacks `unary_floor`\u2014RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This keeps semantics consistent even when specialised kernels are unavailable."
+  ]
+}

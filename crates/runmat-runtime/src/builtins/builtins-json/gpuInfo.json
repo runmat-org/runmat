@@ -1,0 +1,109 @@
+{
+  "title": "gpuInfo",
+  "category": "acceleration/gpu",
+  "keywords": [
+    "gpuInfo",
+    "gpu",
+    "device info",
+    "accelerate",
+    "summary"
+  ],
+  "summary": "Return a formatted status string that describes the active GPU provider.",
+  "references": [
+    "https://www.mathworks.com/help/parallel-computing/gpudevice.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Pure query builtin that formats provider metadata. When no provider is registered it returns `GPU[no provider]`."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::acceleration::gpu::gpuinfo::tests::gpu_info_with_provider_formats_summary",
+    "fallback": "builtins::acceleration::gpu::gpuinfo::tests::gpu_info_placeholder_matches_expectation",
+    "doc": "builtins::acceleration::gpu::gpuinfo::tests::doc_examples_present",
+    "wgpu": "builtins::acceleration::gpu::gpuinfo::tests::gpuInfo_wgpu_provider_reports_backend"
+  },
+  "description": "`gpuInfo()` returns a concise, human-readable string that summarises the active GPU acceleration provider. It is a convenience wrapper around [`gpuDevice`](./gpudevice), intended for logging or displaying status information in the REPL and notebooks.",
+  "behaviors": [
+    "Queries the same device metadata as `gpuDevice()` and formats the fields into `GPU[key=value, ...]`.",
+    "Includes identifiers (`device_id`, `index`), descriptive strings (`name`, `vendor`, `backend`) and capability hints (`precision`, `supports_double`, `memory_bytes` when available).",
+    "Escapes string values using MATLAB-style single quote doubling so they are display-friendly.",
+    "When no acceleration provider is registered, returns the placeholder string `GPU[no provider]` instead of throwing an error, making it safe to call unconditionally.",
+    "Propagates unexpected errors (for example, if a provider fails while reporting metadata) so they can be diagnosed."
+  ],
+  "examples": [
+    {
+      "description": "Displaying GPU status in the REPL",
+      "input": "disp(gpuInfo());",
+      "output": "GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
+    },
+    {
+      "description": "Emitting a log line before a computation",
+      "input": "fprintf(\"Running on %s\\n\", gpuInfo());",
+      "output": "Running on GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]"
+    },
+    {
+      "description": "Checking for double precision support quickly",
+      "input": "summary = gpuInfo();\nif contains(summary, \"supports_double=true\")\n    disp(\"Double precision kernels available.\");\nelse\n    disp(\"Falling back to single precision.\");\nend"
+    },
+    {
+      "description": "Handling missing providers gracefully",
+      "input": "% Safe even when acceleration is disabled\nstatus = gpuInfo();\nif status == \"GPU[no provider]\"\n    warning(\"GPU acceleration is currently disabled.\");\nend"
+    },
+    {
+      "description": "Combining `gpuInfo` with `gpuDevice` for structured data",
+      "input": "info = gpuDevice();\nsummary = gpuInfo();\nif isfield(info, 'memory_bytes')\n    fprintf(\"%s (memory: %.2f GB)\\n\", summary, info.memory_bytes / 1e9);\nelse\n    fprintf(\"%s (memory: unknown)\\n\", summary);\nend",
+      "output": "GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true] (memory: 15.99 GB)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `gpuInfo` change GPU state?",
+      "answer": "No. It only reads metadata and formats it into a string."
+    },
+    {
+      "question": "Will `gpuInfo` throw an error when no provider is registered?",
+      "answer": "No. It returns `GPU[no provider]` so caller code can branch without exception handling."
+    },
+    {
+      "question": "How is `gpuInfo` different from `gpuDevice`?",
+      "answer": "`gpuDevice` returns a struct that you can inspect programmatically. `gpuInfo` formats the same information into a single string that is convenient for logging and display."
+    },
+    {
+      "question": "Does the output order of fields stay stable?",
+      "answer": "Yes. Fields are emitted in the same order as the `gpuDevice` struct: identifiers, descriptive strings, optional metadata, precision, and capability flags."
+    },
+    {
+      "question": "Are strings escaped in MATLAB style?",
+      "answer": "Yes. Single quotes are doubled (e.g., `Ada'GPU` becomes `Ada''GPU`) so the summary can be pasted back into MATLAB code without breaking literal syntax."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuDevice",
+      "url": "./gpudevice"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "`gpuInfo` is a pure metadata query and never changes residency. Arrays stay wherever they already live (GPU or CPU). Use `gpuArray`, `gather`, or RunMat Accelerate's auto-offload heuristics to move data between devices as needed."
+}
