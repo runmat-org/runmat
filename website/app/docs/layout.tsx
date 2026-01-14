@@ -37,13 +37,10 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
 
 function Sidebar() {
   const [open, setOpen] = useState(false);
-  const all = flatten();
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [q, setQ] = useState("");
   // Keyboard shortcut: '/' focuses the search box
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [inputRef, setInputRef] = useState<HTMLInputElement | null>(null);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -61,7 +58,7 @@ function Sidebar() {
   useEffect(() => {
     const current = searchParams?.get("q") || "";
     if (current !== q) setQ(current);
-  }, [searchParams]);
+  }, [searchParams, q]);
 
   return (
     <aside>

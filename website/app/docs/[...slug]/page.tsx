@@ -14,7 +14,6 @@ const _u = URL;
 if (typeof _u.canParse !== "function") {
   _u.canParse = (input: string, base?: string) => {
     try {
-      // eslint-disable-next-line no-new
       new URL(input, base);
       return true;
     } catch {
