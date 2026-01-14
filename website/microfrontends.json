@@ -4,9 +4,19 @@
       "runmat": {
         "routing": [
           { "paths": ["/_next/static/:path*"] },
-          { "paths": ["/_next/image*"] },
+          { "paths": ["/_next/image"] },
           { "paths": ["/_next/data/:path*"] },
-          { "paths": ["/:path*"] }
+          { "paths": ["/sitemap.xml"] },
+          { "paths": ["/robots.txt"] },
+          { "paths": ["/favicon.ico"] },
+          { "paths": ["/docs/:path*"] },
+          { "paths": ["/blog/:path*"] },
+          { "paths": ["/benchmarks/:path*"] },
+          { "paths": ["/resources/:path*"] },
+          { "paths": ["/download"] },
+          { "paths": ["/license"] },
+          { "paths": ["/api/:path*"] },
+          { "paths": ["/"] }
         ]
       },
       "runmat-desktop": {
