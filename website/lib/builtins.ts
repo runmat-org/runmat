@@ -85,7 +85,7 @@ function extractFirstParagraphFromMDX(mdxContent: string): string | null {
     paragraph = paragraph.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
     
     return paragraph || null;
-  } catch (_error) {
+  } catch {
     // If extraction fails, return null
     return null;
   }

@@ -203,13 +203,6 @@ function ResourceListCard({ item }: { item: ResourceItem }) {
   );
 }
 
-function canonicalBadgeLabel(item: ResourceItem) {
-  if (item.source === "blog") return "Blog";
-  if (item.source === "benchmark") return "Benchmark";
-  if (item.source === "doc") return "Doc";
-  return resourceTypeLabel(item.type);
-}
-
 function EmptyState() {
   return (
     <Card>

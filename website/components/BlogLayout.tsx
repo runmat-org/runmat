@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowLeft, Calendar, Clock, User } from "lucide-react";
@@ -11,7 +10,7 @@ interface BlogLayoutProps {
   dateModified?: string;
   readTime: string;
   authors: { name: string; url?: string }[];
-  tags: string[];
+  tags?: string[];
   rightAside?: React.ReactNode;
   backLink?: { href: string; text: string };
   descriptionPlacement?: 'beforeMeta' | 'afterMeta';
@@ -25,7 +24,7 @@ export function BlogLayout({
   dateModified,
   readTime,
   authors,
-  tags,
+  tags: _tags,
   rightAside,
   backLink = { href: '/blog', text: 'Back to Blog' },
   descriptionPlacement = 'beforeMeta'

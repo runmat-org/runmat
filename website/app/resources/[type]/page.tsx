@@ -110,10 +110,10 @@ function ResourceCard({ item }: { item: ResourceItem }) {
   );
 }
 
-function normalizeType(input: string, allowed: string[]) {
+function normalizeType(input: string, allowed: ResourceType[]) {
   if (!Array.isArray(allowed) || allowed.length === 0) return null;
   const t = input.toLowerCase();
-  return allowed.includes(t as any) ? (t as typeof allowed[number]) : null;
+  return allowed.includes(t as ResourceType) ? (t as ResourceType) : null;
 }
 
 function sourceLabel(source: ResourceItem["source"]) {
