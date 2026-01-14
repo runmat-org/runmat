@@ -1,6 +1,7 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
+use runmat_control_flow::{PendingInteraction, RuntimeControlFlow, SuspendMarker};
 
-use crate::{interaction, make_cell_with_shape, new_object_builtin};
+use crate::{make_cell_with_shape, new_object_builtin};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -20,7 +21,7 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
-pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
+pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
     match value {
         Value::GpuTensor(handle) => {
             // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
@@ -33,9 +34,20 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                 }
             }
             let provider = runmat_accelerate_api::provider_for_handle(handle)
-                .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
+                .ok_or_else(|| RuntimeControlFlow::Error("gather: no acceleration provider registered".to_string()))?;
             let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-            let host = provider.download(handle).map_err(|e| e.to_string())?;
+            let host = match provider.download(handle) {
+                Ok(host) => host,
+                Err(err) => {
+                    if let Some(marker) = err.downcast_ref::<SuspendMarker>() {
+                        return Err(RuntimeControlFlow::Suspend(PendingInteraction {
+                            prompt: marker.prompt.clone(),
+                            kind: marker.kind,
+                        }));
+                    }
+                    return Err(RuntimeControlFlow::Error(err.to_string()));
+                }
+            };
             runmat_accelerate_api::clear_residency(handle);
             let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
             if is_logical {
@@ -65,7 +77,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
             for ptr in &ca.data {
                 gathered.push(gather_if_needed(ptr)?);
             }
-            make_cell_with_shape(gathered, ca.shape.clone())
+            make_cell_with_shape(gathered, ca.shape.clone()).map_err(Into::into)
         }
         Value::Struct(sv) => {
             let mut gathered = sv.clone();
@@ -89,7 +101,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
 /// Call a registered language builtin by name.
 /// Supports function overloading by trying different argument patterns.
 /// Returns an error if no builtin with that name and compatible arguments is found.
-pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
+pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -108,12 +120,12 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
                 return call_builtin(&ctor.function_name, args);
             }
             // Otherwise default-construct object
-            return new_object_builtin(name.to_string());
+            return new_object_builtin(name.to_string()).map_err(Into::into);
         }
-        return Err(format!(
+        return Err(RuntimeControlFlow::Error(format!(
             "{}: Undefined function: {name}",
             "MATLAB:UndefinedFunction"
-        ));
+        )));
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -148,33 +160,39 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
                 }
                 return Ok(result);
             }
-            Err(err) => {
-                if err == interaction::PENDING_INTERACTION_ERR {
-                    return Err(err);
-                }
-                if should_retry_with_gpu_gather(&err, args) {
-                    match gather_args_for_retry(args) {
+            Err(flow) => match flow {
+                RuntimeControlFlow::Suspend(pending) => return Err(RuntimeControlFlow::Suspend(pending)),
+                RuntimeControlFlow::Error(err) => {
+                    if should_retry_with_gpu_gather(&err, args) {
+                        match gather_args_for_retry(args) {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args) {
                             Ok(result) => return Ok(result),
-                            Err(retry_err) => last_error = retry_err,
+                            Err(RuntimeControlFlow::Suspend(pending)) => {
+                                return Err(RuntimeControlFlow::Suspend(pending))
+                            }
+                            Err(RuntimeControlFlow::Error(retry_err)) => last_error = retry_err,
                         },
                         Ok(None) => last_error = err,
-                        Err(gather_err) => last_error = gather_err,
+                        Err(RuntimeControlFlow::Suspend(pending)) => {
+                            return Err(RuntimeControlFlow::Suspend(pending))
+                        }
+                        Err(RuntimeControlFlow::Error(gather_err)) => last_error = gather_err,
                     }
-                } else {
-                    last_error = err;
+                    } else {
+                        last_error = err;
+                    }
                 }
-            }
+            },
         }
     }
 
     // If none succeeded, return the last error
-    Err(format!(
+    Err(RuntimeControlFlow::Error(format!(
         "No matching overload for `{}` with {} args: {}",
         name,
         args.len(),
         last_error
-    ))
+    )))
 }
 
 fn should_retry_with_gpu_gather(err: &str, args: &[Value]) -> bool {
@@ -185,7 +203,7 @@ fn should_retry_with_gpu_gather(err: &str, args: &[Value]) -> bool {
     lowered.contains("gpu")
 }
 
-fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, String> {
+fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeControlFlow> {
     let mut gathered_any = false;
     let mut gathered_args = Vec::with_capacity(args.len());
     for arg in args {

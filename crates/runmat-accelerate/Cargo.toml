@@ -34,9 +34,10 @@ rustfft = "6.2"
 smallvec = "1.13"
 rand = "0.8"
 tracing = "0.1"
+futures-channel = "0.3"
 
 # Optional backend deps
-wgpu = { version = "0.19", optional = true }
+wgpu = { version = "0.19", optional = true, features = ["trace"] }
 pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]

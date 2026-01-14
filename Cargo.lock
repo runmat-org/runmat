@@ -284,6 +284,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -899,6 +902,9 @@ name = "bitflags"
 version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "blake3"
@@ -4408,6 +4414,7 @@ dependencies = [
  "log",
  "num-traits",
  "rustc-hash 1.1.0",
+ "serde",
  "spirv",
  "termcolor",
  "thiserror 1.0.69",
@@ -5941,6 +5948,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
+name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.9.1",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "runmat"
 version = "0.2.8"
 dependencies = [
@@ -5989,6 +6008,7 @@ dependencies = [
  "bytemuck",
  "dirs 5.0.1",
  "env_logger 0.11.8",
+ "futures-channel",
  "log",
  "num-complex",
  "once_cell",
@@ -6029,6 +6049,7 @@ dependencies = [
  "inventory",
  "once_cell",
  "runmat-accelerate-api",
+ "runmat-control-flow",
  "runmat-gc-api",
  "runmat-macros",
  "serde",
@@ -6051,6 +6072,13 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "runmat-control-flow"
+version = "0.2.8"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6328,6 +6356,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-control-flow",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
@@ -8736,6 +8765,7 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle 0.6.2",
+ "serde",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
@@ -8764,7 +8794,9 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle 0.6.2",
+ "ron",
  "rustc-hash 1.1.0",
+ "serde",
  "smallvec",
  "thiserror 1.0.69",
  "web-sys",
@@ -8825,6 +8857,7 @@ checksum = "b671ff9fb03f78b46ff176494ee1ebe7d603393f42664be55b64dc8d53969805"
 dependencies = [
  "bitflags 2.9.1",
  "js-sys",
+ "serde",
  "web-sys",
 ]
 

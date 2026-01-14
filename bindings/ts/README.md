@@ -17,6 +17,7 @@ Runs on Windows, macOS, Linux, and Web, across NVIDIA, AMD, Apple Silicon, and I
 | `enableGpu` | `boolean` | Request GPU acceleration (auto-disabled if `navigator.gpu` is missing). |
 | `enableJit` | `boolean` | Toggle the JIT tier. |
 | `telemetryConsent` | `boolean` | Allow or block analytics events (profiling still returns locally). Defaults to `true`. |
+| `logLevel` | `"trace" \| "debug" \| "info" \| "warn" \| "error"` | Sets the wasm runtime's initial tracing filter before any code runs. |
 | `telemetryId` | `string` | Existing analytics client ID to reuse. |
 | `wgpuPowerPreference` | `"auto" \| "high-performance" \| "low-power"` | Hint for adapter selection. |
 | `wgpuForceFallbackAdapter` | `boolean` | Force the WebGPU fallback adapter when the primary device fails. |

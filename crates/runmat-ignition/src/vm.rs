@@ -1268,8 +1268,8 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn is_pending_interaction(err: &str) -> bool {
-    err == runmat_runtime::interaction::PENDING_INTERACTION_ERR
+fn is_suspend_flow(flow: &runmat_control_flow::RuntimeControlFlow) -> bool {
+    matches!(flow, runmat_control_flow::RuntimeControlFlow::Suspend(_))
 }
 
 fn resolve_emit_label_text(
@@ -1344,15 +1344,9 @@ fn run_interpreter(
         *cc.borrow_mut() = call_counts.clone();
     });
     macro_rules! suspend_pending {
-        ($restore:expr) => {{
+        ($restore:expr, $pending:expr) => {{
             $restore;
-            let pending =
-                runmat_runtime::interaction::take_pending_interaction().ok_or_else(|| {
-                    mex(
-                        "MATLAB:runmat:InteractionPending",
-                        "pending interaction missing",
-                    )
-                })?;
+            let pending = $pending;
             sync_initial_vars(initial_vars, &vars);
             return Ok(InterpreterOutcome::Pending(Box::new(PendingExecution {
                 state: InterpreterState {
@@ -2956,12 +2950,20 @@ fn run_interpreter(
                 match runmat_runtime::call_builtin(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
-                        if is_pending_interaction(&e) {
+                        if is_suspend_flow(&e) {
                             for arg in args.iter().rev() {
                                 stack.push(arg.clone());
                             }
-                            suspend_pending!({});
+                            match e {
+                                runmat_control_flow::RuntimeControlFlow::Suspend(pending) => {
+                                    suspend_pending!({}, pending);
+                                }
+                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                            }
                         }
+                        let runmat_control_flow::RuntimeControlFlow::Error(e) = e else {
+                            unreachable!("suspend handled above");
+                        };
                         // Specific-import matches: import pkg.foo; name == foo
                         let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
                         for (path, wildcard) in &imports {
@@ -2974,11 +2976,18 @@ fn run_interpreter(
                                 match runmat_runtime::call_builtin(&qual, &qual_args) {
                                     Ok(value) => specific_matches.push((qual, qual_args, value)),
                                     Err(err) => {
-                                        if is_pending_interaction(&err) {
+                                        if is_suspend_flow(&err) {
                                             for arg in args.iter().rev() {
                                                 stack.push(arg.clone());
                                             }
-                                            suspend_pending!({});
+                                            match err {
+                                                runmat_control_flow::RuntimeControlFlow::Suspend(
+                                                    pending,
+                                                ) => {
+                                                    suspend_pending!({}, pending);
+                                                }
+                                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                                            }
                                         }
                                     }
                                 }
@@ -3018,11 +3027,18 @@ fn run_interpreter(
                                 match runmat_runtime::call_builtin(&qual, &qual_args) {
                                     Ok(value) => wildcard_matches.push((qual, qual_args, value)),
                                     Err(err) => {
-                                        if is_pending_interaction(&err) {
+                                        if is_suspend_flow(&err) {
                                             for arg in args.iter().rev() {
                                                 stack.push(arg.clone());
                                             }
-                                            suspend_pending!({});
+                                            match err {
+                                                runmat_control_flow::RuntimeControlFlow::Suspend(
+                                                    pending,
+                                                ) => {
+                                                    suspend_pending!({}, pending);
+                                                }
+                                                runmat_control_flow::RuntimeControlFlow::Error(_) => {}
+                                            }
                                         }
                                     }
                                 }
@@ -3062,12 +3078,6 @@ fn run_interpreter(
                                     pc = catch_pc;
                                     continue;
                                 } else {
-                                    if is_pending_interaction(&e) {
-                                        for arg in args.iter().rev() {
-                                            stack.push(arg.clone());
-                                        }
-                                        suspend_pending!({});
-                                    }
                                     return Err(e);
                                 }
                             }

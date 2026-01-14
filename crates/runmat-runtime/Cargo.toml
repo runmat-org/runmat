@@ -14,6 +14,7 @@ links = "runmat_runtime_native"
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
+runmat-control-flow = { workspace = true }
 runmat-plot = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }

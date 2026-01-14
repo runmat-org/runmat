@@ -18,11 +18,14 @@ use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, PendingInput, RunMatSession, StdinEvent, StdinEventKind,
-    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    InputResponse, MaterializedVariable, PendingInput, PendingRequest, PendingRequestKind,
+    PendingRequestVisibility, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSliceOptions,
     WorkspaceSnapshot,
 };
-use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions, RuntimeLogRecord};
+use runmat_logging::{
+    init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
+};
 use runmat_thread_local::runmat_thread_local;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use serde_wasm_bindgen;
@@ -131,6 +134,10 @@ struct InitOptions {
     emit_fusion_plan: Option<bool>,
     #[serde(default)]
     language_compat: Option<String>,
+    #[serde(default)]
+    log_level: Option<String>,
+    #[serde(default)]
+    gpu_buffer_pool_max_per_key: Option<u32>,
 }
 
 runmat_thread_local! {
@@ -166,6 +173,8 @@ static TRACE_FORWARDER: OnceLock<
     Arc<dyn Fn(&[runmat_logging::TraceEvent]) + Send + Sync + 'static>,
 > = OnceLock::new();
 static TRACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
+static LOGGING_GUARD: OnceLock<LoggingGuard> = OnceLock::new();
+static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone)]
 struct SessionConfig {
@@ -179,6 +188,7 @@ struct SessionConfig {
     auto_offload: AutoOffloadOptions,
     emit_fusion_plan: bool,
     language_compat: CompatMode,
+    gpu_buffer_pool_max_per_key: Option<u32>,
 }
 
 impl SessionConfig {
@@ -194,6 +204,7 @@ impl SessionConfig {
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
             language_compat: parse_language_compat(opts.language_compat.as_deref()),
+            gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
         }
     }
 
@@ -209,6 +220,13 @@ impl SessionConfig {
             wgpu_power_preference: self.wgpu_power_preference,
             wgpu_force_fallback_adapter: self.wgpu_force_fallback_adapter,
             auto_offload: self.auto_offload.clone(),
+        }
+    }
+
+    fn apply_env_overrides(&self) {
+        if let Some(max) = self.gpu_buffer_pool_max_per_key {
+            log::info!("RunMat wasm: setting RUNMAT_WGPU_POOL_MAX_PER_KEY={}", max);
+            std::env::set_var("RUNMAT_WGPU_POOL_MAX_PER_KEY", max.to_string());
         }
     }
 }
@@ -353,6 +371,29 @@ impl RunMatWasm {
             let _ = (request_id, value);
             Err(js_error(
                 "resumeInput is only available when targeting wasm32",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = resumePendingRequest)]
+    pub fn resume_pending_request(&self, request_id: String) -> Result<JsValue, JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let uuid = Uuid::parse_str(request_id.trim())
+                .map_err(|_| js_error("resumePendingRequest: invalid request id"))?;
+            let mut session = self.session.borrow_mut();
+            let result = session
+                .resume_pending_request(uuid)
+                .map_err(|err| js_error(&format!("RunMat resumePendingRequest failed: {err}")))?;
+            let payload = ExecutionPayload::from(result);
+            return serde_wasm_bindgen::to_value(&payload)
+                .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = request_id;
+            Err(js_error(
+                "resumePendingRequest is only available when targeting wasm32",
             ))
         }
     }
@@ -747,6 +788,21 @@ pub fn subscribe_runtime_log(_callback: JsValue) -> Result<u32, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setLogFilter)]
+pub fn set_log_filter(filter: &str) -> Result<(), JsValue> {
+    init_logging_once();
+    runmat_logging::update_log_filter(filter).map_err(|err| js_error(&err))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = setLogFilter)]
+pub fn set_log_filter(_filter: &str) -> Result<(), JsValue> {
+    Err(js_error(
+        "setLogFilter is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = unsubscribeRuntimeLog)]
 pub fn unsubscribe_runtime_log(id: u32) {
     RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
@@ -1025,6 +1081,19 @@ fn prime_renderer_with_existing_figure(handle: u32, renderer: &mut WebRenderer) 
 
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
+    let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
+        InitOptions::default()
+    } else {
+        serde_wasm_bindgen::from_value(options.clone()).map_err(|err| {
+            init_error(
+                InitErrorCode::InvalidOptions,
+                format!("Invalid init options: {err}"),
+            )
+        })?
+    };
+    if let Some(level) = parsed_opts.log_level.as_deref() {
+        set_log_filter_override(level);
+    }
     init_logging_once();
     #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
@@ -1037,16 +1106,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             Some(err),
         )
     })?;
-    let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
-        InitOptions::default()
-    } else {
-        serde_wasm_bindgen::from_value(options.clone()).map_err(|err| {
-            init_error(
-                InitErrorCode::InvalidOptions,
-                format!("Invalid init options: {err}"),
-            )
-        })?
-    };
     #[cfg(target_arch = "wasm32")]
     {
         if !options.is_null() && !options.is_undefined() {
@@ -1068,6 +1127,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
 
     let config = SessionConfig::from_options(&parsed_opts);
+    config.apply_env_overrides();
     let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await.map_err(|err| {
         let message = js_value_to_string(err.clone());
         init_error_with_details(InitErrorCode::SnapshotResolution, message, Some(err))
@@ -1605,15 +1665,32 @@ fn init_logging_once() {
                     "RunMat panic backtrace:\n{bt:?}"
                 )));
             }));
-            let _ = init_logging(LoggingOptions {
+            let guard = init_logging(LoggingOptions {
                 enable_otlp: false,
                 enable_traces: true,
                 pid: 1,
+                default_filter: Some(
+                    LOG_FILTER_OVERRIDE
+                        .get()
+                        .cloned()
+                        .unwrap_or_else(|| "debug".to_string()),
+                ),
             });
+            let _ = LOGGING_GUARD.set(guard);
             ensure_runtime_log_forwarder_installed();
             ensure_trace_forwarder_installed();
         }
     });
+}
+
+fn set_log_filter_override(level: &str) {
+    let normalized = level.trim();
+    if normalized.is_empty() {
+        return;
+    }
+    if LOGGING_GUARD.get().is_none() {
+        let _ = LOG_FILTER_OVERRIDE.set(normalized.to_string());
+    }
 }
 
 fn js_value_to_string(value: JsValue) -> String {
@@ -1657,6 +1734,31 @@ struct PendingInputPayload {
     waiting_ms: u64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingRequestPayload {
+    id: String,
+    kind: PendingRequestKindPayload,
+    label: String,
+    waiting_ms: u64,
+    visibility: PendingRequestVisibilityPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PendingRequestVisibilityPayload {
+    External,
+    Internal,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+enum PendingRequestKindPayload {
+    Line { echo: bool },
+    KeyPress,
+    GpuMapRead,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MaterializeSelectorPayload {
@@ -1669,7 +1771,14 @@ struct MaterializeSelectorPayload {
 #[serde(rename_all = "camelCase")]
 struct MaterializeOptionsPayload {
     limit: Option<usize>,
-    slices: Option<JsonValue>,
+    slice: Option<MaterializeSlicePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeSlicePayload {
+    start: Vec<usize>,
+    shape: Vec<usize>,
 }
 
 #[derive(Serialize)]
@@ -1698,6 +1807,27 @@ impl From<PendingInput> for PendingInputPayload {
     }
 }
 
+impl From<PendingRequest> for PendingRequestPayload {
+    fn from(input: PendingRequest) -> Self {
+        let kind = match input.kind {
+            PendingRequestKind::Line { echo } => PendingRequestKindPayload::Line { echo },
+            PendingRequestKind::KeyPress => PendingRequestKindPayload::KeyPress,
+            PendingRequestKind::GpuMapRead => PendingRequestKindPayload::GpuMapRead,
+        };
+        let visibility = match input.visibility {
+            PendingRequestVisibility::External => PendingRequestVisibilityPayload::External,
+            PendingRequestVisibility::Internal => PendingRequestVisibilityPayload::Internal,
+        };
+        Self {
+            id: input.id.to_string(),
+            kind,
+            label: input.label,
+            waiting_ms: input.waiting_ms,
+            visibility,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionPayload {
@@ -1714,7 +1844,7 @@ struct ExecutionPayload {
     stdin_events: Vec<StdinEventPayload>,
     profiling: Option<ProfilingPayload>,
     fusion_plan: Option<FusionPlanPayload>,
-    stdin_requested: Option<PendingInputPayload>,
+    pending_request: Option<PendingRequestPayload>,
 }
 
 #[derive(Serialize)]
@@ -1754,7 +1884,7 @@ impl From<ExecutionResult> for ExecutionPayload {
                 .collect(),
             profiling: result.profiling.map(ProfilingPayload::from),
             fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
-            stdin_requested: result.stdin_requested.map(PendingInputPayload::from),
+            pending_request: result.pending_request.map(PendingRequestPayload::from),
         }
     }
 }
@@ -2142,14 +2272,15 @@ fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptio
                 "materializeVariable options could not be parsed: {err}"
             ))
         })?;
-    if payload.slices.is_some() {
-        return Err(js_error(
-            "materializeVariable slices are not supported yet; omit the 'slices' option",
-        ));
-    }
     let mut opts = WorkspaceMaterializeOptions::default();
     if let Some(limit) = payload.limit {
         opts.max_elements = limit.max(1).min(MAX_DATA_PREVIEW);
+    }
+    if let Some(slice) = payload.slice {
+        opts.slice = Some(WorkspaceSliceOptions {
+            start: slice.start,
+            shape: slice.shape,
+        });
     }
     Ok(opts)
 }

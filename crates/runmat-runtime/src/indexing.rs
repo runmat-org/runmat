@@ -7,7 +7,7 @@ use runmat_builtins::{Tensor, Value};
 /// Get a single element from a matrix (1-based indexing like language)
 pub fn matrix_get_element(matrix: &Tensor, row: usize, col: usize) -> Result<f64, String> {
     if row == 0 || col == 0 {
-        return Err("MATLAB uses 1-based indexing".to_string());
+        return Err(runmat_control_flow::RuntimeControlFlow::Error("MATLAB uses 1-based indexing".to_string()));
     }
     matrix.get2(row - 1, col - 1) // Convert to 0-based
 }
@@ -20,7 +20,7 @@ pub fn matrix_set_element(
     value: f64,
 ) -> Result<(), String> {
     if row == 0 || col == 0 {
-        return Err("The MATLAB language uses 1-based indexing".to_string());
+        return Err(runmat_control_flow::RuntimeControlFlow::Error("The MATLAB language uses 1-based indexing".to_string()));
     }
     matrix.set2(row - 1, col - 1, value) // Convert to 0-based
 }
@@ -73,7 +73,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 "Cannot index value of type GpuTensor without a provider".to_string()
             })?;
             if indices.is_empty() {
-                return Err("At least one index is required".to_string());
+                return Err(runmat_control_flow::RuntimeControlFlow::Error("At least one index is required".to_string()));
             }
             // Support scalar indexing cases mirroring Tensor branch
             if indices.len() == 1 {
@@ -107,7 +107,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
         }
         Value::Tensor(matrix) => {
             if indices.is_empty() {
-                return Err("At least one index is required".to_string());
+                return Err(runmat_control_flow::RuntimeControlFlow::Error("At least one index is required".to_string()));
             }
 
             if indices.len() == 1 {
@@ -150,7 +150,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
         }
         Value::StringArray(sa) => {
             if indices.is_empty() {
-                return Err("At least one index is required".to_string());
+                return Err(runmat_control_flow::RuntimeControlFlow::Error("At least one index is required".to_string()));
             }
             if indices.len() == 1 {
                 let idx = indices[0] as usize;
@@ -163,7 +163,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
                 if row < 1 || row > sa.rows || col < 1 || col > sa.cols {
-                    return Err("StringArray subscript out of bounds".to_string());
+                    return Err(runmat_control_flow::RuntimeControlFlow::Error("StringArray subscript out of bounds".to_string()));
                 }
                 let idx = (row - 1) + (col - 1) * sa.rows;
                 Ok(Value::String(sa.data[idx].clone()))
@@ -179,12 +179,12 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 // Scalar indexing with A(1) returns the scalar itself
                 Ok(base.clone())
             } else {
-                Err("MATLAB:SliceNonTensor: Slicing only supported on tensors".to_string())
+                Err(runmat_control_flow::RuntimeControlFlow::Error("MATLAB:SliceNonTensor: Slicing only supported on tensors".to_string()))
             }
         }
         Value::Cell(ca) => {
             if indices.is_empty() {
-                return Err("At least one index is required".to_string());
+                return Err(runmat_control_flow::RuntimeControlFlow::Error("At least one index is required".to_string()));
             }
             if indices.len() == 1 {
                 let idx = indices[0] as usize;
@@ -200,7 +200,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
                 if row < 1 || row > ca.rows || col < 1 || col > ca.cols {
-                    return Err("Cell subscript out of bounds".to_string());
+                    return Err(runmat_control_flow::RuntimeControlFlow::Error("Cell subscript out of bounds".to_string()));
                 }
                 Ok((*ca.data[(row - 1) * ca.cols + (col - 1)]).clone())
             } else {

@@ -38,6 +38,8 @@ export type {
 } from "./fusion-plan.js";
 
 export type LanguageCompatMode = "matlab" | "strict";
+type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
+export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -68,6 +70,8 @@ export interface RunMatInitOptions {
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
+  logLevel?: RunMatLogLevel;
+  gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
   wgpuPowerPreference?: "auto" | "high-performance" | "low-power";
@@ -182,6 +186,7 @@ export interface TraceEvent {
   tid?: number;
   traceId?: string;
   spanId?: string;
+  parentSpanId?: string;
   args?: Record<string, unknown>;
 }
 
@@ -263,7 +268,22 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
-  stdinRequested?: PendingStdinRequest;
+  pendingRequest?: PendingRequest;
+}
+
+export type PendingRequestVisibility = "external" | "internal";
+
+export type PendingRequestKind =
+  | { type: "line"; echo: boolean }
+  | { type: "keyPress" }
+  | { type: "internal" };
+
+export interface PendingRequest {
+  id: string;
+  kind: PendingRequestKind;
+  label: string;
+  waitingMs: number;
+  visibility: PendingRequestVisibility;
 }
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
@@ -298,8 +318,14 @@ export type WorkspaceMaterializeSelector =
       previewToken?: string;
     };
 
+export interface MaterializeSliceOptions {
+  start: number[];
+  shape: number[];
+}
+
 export interface MaterializeVariableOptions {
   limit?: number;
+  slice?: MaterializeSliceOptions;
 }
 
 export interface MaterializedVariable {
@@ -417,6 +443,8 @@ interface NativeInitOptions {
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
+  logLevel?: RunMatLogLevel;
+  gpuBufferPoolMaxPerKey?: number;
   telemetryConsent?: boolean;
   telemetryId?: string;
   wgpuPowerPreference?: string;
@@ -441,6 +469,7 @@ interface RunMatNativeSession {
   cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
+  resumePendingRequest?: (requestId: string) => ExecuteResult;
   pendingStdinRequests?: () => PendingStdinRequest[];
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
@@ -467,6 +496,10 @@ type WorkspaceMaterializeSelectorWire =
 
 interface MaterializeVariableOptionsWire {
   limit?: number;
+  slice?: {
+    start: number[];
+    shape: number[];
+  };
 }
 
 interface RunMatNativeModule {
@@ -494,6 +527,7 @@ interface RunMatNativeModule {
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
   unsubscribeRuntimeLog?: (id: number) => void;
+  setLogFilter?: (filter: string) => void;
   subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
   unsubscribeTraceEvents?: (id: number) => void;
   resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
@@ -569,6 +603,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     enableGpu: effectiveEnableGpu,
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
+    logLevel: options.logLevel,
+    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
     telemetryConsent: options.telemetryConsent ?? true,
     telemetryId: options.telemetryId,
     wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
@@ -659,6 +695,12 @@ export async function unsubscribeRuntimeLog(id: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "unsubscribeRuntimeLog");
   native.unsubscribeRuntimeLog(id);
+}
+
+export async function setLogFilter(filter: string): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setLogFilter");
+  native.setLogFilter(filter);
 }
 
 export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {
@@ -774,6 +816,54 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   constructor(private readonly native: RunMatNativeSession) {}
 
+  private static readonly MAX_INTERNAL_DRAIN_MS = 60_000;
+
+  private async yieldToEventLoop(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  private mergeExecuteResults(prev: ExecuteResult, next: ExecuteResult): ExecuteResult {
+    const mergedStdout = [...(prev.stdout ?? []), ...(next.stdout ?? [])];
+    const mergedWarnings = [...(prev.warnings ?? []), ...(next.warnings ?? [])];
+    const mergedStdinEvents = [...(prev.stdinEvents ?? []), ...(next.stdinEvents ?? [])];
+    const figures = new Set<number>([...(prev.figuresTouched ?? []), ...(next.figuresTouched ?? [])]);
+    return {
+      ...prev,
+      ...next,
+      stdout: mergedStdout,
+      warnings: mergedWarnings,
+      stdinEvents: mergedStdinEvents,
+      figuresTouched: Array.from(figures),
+    };
+  }
+
+  private async drainInternalRequests(result: ExecuteResult): Promise<ExecuteResult> {
+    let current = result;
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    while (current.pendingRequest?.visibility === "internal") {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (now - startedAt > WebRunMatSession.MAX_INTERNAL_DRAIN_MS) {
+        const kind = current.pendingRequest?.kind?.type ?? "unknown";
+        throw new Error(
+          `RunMat: exceeded max internal drain budget (${WebRunMatSession.MAX_INTERNAL_DRAIN_MS}ms) while pending '${kind}'.`
+        );
+      }
+      const pending = current.pendingRequest;
+      if (!pending) {
+        break;
+      }
+      // Internal requests are runtime-internal suspension points (e.g. WebGPU readback).
+      // The host should simply yield and resume; the specific reason is opaque.
+      if (typeof this.native.resumePendingRequest !== "function") {
+        throw new Error("RunMat: runtime exposed an internal pending request but no resumePendingRequest().");
+      }
+      await this.yieldToEventLoop();
+      const next = this.native.resumePendingRequest(pending.id);
+      current = this.mergeExecuteResults(current, next);
+    }
+    return current;
+  }
+
   private ensureActive(): void {
     if (this.disposed) {
       throw new Error("RunMat session has been disposed");
@@ -782,7 +872,8 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   async execute(source: string): Promise<ExecuteResult> {
     this.ensureActive();
-    return this.native.execute(source);
+    const result = this.native.execute(source);
+    return await this.drainInternalRequests(result);
   }
 
   async resetSession(): Promise<void> {
@@ -866,7 +957,8 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "resumeInput");
     const payload = normalizeResumeInputValue(value);
-    return this.native.resumeInput(requestId, payload);
+    const result = this.native.resumeInput(requestId, payload);
+    return await this.drainInternalRequests(result);
   }
 
   async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
@@ -1182,7 +1274,36 @@ function normalizeMaterializeOptions(
       payload.limit = limit;
     }
   }
+  if (options.slice) {
+    const start = normalizeSliceVector(options.slice.start, false);
+    const shape = normalizeSliceVector(options.slice.shape, true);
+    if (start && shape) {
+      payload.slice = { start, shape };
+    }
+  }
   return payload;
+}
+
+function normalizeSliceVector(values?: number[], requirePositive = false): number[] | undefined {
+  if (!Array.isArray(values) || values.length === 0) {
+    return undefined;
+  }
+  const normalized: number[] = [];
+  for (const raw of values) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      return undefined;
+    }
+    const base = Math.floor(raw);
+    if (requirePositive) {
+      if (base <= 0) {
+        return undefined;
+      }
+      normalized.push(base);
+    } else {
+      normalized.push(Math.max(0, base));
+    }
+  }
+  return normalized;
 }
 
 function coerceResumeValue(value: string | number | boolean | undefined): string {

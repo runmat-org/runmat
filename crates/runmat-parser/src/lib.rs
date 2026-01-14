@@ -448,34 +448,16 @@ impl Parser {
         let stmt = self.parse_stmt()?;
         let is_semicolon_terminated = self.consume(&Token::Semicolon);
 
-        // Expression statements: semicolon indicates output suppression
-        // Top-level assignments: set true only if a following top-level statement exists
-        // (i.e., not the final trailing semicolon at EOF).
+        // Expression statements: semicolon indicates output suppression.
+        // Assignments/lvalues are now suppressed whenever a semicolon is present, even at EOF.
         match stmt {
             Stmt::ExprStmt(expr, _) => Ok(Stmt::ExprStmt(expr, is_semicolon_terminated)),
-            Stmt::Assign(name, expr, _) => {
-                let has_more_toplevel_tokens = self.pos < self.tokens.len();
-                Ok(Stmt::Assign(
-                    name,
-                    expr,
-                    is_semicolon_terminated && has_more_toplevel_tokens,
-                ))
-            }
+            Stmt::Assign(name, expr, _) => Ok(Stmt::Assign(name, expr, is_semicolon_terminated)),
             Stmt::MultiAssign(names, expr, _) => {
-                let has_more_toplevel_tokens = self.pos < self.tokens.len();
-                Ok(Stmt::MultiAssign(
-                    names,
-                    expr,
-                    is_semicolon_terminated && has_more_toplevel_tokens,
-                ))
+                Ok(Stmt::MultiAssign(names, expr, is_semicolon_terminated))
             }
             Stmt::AssignLValue(lv, expr, _) => {
-                let has_more_toplevel_tokens = self.pos < self.tokens.len();
-                Ok(Stmt::AssignLValue(
-                    lv,
-                    expr,
-                    is_semicolon_terminated && has_more_toplevel_tokens,
-                ))
+                Ok(Stmt::AssignLValue(lv, expr, is_semicolon_terminated))
             }
             other => Ok(other),
         }

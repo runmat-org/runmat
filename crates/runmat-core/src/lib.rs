@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_builtins::{self, Type, Value};
+use runmat_builtins::{self, Tensor, Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use tracing::{debug, info, info_span, warn};
 
@@ -199,16 +199,115 @@ pub enum WorkspaceMaterializeTarget {
 }
 
 #[derive(Debug, Clone)]
+pub struct WorkspaceSliceOptions {
+    pub start: Vec<usize>,
+    pub shape: Vec<usize>,
+}
+
+impl WorkspaceSliceOptions {
+    fn sanitized(&self, tensor_shape: &[usize]) -> Option<WorkspaceSliceOptions> {
+        if tensor_shape.is_empty() {
+            return None;
+        }
+        let mut start = Vec::with_capacity(tensor_shape.len());
+        let mut shape = Vec::with_capacity(tensor_shape.len());
+        for axis_idx in 0..tensor_shape.len() {
+            let axis_len = tensor_shape[axis_idx];
+            if axis_len == 0 {
+                return None;
+            }
+            let requested_start = self.start.get(axis_idx).copied().unwrap_or(0);
+            let clamped_start = requested_start.min(axis_len.saturating_sub(1));
+            let requested_count = self.shape.get(axis_idx).copied().unwrap_or(axis_len);
+            let clamped_count = requested_count.max(1).min(axis_len - clamped_start);
+            start.push(clamped_start);
+            shape.push(clamped_count);
+        }
+        Some(WorkspaceSliceOptions { start, shape })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct WorkspaceMaterializeOptions {
     pub max_elements: usize,
+    pub slice: Option<WorkspaceSliceOptions>,
 }
 
 impl Default for WorkspaceMaterializeOptions {
     fn default() -> Self {
         Self {
             max_elements: MATERIALIZE_DEFAULT_LIMIT,
+            slice: None,
         }
     }
+}
+
+fn slice_value_for_preview(value: &Value, slice: &WorkspaceSliceOptions) -> Option<Value> {
+    match value {
+        Value::Tensor(tensor) => {
+            let data = gather_tensor_slice(tensor, slice);
+            if data.is_empty() {
+                return None;
+            }
+            let mut shape = slice.shape.clone();
+            if shape.is_empty() {
+                shape.push(1);
+            }
+            let rows = shape.get(0).copied().unwrap_or(1);
+            let cols = shape.get(1).copied().unwrap_or(1);
+            Some(Value::Tensor(Tensor {
+                data,
+                shape,
+                rows,
+                cols,
+                dtype: tensor.dtype,
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Vec<f64> {
+    if tensor.shape.is_empty() || slice.shape.iter().any(|count| *count == 0) {
+        return Vec::new();
+    }
+    let total: usize = slice.shape.iter().product();
+    let mut result = Vec::with_capacity(total);
+    let mut coords = vec![0usize; tensor.shape.len()];
+    gather_tensor_slice_recursive(tensor, slice, 0, &mut coords, &mut result);
+    result
+}
+
+fn gather_tensor_slice_recursive(
+    tensor: &Tensor,
+    slice: &WorkspaceSliceOptions,
+    axis: usize,
+    coords: &mut [usize],
+    out: &mut Vec<f64>,
+) {
+    if axis == tensor.shape.len() {
+        let idx = column_major_index(&tensor.shape, coords);
+        if let Some(value) = tensor.data.get(idx) {
+            out.push(*value);
+        }
+        return;
+    }
+    let start = slice.start.get(axis).copied().unwrap_or(0);
+    let count = slice.shape.get(axis).copied().unwrap_or(1);
+    for offset in 0..count {
+        coords[axis] = start + offset;
+        gather_tensor_slice_recursive(tensor, slice, axis + 1, coords, out);
+    }
+}
+
+fn column_major_index(shape: &[usize], coords: &[usize]) -> usize {
+    let mut idx = 0usize;
+    let mut stride = 1usize;
+    for (dim_len, coord) in shape.iter().zip(coords.iter()) {
+        idx += coord * stride;
+        stride *= *dim_len;
+    }
+    idx
 }
 
 #[derive(Debug, Clone, Default)]
@@ -281,8 +380,36 @@ pub struct ExecutionResult {
     pub fusion_plan: Option<FusionPlanSnapshot>,
     /// Recorded stdin interactions (prompts, values) during execution.
     pub stdin_events: Vec<StdinEvent>,
-    /// Pending stdin request if the execution is waiting for input.
-    pub stdin_requested: Option<PendingInput>,
+    /// Pending request if the execution is suspended waiting on an external or internal event.
+    ///
+    /// - External requests (stdin) must be surfaced to the host.
+    /// - Internal requests (e.g. WebGPU map/readback on wasm) should be automatically drained
+    ///   by the host runtime, yielding to the event loop between resumes.
+    pub pending_request: Option<PendingRequest>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRequestVisibility {
+    External,
+    Internal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRequestKind {
+    Line { echo: bool },
+    KeyPress,
+    GpuMapRead,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingRequest {
+    pub id: Uuid,
+    pub kind: PendingRequestKind,
+    /// User-facing prompt/label (for external requests this is the prompt; for internal this is a
+    /// debug label).
+    pub label: String,
+    pub waiting_ms: u64,
+    pub visibility: PendingRequestVisibility,
 }
 
 #[derive(Debug, Clone)]
@@ -635,12 +762,18 @@ impl RunMatSession {
         let now = Instant::now();
         self.pending_executions
             .iter()
-            .map(|(id, frame)| PendingInput {
-                id: *id,
-                request: pending_interaction_to_request(&frame.pending.interaction),
-                waiting_ms: now
-                    .saturating_duration_since(frame.pending_since)
-                    .as_millis() as u64,
+            .filter_map(|(id, frame)| {
+                match frame.pending.interaction.kind {
+                    runmat_runtime::interaction::InteractionKind::Line { .. }
+                    | runmat_runtime::interaction::InteractionKind::KeyPress => Some(PendingInput {
+                        id: *id,
+                        request: pending_interaction_to_request(&frame.pending.interaction),
+                        waiting_ms: now
+                            .saturating_duration_since(frame.pending_since)
+                            .as_millis() as u64,
+                    }),
+                    runmat_runtime::interaction::InteractionKind::GpuMapRead => None,
+                }
             })
             .collect()
     }
@@ -671,6 +804,17 @@ impl RunMatSession {
         let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
         let _interrupt_guard =
             runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+        // Only stdin-style pending requests can be resumed via resume_input.
+        match frame.pending.interaction.kind {
+            runmat_runtime::interaction::InteractionKind::Line { .. }
+            | runmat_runtime::interaction::InteractionKind::KeyPress => {}
+            runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                return Err(anyhow::anyhow!(
+                    "resume_input called for an internal pending request (use resume_pending_request)"
+                ));
+            }
+        }
+
         match runmat_ignition::resume_with_state(frame.pending.state, &mut self.variable_array) {
             Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
                 let mut streams = frame.streams;
@@ -710,7 +854,137 @@ impl RunMatSession {
                     profiling: None,
                     fusion_plan,
                     stdin_events,
-                    stdin_requested: Some(pending_input),
+                    pending_request: Some(PendingRequest {
+                        id: new_id,
+                        kind: match pending_input.request.kind {
+                            InputRequestKind::Line { echo } => PendingRequestKind::Line { echo },
+                            InputRequestKind::KeyPress => PendingRequestKind::KeyPress,
+                        },
+                        label: pending_input.request.prompt.clone(),
+                        waiting_ms: 0,
+                        visibility: PendingRequestVisibility::External,
+                    }),
+                })
+            }
+            Err(err) => Err(anyhow::anyhow!(err)),
+        }
+    }
+
+    /// Resume a pending internal request by ID. The host should call this automatically
+    /// (typically on a 0ms timer) until the execution completes or transitions to a stdin prompt.
+    pub fn resume_pending_request(&mut self, request_id: Uuid) -> Result<ExecutionResult> {
+        let mut frame = self
+            .pending_executions
+            .remove(&request_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown pending request {request_id}"))?;
+
+        match frame.pending.interaction.kind {
+            runmat_runtime::interaction::InteractionKind::GpuMapRead => {}
+            _ => {
+                self.pending_executions.insert(request_id, frame);
+                return Err(anyhow::anyhow!(
+                    "resume_pending_request called for a non-internal pending request"
+                ));
+            }
+        }
+
+        let _active = ActiveExecutionGuard::new(self)?;
+        let stdin_events = Arc::clone(&frame.plan.stdin_events);
+        let runtime_handler = self.build_runtime_input_handler(stdin_events);
+        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
+        let _interrupt_guard =
+            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+
+        match runmat_ignition::resume_with_state(frame.pending.state, &mut self.variable_array) {
+            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
+                let mut streams = frame.streams;
+                streams.extend(drain_console_streams());
+                self.finalize_pending_execution(frame.plan, values, streams)
+            }
+            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
+                let chunk = drain_console_streams();
+                frame.streams.extend(chunk.clone());
+                frame.pending = *next_pending;
+                // Keep the same request id so hosts can poll/resume without chasing changing ids.
+                // Update pending_since so waiting_ms reflects time since the most recent suspend.
+                frame.pending_since = Instant::now();
+                self.pending_executions.insert(request_id, frame);
+
+                let now = Instant::now();
+                let waiting_ms = now
+                    .saturating_duration_since(
+                        self.pending_executions
+                            .get(&request_id)
+                            .map(|f| f.pending_since)
+                            .unwrap_or(now),
+                    )
+                    .as_millis() as u64;
+
+                let elapsed_ms = self
+                    .pending_executions
+                    .get(&request_id)
+                    .map(|f| f.plan.start_time.elapsed().as_millis() as u64)
+                    .unwrap_or(0);
+                let used_jit = self
+                    .pending_executions
+                    .get(&request_id)
+                    .map(|f| f.plan.used_jit)
+                    .unwrap_or(false);
+                let fusion_plan = self
+                    .pending_executions
+                    .get(&request_id)
+                    .map(|f| f.plan.fusion_snapshot.clone())
+                    .unwrap_or(None);
+                let stdin_events = self
+                    .pending_executions
+                    .get(&request_id)
+                    .and_then(|f| f.plan.stdin_events.lock().ok().map(|g| g.clone()))
+                    .unwrap_or_default();
+
+                let label = self
+                    .pending_executions
+                    .get(&request_id)
+                    .map(|f| f.pending.interaction.prompt.clone())
+                    .unwrap_or_else(|| "wgpu map_async".to_string());
+
+                let kind = self
+                    .pending_executions
+                    .get(&request_id)
+                    .map(|f| f.pending.interaction.kind)
+                    .unwrap_or(runmat_runtime::interaction::InteractionKind::GpuMapRead);
+
+                let (pending_kind, visibility) = match kind {
+                    runmat_runtime::interaction::InteractionKind::Line { echo } => {
+                        (PendingRequestKind::Line { echo }, PendingRequestVisibility::External)
+                    }
+                    runmat_runtime::interaction::InteractionKind::KeyPress => {
+                        (PendingRequestKind::KeyPress, PendingRequestVisibility::External)
+                    }
+                    runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                        (PendingRequestKind::GpuMapRead, PendingRequestVisibility::Internal)
+                    }
+                };
+
+                Ok(ExecutionResult {
+                    value: None,
+                    execution_time_ms: elapsed_ms,
+                    used_jit,
+                    error: None,
+                    type_info: None,
+                    streams: chunk,
+                    workspace: self.build_workspace_snapshot(Vec::new(), false),
+                    figures_touched: Vec::new(),
+                    warnings: Vec::new(),
+                    profiling: None,
+                    fusion_plan,
+                    stdin_events,
+                    pending_request: Some(PendingRequest {
+                        id: request_id,
+                        kind: pending_kind,
+                        label,
+                        waiting_ms,
+                        visibility,
+                    }),
                 })
             }
             Err(err) => Err(anyhow::anyhow!(err)),
@@ -729,6 +1003,14 @@ impl RunMatSession {
     > {
         let session_handler = self.input_handler.clone();
         Arc::new(move |prompt| {
+            if matches!(
+                prompt.kind,
+                runmat_runtime::interaction::InteractionKind::GpuMapRead
+            ) {
+                // GPU map suspensions are handled internally by the runtime/provider and are
+                // not forwarded to user input handlers.
+                return runmat_runtime::interaction::InteractionDecision::Pending;
+            }
             let request_kind = match prompt.kind {
                 runmat_runtime::interaction::InteractionKind::Line { echo } => {
                     InputRequestKind::Line { echo }
@@ -736,6 +1018,9 @@ impl RunMatSession {
                 runmat_runtime::interaction::InteractionKind::KeyPress => {
                     InputRequestKind::KeyPress
                 }
+                runmat_runtime::interaction::InteractionKind::GpuMapRead => unreachable!(
+                    "GpuMapRead is handled as an internal suspension and should have returned early"
+                ),
             };
             let request = InputRequest {
                 prompt: prompt.prompt.to_string(),
@@ -961,11 +1246,12 @@ impl RunMatSession {
 
         // Compile to bytecode with existing function definitions
         let existing_functions = self.convert_hir_functions_to_user_functions();
-        let bytecode = {
+        let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
             runmat_ignition::compile_with_functions(&hir, &existing_functions)
                 .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?
         };
+        bytecode.var_names = id_to_name.clone();
         if self.verbose {
             debug!(
                 "Bytecode compiled: {} instructions",
@@ -994,8 +1280,14 @@ impl RunMatSession {
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
-        #[cfg_attr(not(feature = "jit"), allow(unused_mut))]
+        #[cfg(feature = "jit")]
         let mut used_jit = false;
+        #[cfg(not(feature = "jit"))]
+        let used_jit = false;
+        #[cfg(feature = "jit")]
+        let mut execution_completed = false;
+        #[cfg(not(feature = "jit"))]
+        let execution_completed = false;
         let mut result_value: Option<Value> = None; // Always start fresh for each execution
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
         let mut error = None;
@@ -1015,7 +1307,15 @@ impl RunMatSession {
             toks.into_iter()
                 .rev()
                 .map(|t| t.token)
-                .find(|_| true)
+                .find(|token| {
+                    !matches!(
+                        token,
+                        LexToken::Newline
+                            | LexToken::LineComment
+                            | LexToken::BlockComment
+                            | LexToken::Section
+                    )
+                })
                 .map(|t| matches!(t, LexToken::Semicolon))
                 .unwrap_or(false)
         };
@@ -1052,42 +1352,31 @@ impl RunMatSession {
                     match jit_engine.execute_or_compile(&bytecode, &mut self.variable_array) {
                         Ok((_, actual_used_jit)) => {
                             used_jit = actual_used_jit;
+                            execution_completed = true;
                             if actual_used_jit {
                                 self.stats.jit_compiled += 1;
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            // For assignments, capture the assigned value for both display and type info
-                            // Prefer the variable slot indicated by HIR if available.
-                            let assignment_value =
-                                if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) =
-                                    hir.body.first()
-                                {
-                                    if let Some(name) = id_to_name.get(&var_id.0) {
-                                        assigned_this_execution.insert(name.clone());
-                                    }
-                                    if var_id.0 < self.variable_array.len() {
-                                        Some(self.variable_array[var_id.0].clone())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    self.variable_array
-                                        .iter()
-                                        .rev()
-                                        .find(|v| !matches!(v, Value::Num(0.0)))
-                                        .cloned()
-                                };
-
-                            if !is_semicolon_suppressed {
-                                result_value = assignment_value.clone();
-                                if self.verbose {
-                                    debug!("JIT assignment result: {result_value:?}");
+                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) =
+                                hir.body.first()
+                            {
+                                if let Some(name) = id_to_name.get(&var_id.0) {
+                                    assigned_this_execution.insert(name.clone());
                                 }
-                            } else {
-                                suppressed_value = assignment_value;
-                                if self.verbose {
-                                    debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                                if var_id.0 < self.variable_array.len() {
+                                    let assignment_value = self.variable_array[var_id.0].clone();
+                                    if !is_semicolon_suppressed {
+                                        result_value = Some(assignment_value);
+                                        if self.verbose {
+                                            debug!("JIT assignment result: {result_value:?}");
+                                        }
+                                    } else {
+                                        suppressed_value = Some(assignment_value);
+                                        if self.verbose {
+                                            debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                                        }
+                                    }
                                 }
                             }
 
@@ -1115,7 +1404,7 @@ impl RunMatSession {
         }
 
         // Use interpreter if JIT failed or is disabled
-        if !used_jit {
+        if !execution_completed {
             if self.verbose {
                 debug!(
                     "Interpreter path: variable_array size: {}, bytecode.var_count: {}",
@@ -1183,6 +1472,7 @@ impl RunMatSession {
                         } else if !is_expression_stmt
                             && !results.is_empty()
                             && !is_semicolon_suppressed
+                            && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
                         {
                             result_value = Some(results[0].clone());
                         }
@@ -1211,7 +1501,10 @@ impl RunMatSession {
                                 }
                             }
                         }
-                    } else if !is_semicolon_suppressed && result_value.is_none() {
+                    } else if !is_semicolon_suppressed
+                        && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+                        && result_value.is_none()
+                    {
                         result_value = results.into_iter().last();
                         if self.verbose {
                             debug!("Fallback result from interpreter: {result_value:?}");
@@ -1221,10 +1514,7 @@ impl RunMatSession {
                     if self.verbose {
                         debug!("Final result_value: {result_value:?}");
                     }
-                    debug!(
-                        "Interpreter execution successful, variable_array: {:?}",
-                        self.variable_array
-                    );
+                    debug!("Interpreter execution successful");
                 }
                 Ok(runmat_ignition::InterpreterOutcome::Pending(pending_exec)) => {
                     let plan = self.capture_execution_plan(ExecutionPlanInputs {
@@ -1349,7 +1639,11 @@ impl RunMatSession {
             debug!("Execution completed in {execution_time_ms}ms (JIT: {used_jit})");
         }
 
-        if !is_expression_stmt && !is_semicolon_suppressed && result_value.is_none() {
+        if !is_expression_stmt
+            && !is_semicolon_suppressed
+            && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+            && result_value.is_none()
+        {
             if let Some(v) = self
                 .variable_array
                 .iter()
@@ -1436,7 +1730,7 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: fusion_snapshot,
             stdin_events,
-            stdin_requested: None,
+            pending_request: None,
         })
     }
 
@@ -1509,14 +1803,30 @@ impl RunMatSession {
             value.clone()
         };
 
-        let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
-        let preview = preview_numeric_values(&host_value, max_elements)
-            .map(|(values, truncated)| WorkspacePreview { values, truncated });
+        let value_shape_vec = value_shape(&host_value).unwrap_or_default();
+        let mut preview = None;
+        if let Some(slice_opts) = options
+            .slice
+            .as_ref()
+            .and_then(|slice| slice.sanitized(&value_shape_vec))
+        {
+            let slice_elements = slice_opts.shape.iter().product::<usize>();
+            let slice_limit = slice_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+            if let Some(slice_value) = slice_value_for_preview(&host_value, &slice_opts) {
+                preview = preview_numeric_values(&slice_value, slice_limit)
+                    .map(|(values, truncated)| WorkspacePreview { values, truncated });
+            }
+        }
+        if preview.is_none() {
+            let max_elements = options.max_elements.clamp(1, MATERIALIZE_DEFAULT_LIMIT);
+            preview = preview_numeric_values(&host_value, max_elements)
+                .map(|(values, truncated)| WorkspacePreview { values, truncated });
+        }
         Ok(MaterializedVariable {
             name,
             class_name: matlab_class_name(&host_value),
             dtype: numeric_dtype_label(&host_value).map(|label| label.to_string()),
-            shape: value_shape(&host_value).unwrap_or_default(),
+            shape: value_shape_vec,
             is_gpu,
             residency,
             size_bytes: approximate_size_bytes(&host_value),
@@ -1568,7 +1878,9 @@ impl RunMatSession {
         pending: runmat_ignition::PendingExecution,
         new_streams: Vec<ExecutionStreamEntry>,
     ) -> Result<ExecutionResult> {
-        let request = pending_interaction_to_request(&pending.interaction);
+        let interaction_kind = pending.interaction.kind;
+        let interaction_prompt = pending.interaction.prompt.clone();
+        let input_request = pending_interaction_to_request(&pending.interaction);
         let id = Uuid::new_v4();
         let elapsed_ms = plan.start_time.elapsed().as_millis() as u64;
         let fusion_plan = plan.fusion_snapshot.clone();
@@ -1585,10 +1897,22 @@ impl RunMatSession {
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
-        let pending_input = PendingInput {
-            id,
-            request,
-            waiting_ms: 0,
+        let (kind, visibility, label) = match interaction_kind {
+            runmat_runtime::interaction::InteractionKind::Line { echo } => (
+                PendingRequestKind::Line { echo },
+                PendingRequestVisibility::External,
+                input_request.prompt.clone(),
+            ),
+            runmat_runtime::interaction::InteractionKind::KeyPress => (
+                PendingRequestKind::KeyPress,
+                PendingRequestVisibility::External,
+                input_request.prompt.clone(),
+            ),
+            runmat_runtime::interaction::InteractionKind::GpuMapRead => (
+                PendingRequestKind::GpuMapRead,
+                PendingRequestVisibility::Internal,
+                interaction_prompt,
+            ),
         };
         Ok(ExecutionResult {
             value: None,
@@ -1603,7 +1927,13 @@ impl RunMatSession {
             profiling: None,
             fusion_plan,
             stdin_events,
-            stdin_requested: Some(pending_input),
+            pending_request: Some(PendingRequest {
+                id,
+                kind,
+                label,
+                waiting_ms: 0,
+                visibility,
+            }),
         })
     }
 
@@ -1636,6 +1966,10 @@ impl RunMatSession {
             && !plan.is_expression_stmt
             && !interpreter_values.is_empty()
             && !plan.is_semicolon_suppressed
+            && matches!(
+                plan.final_stmt_emit,
+                FinalStmtEmitDisposition::NeedsFallback
+            )
         {
             plan.result_value = Some(interpreter_values[0].clone());
         }
@@ -1653,7 +1987,13 @@ impl RunMatSession {
                     }
                 }
             }
-        } else if !plan.is_semicolon_suppressed && plan.result_value.is_none() {
+        } else if !plan.is_semicolon_suppressed
+            && matches!(
+                plan.final_stmt_emit,
+                FinalStmtEmitDisposition::NeedsFallback
+            )
+            && plan.result_value.is_none()
+        {
             plan.result_value = interpreter_values.into_iter().last();
         }
 
@@ -1725,7 +2065,13 @@ impl RunMatSession {
             // keep
         }
         let type_info = plan.suppressed_value.as_ref().map(format_type_info);
-        if !plan.is_semicolon_suppressed && plan.result_value.is_none() {
+        if !plan.is_semicolon_suppressed
+            && matches!(
+                plan.final_stmt_emit,
+                FinalStmtEmitDisposition::NeedsFallback
+            )
+            && plan.result_value.is_none()
+        {
             if let Some(v) = self
                 .variable_array
                 .iter()
@@ -1783,7 +2129,7 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: plan.fusion_snapshot,
             stdin_events,
-            stdin_requested: None,
+            pending_request: None,
         })
     }
 
@@ -2024,6 +2370,10 @@ fn pending_interaction_to_request(
             InputRequestKind::Line { echo }
         }
         runmat_runtime::interaction::InteractionKind::KeyPress => InputRequestKind::KeyPress,
+        runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+            // Should not be mapped to an input request; caller must branch before calling.
+            InputRequestKind::KeyPress
+        }
     };
     InputRequest {
         prompt: interaction.prompt.clone(),

@@ -837,8 +837,8 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         bias,
         gamma,
     };
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!("execute_image_normalize: desc {:?}", desc);
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!("execute_image_normalize: desc {:?}", desc);
     }
 
     let output = provider.image_normalize(&input_handle, &desc)?;

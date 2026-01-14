@@ -1,5 +1,6 @@
 pub use inventory;
 use runmat_gc_api::GcPtr;
+use runmat_control_flow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -985,7 +986,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
-    pub implementation: fn(&[Value]) -> Result<Value, String>,
+    pub implementation: fn(&[Value]) -> Result<Value, runmat_control_flow::RuntimeControlFlow>,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
@@ -1001,7 +1002,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
-        implementation: fn(&[Value]) -> Result<Value, String>,
+        implementation: fn(&[Value]) -> Result<Value, runmat_control_flow::RuntimeControlFlow>,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
         suppress_auto_output: bool,

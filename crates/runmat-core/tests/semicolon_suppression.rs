@@ -24,16 +24,28 @@ fn test_assignment_with_semicolon() {
     // Assignment without semicolon should return the assigned value
     let result = engine.execute("x = 42").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "42");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "42");
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout, vec!["x = 42"]);
 
     // Assignment with semicolon should suppress output
     let result = engine.execute("y = 42;").unwrap();
     assert!(result.value.is_none()); // No value returned due to semicolon suppression
+    let stdout = collect_stdout_texts(&result);
+    assert!(stdout.is_empty());
 
     // But the variable should still be assigned
     let result = engine.execute("y").unwrap();
     assert!(result.value.is_some());
     assert_eq!(result.value.unwrap().to_string(), "42");
+}
+
+#[test]
+fn test_semicolon_with_trailing_newline_is_suppressed() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = engine.execute("z = 5;\n").unwrap();
+    assert!(result.value.is_none());
+    assert!(collect_stdout_texts(&result).is_empty());
 }
 
 /// Test mixed expressions with and without semicolons
@@ -158,8 +170,10 @@ fn test_type_info_display() {
     // Test that assignments without semicolon still show values, not type info
     let result = engine.execute("a = 100").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "100");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "100");
     assert_eq!(result.type_info, None);
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout, vec!["a = 100"]);
 }
 
 /// Test that statement-only constructs (like if/while) are not affected by semicolons

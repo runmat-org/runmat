@@ -35,7 +35,7 @@ fn parse_assignment() {
                     BinOp::Add,
                     Box::new(Expr::Number("5".into()))
                 ),
-                false // Assignment without semicolon for test case
+                true // Semicolon suppresses display even at EOF
             )]
         }
     );
@@ -93,7 +93,7 @@ fn multiple_statements() {
         Program {
             body: vec![
                 Stmt::Assign("x".into(), Expr::Number("1".into()), true), // Has semicolon
-                Stmt::Assign("y".into(), Expr::Number("2".into()), false)  // No semicolon
+                Stmt::Assign("y".into(), Expr::Number("2".into()), true)  // Has semicolon
             ]
         }
     );

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,7 +57,7 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use tracing::info_span;
@@ -148,6 +148,18 @@ pub struct WgpuProvider {
     // Optimization caches
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+
+    /// wasm/WebGPU only: tracks in-flight `map_async` readbacks so we can suspend the VM
+    /// instead of blocking the worker event loop.
+    #[cfg(target_arch = "wasm32")]
+    pending_map_reads: Mutex<HashMap<u64, PendingWasmMapRead>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PendingWasmMapRead {
+    staging: wgpu::Buffer,
+    size_bytes: u64,
+    rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -162,6 +174,7 @@ struct BufferEntry {
     shape: Vec<usize>,
     precision: NumericPrecision,
     usage: BufferUsageClass,
+    last_submission_id: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -1906,6 +1919,8 @@ fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }
+static NEXT_SUBMISSION_ID: AtomicU32 = AtomicU32::new(1);
+
 impl WgpuProvider {
     const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
     const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
@@ -2432,6 +2447,33 @@ impl WgpuProvider {
         }
     }
 
+    fn buffer_residency_pool_limit() -> usize {
+        const VAR: &str = "RUNMAT_WGPU_POOL_MAX_PER_KEY";
+        match std::env::var(VAR) {
+            Ok(raw) => match raw.parse::<usize>() {
+                Ok(value) => {
+                    log::info!(
+                        "RunMat Accelerate: buffer residency pool capacity set to {} via {}",
+                        value,
+                        VAR
+                    );
+                    value
+                }
+                Err(err) => {
+                    log::warn!(
+                        "RunMat Accelerate: failed to parse {}='{}' ({}); using default {}",
+                        VAR,
+                        raw,
+                        err,
+                        Self::BUFFER_RESIDENCY_MAX_PER_KEY
+                    );
+                    Self::BUFFER_RESIDENCY_MAX_PER_KEY
+                }
+            },
+            Err(_) => Self::BUFFER_RESIDENCY_MAX_PER_KEY,
+        }
+    }
+
     pub async fn new_async(opts: WgpuProviderOptions) -> Result<Self> {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
@@ -2558,6 +2600,7 @@ impl WgpuProvider {
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
         let device = Arc::new(device_raw);
+        install_device_error_handlers(&device);
         let queue = Arc::new(queue_raw);
         let adapter = Arc::new(adapter);
         let satisfied_limits = device.limits();
@@ -2691,6 +2734,8 @@ impl WgpuProvider {
         };
         let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
 
+        let buffer_pool_limit = Self::buffer_residency_pool_limit();
+
         Ok(Self {
             instance,
             device,
@@ -2700,7 +2745,7 @@ impl WgpuProvider {
             adapter_limits: satisfied_limits,
             workgroup_config,
             buffers: Mutex::new(HashMap::new()),
-            buffer_residency: BufferResidency::new(Self::BUFFER_RESIDENCY_MAX_PER_KEY),
+            buffer_residency: BufferResidency::new(buffer_pool_limit),
             next_id: AtomicU64::new(1),
             pipelines,
             runtime_device_id,
@@ -2725,6 +2770,8 @@ impl WgpuProvider {
             autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
+            #[cfg(target_arch = "wasm32")]
+            pending_map_reads: Mutex::new(HashMap::new()),
         })
     }
 
@@ -2766,6 +2813,7 @@ impl WgpuProvider {
             shape: shape.clone(),
             precision: self.precision,
             usage,
+            last_submission_id: None,
         };
         self.buffers
             .lock()
@@ -2806,6 +2854,14 @@ impl WgpuProvider {
         if let Ok(mut guard) = self.buffers.lock() {
             if let Some(entry) = guard.get_mut(&handle.buffer_id) {
                 entry.usage = usage;
+            }
+        }
+    }
+
+    fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
+        if let Ok(mut guard) = self.buffers.lock() {
+            if let Some(entry) = guard.get_mut(&buffer_id) {
+                entry.last_submission_id = Some(submission_id);
             }
         }
     }
@@ -3240,10 +3296,54 @@ impl WgpuProvider {
         self.submit(enc);
     }
 
-    fn submit(&self, encoder: wgpu::CommandEncoder) {
-        let _span = info_span!("gpu.dispatch", label = "runmat-wgpu-submit").entered();
-        self.queue.submit(Some(encoder.finish()));
+    fn submit(&self, encoder: wgpu::CommandEncoder) -> u32 {
+        let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
+        let _span = info_span!(
+            "gpu.dispatch",
+            label = "runmat-wgpu-submit",
+            submission_id = submission_id
+        )
+        .entered();
+        log::trace!("wgpu submit {}: begin", submission_id);
+        let work = encoder.finish();
+        let submission_index = self.queue.submit(Some(work));
+        log::trace!(
+            "wgpu submit {}: submitted, polling (index={:?})",
+            submission_id,
+            submission_index
+        );
+        #[cfg(target_arch = "wasm32")]
+        let poll_start = Instant::now();
         self.device.poll(wgpu::Maintain::Wait);
+        log::trace!("wgpu submit {}: poll complete", submission_id);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.queue.on_submitted_work_done(move || {
+                log::trace!(
+                    "wgpu submit {}: on_submitted_work_done callback fired",
+                    submission_id
+                );
+            });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            log::debug!(
+                "wgpu submit {}: on_submitted_work_done not supported on wasm targets",
+                submission_id
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let elapsed = poll_start.elapsed();
+            if elapsed > Duration::from_millis(250) {
+                log::warn!(
+                    "wgpu submit {}: device.poll took {}ms on wasm target",
+                    submission_id,
+                    elapsed.as_millis()
+                );
+            }
+        }
+        submission_id
     }
     fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         if handle.device_id != self.runtime_device_id {
@@ -3262,6 +3362,7 @@ impl WgpuProvider {
                 shape: entry.shape.clone(),
                 precision: entry.precision,
                 usage: entry.usage,
+                last_submission_id: entry.last_submission_id,
             })
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
     }
@@ -3552,14 +3653,31 @@ impl WgpuProvider {
                     )
                 });
 
+        let output_ptr = output_buffer.as_ref() as *const wgpu::Buffer as usize;
+        let input_ids: Vec<u64> = inputs.iter().map(|h| h.buffer_id).collect();
+        log::trace!(
+            "fusion elementwise begin len={} out_ptr=0x{:x} inputs={:?}",
+            len,
+            output_ptr,
+            input_ids
+        );
         // Dispatch in chunks to satisfy 65535 limit
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset_elems = 0usize;
+        let mut chunk_index = 0usize;
+        let mut last_submission_id = None;
         while offset_elems < len {
             let remaining = len - offset_elems;
             let chunk_len = remaining.min(chunk_capacity);
 
+            log::trace!(
+                "fusion elementwise chunk start out_ptr=0x{:x} chunk_len={} offset={} chunk_index={}",
+                output_ptr,
+                chunk_len,
+                offset_elems,
+                chunk_index
+            );
             match &mut uniform_state {
                 FusionUniformState::Broadcast(state) => {
                     state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32)
@@ -3580,22 +3698,52 @@ impl WgpuProvider {
                 chunk_len as u32,
                 crate::backend::wgpu::config::effective_workgroup_size(),
             );
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                bind_group.as_ref(),
-                workgroups,
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-fusion-elementwise-encoder"),
+                    });
+            {
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-fusion-elementwise-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, bind_group.as_ref(), &[]);
+                if workgroups > 0 {
+                    pass.dispatch_workgroups(workgroups, 1, 1);
+                }
+            }
+            let submission_id = self.submit(enc);
+            last_submission_id = Some(submission_id);
+            log::trace!(
+                "fusion elementwise chunk complete out_ptr=0x{:x} chunk_len={} offset={} submission_id={}",
+                output_ptr,
+                chunk_len,
+                offset_elems,
+                submission_id
             );
-
             offset_elems += chunk_len;
+            chunk_index += 1;
         }
-        Ok(self.register_existing_buffer_with_usage(
+        let handle = self.register_existing_buffer_with_usage(
             output_buffer,
             output_shape.to_vec(),
             len,
             BufferUsageClass::FusionOut,
-        ))
+        );
+        log::trace!(
+            "fusion elementwise complete buffer_id={} out_ptr=0x{:x} len={} chunks={} last_submission_id={:?}",
+            handle.buffer_id,
+            output_ptr,
+            len,
+            chunk_index,
+            last_submission_id
+        );
+        if let Some(submission_id) = last_submission_id {
+            self.record_buffer_submission(handle.buffer_id, submission_id);
+        }
+        Ok(handle)
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn fused_reduction_exec(
@@ -11019,6 +11167,13 @@ impl WgpuProvider {
         let entry = self.get_entry(source)?;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
+        let _span = info_span!(
+            "gpu.gather_linear",
+            source_len = entry.len,
+            index_count = indices.len(),
+            output_size = expected
+        )
+        .entered();
         ensure!(
             expected == indices.len(),
             "gather_linear: index count {} does not match output size {}",
@@ -11044,6 +11199,13 @@ impl WgpuProvider {
             self.queue
                 .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
         }
+        log::trace!(
+            "gather_linear begin source_buffer={} ptr=0x{:x} out_shape={:?} count={}",
+            source.buffer_id,
+            entry.buffer.as_ref() as *const wgpu::Buffer as usize,
+            output_shape,
+            indices.len()
+        );
 
         let out_buffer =
             self.create_storage_buffer_checked(expected, "runmat-gather-linear-out")?;
@@ -11089,6 +11251,12 @@ impl WgpuProvider {
             "runmat-gather-linear-encoder",
             "runmat-gather-linear-pass",
         );
+        log::trace!(
+            "gather_linear complete source_buffer={} out_ptr=0x{:x} count={}",
+            source.buffer_id,
+            out_buffer.as_ref() as *const wgpu::Buffer as usize,
+            indices.len()
+        );
 
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), expected))
     }
@@ -11108,6 +11276,13 @@ impl WgpuProvider {
         );
         let target_entry = self.get_entry(target)?;
         let values_entry = self.get_entry(values)?;
+        let _span = info_span!(
+            "gpu.scatter_linear",
+            target_len = target_entry.len,
+            index_count = indices.len(),
+            values_len = values_entry.len
+        )
+        .entered();
         ensure!(
             values_entry.len == indices.len(),
             "scatter_linear: values length {} does not match indices length {}",
@@ -11127,6 +11302,14 @@ impl WgpuProvider {
         }));
         self.queue
             .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+        log::trace!(
+            "scatter_linear begin target_buffer={} target_ptr=0x{:x} values_buffer={} values_ptr=0x{:x} count={}",
+            target.buffer_id,
+            target_entry.buffer.as_ref() as *const wgpu::Buffer as usize,
+            values.buffer_id,
+            values_entry.buffer.as_ref() as *const wgpu::Buffer as usize,
+            indices.len()
+        );
         let params = LinearScatterParams {
             count: indices.len() as u32,
             _pad: [0; 3],
@@ -11168,6 +11351,12 @@ impl WgpuProvider {
             workgroups,
             "runmat-scatter-linear-encoder",
             "runmat-scatter-linear-pass",
+        );
+        log::trace!(
+            "scatter_linear complete target_buffer={} values_buffer={} count={}",
+            target.buffer_id,
+            values.buffer_id,
+            indices.len()
         );
         Ok(())
     }
@@ -16133,80 +16322,219 @@ impl AccelProvider for WgpuProvider {
         .entered();
         log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
         let entry = self.get_entry(h)?;
+        if let Some(last) = entry.last_submission_id {
+            log::trace!(
+                "wgpu download id={} last_submission_id={}",
+                h.buffer_id,
+                last
+            );
+        } else {
+            log::trace!("wgpu download id={} last_submission_id=<none>", h.buffer_id);
+        }
         if entry.len == 0 {
             return Ok(HostTensorOwned {
                 data: Vec::new(),
                 shape: h.shape.clone(),
             });
         }
-        let size_bytes = (entry.len * self.element_size) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-download-staging"),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-download-encoder"),
-            });
-        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
-        self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|_| anyhow!("map_async callback dropped"))?
-            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let data = slice.get_mapped_range();
-        let mut out = vec![0.0f64; entry.len];
-        match entry.precision {
-            NumericPrecision::F64 => {
-                out.copy_from_slice(cast_slice(&data));
-            }
-            NumericPrecision::F32 => {
-                let f32_slice: &[f32] = cast_slice(&data);
-                for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                    *dst = *src as f64;
-                }
-            }
-        }
-        drop(data);
-        staging.unmap();
-        self.telemetry.record_download_bytes(size_bytes);
 
-        let mut shape = h.shape.clone();
-        if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
-            let base_rows = info.base_rows;
-            let base_cols = info.base_cols;
-            if base_rows * base_cols != out.len() {
-                return Err(anyhow!(
-                    "download: transpose metadata mismatch for buffer {}",
-                    h.buffer_id
-                ));
-            }
-            if shape.len() == 2 {
-                let rows_t = base_cols;
-                let cols_t = base_rows;
-                let mut transposed = vec![0.0f64; out.len()];
-                for col in 0..base_cols {
-                    for row in 0..base_rows {
-                        let src_idx = row + col * base_rows;
-                        let dst_idx = col + row * base_cols;
-                        transposed[dst_idx] = out[src_idx];
+        let size_bytes = (entry.len * self.element_size) as u64;
+
+        // Shared post-map readback logic: decode mapped bytes, unmap, record telemetry,
+        // apply transpose metadata, and return host tensor.
+        let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
+            let slice = staging.slice(..);
+            let data = slice.get_mapped_range();
+            log::trace!(
+                "wgpu download copying data id={} len={} bytes={}",
+                h.buffer_id,
+                entry.len,
+                size_bytes
+            );
+
+            let mut out = vec![0.0f64; entry.len];
+            match entry.precision {
+                NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
+                NumericPrecision::F32 => {
+                    let f32_slice: &[f32] = cast_slice(&data);
+                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                        *dst = *src as f64;
                     }
                 }
-                out = transposed;
-                shape[0] = rows_t;
-                shape[1] = cols_t;
             }
+            drop(data);
+            staging.unmap();
+            log::trace!("wgpu download finished copy id={}", h.buffer_id);
+            self.telemetry.record_download_bytes(size_bytes);
+
+            let mut shape = h.shape.clone();
+            if let Some(info) = runmat_accelerate_api::handle_transpose_info(h) {
+                let base_rows = info.base_rows;
+                let base_cols = info.base_cols;
+                if base_rows * base_cols != out.len() {
+                    return Err(anyhow!(
+                        "download: transpose metadata mismatch for buffer {}",
+                        h.buffer_id
+                    ));
+                }
+                if shape.len() == 2 {
+                    let rows_t = base_cols;
+                    let cols_t = base_rows;
+                    let mut transposed = vec![0.0f64; out.len()];
+                    for col in 0..base_cols {
+                        for row in 0..base_rows {
+                            let src_idx = row + col * base_rows;
+                            let dst_idx = col + row * base_cols;
+                            transposed[dst_idx] = out[src_idx];
+                        }
+                    }
+                    out = transposed;
+                    shape[0] = rows_t;
+                    shape[1] = cols_t;
+                }
+            }
+
+            log::trace!(
+                "wgpu download complete id={} final_shape={:?}",
+                h.buffer_id,
+                shape
+            );
+
+            Ok(HostTensorOwned { data: out, shape })
+        };
+
+        // wasm/WebGPU: never block waiting for map_async. Instead, schedule the map once and
+        // suspend the interpreter, letting the host resume on the next tick.
+        #[cfg(target_arch = "wasm32")]
+        {
+            // If we already have an in-flight map for this buffer id, check if it's completed.
+            if let Ok(mut pending) = self.pending_map_reads.lock() {
+                if let Some(state) = pending.get_mut(&h.buffer_id) {
+                    match state.rx.try_recv() {
+                        Ok(map_result) => {
+                            let PendingWasmMapRead { staging, size_bytes, .. } =
+                                pending.remove(&h.buffer_id).unwrap();
+                            map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+                            return finish_readback(staging, size_bytes);
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            let label = format!(
+                                "wgpu pending map_async id={} bytes={}",
+                                h.buffer_id, state.size_bytes
+                            );
+                            let _ = runmat_runtime::interaction::suspend(
+                                runmat_runtime::interaction::InteractionKind::GpuMapRead,
+                                &label,
+                            );
+                            return Err(anyhow!(runmat_runtime::interaction::PENDING_INTERACTION_ERR));
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            pending.remove(&h.buffer_id);
+                            return Err(anyhow!(
+                                "map_async callback dropped for buffer {}",
+                                h.buffer_id
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // No in-flight map yet; schedule one now.
+            log::trace!(
+                "wgpu download (wasm) creating staging buffer id={} bytes={}",
+                h.buffer_id,
+                size_bytes
+            );
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-download-staging"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-download-encoder"),
+                });
+            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
+            self.submit(encoder);
+
+            let slice = staging.slice(..);
+            let (tx, rx) = mpsc::channel();
+            let map_buffer_id = h.buffer_id;
+            slice.map_async(wgpu::MapMode::Read, move |res| {
+                log::trace!(
+                    "wgpu download map_async callback id={} status={:?}",
+                    map_buffer_id,
+                    res
+                );
+                let _ = tx.send(res);
+            });
+
+            if let Ok(mut pending) = self.pending_map_reads.lock() {
+                pending.insert(
+                    h.buffer_id,
+                    PendingWasmMapRead {
+                        staging,
+                        size_bytes,
+                        rx,
+                    },
+                );
+            }
+
+            let label = format!("wgpu pending map_async id={} bytes={}", h.buffer_id, size_bytes);
+            let _ = runmat_runtime::interaction::suspend(
+                runmat_runtime::interaction::InteractionKind::GpuMapRead,
+                &label,
+            );
+            return Err(anyhow!(runmat_runtime::interaction::PENDING_INTERACTION_ERR));
         }
 
-        Ok(HostTensorOwned { data: out, shape })
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // native: blocking readback
+            log::trace!(
+                "wgpu download creating staging buffer id={} bytes={}",
+                h.buffer_id,
+                size_bytes
+            );
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-download-staging"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-download-encoder"),
+                });
+            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
+            self.submit(encoder);
+            let slice = staging.slice(..);
+            let (tx, rx) = mpsc::channel();
+
+            let map_buffer_id = h.buffer_id;
+            slice.map_async(wgpu::MapMode::Read, move |res| {
+                log::trace!(
+                    "wgpu download map_async callback id={} status={:?}",
+                    map_buffer_id,
+                    res
+                );
+                let _ = tx.send(res);
+            });
+            log::trace!(
+                "wgpu download awaiting map_async completion id={} bytes={}",
+                h.buffer_id,
+                size_bytes
+            );
+            self.device.poll(wgpu::Maintain::Wait);
+            let map_result = wait_for_map_async(rx, self.device.as_ref(), h.buffer_id)?;
+
+            log::trace!("wgpu download map_async success id={}", h.buffer_id);
+            map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+            return finish_readback(staging, size_bytes);
+        }
     }
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         // Remove from handle table and return buffer to pool for reuse
@@ -16720,4 +17048,57 @@ impl WgpuProvider {
             ex2: ex2_handle,
         })
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wait_for_map_async(
+    rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    device: &wgpu::Device,
+    buffer_id: u64,
+) -> Result<Result<(), wgpu::BufferAsyncError>> {
+    use std::sync::mpsc::RecvTimeoutError::{Disconnected, Timeout};
+    const POLL_INTERVAL: Duration = Duration::from_millis(50);
+    const LOG_INTERVAL: Duration = Duration::from_secs(5);
+    let mut waited = Duration::ZERO;
+    loop {
+        match rx.recv_timeout(POLL_INTERVAL) {
+            Ok(res) => return Ok(res),
+            Err(Timeout) => {
+                waited += POLL_INTERVAL;
+                device.poll(wgpu::Maintain::Poll);
+                if waited >= LOG_INTERVAL {
+                    log::warn!(
+                        "wgpu download map_async still pending id={} waited_ms={}",
+                        buffer_id,
+                        waited.as_millis()
+                    );
+                    waited = Duration::ZERO;
+                }
+            }
+            Err(Disconnected) => {
+                return Err(anyhow!(
+                    "map_async callback dropped for buffer {}",
+                    buffer_id
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_device_error_handlers(device: &wgpu::Device) {
+    device.on_uncaptured_error(Box::new(|error| {
+        error!("WGPU uncaptured error: {:?}", error);
+    }));
+    device.set_device_lost_callback(|reason, message| {
+        error!("WGPU device lost: reason={:?}, message={}", reason, message);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn install_device_error_handlers(device: &wgpu::Device) {
+    device.on_uncaptured_error(Box::new(|error| {
+        error!("WGPU uncaptured error (wasm): {:?}", error);
+    }));
+    debug!("wgpu set_device_lost_callback not supported on wasm targets");
 }

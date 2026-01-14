@@ -14,6 +14,9 @@ use std::sync::{Arc, RwLock};
 pub enum InteractionKind {
     Line { echo: bool },
     KeyPress,
+    /// Internal suspension used by the wasm runtime while waiting for a WebGPU map/readback
+    /// completion. The `PendingInteraction.prompt` carries a human-readable label.
+    GpuMapRead,
 }
 
 pub struct InteractionPrompt<'a> {
@@ -25,6 +28,8 @@ pub struct InteractionPrompt<'a> {
 pub enum InteractionResponse {
     Line(String),
     KeyPress,
+    /// Resume token for `InteractionKind::GpuMapRead`.
+    GpuMapReady,
 }
 
 #[derive(Clone)]
@@ -109,6 +114,9 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
             InteractionResponse::KeyPress => {
                 Err("queued keypress response used for line request".to_string())
             }
+            InteractionResponse::GpuMapReady => {
+                Err("queued gpu map response used for line request".to_string())
+            }
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -121,16 +129,13 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
                 InteractionResponse::KeyPress => {
                     Err("interaction handler returned keypress for line request".to_string())
                 }
+                InteractionResponse::GpuMapReady => Err(
+                    "interaction handler returned gpu map response for line request".to_string(),
+                ),
             },
             InteractionDecision::Pending => {
-                console::record_console_output(ConsoleStream::Stdout, prompt);
-                LAST_PENDING.with(|slot| {
-                    *slot.borrow_mut() = Some(PendingInteraction {
-                        prompt: prompt.to_string(),
-                        kind: InteractionKind::Line { echo },
-                    });
-                });
-                Err(PENDING_INTERACTION_ERR.to_string())
+                suspend(InteractionKind::Line { echo }, prompt)?;
+                unreachable!("suspend always returns Err")
             }
         }
     } else {
@@ -145,6 +150,9 @@ pub fn wait_for_key(prompt: &str) -> Result<(), String> {
                 Err("queued line response used for keypress request".to_string())
             }
             InteractionResponse::KeyPress => Ok(()),
+            InteractionResponse::GpuMapReady => {
+                Err("queued gpu map response used for keypress request".to_string())
+            }
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -157,16 +165,14 @@ pub fn wait_for_key(prompt: &str) -> Result<(), String> {
                     Err("interaction handler returned line value for keypress request".to_string())
                 }
                 InteractionResponse::KeyPress => Ok(()),
+                InteractionResponse::GpuMapReady => Err(
+                    "interaction handler returned gpu map response for keypress request"
+                        .to_string(),
+                ),
             },
             InteractionDecision::Pending => {
-                console::record_console_output(ConsoleStream::Stdout, prompt);
-                LAST_PENDING.with(|slot| {
-                    *slot.borrow_mut() = Some(PendingInteraction {
-                        prompt: prompt.to_string(),
-                        kind: InteractionKind::KeyPress,
-                    });
-                });
-                Err(PENDING_INTERACTION_ERR.to_string())
+                suspend(InteractionKind::KeyPress, prompt)?;
+                unreachable!("suspend always returns Err")
             }
         }
     } else {
@@ -239,4 +245,20 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
     QUEUED_RESPONSE.with(|slot| {
         *slot.borrow_mut() = Some(response);
     });
+}
+
+/// Suspend the current execution, recording the pending interaction for the host to resume.
+///
+/// This is the central suspension primitive used by the interpreter/host bridge. Builtins like
+/// `input()` use it, and internal subsystems (e.g. wasm WebGPU readbacks) can also use it to
+/// avoid blocking the browser event loop.
+pub fn suspend(kind: InteractionKind, prompt: &str) -> Result<(), String> {
+    console::record_console_output(ConsoleStream::Stdout, prompt);
+    LAST_PENDING.with(|slot| {
+        *slot.borrow_mut() = Some(PendingInteraction {
+            prompt: prompt.to_string(),
+            kind,
+        });
+    });
+    Err(PENDING_INTERACTION_ERR.to_string())
 }
