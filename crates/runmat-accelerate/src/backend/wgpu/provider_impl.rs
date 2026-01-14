@@ -16422,11 +16422,10 @@ impl AccelProvider for WgpuProvider {
                                 "wgpu pending map_async id={} bytes={}",
                                 h.buffer_id, state.size_bytes
                             );
-                            let _ = runmat_runtime::interaction::suspend(
-                                runmat_runtime::interaction::InteractionKind::GpuMapRead,
-                                &label,
-                            );
-                            return Err(anyhow!(runmat_runtime::interaction::PENDING_INTERACTION_ERR));
+                            return Err(anyhow!(runmat_async::SuspendMarker {
+                                kind: runmat_async::InteractionKind::GpuMapRead,
+                                prompt: label,
+                            }));
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             pending.remove(&h.buffer_id);
@@ -16483,11 +16482,10 @@ impl AccelProvider for WgpuProvider {
             }
 
             let label = format!("wgpu pending map_async id={} bytes={}", h.buffer_id, size_bytes);
-            let _ = runmat_runtime::interaction::suspend(
-                runmat_runtime::interaction::InteractionKind::GpuMapRead,
-                &label,
-            );
-            return Err(anyhow!(runmat_runtime::interaction::PENDING_INTERACTION_ERR));
+            return Err(anyhow!(runmat_async::SuspendMarker {
+                kind: runmat_async::InteractionKind::GpuMapRead,
+                prompt: label,
+            }));
         }
 
         #[cfg(not(target_arch = "wasm32"))]

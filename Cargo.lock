@@ -6015,6 +6015,7 @@ dependencies = [
  "pollster",
  "rand 0.8.5",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-hir",
  "runmat-ignition",

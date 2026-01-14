@@ -211,7 +211,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 if args.len() != #param_len { return Err(format!("expected {} args, got {}", #param_len, args.len()).into()); }
             }
             #(#conv_stmts)*
-            let res = #ident(#(#param_idents),*)?;
+            let res = match #ident(#(#param_idents),*) {
+                Ok(value) => value,
+                Err(message) => {
+                    if message == crate::interaction::PENDING_INTERACTION_ERR {
+                        if let Some(pending) = crate::interaction::take_pending_interaction() {
+                            return Err(runmat_async::RuntimeControlFlow::Suspend(pending));
+                        }
+                    }
+                    return Err(runmat_async::RuntimeControlFlow::Error(message));
+                }
+            };
             Ok(runmat_builtins::Value::from(res))
         }
     };
