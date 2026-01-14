@@ -34,7 +34,7 @@ export function builtinMetadataForSlug(slug: string): Metadata {
     ).trim();
 
     return {
-        title: `${builtin.name} | MATLAB Language Function Reference`,
+        title: { absolute: `${builtin.name} in MATLAB - runnable examples online + source | RunMat docs` },
         description,
         openGraph: {
             title: builtin.name,
