@@ -63,9 +63,6 @@ function Sidebar() {
     if (current !== q) setQ(current);
   }, [searchParams]);
 
-  const filtered = q
-    ? all.filter((n) => n.title.toLowerCase().includes(q.toLowerCase()) && (n.slug || n.externalHref))
-    : [];
   return (
     <aside>
       <button className="md:hidden flex items-center gap-2 text-sm mb-4" onClick={() => setOpen(!open)}>

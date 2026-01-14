@@ -24,11 +24,12 @@ export function BlogLayout({
   dateModified,
   readTime,
   authors,
-  tags: _tags,
+  tags,
   rightAside,
   backLink = { href: '/blog', text: 'Back to Blog' },
   descriptionPlacement = 'beforeMeta'
 }: BlogLayoutProps) {
+  void tags;
   const resolvedAuthors = authors && authors.length > 0 ? authors : [{ name: 'RunMat Team' }];
 
   const descriptionSpacingClass =

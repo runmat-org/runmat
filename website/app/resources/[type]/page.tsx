@@ -9,6 +9,7 @@ import {
   getResourcesByType,
   resourceTypeLabel,
   ResourceItem,
+  ResourceType,
   getRoutableResourceTypes,
   getGuidesCollection,
 } from "@/lib/resources";
@@ -19,9 +20,10 @@ export function generateStaticParams() {
   return getRoutableResourceTypes().map((type) => ({ type }));
 }
 
-export function generateMetadata({ params }: { params: Params }): Metadata {
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
+  const { type: rawType } = await params;
   const available = getRoutableResourceTypes();
-  const type = normalizeType(params.type, available);
+  const type = normalizeType(rawType, available);
   if (!type) return {};
   const label = resourceTypeLabel(type);
   const path = `https://runmat.org/resources/${type}`;
@@ -38,9 +40,10 @@ export function generateMetadata({ params }: { params: Params }): Metadata {
   };
 }
 
-export default function ResourcesByTypePage({ params }: { params: Params }) {
+export default async function ResourcesByTypePage({ params }: { params: Promise<Params> }) {
+  const { type: rawType } = await params;
   const available = getRoutableResourceTypes();
-  const type = normalizeType(params.type, available);
+  const type = normalizeType(rawType, available);
   if (!type) notFound();
 
   const items =

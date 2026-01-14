@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 import React from 'react';
 import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
@@ -222,8 +221,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const inlineClassName = mergeClassNames("markdown-inline-code", className);
       return <code className={inlineClassName} {...props}>{children}</code>;
     },
-    // eslint-disable-next-line @next/next/no-img-element
     img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
+      // eslint-disable-next-line @next/next/no-img-element
       <img 
         src={src} 
         alt={alt} 
