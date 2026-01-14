@@ -2,6 +2,7 @@
     "$schema": "https://openapi.vercel.sh/microfrontends.json",
     "applications": {
       "runmat": {
+        "default": true,
         "routing": [
           { "paths": ["/_next/static/:path*"] },
           { "paths": ["/_next/image"] },
