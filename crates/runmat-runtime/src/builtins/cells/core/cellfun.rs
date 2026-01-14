@@ -357,7 +357,8 @@ fn execute_uniform(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw).map_err(crate::dispatcher::flow_to_string)?;
+            let host_value = gather_if_needed(&raw)
+                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
             cell_values.push(host_value);
         }
         call_args.clear();
@@ -380,7 +381,8 @@ fn execute_uniform(
             }
         };
 
-        let host_value = gather_if_needed(&result).map_err(crate::dispatcher::flow_to_string)?;
+        let host_value = gather_if_needed(&result)
+            .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
         collector.push(&host_value)?;
     }
 
@@ -405,7 +407,8 @@ fn execute_cell(
         cell_values.clear();
         for cell in cell_inputs {
             let raw = deref_cell_value(cell, linear_idx);
-            let host_value = gather_if_needed(&raw).map_err(crate::dispatcher::flow_to_string)?;
+            let host_value = gather_if_needed(&raw)
+                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
             cell_values.push(host_value);
         }
         call_args.clear();
@@ -428,7 +431,8 @@ fn execute_cell(
             }
         };
 
-        let host_value = gather_if_needed(&result).map_err(crate::dispatcher::flow_to_string)?;
+        let host_value = gather_if_needed(&result)
+            .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
         outputs.push(host_value);
     }
 
@@ -464,7 +468,9 @@ fn extract_string(value: &Value) -> Option<String> {
 fn prepare_extra_args(extra_args: &[Value]) -> Result<Vec<Value>, String> {
     let mut host_args = Vec::with_capacity(extra_args.len());
     for arg in extra_args {
-        host_args.push(gather_if_needed(arg).map_err(crate::dispatcher::flow_to_string)?);
+        host_args.push(
+            gather_if_needed(arg).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+        );
     }
     Ok(host_args)
 }
@@ -637,14 +643,13 @@ impl Callable {
 
     fn call(&self, args: &[Value]) -> Result<Value, String> {
         match self {
-            Callable::Builtin { name } => {
-                crate::call_builtin(name, args).map_err(crate::dispatcher::flow_to_string)
-            }
+            Callable::Builtin { name } => crate::call_builtin(name, args)
+                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e)),
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
                 crate::call_builtin(&c.function_name, &captures)
-                    .map_err(crate::dispatcher::flow_to_string)
+                    .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
             }
             Callable::Special(special) => special.call(args),
         }
@@ -674,7 +679,7 @@ impl SpecialCallable {
                 let class_name = extract_string(&args[1])
                     .ok_or_else(|| "cellfun: class name must be a string scalar".to_string())?;
                 let class_value = crate::call_builtin("class", &[left])
-                    .map_err(crate::dispatcher::flow_to_string)?;
+                    .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
                 let class_str = extract_string(&class_value)
                     .ok_or_else(|| "cellfun: failed to evaluate class name".to_string())?;
                 Ok(Value::Bool(

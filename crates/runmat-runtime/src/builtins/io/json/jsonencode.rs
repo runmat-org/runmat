@@ -280,10 +280,13 @@ enum JsonNumber {
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let host_value = gather_if_needed(&value).map_err(crate::dispatcher::flow_to_string)?;
+    let host_value =
+        gather_if_needed(&value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
     let gathered_args: Vec<Value> = rest
         .iter()
-        .map(|v| gather_if_needed(v).map_err(crate::dispatcher::flow_to_string))
+        .map(|v| {
+            gather_if_needed(v).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
+        })
         .collect::<Result<_, _>>()?;
 
     let options = parse_options(&gathered_args)?;

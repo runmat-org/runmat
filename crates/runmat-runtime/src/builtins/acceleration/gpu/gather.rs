@@ -304,9 +304,7 @@ pub fn evaluate(args: &[Value]) -> Result<GatherResult, String> {
 fn gather_argument(value: &Value) -> Result<Value, String> {
     match crate::dispatcher::gather_if_needed(value) {
         Ok(val) => Ok(val),
-        Err(RuntimeControlFlow::Suspend(pending)) => {
-            Err(format!("__RUNMAT_SUSPEND__:internal:{}", pending.prompt))
-        }
+        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending).into()),
         Err(RuntimeControlFlow::Error(err)) => {
             if err.trim_start().to_ascii_lowercase().starts_with("gather:") {
                 Err(err)

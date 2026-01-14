@@ -54,14 +54,11 @@ impl From<RuntimeControlFlow> for String {
     fn from(value: RuntimeControlFlow) -> Self {
         match value {
             RuntimeControlFlow::Error(e) => e,
-            RuntimeControlFlow::Suspend(pending) => {
-                let kind = match pending.kind {
-                    InteractionKind::Line { .. } => "line",
-                    InteractionKind::KeyPress => "keypress",
-                    InteractionKind::GpuMapRead => "internal",
-                };
-                format!("__RUNMAT_SUSPEND__:{kind}:{}", pending.prompt)
-            }
+            // Transitional: allow suspension to bubble through legacy `Result<_, String>` call
+            // stacks by mapping it to the existing pending-interaction sentinel.
+            //
+            // This will be removed once evaluation is modeled as `Poll::Pending` (ExecuteFuture).
+            RuntimeControlFlow::Suspend(_) => "__RUNMAT_PENDING_INTERACTION__".to_string(),
         }
     }
 }

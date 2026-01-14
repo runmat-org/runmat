@@ -1,13 +1,6 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
-fn encode_internal_suspend(prompt: &str) -> String {
-    // Transitional marker to carry a typed suspension through legacy `Result<_, String>` call
-    // stacks. `dispatcher::call_builtin` recognizes this and converts it back into a typed
-    // suspension.
-    format!("__RUNMAT_SUSPEND__:internal:{prompt}")
-}
-
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
 /// This helper routes through the dispatcher so residency hooks and provider
@@ -24,14 +17,8 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
         }
     }
     let value = Value::GpuTensor(handle.clone());
-    let gathered = match crate::dispatcher::gather_if_needed(&value) {
-        Ok(v) => v,
-        Err(runmat_async::RuntimeControlFlow::Error(e)) => return Err(e),
-        Err(runmat_async::RuntimeControlFlow::Suspend(pending)) => {
-            // Preserve suspension through string-based call stacks.
-            return Err(encode_internal_suspend(&pending.prompt));
-        }
-    };
+    let gathered = crate::dispatcher::gather_if_needed(&value)
+        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
     match gathered {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}").into()),
@@ -49,13 +36,8 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
 
 /// Gather an arbitrary value, returning a host-side `Value`.
 pub fn gather_value(value: &Value) -> Result<Value, String> {
-    match crate::dispatcher::gather_if_needed(value) {
-        Ok(v) => Ok(v),
-        Err(runmat_async::RuntimeControlFlow::Error(e)) => Err(e),
-        Err(runmat_async::RuntimeControlFlow::Suspend(pending)) => {
-            Err(encode_internal_suspend(&pending.prompt))
-        }
-    }
+    crate::dispatcher::gather_if_needed(value)
+        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
 }
 
 /// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that

@@ -203,7 +203,10 @@ fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
     }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_if_needed(&arg).map_err(crate::dispatcher::flow_to_string)?);
+        gathered.push(
+            gather_if_needed(&arg)
+                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+        );
     }
     let request = parse_request(&gathered)?;
 
@@ -418,7 +421,9 @@ fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
                     names.push(text);
                     continue;
                 }
-                let gathered = gather_if_needed(inner).map_err(crate::dispatcher::flow_to_string)?;
+                let gathered =
+                    gather_if_needed(inner)
+                        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
                 if let Some(text) = value_to_string_scalar(&gathered) {
                     names.push(text);
                 } else {
@@ -430,7 +435,9 @@ fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
             Ok(names)
         }
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value).map_err(crate::dispatcher::flow_to_string)?;
+            let gathered =
+                gather_if_needed(value)
+                    .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
             extract_name_list(&gathered)
         }
         _ => Err(
