@@ -1,3 +1,8 @@
+---
+collections:
+  - guides
+---
+
 # RunMat Filesystem Strategy
 
 ## Goals

@@ -22,6 +22,18 @@ export const metadata: Metadata = {
 export default function BlogPage() {
   const blogPosts = getPublicBlogPosts();
 
+  const formatDate = (value?: string) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime())
+      ? value
+      : parsed.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+  };
+
   const renderAuthors = (authors?: { name: string; url?: string }[], fallback?: string) => {
     const list =
       authors && authors.length > 0
@@ -87,11 +99,7 @@ export default function BlogPage() {
                     <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mb-4">
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4" />
-                        {new Date(post.date).toLocaleDateString('en-US', { 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        })}
+                        {formatDate(post.dateModified || post.date)}
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4" />

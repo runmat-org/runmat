@@ -1,25 +1,32 @@
 {
     "$schema": "https://openapi.vercel.sh/microfrontends.json",
     "applications": {
-    "runmat": { },
-    "runmat-desktop": {
-      "routing": [
-        {
-          "paths": ["/sandbox"]
-        },
-        {
-          "paths": ["/_p/:path*"]
-        },
-        {
-          "paths": ["/js/:path*"]
-        },
-        {
-          "paths": ["/sQuv/:path*"]
-        },
-        {
-          "paths": ["/sQuv/static/:path*"]
-        }
-      ]
-    }
+      "runmat": {
+        "routing": [
+          { "paths": ["/_next/static/:path*"] },
+          { "paths": ["/_next/image*"] },
+          { "paths": ["/_next/data/:path*"] },
+          { "paths": ["/:path*"] }
+        ]
+      },
+      "runmat-desktop": {
+        "routing": [
+          {
+            "paths": ["/sandbox"]
+          },
+          {
+            "paths": ["/_p/:path*"]
+          },
+          {
+            "paths": ["/js/:path*"]
+          },
+          {
+            "paths": ["/sQuv/:path*"]
+          },
+          {
+            "paths": ["/sQuv/static/:path*"]
+          }
+        ]
+      }
     }
 }

@@ -47,6 +47,9 @@ interface BlogPost {
     image?: string;
     imageAlt?: string;
     canonical?: string;
+  resourceType?: string;
+    collections?: string[];
+    featured?: boolean;
     keywords?: string | string[];
     ogType?: string;
     ogTitle?: string;
@@ -76,6 +79,9 @@ const FRONTMATTER_KEYS = new Set([
   'image',
   'imageAlt',
   'canonical',
+  'resourceType',
+  'collections',
+  'featured',
   'ogType',
   'ogTitle',
   'ogDescription',
@@ -134,6 +140,12 @@ function assertStringArray(val: unknown, field: string, slug: string): string[] 
     throw new Error(`Frontmatter field "${field}" must be an array of strings in slug "${slug}".`);
   }
   return val as string[];
+}
+
+function assertOptionalBoolean(val: unknown, field: string, slug: string): boolean | undefined {
+  if (val === undefined) return undefined;
+  if (typeof val === "boolean") return val;
+  throw new Error(`Frontmatter field "${field}" must be a boolean in slug "${slug}".`);
 }
 
 function serializeJsonLd(data: JsonLd | JsonLdObject): string {
@@ -197,6 +209,12 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     }
   }
 
+  const resourceType =
+    raw.resourceType === undefined ? undefined : assertString(raw.resourceType, 'resourceType', slug);
+  const collections =
+    raw.collections === undefined ? undefined : assertStringArray(raw.collections, 'collections', slug);
+  const featured = assertOptionalBoolean(raw.featured, 'featured', slug);
+
   const jsonLd = validateJsonLd(raw.jsonLd, slug);
 
   return {
@@ -213,6 +231,9 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     image,
     imageAlt,
     canonical,
+    resourceType,
+    collections,
+    featured,
     keywords,
     ogType,
     ogTitle,

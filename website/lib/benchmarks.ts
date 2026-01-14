@@ -12,6 +12,7 @@ export interface BenchmarkSummary {
   readTime: string
   author: string
   tags: string[]
+  featured?: boolean
 }
 
 function extractTitleFromMarkdown(content: string): string {
@@ -133,6 +134,7 @@ export function getAllBenchmarks(): BenchmarkSummary[] {
             readTime: frontmatter.readTime || '5 min read',
             author: frontmatter.author || 'RunMat Team',
             tags: frontmatter.tags || [],
+            featured: frontmatter.featured === true,
           }
         } catch (error) {
           console.error(`Error reading benchmark ${slug}:`, error)

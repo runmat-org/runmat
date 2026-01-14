@@ -38,6 +38,7 @@ type DocFrontmatter = {
   keywords?: string | string[];
   ogTitle?: string;
   ogDescription?: string;
+  collections?: string[];
   jsonLd?: unknown;
 };
 
@@ -53,6 +54,16 @@ function coerceKeywords(val?: string | string[]) {
   if (typeof val !== "string") return undefined;
   const trimmed = val.trim();
   return trimmed ? [trimmed] : undefined;
+}
+
+function coerceCollections(val?: unknown) {
+  if (val === undefined) return undefined;
+  if (!Array.isArray(val)) return undefined;
+  const out = val
+    .filter((k): k is string => typeof k === "string")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  return out.length ? out : undefined;
 }
 
 function isJsonLdObject(val: unknown): Record<string, unknown> | undefined {
@@ -75,7 +86,8 @@ function readDocSource(file: string): { body: string; data: DocFrontmatter } | n
     try {
       const raw = readFileSync(p, "utf-8");
       const parsed = matter(raw);
-      return { body: parsed.content, data: parsed.data as DocFrontmatter };
+      const collections = coerceCollections((parsed.data as DocFrontmatter).collections);
+      return { body: parsed.content, data: { ...(parsed.data as DocFrontmatter), collections } };
     } catch {
       continue;
     }

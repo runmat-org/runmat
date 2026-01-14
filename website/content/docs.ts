@@ -52,7 +52,13 @@ export const docsTree: DocsNode[] = [
   {
     title: "Using RunMat",
     children: [
-      { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
+      {
+        title: "Builtin Function Reference",
+        externalHref: "/docs/matlab-function-reference",
+        seo: {
+          description: "Explore MATLAB-compatible builtins implemented in RunMat. Search by name, category, or keywords.",
+        },
+      },
       {
         title: "Package Manager",
         slug: ["package-manager"],

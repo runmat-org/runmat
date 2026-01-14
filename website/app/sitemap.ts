@@ -2,6 +2,7 @@ import { MetadataRoute } from 'next'
 import { getAllBlogPosts } from '@/lib/blog'
 import { getAllBenchmarks } from '@/lib/benchmarks'
 import { loadBuiltins } from '@/lib/builtins'
+import { getRoutableResourceTypes } from '@/lib/resources'
 import { flatten } from '@/content/docs'
 
 export const dynamic = 'force-static'
@@ -40,6 +41,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 0.5,
+    },
+    {
+      url: `${baseUrl}/resources`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.6,
     },
     {
       url: `${baseUrl}/license`,
@@ -91,6 +98,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
     }
   })
 
+  const resourceTypeRoutes: MetadataRoute.Sitemap = getRoutableResourceTypes().map(type => ({
+    url: `${baseUrl}/resources/${type}`,
+    lastModified: currentDate,
+    changeFrequency: 'weekly',
+    priority: 0.5,
+  }))
+
   const builtinRoutes: MetadataRoute.Sitemap = loadBuiltins().map(builtin => ({
     url: `${baseUrl}/docs/reference/builtins/${builtin.slug}`,
     lastModified: currentDate,
@@ -100,7 +114,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   const seen = new Set<string>()
   const merged: MetadataRoute.Sitemap = []
-  for (const route of [...staticRoutes, ...blogPostRoutes, ...benchmarkRoutes, ...builtinRoutes, ...docRoutes]) {
+  for (const route of [
+    ...staticRoutes,
+    ...blogPostRoutes,
+    ...benchmarkRoutes,
+    ...resourceTypeRoutes,
+    ...builtinRoutes,
+    ...docRoutes,
+  ]) {
     if (seen.has(route.url)) continue
     seen.add(route.url)
     merged.push(route)
