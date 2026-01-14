@@ -221,6 +221,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const inlineClassName = mergeClassNames("markdown-inline-code", className);
       return <code className={inlineClassName} {...props}>{children}</code>;
     },
+    // eslint-disable-next-line @next/next/no-img-element
     img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
       <img 
         src={src} 

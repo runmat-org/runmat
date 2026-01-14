@@ -6,7 +6,7 @@ import { docsTree, flatten, type DocsNode } from "@/content/docs";
 
 type DocItem = { title: string; href: string; summary: string; keywords: string[] };
 
-export function DocsSearchResults({ source }: { source: string }) {
+export function DocsSearchResults() {
   const params = useSearchParams();
   const q = (params.get('q') || '').trim().toLowerCase();
   const index: DocItem[] = useMemo(() => {

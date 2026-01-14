@@ -9,7 +9,7 @@ import type { Builtin } from '@/lib/builtins';
 import { getBuiltinBadges, getDisplayCategory } from '@/lib/builtin-utils';
 import type { DisplayCategory } from '@/lib/builtin-utils';
 import { formatCategoryName, getCategoryDisplayOrder, groupCategoriesByPrefix } from '@/lib/display-categories';
-import { POPULAR_FUNCTIONS_BY_CATEGORY, getJsonCategoriesForDisplayCategory } from '@/lib/builtin-popularity';
+import { POPULAR_FUNCTIONS_BY_CATEGORY } from '@/lib/builtin-popularity';
 import { getCategoryColor } from '@/lib/category-colors';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -342,7 +342,6 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
         // Determine best position based on available space
         const spaceAbove = tileRect.top;
         const spaceBelow = viewportHeight - tileRect.bottom;
-        const spaceLeft = tileRect.left;
         const spaceRight = viewportWidth - tileRect.right;
 
         // Estimate tooltip dimensions
@@ -575,7 +574,6 @@ function TagChip({ builtin }: { builtin: Builtin }) {
 
         const spaceAbove = chipRect.top;
         const spaceBelow = viewportHeight - chipRect.bottom;
-        const spaceLeft = chipRect.left;
         const spaceRight = viewportWidth - chipRect.right;
 
         const estimatedTooltipHeight = 250;
@@ -721,12 +719,10 @@ function ListTile({ builtin }: { builtin: Builtin }) {
 
 function ViewAllTile({ 
   category, 
-  subcategories, 
   totalCount,
   onClick 
 }: { 
   category: DisplayCategory; 
-  subcategories?: DisplayCategory[];
   totalCount: number;
   onClick: () => void;
 }) {

@@ -68,6 +68,7 @@ export function renderOg({ title, subtitle, imageUrl, siteTitle = 'Fast, Free, M
           </div>
           {imageUrl ? (
             <div style={{ flex: 1, height: '100%' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={imageUrl}
                 alt=""

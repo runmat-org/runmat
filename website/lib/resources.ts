@@ -62,6 +62,7 @@ const RESOURCE_TYPE_FOLDERS: Record<ResourceType, string> = {
   blogs: 'blogs',
   'case-studies': 'case-studies',
   webinars: 'webinars',
+  benchmarks: 'benchmarks',
 }
 
 function normalizeResourceType(value?: string): ResourceType | null {
