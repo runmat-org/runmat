@@ -161,13 +161,13 @@ The Variables pane shows **Residency** for each variable:
 
 ### Plotting
 
-Plots render directly in the browser using GPU-accelerated graphics. Supported plot types include:
+> **Note:** Plotting support is still in development. Some plot types may not be fully functional yet.
+
+Plots render directly in the browser using GPU-accelerated graphics. Currently supported plot types include:
 - `plot` — line plots
 - `scatter` — scatter plots
-- `bar` — bar charts
-- `hist` — histograms
 
-More plot types are being added.
+More plot types (bar charts, histograms, 3D plots, etc.) are being added.
 
 ---
 
@@ -186,10 +186,6 @@ This means:
 ---
 
 ## Common Questions
-
-### Why is my script slow on the first run?
-
-The first execution includes compilation time. Subsequent runs are faster because compiled code is cached.
 
 ### Why don't I see GPU acceleration?
 
