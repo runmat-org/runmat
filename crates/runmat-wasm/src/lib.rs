@@ -34,6 +34,7 @@ use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::closure::Closure;
 
 #[cfg(target_arch = "wasm32")]
 mod fs;
@@ -243,7 +244,7 @@ pub struct RunMatWasm {
 #[wasm_bindgen]
 impl RunMatWasm {
     #[wasm_bindgen(js_name = execute)]
-    pub fn execute(&self, source: String) -> Result<JsValue, JsValue> {
+    pub async fn execute(&self, source: String) -> Result<JsValue, JsValue> {
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
@@ -252,10 +253,12 @@ impl RunMatWasm {
         );
         let _enter = exec_span.enter();
         info!(target = "runmat.runtime", "Execution started");
-        let mut session = self.session.borrow_mut();
-        let result = session
+        let result = self
+            .session
+            .borrow_mut()
             .execute(&source)
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
+        let result = self.drain_internal_requests(result).await?;
         info!(
             target = "runmat.runtime",
             workspace_entries = result.workspace.values.len(),
@@ -352,16 +355,18 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = resumeInput)]
-    pub fn resume_input(&self, request_id: String, value: JsValue) -> Result<JsValue, JsValue> {
+    pub async fn resume_input(&self, request_id: String, value: JsValue) -> Result<JsValue, JsValue> {
         #[cfg(target_arch = "wasm32")]
         {
             let uuid = Uuid::parse_str(request_id.trim())
                 .map_err(|_| js_error("resumeInput: invalid request id"))?;
             let response = coerce_resume_payload(value)?;
-            let mut session = self.session.borrow_mut();
-            let result = session
+            let result = self
+                .session
+                .borrow_mut()
                 .resume_input(uuid, response)
                 .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
+            let result = self.drain_internal_requests(result).await?;
             let payload = ExecutionPayload::from(result);
             return serde_wasm_bindgen::to_value(&payload)
                 .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
@@ -375,26 +380,25 @@ impl RunMatWasm {
         }
     }
 
-    #[wasm_bindgen(js_name = resumePendingRequest)]
-    pub fn resume_pending_request(&self, request_id: String) -> Result<JsValue, JsValue> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let uuid = Uuid::parse_str(request_id.trim())
-                .map_err(|_| js_error("resumePendingRequest: invalid request id"))?;
-            let mut session = self.session.borrow_mut();
-            let result = session
-                .resume_pending_request(uuid)
+    async fn drain_internal_requests(
+        &self,
+        mut result: ExecutionResult,
+    ) -> Result<ExecutionResult, JsValue> {
+        loop {
+            let Some(pending) = result.pending_request.as_ref() else {
+                return Ok(result);
+            };
+            if pending.visibility != PendingRequestVisibility::Internal {
+                return Ok(result);
+            }
+            let request_id = pending.id;
+            yield_to_event_loop().await?;
+            let next = self
+                .session
+                .borrow_mut()
+                .resume_pending_request(request_id)
                 .map_err(|err| js_error(&format!("RunMat resumePendingRequest failed: {err}")))?;
-            let payload = ExecutionPayload::from(result);
-            return serde_wasm_bindgen::to_value(&payload)
-                .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = request_id;
-            Err(js_error(
-                "resumePendingRequest is only available when targeting wasm32",
-            ))
+            merge_execution_results(&mut result, next);
         }
     }
 
@@ -539,6 +543,62 @@ impl RunMatWasm {
             });
         }
     }
+}
+
+fn merge_execution_results(acc: &mut ExecutionResult, mut next: ExecutionResult) {
+    // Preserve incremental outputs while internal requests are drained.
+    acc.streams.append(&mut next.streams);
+    acc.warnings.append(&mut next.warnings);
+    acc.stdin_events.append(&mut next.stdin_events);
+
+    if !next.figures_touched.is_empty() {
+        let mut seen = std::collections::HashSet::<u32>::new();
+        for id in acc.figures_touched.iter().copied() {
+            seen.insert(id);
+        }
+        for id in next.figures_touched.iter().copied() {
+            if seen.insert(id) {
+                acc.figures_touched.push(id);
+            }
+        }
+    }
+
+    // "next wins" for scalar fields / snapshots.
+    if next.value.is_some() {
+        acc.value = next.value.take();
+    }
+    acc.execution_time_ms = next.execution_time_ms;
+    acc.used_jit = next.used_jit;
+    if next.error.is_some() {
+        acc.error = next.error.take();
+    }
+    if next.type_info.is_some() {
+        acc.type_info = next.type_info.take();
+    }
+    acc.workspace = next.workspace;
+    if next.profiling.is_some() {
+        acc.profiling = next.profiling.take();
+    }
+    if next.fusion_plan.is_some() {
+        acc.fusion_plan = next.fusion_plan.take();
+    }
+    acc.pending_request = next.pending_request.take();
+}
+
+async fn yield_to_event_loop() -> Result<(), JsValue> {
+    // Use a 0ms timeout to yield back to the browser event loop (not just a microtask).
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let window = web_sys::window().expect("window");
+        let resolve_fn: js_sys::Function = resolve.unchecked_into();
+        let cb = Closure::once_into_js(move || {
+            let _ = resolve_fn.call0(&JsValue::UNDEFINED);
+        });
+        let cb = cb.unchecked_ref::<js_sys::Function>();
+        // Ignore errors (e.g., if window is missing).
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(cb, 0);
+    });
+    JsFuture::from(promise).await?;
+    Ok(())
 }
 
 #[wasm_bindgen(js_name = registerFsProvider)]

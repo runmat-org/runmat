@@ -456,7 +456,7 @@ interface NativeInitOptions {
 }
 
 interface RunMatNativeSession {
-  execute(source: string): ExecuteResult;
+  execute(source: string): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
@@ -468,8 +468,7 @@ interface RunMatNativeSession {
   cancelExecution?: () => void;
   cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
-  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
-  resumePendingRequest?: (requestId: string) => ExecuteResult;
+  resumeInput?: (requestId: string, value: ResumeInputWireValue) => Promise<ExecuteResult>;
   pendingStdinRequests?: () => PendingStdinRequest[];
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
@@ -816,54 +815,6 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   constructor(private readonly native: RunMatNativeSession) {}
 
-  private static readonly MAX_INTERNAL_DRAIN_MS = 60_000;
-
-  private async yieldToEventLoop(): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-
-  private mergeExecuteResults(prev: ExecuteResult, next: ExecuteResult): ExecuteResult {
-    const mergedStdout = [...(prev.stdout ?? []), ...(next.stdout ?? [])];
-    const mergedWarnings = [...(prev.warnings ?? []), ...(next.warnings ?? [])];
-    const mergedStdinEvents = [...(prev.stdinEvents ?? []), ...(next.stdinEvents ?? [])];
-    const figures = new Set<number>([...(prev.figuresTouched ?? []), ...(next.figuresTouched ?? [])]);
-    return {
-      ...prev,
-      ...next,
-      stdout: mergedStdout,
-      warnings: mergedWarnings,
-      stdinEvents: mergedStdinEvents,
-      figuresTouched: Array.from(figures),
-    };
-  }
-
-  private async drainInternalRequests(result: ExecuteResult): Promise<ExecuteResult> {
-    let current = result;
-    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    while (current.pendingRequest?.visibility === "internal") {
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      if (now - startedAt > WebRunMatSession.MAX_INTERNAL_DRAIN_MS) {
-        const kind = current.pendingRequest?.kind?.type ?? "unknown";
-        throw new Error(
-          `RunMat: exceeded max internal drain budget (${WebRunMatSession.MAX_INTERNAL_DRAIN_MS}ms) while pending '${kind}'.`
-        );
-      }
-      const pending = current.pendingRequest;
-      if (!pending) {
-        break;
-      }
-      // Internal requests are runtime-internal suspension points (e.g. WebGPU readback).
-      // The host should simply yield and resume; the specific reason is opaque.
-      if (typeof this.native.resumePendingRequest !== "function") {
-        throw new Error("RunMat: runtime exposed an internal pending request but no resumePendingRequest().");
-      }
-      await this.yieldToEventLoop();
-      const next = this.native.resumePendingRequest(pending.id);
-      current = this.mergeExecuteResults(current, next);
-    }
-    return current;
-  }
-
   private ensureActive(): void {
     if (this.disposed) {
       throw new Error("RunMat session has been disposed");
@@ -872,8 +823,7 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   async execute(source: string): Promise<ExecuteResult> {
     this.ensureActive();
-    const result = this.native.execute(source);
-    return await this.drainInternalRequests(result);
+    return await this.native.execute(source);
   }
 
   async resetSession(): Promise<void> {
@@ -957,8 +907,7 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "resumeInput");
     const payload = normalizeResumeInputValue(value);
-    const result = this.native.resumeInput(requestId, payload);
-    return await this.drainInternalRequests(result);
+    return await this.native.resumeInput(requestId, payload);
   }
 
   async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
