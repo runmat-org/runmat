@@ -258,7 +258,7 @@ impl RunMatWasm {
             .borrow_mut()
             .execute(&source)
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
-        let result = self.drain_internal_requests(result).await?;
+        let result = self.drain_pending_requests(result).await?;
         info!(
             target = "runmat.runtime",
             workspace_entries = result.workspace.values.len(),
@@ -366,7 +366,7 @@ impl RunMatWasm {
                 .borrow_mut()
                 .resume_input(uuid, response)
                 .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
-            let result = self.drain_internal_requests(result).await?;
+            let result = self.drain_pending_requests(result).await?;
             let payload = ExecutionPayload::from(result);
             return serde_wasm_bindgen::to_value(&payload)
                 .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
@@ -380,7 +380,7 @@ impl RunMatWasm {
         }
     }
 
-    async fn drain_internal_requests(
+    async fn drain_pending_requests(
         &self,
         mut result: ExecutionResult,
     ) -> Result<ExecutionResult, JsValue> {
@@ -388,18 +388,119 @@ impl RunMatWasm {
             let Some(pending) = result.pending_request.as_ref() else {
                 return Ok(result);
             };
-            if pending.visibility != PendingRequestVisibility::Internal {
-                return Ok(result);
+            match pending.visibility {
+                PendingRequestVisibility::Internal => {
+                    let request_id = pending.id;
+                    yield_to_event_loop().await?;
+                    let next = self
+                        .session
+                        .borrow_mut()
+                        .resume_pending_request(request_id)
+                        .map_err(|err| {
+                            js_error(&format!("RunMat resumePendingRequest failed: {err}"))
+                        })?;
+                    merge_execution_results(&mut result, next);
+                }
+                PendingRequestVisibility::External => {
+                    let Some(response) = self.try_fulfill_stdin_request(pending).await? else {
+                        return Ok(result);
+                    };
+                    let request_id = pending.id;
+                    let next = self
+                        .session
+                        .borrow_mut()
+                        .resume_input(request_id, response)
+                        .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
+                    merge_execution_results(&mut result, next);
+                }
             }
-            let request_id = pending.id;
-            yield_to_event_loop().await?;
-            let next = self
-                .session
-                .borrow_mut()
-                .resume_pending_request(request_id)
-                .map_err(|err| js_error(&format!("RunMat resumePendingRequest failed: {err}")))?;
-            merge_execution_results(&mut result, next);
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn try_fulfill_stdin_request(
+        &self,
+        pending: &PendingRequest,
+    ) -> Result<Option<Result<InputResponse, String>>, JsValue> {
+        let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
+        let Some(handler) = handler else {
+            return Ok(None);
+        };
+
+        // Only stdin-style pending requests can be fulfilled here.
+        let request = match pending.kind {
+            PendingRequestKind::Line { echo } => InputRequest {
+                prompt: pending.label.clone(),
+                kind: InputRequestKind::Line { echo },
+            },
+            PendingRequestKind::KeyPress => InputRequest {
+                prompt: pending.label.clone(),
+                kind: InputRequestKind::KeyPress,
+            },
+            PendingRequestKind::GpuMapRead => return Ok(None),
+        };
+
+        let js_request = js_sys::Object::new();
+        Reflect::set(
+            &js_request,
+            &JsValue::from_str("prompt"),
+            &JsValue::from_str(&request.prompt),
+        )
+        .unwrap_or_default();
+        match request.kind {
+            InputRequestKind::Line { echo } => {
+                Reflect::set(&js_request, &JsValue::from_str("kind"), &JsValue::from_str("line"))
+                    .unwrap_or_default();
+                Reflect::set(&js_request, &JsValue::from_str("echo"), &JsValue::from_bool(echo))
+                    .unwrap_or_default();
+            }
+            InputRequestKind::KeyPress => {
+                Reflect::set(
+                    &js_request,
+                    &JsValue::from_str("kind"),
+                    &JsValue::from_str("keyPress"),
+                )
+                .unwrap_or_default();
+            }
+        }
+
+        let mut value = handler.call1(&JsValue::NULL, &js_request).map_err(|err| {
+            js_error(&format!("stdin handler threw: {}", js_value_to_string(err)))
+        })?;
+
+        if value.is_instance_of::<js_sys::Promise>() {
+            value = JsFuture::from(js_sys::Promise::from(value)).await?;
+        }
+
+        if value_should_pending(&value) {
+            return Ok(None);
+        }
+
+        if let Some(err) = extract_error_message(&value) {
+            return Ok(Some(Err(err)));
+        }
+
+        match request.kind {
+            InputRequestKind::Line { .. } => {
+                if let Some(text) = extract_line_value(&value) {
+                    Ok(Some(Ok(InputResponse::Line(text))))
+                } else {
+                    Ok(Some(Err(
+                        "stdin handler must return a string (or { value }) for line input"
+                            .to_string(),
+                    )))
+                }
+            }
+            InputRequestKind::KeyPress => Ok(Some(Ok(InputResponse::KeyPress))),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn try_fulfill_stdin_request(
+        &self,
+        _pending: &PendingRequest,
+    ) -> Result<Option<Result<InputResponse, String>>, JsValue> {
+        Ok(None)
     }
 
     #[wasm_bindgen(js_name = pendingStdinRequests)]
