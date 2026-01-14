@@ -125,8 +125,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/solve/cond.rs"
   },
   "gpu_residency": "```matlab\nG = gpuArray([]);      % Empty 0x0 matrix on the GPU\nk = cond(G);           % Returns 0 and keeps residency when possible\nresult = gather(k);\n```\nExpected output:\n```matlab\nresult = 0\n```",
   "gpu_behavior": [

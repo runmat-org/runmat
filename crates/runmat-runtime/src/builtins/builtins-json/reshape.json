@@ -95,8 +95,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/array/shape/reshape.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/reshape.rs"
   },
   "gpu_behavior": [
     "When the input lives on the GPU, RunMat asks the active acceleration provider to apply the `reshape` hook so the backend can update its residency metadata. No data transfers or kernel launches are needed, so `gpuArray` inputs stay on the device. Providers that do not override the hook fall back to updating the tensor handle directly, which is sufficient for the in-process reference backend."

@@ -115,8 +115,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/array/shape/cat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/cat.rs"
   },
   "gpu_behavior": [
     "When every input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook to concatenate the buffers directly on the device. Providers that do not expose this hook trigger a transparent fallback: the operands are gathered to the host, concatenated with the same rules as CPU arrays, and uploaded back to the originating device so downstream work still sees a `gpuArray`. The `'like'` prototype is honoured during fallback, ensuring the final residency matches your request. Mixing host arrays with `gpuArray` inputs is not supported\u2014convert explicitly with `gpuArray` / `gather` to control residency."

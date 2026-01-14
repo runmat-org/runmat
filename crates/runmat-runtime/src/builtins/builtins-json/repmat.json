@@ -133,8 +133,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/array/shape/repmat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/repmat.rs"
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` directly. RunMat's planner keeps values on the GPU when it detects that further operations benefit from staying there. Explicit `gpuArray` calls remain available for compatibility with legacy MATLAB code and when you want to steer residency manually.",
   "gpu_behavior": [

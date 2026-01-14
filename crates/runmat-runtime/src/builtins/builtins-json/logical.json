@@ -134,8 +134,8 @@
     }
   ],
   "source": {
-    "label": "https://github.com/runmat-org/runmat/issues/new/choose",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/logical/ops.rs",
+    "url": "crates/runmat-runtime/src/builtins/logical/ops.rs"
   },
   "gpu_residency": "You rarely need to call `gpuArray` manually. When the acceleration provider is active, RunMat keeps logical conversions on the GPU by issuing `elem_ne(X, 0)` kernels (backed by `zeros_like` allocations) and flagging the handle as logical metadata. Explicit `gpuArray` calls are available for MATLAB compatibility or when you want to pin residency before interacting with external libraries. When the provider lacks the necessary hook, RunMat documents the fallback: it gathers the data, converts it on the host, and\u2014if a provider is still available\u2014re-uploads the logical mask so downstream GPU code continues to work without residency surprises.",
   "gpu_behavior": [

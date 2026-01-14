@@ -128,8 +128,8 @@
     }
   ],
   "source": {
-    "label": "RunMat issue tracker",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/svd.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/svd.rs"
   },
   "gpu_behavior": [
     "RunMat reserves a dedicated `svd` provider hook; once a backend implements it, the factors can stay on the device as `gpuTensor` handles without round-tripping through host memory.",

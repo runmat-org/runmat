@@ -93,8 +93,8 @@
     }
   ],
   "source": {
-    "label": "Open a RunMat issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/array/shape/horzcat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/horzcat.rs"
   },
   "gpu_behavior": [
     "`horzcat` delegates to `cat(dim = 2, \u2026)`. When the active acceleration provider implements the `cat` hook, the concatenation is executed directly on the GPU without staging data back to the CPU. Providers that lack this hook fall back to gathering the operands, concatenating on the host, and uploading the result so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflow while keeping RunMat's auto-offload planner informed."

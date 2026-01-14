@@ -111,8 +111,8 @@
     }
   ],
   "source": {
-    "label": "Open a RunMat issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/array/shape/vertcat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/vertcat.rs"
   },
   "gpu_behavior": [
     "`vertcat` delegates to `cat(dim = 1, \u2026)`. When the active acceleration provider implements the `cat` hook, concatenation happens entirely on the GPU, keeping `gpuArray` inputs resident and avoiding costly round-trips. Providers that lack this hook trigger a transparent fallback: RunMat gathers the operands to the host, concatenates them with MATLAB semantics, and uploads the result back to the originating device so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflows while keeping RunMat's auto-offload planner informed."

@@ -122,8 +122,8 @@
     }
   ],
   "source": {
-    "label": "Open a ticket",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/io/net/close.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/net/close.rs"
   },
   "gpu_behavior": [
     "`close` performs only CPU-side bookkeeping. When network structs or option strings reside on the GPU, RunMat gathers them to host memory before inspecting their hidden identifiers. No provider hooks participate, and GPU residency is irrelevant to the close operation."

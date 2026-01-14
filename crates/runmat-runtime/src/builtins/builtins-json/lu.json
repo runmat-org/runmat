@@ -138,8 +138,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/lu.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/lu.rs"
   },
   "gpu_behavior": [
     "When an acceleration provider implements the `lu` hook (the WGPU provider does), the factorization executes through that provider and the combined LU factor, `L`, `U`, and permutation outputs all remain on the device. The current WGPU backend performs the decomposition on the host once and immediately reuploads the factors so residency is preserved until dedicated kernels land.",

@@ -124,8 +124,8 @@
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/fclose.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/filetext/fclose.rs"
   },
   "gpu_behavior": [
     "`fclose` does not perform GPU computation. If the argument resides on a GPU array (for example, `'all'` stored in a `gpuArray`), RunMat gathers the value to host memory before dispatching the host-only close logic."

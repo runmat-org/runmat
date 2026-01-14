@@ -109,11 +109,11 @@
   "links": [
     {
       "label": "`regexp`",
-      "url": "./regexp"
+      "url": "../regex/regexp.rs"
     },
     {
       "label": "`regexpi`",
-      "url": "./regexpi"
+      "url": "../regex/regexpi.rs"
     }
   ],
   "source": {

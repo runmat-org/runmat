@@ -135,8 +135,8 @@
     }
   ],
   "source": {
-    "label": "https://github.com/runmat-org/runmat/issues/new/choose",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/elementwise/single.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/elementwise/single.rs"
   },
   "gpu_residency": "You rarely need to call `gpuArray` solely for type conversion. RunMat\u2019s planner already keeps hot paths on the GPU. When `single` runs on gpuArray inputs it attempts a device-side cast first, and falls back to gather/convert/re-upload when hooks are missing. The fallback is documented so users understand the temporary host hop.",
   "gpu_behavior": [

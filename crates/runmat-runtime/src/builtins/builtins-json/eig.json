@@ -145,8 +145,8 @@
     }
   ],
   "source": {
-    "label": "RunMat issue tracker",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
   },
   "gpu_behavior": [
     "The WGPU provider implements the reserved `eig` hook by downloading the input, running the same CPU decomposition used by the host path, and immediately re-uploading the double-precision eigenvalues, eigenvectors, and diagonal matrix. When the spectrum is real, the outputs therefore remain on the GPU without any user intervention.",

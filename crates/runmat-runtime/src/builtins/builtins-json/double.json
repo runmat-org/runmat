@@ -133,8 +133,8 @@
     }
   ],
   "source": {
-    "label": "https://github.com/runmat-org/runmat/issues/new/choose",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/math/elementwise/double.rs",
+    "url": "crates/runmat-runtime/src/builtins/math/elementwise/double.rs"
   },
   "gpu_residency": "RunMat keeps tensors on the GPU whenever the active provider supports double precision. You only need explicit `gpuArray` / `gather` calls when interfacing with legacy code or when you must force residency. On float32-only providers, `double` returns host data, matching MATLAB systems where the GPU lacks native double support.",
   "gpu_behavior": [
