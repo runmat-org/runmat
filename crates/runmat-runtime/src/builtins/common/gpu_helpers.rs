@@ -5,7 +5,9 @@ use runmat_builtins::{Tensor, Value};
 ///
 /// This helper routes through the dispatcher so residency hooks and provider
 /// semantics stay consistent with the rest of the runtime.
-pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<Tensor, String> {
+pub fn gather_tensor(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> Result<Tensor, String> {
     // Ensure the correct provider is active for WGPU-backed handles when tests run in parallel.
     // This mirrors the guard used in test_support::gather.
     #[cfg(all(test, feature = "wgpu"))]
@@ -21,7 +23,9 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
         .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
     match gathered {
         Value::Tensor(t) => Ok(t),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}").into()),
+        Value::Num(n) => {
+            Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}").into())
+        }
         Value::LogicalArray(la) => {
             let data: Vec<f64> = la
                 .data

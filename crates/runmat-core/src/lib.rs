@@ -24,6 +24,10 @@ use std::sync::{
     Arc, Mutex,
 };
 use uuid::Uuid;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -64,7 +68,9 @@ pub struct RunMatSession {
     is_executing: bool,
     /// Optional session-level input handler supplied by the host.
     input_handler: Option<SharedInputHandler>,
-    pending_executions: HashMap<Uuid, PendingFrame>,
+    /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
+    /// internally by `ExecuteFuture` rather than being surfaced as "pending requests".
+    async_input_handler: Option<SharedAsyncInputHandler>,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
@@ -122,6 +128,12 @@ pub enum InputHandlerAction {
 }
 
 type SharedInputHandler = Arc<dyn Fn(&InputRequest) -> InputHandlerAction + Send + Sync>;
+
+type SharedAsyncInputHandler = Arc<
+    dyn Fn(InputRequest) -> Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionStreamKind {
@@ -380,36 +392,34 @@ pub struct ExecutionResult {
     pub fusion_plan: Option<FusionPlanSnapshot>,
     /// Recorded stdin interactions (prompts, values) during execution.
     pub stdin_events: Vec<StdinEvent>,
-    /// Pending request if the execution is suspended waiting on an external or internal event.
-    ///
-    /// - External requests (stdin) must be surfaced to the host.
-    /// - Internal requests (e.g. WebGPU map/readback on wasm) should be automatically drained
-    ///   by the host runtime, yielding to the event loop between resumes.
-    pub pending_request: Option<PendingRequest>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingRequestVisibility {
-    External,
-    Internal,
+enum ExecuteStep {
+    Completed(ExecutionResult),
+    Pending(PendingFrame),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingRequestKind {
-    Line { echo: bool },
-    KeyPress,
-    GpuMapRead,
+/// Poll-driven execution future (Phase 2).
+///
+/// This owns the session state while running, and returns the session back on completion so
+/// hosts (wasm, desktop, native) can keep using the same long-lived session without any
+/// "resume" APIs or sentinel strings.
+pub struct ExecuteFuture {
+    session: RunMatSession,
+    input: String,
+    state: ExecuteFutureState,
 }
 
-#[derive(Debug, Clone)]
-pub struct PendingRequest {
-    pub id: Uuid,
-    pub kind: PendingRequestKind,
-    /// User-facing prompt/label (for external requests this is the prompt; for internal this is a
-    /// debug label).
-    pub label: String,
-    pub waiting_ms: u64,
-    pub visibility: PendingRequestVisibility,
+enum ExecuteFutureState {
+    Start,
+    WaitingOnInput {
+        frame: PendingFrame,
+        fut: Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>>,
+    },
+    WaitingOnGpu {
+        frame: PendingFrame,
+    },
+    Done,
 }
 
 #[derive(Debug, Clone)]
@@ -662,7 +672,7 @@ impl RunMatSession {
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
             input_handler: None,
-            pending_executions: HashMap::new(),
+            async_input_handler: None,
             telemetry_consent: true,
             telemetry_client_id: None,
             workspace_preview_tokens: HashMap::new(),
@@ -742,6 +752,38 @@ impl RunMatSession {
         self.input_handler = None;
     }
 
+    /// Install an async stdin handler (Phase 2). This is the preferred input path for
+    /// poll-driven execution (`ExecuteFuture`).
+    ///
+    /// The handler is invoked when `input()` / `pause()` needs a line or keypress, and the
+    /// returned future is awaited by the runtime.
+    pub fn install_async_input_handler<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(InputRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<InputResponse, String>> + 'static,
+    {
+        self.async_input_handler = Some(Arc::new(move |req: InputRequest| {
+            let fut = handler(req);
+            Box::pin(fut)
+        }));
+    }
+
+    pub fn clear_async_input_handler(&mut self) {
+        self.async_input_handler = None;
+    }
+
+    /// Start a poll-driven execution. The returned future owns the session state while running,
+    /// and yields it back on completion.
+    pub fn execute_future(self, input: impl Into<String>) -> ExecuteFuture {
+        // Ensure a clean cancellation flag for this run.
+        self.interrupt_flag.store(false, Ordering::Relaxed);
+        ExecuteFuture {
+            session: self,
+            input: input.into(),
+            state: ExecuteFutureState::Start,
+        }
+    }
+
     pub fn telemetry_consent(&self) -> bool {
         self.telemetry_consent
     }
@@ -756,239 +798,6 @@ impl RunMatSession {
 
     pub fn set_telemetry_client_id(&mut self, cid: Option<String>) {
         self.telemetry_client_id = cid;
-    }
-
-    pub fn pending_requests(&self) -> Vec<PendingInput> {
-        let now = Instant::now();
-        self.pending_executions
-            .iter()
-            .filter_map(|(id, frame)| {
-                match frame.pending.interaction.kind {
-                    runmat_runtime::interaction::InteractionKind::Line { .. }
-                    | runmat_runtime::interaction::InteractionKind::KeyPress => Some(PendingInput {
-                id: *id,
-                request: pending_interaction_to_request(&frame.pending.interaction),
-                waiting_ms: now
-                    .saturating_duration_since(frame.pending_since)
-                    .as_millis() as u64,
-                    }),
-                    runmat_runtime::interaction::InteractionKind::GpuMapRead => None,
-                }
-            })
-            .collect()
-    }
-
-    /// Cancel a specific pending stdin request by ID. Returns true if the request existed.
-    pub fn cancel_pending_request(&mut self, request_id: Uuid) -> bool {
-        self.pending_executions.remove(&request_id).is_some()
-    }
-
-    /// Drop all pending stdin requests (useful when the host wants to hard-reset a session).
-    pub fn cancel_all_pending_requests(&mut self) {
-        self.pending_executions.clear();
-    }
-
-    pub fn resume_input(
-        &mut self,
-        request_id: Uuid,
-        response: Result<InputResponse, String>,
-    ) -> Result<ExecutionResult> {
-        let mut frame = self
-            .pending_executions
-            .remove(&request_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown pending request {request_id}"))?;
-        let _active = ActiveExecutionGuard::new(self)?;
-        runmat_runtime::interaction::push_queued_response(response.map(map_input_response));
-        let stdin_events = Arc::clone(&frame.plan.stdin_events);
-        let runtime_handler = self.build_runtime_input_handler(stdin_events);
-        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
-        let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
-        // Only stdin-style pending requests can be resumed via resume_input.
-        match frame.pending.interaction.kind {
-            runmat_runtime::interaction::InteractionKind::Line { .. }
-            | runmat_runtime::interaction::InteractionKind::KeyPress => {}
-            runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                return Err(anyhow::anyhow!(
-                    "resume_input called for an internal pending request (use resume_pending_request)"
-                ));
-            }
-        }
-
-        match runmat_ignition::resume_with_state(frame.pending.state, &mut self.variable_array) {
-            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
-                let mut streams = frame.streams;
-                streams.extend(drain_console_streams());
-                self.finalize_pending_execution(frame.plan, values, streams)
-            }
-            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
-                let chunk = drain_console_streams();
-                frame.streams.extend(chunk.clone());
-                frame.pending = *next_pending;
-                let new_id = Uuid::new_v4();
-                let elapsed_ms = frame.plan.start_time.elapsed().as_millis() as u64;
-                let fusion_plan = frame.plan.fusion_snapshot.clone();
-                let stdin_arc = Arc::clone(&frame.plan.stdin_events);
-                let used_jit = frame.plan.used_jit;
-                let pending_input = PendingInput {
-                    id: new_id,
-                    request: pending_interaction_to_request(&frame.pending.interaction),
-                    waiting_ms: 0,
-                };
-                let stdin_events = stdin_arc
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                frame.pending_since = Instant::now();
-                self.pending_executions.insert(new_id, frame);
-                Ok(ExecutionResult {
-                    value: None,
-                    execution_time_ms: elapsed_ms,
-                    used_jit,
-                    error: None,
-                    type_info: None,
-                    streams: chunk,
-                    workspace: self.build_workspace_snapshot(Vec::new(), false),
-                    figures_touched: Vec::new(),
-                    warnings: Vec::new(),
-                    profiling: None,
-                    fusion_plan,
-                    stdin_events,
-                    pending_request: Some(PendingRequest {
-                        id: new_id,
-                        kind: match pending_input.request.kind {
-                            InputRequestKind::Line { echo } => PendingRequestKind::Line { echo },
-                            InputRequestKind::KeyPress => PendingRequestKind::KeyPress,
-                        },
-                        label: pending_input.request.prompt.clone(),
-                        waiting_ms: 0,
-                        visibility: PendingRequestVisibility::External,
-                    }),
-                })
-            }
-            Err(err) => Err(anyhow::anyhow!(err)),
-        }
-    }
-
-    /// Resume a pending internal request by ID. The host should call this automatically
-    /// (typically on a 0ms timer) until the execution completes or transitions to a stdin prompt.
-    pub fn resume_pending_request(&mut self, request_id: Uuid) -> Result<ExecutionResult> {
-        let mut frame = self
-            .pending_executions
-            .remove(&request_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown pending request {request_id}"))?;
-
-        match frame.pending.interaction.kind {
-            runmat_runtime::interaction::InteractionKind::GpuMapRead => {}
-            _ => {
-                self.pending_executions.insert(request_id, frame);
-                return Err(anyhow::anyhow!(
-                    "resume_pending_request called for a non-internal pending request"
-                ));
-            }
-        }
-
-        let _active = ActiveExecutionGuard::new(self)?;
-        let stdin_events = Arc::clone(&frame.plan.stdin_events);
-        let runtime_handler = self.build_runtime_input_handler(stdin_events);
-        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
-        let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
-
-        match runmat_ignition::resume_with_state(frame.pending.state, &mut self.variable_array) {
-            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
-                let mut streams = frame.streams;
-                streams.extend(drain_console_streams());
-                self.finalize_pending_execution(frame.plan, values, streams)
-            }
-            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
-                let chunk = drain_console_streams();
-                frame.streams.extend(chunk.clone());
-                frame.pending = *next_pending;
-                // Keep the same request id so hosts can poll/resume without chasing changing ids.
-                // Update pending_since so waiting_ms reflects time since the most recent suspend.
-                frame.pending_since = Instant::now();
-                self.pending_executions.insert(request_id, frame);
-
-                let now = Instant::now();
-                let waiting_ms = now
-                    .saturating_duration_since(
-                        self.pending_executions
-                            .get(&request_id)
-                            .map(|f| f.pending_since)
-                            .unwrap_or(now),
-                    )
-                    .as_millis() as u64;
-
-                let elapsed_ms = self
-                    .pending_executions
-                    .get(&request_id)
-                    .map(|f| f.plan.start_time.elapsed().as_millis() as u64)
-                    .unwrap_or(0);
-                let used_jit = self
-                    .pending_executions
-                    .get(&request_id)
-                    .map(|f| f.plan.used_jit)
-                    .unwrap_or(false);
-                let fusion_plan = self
-                    .pending_executions
-                    .get(&request_id)
-                    .map(|f| f.plan.fusion_snapshot.clone())
-                    .unwrap_or(None);
-                let stdin_events = self
-                    .pending_executions
-                    .get(&request_id)
-                    .and_then(|f| f.plan.stdin_events.lock().ok().map(|g| g.clone()))
-                    .unwrap_or_default();
-
-                let label = self
-                    .pending_executions
-                    .get(&request_id)
-                    .map(|f| f.pending.interaction.prompt.clone())
-                    .unwrap_or_else(|| "wgpu map_async".to_string());
-
-                let kind = self
-                    .pending_executions
-                    .get(&request_id)
-                    .map(|f| f.pending.interaction.kind)
-                    .unwrap_or(runmat_runtime::interaction::InteractionKind::GpuMapRead);
-
-                let (pending_kind, visibility) = match kind {
-                    runmat_runtime::interaction::InteractionKind::Line { echo } => {
-                        (PendingRequestKind::Line { echo }, PendingRequestVisibility::External)
-                    }
-                    runmat_runtime::interaction::InteractionKind::KeyPress => {
-                        (PendingRequestKind::KeyPress, PendingRequestVisibility::External)
-                    }
-                    runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                        (PendingRequestKind::GpuMapRead, PendingRequestVisibility::Internal)
-                    }
-                };
-
-                Ok(ExecutionResult {
-                    value: None,
-                    execution_time_ms: elapsed_ms,
-                    used_jit,
-                    error: None,
-                    type_info: None,
-                    streams: chunk,
-                    workspace: self.build_workspace_snapshot(Vec::new(), false),
-                    figures_touched: Vec::new(),
-                    warnings: Vec::new(),
-                    profiling: None,
-                    fusion_plan,
-                    stdin_events,
-                    pending_request: Some(PendingRequest {
-                        id: request_id,
-                        kind: pending_kind,
-                        label,
-                        waiting_ms,
-                        visibility,
-                    }),
-                })
-            }
-            Err(err) => Err(anyhow::anyhow!(err)),
-        }
     }
 
     fn build_runtime_input_handler(
@@ -1146,16 +955,16 @@ impl RunMatSession {
 
     /// Execute MATLAB/Octave code
     pub fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
-        if !self.pending_executions.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Cannot execute new code while pending stdin requests exist"
-            ));
-        }
         let _active = ActiveExecutionGuard::new(self)?;
-        self.execute_internal(input)
+        match self.execute_internal(input)? {
+            ExecuteStep::Completed(result) => Ok(result),
+            ExecuteStep::Pending(_frame) => Err(anyhow::anyhow!(
+                "Execution suspended (async required). Use ExecuteFuture/execute_async."
+            )),
+        }
     }
 
-    fn execute_internal(&mut self, input: &str) -> Result<ExecutionResult> {
+    fn execute_internal(&mut self, input: &str) -> Result<ExecuteStep> {
         let exec_span = info_span!(
             "runtime.execute",
             input_len = input.len(),
@@ -1539,9 +1348,9 @@ impl RunMatSession {
                         workspace_guard: pending_workspace_guard.take(),
                     });
                     let console_streams = drain_console_streams();
-                    let pending_result =
+                    let frame =
                         self.defer_pending_execution(plan, *pending_exec, console_streams)?;
-                    return Ok(pending_result);
+                    return Ok(ExecuteStep::Pending(frame));
                 }
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
@@ -1717,7 +1526,7 @@ impl RunMatSession {
             result_value
         };
 
-        Ok(ExecutionResult {
+        Ok(ExecuteStep::Completed(ExecutionResult {
             value: public_value,
             execution_time_ms,
             used_jit,
@@ -1730,8 +1539,7 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: fusion_snapshot,
             stdin_events,
-            pending_request: None,
-        })
+        }))
     }
 
     /// Get execution statistics
@@ -1877,64 +1685,14 @@ impl RunMatSession {
         plan: ExecutionPlan,
         pending: runmat_ignition::PendingExecution,
         new_streams: Vec<ExecutionStreamEntry>,
-    ) -> Result<ExecutionResult> {
-        let interaction_kind = pending.interaction.kind;
-        let interaction_prompt = pending.interaction.prompt.clone();
-        let input_request = pending_interaction_to_request(&pending.interaction);
-        let id = Uuid::new_v4();
-        let elapsed_ms = plan.start_time.elapsed().as_millis() as u64;
-        let fusion_plan = plan.fusion_snapshot.clone();
-        let stdin_arc = Arc::clone(&plan.stdin_events);
-        let used_jit = plan.used_jit;
+    ) -> Result<PendingFrame> {
         let frame = PendingFrame {
             plan,
             pending,
             streams: new_streams.clone(),
             pending_since: Instant::now(),
         };
-        self.pending_executions.insert(id, frame);
-        let stdin_events = stdin_arc
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        let (kind, visibility, label) = match interaction_kind {
-            runmat_runtime::interaction::InteractionKind::Line { echo } => (
-                PendingRequestKind::Line { echo },
-                PendingRequestVisibility::External,
-                input_request.prompt.clone(),
-            ),
-            runmat_runtime::interaction::InteractionKind::KeyPress => (
-                PendingRequestKind::KeyPress,
-                PendingRequestVisibility::External,
-                input_request.prompt.clone(),
-            ),
-            runmat_runtime::interaction::InteractionKind::GpuMapRead => (
-                PendingRequestKind::GpuMapRead,
-                PendingRequestVisibility::Internal,
-                interaction_prompt,
-            ),
-        };
-        Ok(ExecutionResult {
-            value: None,
-            execution_time_ms: elapsed_ms,
-            used_jit,
-            error: None,
-            type_info: None,
-            streams: new_streams,
-            workspace: self.build_workspace_snapshot(Vec::new(), false),
-            figures_touched: Vec::new(),
-            warnings: Vec::new(),
-            profiling: None,
-            fusion_plan,
-            stdin_events,
-            pending_request: Some(PendingRequest {
-                id,
-                kind,
-                label,
-                waiting_ms: 0,
-                visibility,
-            }),
-        })
+        Ok(frame)
     }
 
     fn finalize_pending_execution(
@@ -2129,7 +1887,6 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: plan.fusion_snapshot,
             stdin_events,
-            pending_request: None,
         })
     }
 
@@ -2291,6 +2048,207 @@ impl RunMatSession {
             full,
             version,
             values,
+        }
+    }
+}
+
+impl ExecuteFuture {
+    fn make_input_future(
+        session: &RunMatSession,
+        interaction: &runmat_runtime::interaction::PendingInteraction,
+    ) -> Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>> {
+        let request = pending_interaction_to_request(interaction);
+        if let Some(handler) = &session.async_input_handler {
+            return handler(request);
+        }
+        if let Some(sync) = &session.input_handler {
+            match sync(&request) {
+                InputHandlerAction::Respond(result) => {
+                    return Box::pin(std::future::ready(result));
+                }
+                InputHandlerAction::Pending => {
+                    return Box::pin(std::future::ready(Err(
+                        "stdin handler returned Pending but no async handler is installed"
+                            .to_string(),
+                    )));
+                }
+            }
+        }
+        // Default (native) blocking handlers.
+        match request.kind {
+            InputRequestKind::Line { echo } => Box::pin(std::future::ready(
+                runmat_runtime::interaction::default_read_line(&request.prompt, echo)
+                    .map(InputResponse::Line),
+            )),
+            InputRequestKind::KeyPress => Box::pin(std::future::ready(
+                runmat_runtime::interaction::default_wait_for_key(&request.prompt)
+                    .map(|_| InputResponse::KeyPress),
+            )),
+        }
+    }
+
+    fn record_stdin_result(frame: &PendingFrame, response: &Result<InputResponse, String>) {
+        let request = pending_interaction_to_request(&frame.pending.interaction);
+        let (event_kind, echo_flag) = match &request.kind {
+            InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
+            InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
+        };
+        let mut event = StdinEvent {
+            prompt: request.prompt,
+            kind: event_kind,
+            echo: echo_flag,
+            value: None,
+            error: None,
+        };
+        match response {
+            Ok(InputResponse::Line(v)) => event.value = Some(v.clone()),
+            Ok(InputResponse::KeyPress) => {}
+            Err(e) => event.error = Some(e.clone()),
+        }
+        if let Ok(mut guard) = frame.plan.stdin_events.lock() {
+            guard.push(event);
+        }
+    }
+
+    fn resume_pending_frame(session: &mut RunMatSession, mut frame: PendingFrame) -> Result<ExecuteStep> {
+        // Reinstall per-run runtime hooks before resuming.
+        let stdin_events = Arc::clone(&frame.plan.stdin_events);
+        let runtime_handler = session.build_runtime_input_handler(stdin_events);
+        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
+        let _interrupt_guard =
+            runmat_runtime::interrupt::replace_interrupt(Some(session.interrupt_flag.clone()));
+
+        match runmat_ignition::resume_with_state(frame.pending.state, &mut session.variable_array) {
+            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
+                let mut streams = frame.streams;
+                streams.extend(drain_console_streams());
+                let result = session.finalize_pending_execution(frame.plan, values, streams)?;
+                Ok(ExecuteStep::Completed(result))
+            }
+            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
+                let chunk = drain_console_streams();
+                frame.streams.extend(chunk);
+                frame.pending = *next_pending;
+                frame.pending_since = Instant::now();
+                Ok(ExecuteStep::Pending(frame))
+            }
+            Err(err) => Err(anyhow::anyhow!(err)),
+        }
+    }
+}
+
+impl Future for ExecuteFuture {
+    type Output = Result<(RunMatSession, ExecutionResult)>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            match std::mem::replace(&mut self.state, ExecuteFutureState::Done) {
+                ExecuteFutureState::Start => {
+                    // Start executing synchronously until the first suspension point.
+                    // Note: this still uses the interpreter's existing suspend mechanism; Phase 2
+                    // completes by removing the sentinel strings under it.
+                    let input = self.input.clone();
+                    let step = match self.session.execute_internal(&input) {
+                        Ok(step) => step,
+                        Err(err) => return Poll::Ready(Err(err)),
+                    };
+                    match step {
+                        ExecuteStep::Completed(result) => {
+                            return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
+                        }
+                        ExecuteStep::Pending(frame) => {
+                            match frame.pending.interaction.kind {
+                                runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                                    runmat_async::register_gpu_map_read_waker(cx.waker());
+                                    self.state = ExecuteFutureState::WaitingOnGpu { frame };
+                                    return Poll::Pending;
+                                }
+                                runmat_runtime::interaction::InteractionKind::Line { .. }
+                                | runmat_runtime::interaction::InteractionKind::KeyPress => {
+                                    let fut = Self::make_input_future(&self.session, &frame.pending.interaction);
+                                    self.state = ExecuteFutureState::WaitingOnInput { frame, fut };
+                                    // Continue; we may be able to poll the input future immediately.
+                                }
+                            }
+                        }
+                    }
+                }
+                ExecuteFutureState::WaitingOnInput { frame, mut fut } => {
+                    match fut.as_mut().poll(cx) {
+                        Poll::Pending => {
+                            self.state = ExecuteFutureState::WaitingOnInput { frame, fut };
+                            return Poll::Pending;
+                        }
+                        Poll::Ready(response) => {
+                            Self::record_stdin_result(&frame, &response);
+                            runmat_runtime::interaction::push_queued_response(
+                                response.map(map_input_response),
+                            );
+                            let step = match Self::resume_pending_frame(&mut self.session, frame) {
+                                Ok(step) => step,
+                                Err(err) => return Poll::Ready(Err(err)),
+                            };
+                            match step {
+                                ExecuteStep::Completed(result) => {
+                                    return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
+                                }
+                                ExecuteStep::Pending(next_frame) => {
+                                    match next_frame.pending.interaction.kind {
+                                        runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                                            runmat_async::register_gpu_map_read_waker(cx.waker());
+                                            self.state = ExecuteFutureState::WaitingOnGpu { frame: next_frame };
+                                            return Poll::Pending;
+                                        }
+                                        runmat_runtime::interaction::InteractionKind::Line { .. }
+                                        | runmat_runtime::interaction::InteractionKind::KeyPress => {
+                                            let next_fut = Self::make_input_future(
+                                                &self.session,
+                                                &next_frame.pending.interaction,
+                                            );
+                                            self.state = ExecuteFutureState::WaitingOnInput {
+                                                frame: next_frame,
+                                                fut: next_fut,
+                                            };
+                                            // loop and poll again
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ExecuteFutureState::WaitingOnGpu { frame } => {
+                    // Register waker and attempt to resume once. If the GPU is still pending,
+                    // the interpreter will re-suspend and we'll return Pending again.
+                    runmat_async::register_gpu_map_read_waker(cx.waker());
+                    let step = match Self::resume_pending_frame(&mut self.session, frame) {
+                        Ok(step) => step,
+                        Err(err) => return Poll::Ready(Err(err)),
+                    };
+                    match step {
+                        ExecuteStep::Completed(result) => {
+                            return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
+                        }
+                        ExecuteStep::Pending(next_frame) => match next_frame.pending.interaction.kind {
+                            runmat_runtime::interaction::InteractionKind::GpuMapRead => {
+                                self.state = ExecuteFutureState::WaitingOnGpu { frame: next_frame };
+                                return Poll::Pending;
+                            }
+                            runmat_runtime::interaction::InteractionKind::Line { .. }
+                            | runmat_runtime::interaction::InteractionKind::KeyPress => {
+                                let fut = Self::make_input_future(&self.session, &next_frame.pending.interaction);
+                                self.state = ExecuteFutureState::WaitingOnInput { frame: next_frame, fut };
+                                // loop
+                            }
+                        },
+                    }
+                }
+                ExecuteFutureState::Done => {
+                    return Poll::Ready(Err(anyhow::anyhow!(
+                        "ExecuteFuture polled after completion"
+                    )));
+                }
+            }
         }
     }
 }

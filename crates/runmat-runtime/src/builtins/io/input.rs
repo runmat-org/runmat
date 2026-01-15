@@ -125,9 +125,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 #[runtime_builtin(name = "input", builtin_path = "crate::builtins::io::input")]
-fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn input_builtin(args: Vec<Value>) -> Result<Value, runmat_async::RuntimeControlFlow> {
     if args.len() > 2 {
-        return Err("MATLAB:input:TooManyInputs".to_string());
+        return Err(runmat_async::RuntimeControlFlow::Error(
+            "MATLAB:input:TooManyInputs".to_string(),
+        ));
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -143,34 +145,35 @@ fn input_builtin(args: Vec<Value>) -> Result<Value, String> {
                             parsed_flag = Some(swapped_flag);
                             prompt_index = Some(idx);
                         }
-                        Err(_) => return Err(original_err),
+                        Err(_) => {
+                            return Err(runmat_async::RuntimeControlFlow::Error(original_err))
+                        }
                     }
                 } else {
-                    return Err(original_err);
+                    return Err(runmat_async::RuntimeControlFlow::Error(original_err));
                 }
             }
         }
     }
 
     let prompt = if let Some(idx) = prompt_index {
-        parse_prompt(&args[idx])?
+        parse_prompt(&args[idx]).map_err(runmat_async::RuntimeControlFlow::Error)?
     } else {
         DEFAULT_PROMPT.to_string()
     };
     let return_string = parsed_flag.unwrap_or(false);
-    let line = match interaction::request_line(&prompt, true) {
-        Ok(line) => line,
-        Err(err) => {
-            if err == interaction::PENDING_INTERACTION_ERR {
-                return Err(err);
-            }
-            return Err(format!("input: {err}"));
+    let line = interaction::request_line(&prompt, true).map_err(|flow| match flow {
+        runmat_async::RuntimeControlFlow::Suspend(pending) => {
+            runmat_async::RuntimeControlFlow::Suspend(pending)
         }
-    };
+        runmat_async::RuntimeControlFlow::Error(message) => {
+            runmat_async::RuntimeControlFlow::Error(format!("input: {message}"))
+        }
+    })?;
     if return_string {
         return Ok(Value::CharArray(CharArray::new_row(&line)));
     }
-    parse_numeric_response(&line)
+    parse_numeric_response(&line).map_err(runmat_async::RuntimeControlFlow::Error)
 }
 
 fn parse_prompt(value: &Value) -> Result<String, String> {

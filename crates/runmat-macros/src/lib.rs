@@ -213,13 +213,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #(#conv_stmts)*
             let res = match #ident(#(#param_idents),*) {
                 Ok(value) => value,
-                Err(message) => {
-                    if message == crate::interaction::PENDING_INTERACTION_ERR {
-                        if let Some(pending) = crate::interaction::take_pending_interaction() {
-                            return Err(runmat_async::RuntimeControlFlow::Suspend(pending));
-                        }
+                Err(err) => {
+                    if let Some(pending) = runmat_async::take_last_suspend() {
+                        return Err(runmat_async::RuntimeControlFlow::Suspend(pending));
                     }
-                    return Err(runmat_async::RuntimeControlFlow::Error(message));
+                    return Err(err.into());
                 }
             };
             Ok(runmat_builtins::Value::from(res))

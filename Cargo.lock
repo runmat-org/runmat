@@ -6090,6 +6090,7 @@ dependencies = [
  "log",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-async",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",

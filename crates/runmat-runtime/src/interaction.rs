@@ -1,4 +1,3 @@
-use crate::console::{self, ConsoleStream};
 use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
@@ -11,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 pub use runmat_async::InteractionKind;
+pub use runmat_async::RuntimeControlFlow;
 
 pub struct InteractionPrompt<'a> {
     pub prompt: &'a str,
@@ -38,7 +38,6 @@ type InteractionHandler =
 
 static HANDLER: OnceCell<RwLock<Option<Arc<InteractionHandler>>>> = OnceCell::new();
 runmat_thread_local! {
-    static LAST_PENDING: RefCell<Option<PendingInteraction>> = const { RefCell::new(None) };
     static QUEUED_RESPONSE: RefCell<Option<Result<InteractionResponse, String>>> =
         const { RefCell::new(None) };
 }
@@ -62,8 +61,6 @@ fn force_interactive_stdin() -> bool {
 fn force_interactive_stdin() -> bool {
     FORCE_INTERACTIVE_STDIN.load(Ordering::Relaxed)
 }
-
-pub const PENDING_INTERACTION_ERR: &str = "__RUNMAT_PENDING_INTERACTION__";
 
 fn handler_slot() -> &'static RwLock<Option<Arc<InteractionHandler>>> {
     HANDLER.get_or_init(|| RwLock::new(None))
@@ -96,15 +93,19 @@ pub fn replace_handler(handler: Option<Arc<InteractionHandler>>) -> HandlerGuard
     HandlerGuard::install(handler)
 }
 
-pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
+pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeControlFlow> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response? {
+        return match response.map_err(RuntimeControlFlow::Error)? {
             InteractionResponse::Line(value) => Ok(value),
             InteractionResponse::KeyPress => {
-                Err("queued keypress response used for line request".to_string())
+                Err(RuntimeControlFlow::Error(
+                    "queued keypress response used for line request".to_string(),
+                ))
             }
             InteractionResponse::GpuMapReady => {
-                Err("queued gpu map response used for line request".to_string())
+                Err(RuntimeControlFlow::Error(
+                    "queued gpu map response used for line request".to_string(),
+                ))
             }
         };
     }
@@ -113,34 +114,44 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, String> {
             prompt,
             kind: InteractionKind::Line { echo },
         }) {
-            InteractionDecision::Respond(result) => match result? {
+            InteractionDecision::Respond(result) => match result.map_err(RuntimeControlFlow::Error)? {
                 InteractionResponse::Line(value) => Ok(value),
                 InteractionResponse::KeyPress => {
-                    Err("interaction handler returned keypress for line request".to_string())
+                    Err(RuntimeControlFlow::Error(
+                        "interaction handler returned keypress for line request".to_string(),
+                    ))
                 }
                 InteractionResponse::GpuMapReady => Err(
-                    "interaction handler returned gpu map response for line request".to_string(),
+                    RuntimeControlFlow::Error(
+                        "interaction handler returned gpu map response for line request".to_string(),
+                    ),
                 ),
             },
             InteractionDecision::Pending => {
-                suspend(InteractionKind::Line { echo }, prompt)?;
-                unreachable!("suspend always returns Err")
+                return Err(RuntimeControlFlow::Suspend(PendingInteraction {
+                    prompt: prompt.to_string(),
+                    kind: InteractionKind::Line { echo },
+                }));
             }
         }
     } else {
-        default_read_line(prompt, echo)
+        default_read_line(prompt, echo).map_err(RuntimeControlFlow::Error)
     }
 }
 
-pub fn wait_for_key(prompt: &str) -> Result<(), String> {
+pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeControlFlow> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response? {
+        return match response.map_err(RuntimeControlFlow::Error)? {
             InteractionResponse::Line(_) => {
-                Err("queued line response used for keypress request".to_string())
+                Err(RuntimeControlFlow::Error(
+                    "queued line response used for keypress request".to_string(),
+                ))
             }
             InteractionResponse::KeyPress => Ok(()),
             InteractionResponse::GpuMapReady => {
-                Err("queued gpu map response used for keypress request".to_string())
+                Err(RuntimeControlFlow::Error(
+                    "queued gpu map response used for keypress request".to_string(),
+                ))
             }
         };
     }
@@ -149,23 +160,29 @@ pub fn wait_for_key(prompt: &str) -> Result<(), String> {
             prompt,
             kind: InteractionKind::KeyPress,
         }) {
-            InteractionDecision::Respond(result) => match result? {
+            InteractionDecision::Respond(result) => match result.map_err(RuntimeControlFlow::Error)? {
                 InteractionResponse::Line(_) => {
-                    Err("interaction handler returned line value for keypress request".to_string())
+                    Err(RuntimeControlFlow::Error(
+                        "interaction handler returned line value for keypress request".to_string(),
+                    ))
                 }
                 InteractionResponse::KeyPress => Ok(()),
                 InteractionResponse::GpuMapReady => Err(
-                    "interaction handler returned gpu map response for keypress request"
-                        .to_string(),
+                    RuntimeControlFlow::Error(
+                        "interaction handler returned gpu map response for keypress request"
+                            .to_string(),
+                    ),
                 ),
             },
             InteractionDecision::Pending => {
-                suspend(InteractionKind::KeyPress, prompt)?;
-                unreachable!("suspend always returns Err")
+                return Err(RuntimeControlFlow::Suspend(PendingInteraction {
+                    prompt: prompt.to_string(),
+                    kind: InteractionKind::KeyPress,
+                }));
             }
         }
     } else {
-        default_wait_for_key(prompt)
+        default_wait_for_key(prompt).map_err(RuntimeControlFlow::Error)
     }
 }
 
@@ -226,28 +243,11 @@ pub fn default_wait_for_key(prompt: &str) -> Result<(), String> {
     }
 }
 
-pub fn take_pending_interaction() -> Option<PendingInteraction> {
-    LAST_PENDING.with(|slot| slot.borrow_mut().take())
-}
-
 pub fn push_queued_response(response: Result<InteractionResponse, String>) {
     QUEUED_RESPONSE.with(|slot| {
         *slot.borrow_mut() = Some(response);
     });
 }
 
-/// Suspend the current execution, recording the pending interaction for the host to resume.
-///
-/// This is the central suspension primitive used by the interpreter/host bridge. Builtins like
-/// `input()` use it, and internal subsystems (e.g. wasm WebGPU readbacks) can also use it to
-/// avoid blocking the browser event loop.
-pub fn suspend(kind: InteractionKind, prompt: &str) -> Result<(), String> {
-    console::record_console_output(ConsoleStream::Stdout, prompt);
-    LAST_PENDING.with(|slot| {
-        *slot.borrow_mut() = Some(PendingInteraction {
-            prompt: prompt.to_string(),
-            kind,
-        });
-    });
-    Err(PENDING_INTERACTION_ERR.to_string())
-}
+// NOTE: The old `suspend()` + sentinel string bridge has been removed. Typed suspension is now
+// represented by `RuntimeControlFlow::Suspend(PendingInteraction)`.

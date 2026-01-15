@@ -183,32 +183,36 @@ enum PauseWait {
     sink = true,
     builtin_path = "crate::builtins::timing::pause"
 )]
-fn pause_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn pause_builtin(args: Vec<Value>) -> Result<Value, runmat_async::RuntimeControlFlow> {
     match args.len() {
         0 => {
             perform_wait(PauseWait::Default)?;
             Ok(empty_return_value())
         }
-        1 => match classify_argument(&args[0])? {
+        1 => match classify_argument(&args[0]).map_err(runmat_async::RuntimeControlFlow::Error)? {
             PauseArgument::Wait(wait) => {
                 perform_wait(wait)?;
                 Ok(empty_return_value())
             }
             PauseArgument::SetState(next_state) => {
-                let previous = set_pause_enabled(next_state)?;
+                let previous = set_pause_enabled(next_state)
+                    .map_err(runmat_async::RuntimeControlFlow::Error)?;
                 Ok(state_value(previous))
             }
             PauseArgument::Query => {
-                let current = pause_enabled()?;
+                let current =
+                    pause_enabled().map_err(runmat_async::RuntimeControlFlow::Error)?;
                 Ok(state_value(current))
             }
         },
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        _ => Err(runmat_async::RuntimeControlFlow::Error(
+            ERR_TOO_MANY_INPUTS.to_string(),
+        )),
     }
 }
 
-fn perform_wait(wait: PauseWait) -> Result<(), String> {
-    if !pause_enabled()? {
+fn perform_wait(wait: PauseWait) -> Result<(), runmat_async::RuntimeControlFlow> {
+    if !pause_enabled().map_err(runmat_async::RuntimeControlFlow::Error)? {
         return Ok(());
     }
 
@@ -226,7 +230,7 @@ fn perform_wait(wait: PauseWait) -> Result<(), String> {
     }
 }
 
-fn wait_for_key_press() -> Result<(), String> {
+fn wait_for_key_press() -> Result<(), runmat_async::RuntimeControlFlow> {
     #[cfg(test)]
     {
         Ok(())

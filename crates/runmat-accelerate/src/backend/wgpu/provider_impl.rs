@@ -16468,6 +16468,8 @@ impl AccelProvider for WgpuProvider {
                     res
                 );
                 let _ = tx.send(res);
+                // Wake any poll-driven execution waiting on a GPU map/readback.
+                runmat_async::wake_gpu_map_read();
             });
 
             if let Ok(mut pending) = self.pending_map_reads.lock() {

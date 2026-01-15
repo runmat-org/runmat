@@ -18,8 +18,7 @@ use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, PendingRequest, PendingRequestKind,
-    PendingRequestVisibility, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
+    InputResponse, MaterializedVariable, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSliceOptions,
     WorkspaceSnapshot,
 };
@@ -253,12 +252,17 @@ impl RunMatWasm {
         );
         let _enter = exec_span.enter();
         info!(target = "runmat.runtime", "Execution started");
-        let result = self
-            .session
-            .borrow_mut()
-            .execute(&source)
+        // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
+        let mut slot = self.session.borrow_mut();
+        let session = std::mem::take(&mut *slot);
+        drop(slot);
+
+        let (session, result) = session
+            .execute_future(source)
+            .await
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
-        let result = self.drain_pending_requests(result).await?;
+
+        *self.session.borrow_mut() = session;
         info!(
             target = "runmat.runtime",
             workspace_entries = result.workspace.values.len(),
@@ -311,7 +315,8 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = cancelPendingRequests)]
     pub fn cancel_pending_requests(&self) {
-        self.session.borrow_mut().cancel_all_pending_requests();
+        // Phase 2: stdin + internal suspensions are awaited inside `ExecuteFuture`.
+        // Keep this API as a no-op for now to avoid breaking older hosts.
     }
 
     #[wasm_bindgen(js_name = "setLanguageCompat")]
@@ -336,13 +341,22 @@ impl RunMatWasm {
         {
             if handler.is_null() || handler.is_undefined() {
                 set_js_stdin_handler(None);
+                let mut session = self.session.borrow_mut();
+                session.clear_input_handler();
+                session.clear_async_input_handler();
                 return Ok(());
             }
             let func = handler
                 .dyn_into::<js_sys::Function>()
                 .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
             set_js_stdin_handler(Some(func));
-            configure_session_input_handler(&mut self.session.borrow_mut());
+            {
+                let mut session = self.session.borrow_mut();
+                // Keep the legacy synchronous bridge (used by some builtins), but prefer the
+                // async handler for `ExecuteFuture`.
+                configure_session_input_handler(&mut session);
+                session.install_async_input_handler(|req| async move { js_input_request(req).await });
+            }
             return Ok(());
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -354,134 +368,7 @@ impl RunMatWasm {
         }
     }
 
-    async fn drain_pending_requests(
-        &self,
-        mut result: ExecutionResult,
-    ) -> Result<ExecutionResult, JsValue> {
-        loop {
-            let Some(pending) = result.pending_request.as_ref() else {
-                return Ok(result);
-            };
-            match pending.visibility {
-                PendingRequestVisibility::Internal => {
-                    let request_id = pending.id;
-                    yield_to_event_loop().await?;
-                    let next = self
-                        .session
-                        .borrow_mut()
-                        .resume_pending_request(request_id)
-                        .map_err(|err| {
-                            js_error(&format!("RunMat resumePendingRequest failed: {err}"))
-                        })?;
-                    merge_execution_results(&mut result, next);
-                }
-                PendingRequestVisibility::External => {
-                    let response = self.fulfill_stdin_request(pending).await?;
-                    let request_id = pending.id;
-                    let next = self
-                        .session
-                        .borrow_mut()
-                        .resume_input(request_id, response)
-                        .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
-                    merge_execution_results(&mut result, next);
-                }
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    async fn fulfill_stdin_request(
-        &self,
-        pending: &PendingRequest,
-    ) -> Result<Result<InputResponse, String>, JsValue> {
-        let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
-        let Some(handler) = handler else {
-            return Err(js_error(
-                "RunMat: stdin requested but no input handler is installed. Call setInputHandler().",
-            ));
-        };
-
-        // Only stdin-style pending requests can be fulfilled here.
-        let request = match pending.kind {
-            PendingRequestKind::Line { echo } => InputRequest {
-                prompt: pending.label.clone(),
-                kind: InputRequestKind::Line { echo },
-            },
-            PendingRequestKind::KeyPress => InputRequest {
-                prompt: pending.label.clone(),
-                kind: InputRequestKind::KeyPress,
-            },
-            PendingRequestKind::GpuMapRead => {
-                return Err(js_error(
-                    "RunMat internal error: attempted to fulfill non-stdin pending request via stdin handler.",
-                ));
-            }
-        };
-
-        let js_request = js_sys::Object::new();
-        Reflect::set(
-            &js_request,
-            &JsValue::from_str("prompt"),
-            &JsValue::from_str(&request.prompt),
-        )
-        .unwrap_or_default();
-        match request.kind {
-            InputRequestKind::Line { echo } => {
-                Reflect::set(&js_request, &JsValue::from_str("kind"), &JsValue::from_str("line"))
-                    .unwrap_or_default();
-                Reflect::set(&js_request, &JsValue::from_str("echo"), &JsValue::from_bool(echo))
-                    .unwrap_or_default();
-            }
-            InputRequestKind::KeyPress => {
-                Reflect::set(
-                    &js_request,
-                    &JsValue::from_str("kind"),
-                    &JsValue::from_str("keyPress"),
-                )
-                .unwrap_or_default();
-            }
-        }
-
-        let mut value = handler.call1(&JsValue::NULL, &js_request).map_err(|err| {
-            js_error(&format!("stdin handler threw: {}", js_value_to_string(err)))
-        })?;
-
-        if value.is_instance_of::<js_sys::Promise>() {
-            value = JsFuture::from(js_sys::Promise::from(value)).await?;
-        }
-
-        if value_should_pending(&value) {
-            return Err(js_error(
-                "RunMat: input handler returned pending/null/undefined. It must return a value or a Promise of a value.",
-            ));
-        }
-
-        if let Some(err) = extract_error_message(&value) {
-            return Ok(Err(err));
-        }
-
-        match request.kind {
-            InputRequestKind::Line { .. } => {
-                if let Some(text) = extract_line_value(&value) {
-                    Ok(Ok(InputResponse::Line(text)))
-                } else {
-                    Ok(Err(
-                        "stdin handler must return a string (or { value }) for line input"
-                            .to_string(),
-                    ))
-                }
-            }
-            InputRequestKind::KeyPress => Ok(Ok(InputResponse::KeyPress)),
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn fulfill_stdin_request(
-        &self,
-        _pending: &PendingRequest,
-    ) -> Result<Result<InputResponse, String>, JsValue> {
-        Err(js_error("RunMat: stdin handler is only supported when targeting wasm32"))
-    }
+    // Pending/resume plumbing has been removed in favor of poll-driven `ExecuteFuture`.
 
     #[wasm_bindgen(js_name = setFusionPlanEnabled)]
     pub fn set_fusion_plan_enabled(&self, enabled: bool) {
@@ -589,7 +476,6 @@ impl RunMatWasm {
         {
             let mut session = self.session.borrow_mut();
             session.cancel_execution();
-            session.cancel_all_pending_requests();
             session.clear_variables();
         }
         #[cfg(target_arch = "wasm32")]
@@ -600,62 +486,6 @@ impl RunMatWasm {
             });
         }
     }
-}
-
-fn merge_execution_results(acc: &mut ExecutionResult, mut next: ExecutionResult) {
-    // Preserve incremental outputs while internal requests are drained.
-    acc.streams.append(&mut next.streams);
-    acc.warnings.append(&mut next.warnings);
-    acc.stdin_events.append(&mut next.stdin_events);
-
-    if !next.figures_touched.is_empty() {
-        let mut seen = std::collections::HashSet::<u32>::new();
-        for id in acc.figures_touched.iter().copied() {
-            seen.insert(id);
-        }
-        for id in next.figures_touched.iter().copied() {
-            if seen.insert(id) {
-                acc.figures_touched.push(id);
-            }
-        }
-    }
-
-    // "next wins" for scalar fields / snapshots.
-    if next.value.is_some() {
-        acc.value = next.value.take();
-    }
-    acc.execution_time_ms = next.execution_time_ms;
-    acc.used_jit = next.used_jit;
-    if next.error.is_some() {
-        acc.error = next.error.take();
-    }
-    if next.type_info.is_some() {
-        acc.type_info = next.type_info.take();
-    }
-    acc.workspace = next.workspace;
-    if next.profiling.is_some() {
-        acc.profiling = next.profiling.take();
-    }
-    if next.fusion_plan.is_some() {
-        acc.fusion_plan = next.fusion_plan.take();
-    }
-    acc.pending_request = next.pending_request.take();
-}
-
-async fn yield_to_event_loop() -> Result<(), JsValue> {
-    // Use a 0ms timeout to yield back to the browser event loop (not just a microtask).
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let window = web_sys::window().expect("window");
-        let resolve_fn: js_sys::Function = resolve.unchecked_into();
-        let cb = Closure::once_into_js(move || {
-            let _ = resolve_fn.call0(&JsValue::UNDEFINED);
-        });
-        let cb = cb.unchecked_ref::<js_sys::Function>();
-        // Ignore errors (e.g., if window is missing).
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(cb, 0);
-    });
-    JsFuture::from(promise).await?;
-    Ok(())
 }
 
 #[wasm_bindgen(js_name = registerFsProvider)]
@@ -1042,6 +872,68 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
             }
             InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn js_input_request(request: InputRequest) -> Result<InputResponse, String> {
+    let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
+    let Some(handler) = handler else {
+        return Err("stdin requested but no input handler is installed".to_string());
+    };
+
+    let js_request = js_sys::Object::new();
+    Reflect::set(
+        &js_request,
+        &JsValue::from_str("prompt"),
+        &JsValue::from_str(&request.prompt),
+    )
+    .map_err(js_value_to_string)?;
+
+    match request.kind {
+        InputRequestKind::Line { echo } => {
+            Reflect::set(&js_request, &JsValue::from_str("kind"), &JsValue::from_str("line"))
+                .unwrap_or_default();
+            Reflect::set(&js_request, &JsValue::from_str("echo"), &JsValue::from_bool(echo))
+                .unwrap_or_default();
+        }
+        InputRequestKind::KeyPress => {
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("kind"),
+                &JsValue::from_str("keyPress"),
+            )
+            .unwrap_or_default();
+        }
+    }
+
+    let mut value = handler
+        .call1(&JsValue::NULL, &js_request)
+        .map_err(js_value_to_string)?;
+
+    if value.is_instance_of::<js_sys::Promise>() {
+        value = JsFuture::from(js_sys::Promise::from(value))
+            .await
+            .map_err(js_value_to_string)?;
+    }
+
+    if let Some(err) = extract_error_message(&value) {
+        return Err(err);
+    }
+
+    match request.kind {
+        InputRequestKind::Line { .. } => {
+            // Accept null/undefined as an empty line.
+            if value.is_null() || value.is_undefined() {
+                return Ok(InputResponse::Line(String::new()));
+            }
+            if let Some(text) = extract_line_value(&value) {
+                return Ok(InputResponse::Line(text));
+            }
+            Err("stdin handler must return a string (or Promise of a string) for line input"
+                .to_string())
+        }
+        InputRequestKind::KeyPress => Ok(InputResponse::KeyPress),
     }
 }
 
