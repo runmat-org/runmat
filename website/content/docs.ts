@@ -24,6 +24,17 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
+        title: "Desktop & Browser Guide",
+        slug: ["desktop-browser-guide"],
+        file: "docs/DESKTOP_BROWSER_GUIDE.md",
+        seo: {
+          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
+          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
+          ogTitle: "Desktop & Browser Guide",
+          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+        },
+      },
+      {
         title: "Design Philosophy",
         slug: ["design-philosophy"],
         file: "docs/DESIGN_PHILOSOPHY.md",
@@ -92,7 +103,6 @@ export const docsTree: DocsNode[] = [
     title: "Accelerate (GPU)",
     children: [
       { title: "Introduction to RunMat Fusion", slug: ["accelerate", "fusion-intro"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
-      { title: "Accelerate Architecture", slug: ["accelerate", "gpu-residency"], file: "docs/HOW_RUNMAT_ACCELERATE_WORKS.md", seo: { description: "How RunMat Accelerate works: GPU acceleration architecture, planner, and execution.", keywords: ["GPU", "accelerate", "how it works", "planner", "execution"] } },
       {
         title: "Fusion Guide",
         externalHref: "/docs/fusion-guide",

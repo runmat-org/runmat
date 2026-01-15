@@ -34,8 +34,8 @@ jsonLd:
       alternativeHeadline: "MATLAB vs RunMat: A Technical Overview"
       description: "An engineer's guide to the MATLAB language, its mental model (arrays, matrices, indexing), and how RunMat provides a modern, high-performance open-source runtime for it."
       proficiencyLevel: "Beginner"
-      datePublished: "2025-01-01"
-      dateModified: "2025-01-01"
+      datePublished: "2025-01-01T00:00:00Z"
+      dateModified: "2025-01-01T00:00:00Z"
       author:
         "@type": "Organization"
         name: "Dystr Inc."
@@ -52,13 +52,25 @@ jsonLd:
           name: "MATLAB"
           sameAs: "https://en.wikipedia.org/wiki/MATLAB"
           applicationCategory: "Numerical Computing"
+          operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "RunMat"
           url: "https://runmat.org"
           applicationCategory: "Runtime Environment"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "GNU Octave"
           sameAs: "https://en.wikipedia.org/wiki/GNU_Octave"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
       mainEntity: { "@id": "#faq" }
     - "@type": "FAQPage"
       "@id": "#faq"
@@ -215,7 +227,7 @@ Key properties about RunMat Fusion:
 - **Cross-platform GPU backend** via `wgpu`, targeting **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)**.
 - **Residency awareness**: keep arrays on device when it’s faster, and avoid unnecessary transfers.
 
-To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](../INTRODUCTION_TO_RUNMAT_GPU.md).
+To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](/docs/accelerate/fusion-intro).
 
 ### Tiered CPU execution (fast startup + fast hot loops)
 
@@ -245,7 +257,7 @@ runmat benchmark my_script.m --iterations 5 --jit
 runmat accel-info
 ```
 
-For the full CLI reference, see [CLI](../CLI.md).
+For the full CLI reference, see [CLI](/docs/cli).
 
 ---
 

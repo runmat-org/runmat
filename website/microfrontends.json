@@ -12,6 +12,12 @@
         },
         {
           "paths": ["/js/:path*"]
+        },
+        {
+          "paths": ["/sQuv/:path*"]
+        },
+        {
+          "paths": ["/sQuv/static/:path*"]
         }
       ]
     }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
-import Logo from "@/components/Logo";
+import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
 
 export default function Footer() {
@@ -30,16 +30,36 @@ export default function Footer() {
       <div className="container mx-auto flex flex-col md:flex-row items-start justify-between gap-8 py-8 px-4 md:px-6 border-t">
         <div className="hidden md:flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="shrink-0" style={{ minWidth: '47px', width: '47px' }}>
-              <Logo height={24} className="w-full h-auto" />
-            </div>
-            <p className="text-base leading-none md:text-lg">
-              <span className="font-semibold brand-text-sheen">RunMat</span>
-            </p>
+            <Image
+              src="/runmat-logo.svg"
+              alt="RunMat"
+              width={136}
+              height={24}
+              className="h-6 w-auto"
+              priority
+            />
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             The Fastest Runtime for Math
           </p>
+        </div>
+        <div className="grid w-full md:flex-1 gap-6 md:grid-cols-2 text-sm text-muted-foreground">
+          <div>
+            <h3 className="text-foreground font-semibold mb-2">Resources</h3>
+            <ul className="space-y-1">
+              <li><Link href="/license" className="hover:underline">License</Link></li>
+              <li><Link href="/docs/telemetry" className="hover:underline">Telemetry</Link></li>
+              <li><Link href="/docs/roadmap" className="hover:underline">Roadmap</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-foreground font-semibold mb-2">Learn</h3>
+            <ul className="space-y-1">
+              <li><Link href="/blog" className="hover:underline">Blog</Link></li>
+              <li><Link href="/benchmarks" className="hover:underline">Benchmarks</Link></li>
+              <li><Link href="/docs/fusion-guide" className="hover:underline">Fusion Guide</Link></li>
+            </ul>
+          </div>
         </div>
         <div className="w-full md:w-auto md:flex-1 md:max-w-md">
           <NewsletterCta

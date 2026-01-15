@@ -43,8 +43,8 @@ jsonLd:
       alternativeHeadline: "RunMat vs GNU Octave: Performance Benchmarks"
       description: "RunMat is a modern, open-source runtime that executes MATLAB code quickly using a Rust-based engine, tiered JIT execution, and automatic GPU acceleration."
       image: "https://runmat.org/plot-example.jpg"
-      datePublished: "2025-08-07"
-      dateModified: "2025-08-07"
+      datePublished: "2025-08-07T00:00:00Z"
+      dateModified: "2025-08-07T00:00:00Z"
       author:
         "@type": "Person"
         name: "Nabeel Allana"
@@ -61,12 +61,26 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "RunMat"
           sameAs: "https://runmat.org"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "MATLAB"
           sameAs: "https://en.wikipedia.org/wiki/MATLAB"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "GNU Octave"
           sameAs: "https://en.wikipedia.org/wiki/GNU_Octave"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: ["Windows", "macOS", "Linux"]
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "ComputerLanguage"
           name: "Rust"
           sameAs: "https://en.wikipedia.org/wiki/Rust_(programming_language)"
@@ -109,6 +123,7 @@ jsonLd:
 - Core built-ins are **canonical** (e.g., `sin`, `cos`, `sum`, and `printf`-style formatting like `fprintf`/`sprintf`) and match the expected, documented behavior. When semantics are domain-specific or ambiguous, they live in packages.
 - Built in **Rust**, with **tiered execution** (interpreter first, JIT for hot code) and a **generational GC** tuned for numerics.
 - Benchmarks show **150x–180x speedups** vs GNU Octave on representative workloads; see Performance below.
+- New to MATLAB? Start with our primer: [What is MATLAB? The Language, The Runtime, and RunMat](/blog/what-is-matlab).
 
 ---
 
@@ -184,6 +199,9 @@ cd benchmarks
 ./run_benchmarks.sh
 cat results/benchmark_YYYYMMDD_HHMMSS.yaml
 ```
+
+For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and Python in the
+[MATLAB alternatives guide](/blog/free-matlab-alternatives).
 
 ---
 

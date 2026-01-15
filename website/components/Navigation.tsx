@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
   NavigationMenu,
@@ -15,7 +16,6 @@ import { Download, Menu, BookOpen, FileText, Scale, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
-import Logo from "@/components/Logo";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -24,9 +24,15 @@ export default function Navigation() {
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
         <div className="mr-4 hidden md:flex">
-          <Link href="/" className="mr-6 flex items-center space-x-2">
-            <Logo height={20} className="pr-2" />
-            <span className="hidden sm:inline-block font-bold text-lg md:text-xl leading-none brand-text-sheen">RunMat</span>
+          <Link href="/" className="mr-6 flex items-center">
+            <Image
+              src="/runmat-logo.svg"
+              alt="RunMat"
+              width={136}
+              height={24}
+              className="h-6 w-auto"
+              priority
+            />
           </Link>
           <NavigationMenu>
             <NavigationMenuList>
@@ -56,9 +62,15 @@ export default function Navigation() {
         </div>
         <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
           <div className="w-full flex-1 md:w-auto md:flex-none">
-            <Link href="/" className="flex items-center space-x-3 md:hidden">
-              <Logo height={24} />
-              <span className="font-bold text-lg leading-none brand-text-sheen">RunMat</span>
+            <Link href="/" className="flex items-center md:hidden">
+              <Image
+                src="/runmat-logo.svg"
+                alt="RunMat"
+                width={120}
+                height={20}
+                className="h-5 w-auto"
+                priority
+              />
             </Link>
           </div>
 

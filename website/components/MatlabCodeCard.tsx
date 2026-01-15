@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import Prism from "prismjs";
 import "prismjs/components/prism-matlab";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
 const sampleCode = `
 x = 0:0.001:4*pi;           % 0 to 4π in steps of 0.001
@@ -16,12 +16,7 @@ interface MatlabCodeCardProps {
 }
 
 export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardProps) {
-  const [highlighted, setHighlighted] = useState<string | null>(null);
-
-  useEffect(() => {
-    const html = Prism.highlight(code, Prism.languages.matlab, "matlab");
-    setHighlighted(html);
-  }, [code]);
+  const highlighted = useMemo(() => Prism.highlight(code, Prism.languages.matlab, "matlab"), [code]);
 
   return (
     <div className={cn("w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-[#131a2a] to-[#060a12] p-4 shadow-2xl ", className)}>
@@ -35,12 +30,13 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
       <pre
         className="mt-3 overflow-x-auto rounded-2xl bg-[#0d1422] p-1 text-left font-mono text-lg leading-8 text-white language-example"
         tabIndex={0}
+        suppressHydrationWarning
       >
-        {highlighted ? (
-          <code className="language-matlab" dangerouslySetInnerHTML={{ __html: highlighted }} />
-        ) : (
-          <code className="language-matlab">{code}</code>
-        )}
+        <code
+          className="language-matlab"
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+          suppressHydrationWarning
+        />
       </pre>
     </div>
   );

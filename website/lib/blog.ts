@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync, readdirSync } from 'fs'
+import { basename, join } from 'path'
 import matter from 'gray-matter'
 
 export interface BlogPost {
@@ -7,6 +7,7 @@ export interface BlogPost {
   title: string
   description: string
   date: string
+  dateModified?: string
   readTime: string
   author: string
   authors: AuthorInfo[]
@@ -36,12 +37,14 @@ interface BlogFrontmatter {
   excerpt?: string
   date?: string
   readTime?: string
+  slug?: string
   author?: string
   authors?: FrontmatterAuthorEntry[]
   tags?: string[]
   image?: string
   imageAlt?: string
   visibility?: 'public' | 'unlisted'
+  dateModified?: string
   [key: string]: unknown
 }
 
@@ -84,17 +87,29 @@ function normalizeAuthors(frontmatter: BlogFrontmatter): AuthorInfo[] {
   return result
 }
 
+function resolveFrontmatterSlug(frontmatter: BlogFrontmatter, file: string): string {
+  if (typeof frontmatter.slug === 'string' && frontmatter.slug.trim().length > 0) {
+    return frontmatter.slug.trim()
+  }
+  return slugifyFileName(file)
+}
+
+function readFrontmatter(filePath: string) {
+  const fileContent = readFileSync(filePath, 'utf-8')
+  const { data } = matter(fileContent)
+  const frontmatter = data as BlogFrontmatter
+  const slug = resolveFrontmatterSlug(frontmatter, basename(filePath))
+  return { frontmatter, slug }
+}
+
 export function getAllBlogPosts(): BlogPost[] {
   try {
     const blogDir = join(process.cwd(), 'content/blog')
     const files = readdirSync(blogDir).filter(file => file.endsWith('.md'))
 
     const posts = files.map(file => {
-      const slug = slugifyFileName(file)
       const filePath = join(blogDir, file)
-      const fileContent = readFileSync(filePath, 'utf-8')
-      const { data } = matter(fileContent)
-      const frontmatter = data as BlogFrontmatter
+      const { frontmatter, slug } = readFrontmatter(filePath)
       const authors = normalizeAuthors(frontmatter)
       const visibility: 'public' | 'unlisted' =
         frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public'
@@ -104,6 +119,7 @@ export function getAllBlogPosts(): BlogPost[] {
         title: frontmatter.title || 'Untitled',
         description: frontmatter.description || frontmatter.excerpt || '',
         date: frontmatter.date || new Date().toISOString(),
+        dateModified: frontmatter.dateModified,
         readTime: frontmatter.readTime || '5 min read',
         author: authors.map(author => author.name).join(', '),
         authors,
@@ -123,4 +139,27 @@ export function getAllBlogPosts(): BlogPost[] {
 
 export function getPublicBlogPosts(): BlogPost[] {
   return getAllBlogPosts().filter(post => post.visibility !== 'unlisted')
+}
+
+export function resolveBlogFilePath(slug: string): string | null {
+  const blogDir = join(process.cwd(), 'content/blog')
+  const directPath = join(blogDir, `${slug}.md`)
+  if (existsSync(directPath)) {
+    return directPath
+  }
+
+  try {
+    const files = readdirSync(blogDir).filter(file => file.endsWith('.md'))
+    for (const file of files) {
+      const filePath = join(blogDir, file)
+      const { frontmatter } = readFrontmatter(filePath)
+      if (typeof frontmatter.slug === 'string' && frontmatter.slug.trim() === slug) {
+        return filePath
+      }
+    }
+  } catch (error) {
+    console.warn('Error resolving blog file path:', error)
+  }
+
+  return null
 }

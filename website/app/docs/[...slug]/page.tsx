@@ -7,6 +7,7 @@ import { DocsContentSwitch } from "@/components/DocsContentSwitch";
 import { DocsArticleVisibility } from "@/components/DocsArticleVisibility";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { HeadingsNav } from "@/components/HeadingsNav";
+import matter from "gray-matter";
 
 // Polyfill URL.canParse for Node environments that don't support it yet (e.g., Node 18)
 const _u = URL;
@@ -31,18 +32,86 @@ export async function generateStaticParams(): Promise<{ slug: string[] }[]> {
     .map((n) => ({ slug: n.slug! }));
 }
 
+type DocFrontmatter = {
+  title?: string;
+  description?: string;
+  keywords?: string | string[];
+  ogTitle?: string;
+  ogDescription?: string;
+  jsonLd?: unknown;
+};
+
+function coerceKeywords(val?: string | string[]) {
+  if (!val) return undefined;
+  if (Array.isArray(val)) {
+    const normalized = val
+      .filter((k): k is string => typeof k === "string")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    return normalized.length ? normalized : undefined;
+  }
+  if (typeof val !== "string") return undefined;
+  const trimmed = val.trim();
+  return trimmed ? [trimmed] : undefined;
+}
+
+function isJsonLdObject(val: unknown): Record<string, unknown> | undefined {
+  if (!val || typeof val !== "object" || Array.isArray(val)) return undefined;
+  return val as Record<string, unknown>;
+}
+
+function readDocSource(file: string): { body: string; data: DocFrontmatter } | null {
+  const repoRoot = findRepoRoot(process.cwd());
+  const candidatePaths = Array.from(
+    new Set([
+      join(process.cwd(), file),
+      join(process.cwd(), "..", file),
+      join(process.cwd(), "..", "..", file),
+      repoRoot ? join(repoRoot, file) : undefined,
+    ].filter(Boolean) as string[])
+  );
+
+  for (const p of candidatePaths) {
+    try {
+      const raw = readFileSync(p, "utf-8");
+      const parsed = matter(raw);
+      return { body: parsed.content, data: parsed.data as DocFrontmatter };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ slug?: string[] }> }): Promise<Metadata> {
   const { slug = [] } = await params;
   const node = findNodeBySlug(slug);
-  const base: Metadata = { title: node ? `${node.title} | Docs` : "Docs" };
+  const baseTitle = node ? `${node.title} | Docs` : "Docs";
+  const base: Metadata = { title: baseTitle };
   if (!node) return base;
+
+  const baseUrl = "https://runmat.org";
+  const path = `/docs${slug.length ? `/${slug.join("/")}` : ""}`;
+  const pageUrl = `${baseUrl}${path}`;
   const seo = (node as DocsNode).seo;
+  const parsed = node.file ? readDocSource(node.file) : null;
+  const fm = parsed?.data || {};
+
+  const title = fm.title ?? baseTitle;
+  const description = fm.description || seo?.description;
+  const keywords = coerceKeywords(fm.keywords) ?? seo?.keywords;
+  const ogTitle = fm.ogTitle || seo?.ogTitle || title;
+  const ogDescription = fm.ogDescription || seo?.ogDescription || description;
+
   return {
-    ...base,
-    description: seo?.description,
-    keywords: seo?.keywords,
-    openGraph: seo ? { title: seo.ogTitle ?? base.title as string, description: seo.ogDescription ?? seo.description } : undefined,
-    twitter: seo ? { card: 'summary_large_image', title: seo.ogTitle ?? base.title as string, description: seo.ogDescription ?? seo.description } : undefined,
+    title,
+    description,
+    keywords,
+    alternates: { canonical: pageUrl },
+    openGraph: (ogTitle || ogDescription)
+      ? { title: ogTitle, description: ogDescription, url: pageUrl }
+      : { url: pageUrl },
+    twitter: (ogTitle || ogDescription) ? { card: 'summary_large_image', title: ogTitle, description: ogDescription } : undefined,
   };
 }
 
@@ -55,25 +124,11 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
     if (fallback) node = fallback;
   }
   if (!node || !node.file) notFound();
-  // Files in the manifest are repo-root relative (e.g., "docs/..." or "crates/...").
-  // Compute a robust set of candidate absolute paths, walking up to detect the repo root.
-  const repoRoot = findRepoRoot(process.cwd());
-  const candidatePaths = Array.from(
-    new Set([
-      join(process.cwd(), node.file),
-      join(process.cwd(), "..", node.file),
-      join(process.cwd(), "..", "..", node.file),
-      repoRoot ? join(repoRoot, node.file) : undefined,
-    ].filter(Boolean) as string[])
-  );
-  let source = "";
-  for (const p of candidatePaths) {
-    try {
-      source = readFileSync(p, "utf-8");
-      break;
-    } catch {}
-  }
-  if (!source) notFound();
+  const parsed = readDocSource(node.file);
+  if (!parsed) notFound();
+  const { body, data } = parsed;
+  const jsonLdObj = isJsonLdObject(data.jsonLd);
+  const jsonLdString = jsonLdObj ? JSON.stringify(jsonLdObj).replace(/<\//g, "<\\/") : undefined;
   const crumbs = findPathBySlug(slug) ?? [];
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-8">
@@ -99,13 +154,19 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
             ))}
         </nav>
         {/* Title is already conveyed by breadcrumbs and in-page H1 within markdown, avoid duplication */}
+        {jsonLdString && (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: jsonLdString }}
+          />
+        )}
         <DocsArticleVisibility>
-          <MarkdownRenderer source={source} />
+          <MarkdownRenderer source={body} />
         </DocsArticleVisibility>
         {/* Client search/results overlay */}
-        <DocsContentSwitch source={source} />
+        <DocsContentSwitch source={body} />
       </article>
-      <HeadingsNav source={source} />
+      <HeadingsNav source={body} />
     </div>
   );
 }
