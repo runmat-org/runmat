@@ -227,14 +227,14 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
-fn str2double_builtin(value: Value) -> Result<Value, String> {
+fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("str2double: {e}"))?;
     match gathered {
         Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
-        Value::StringArray(array) => str2double_string_array(array),
-        Value::CharArray(array) => str2double_char_array(array),
-        Value::Cell(cell) => str2double_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(array) => (str2double_string_array(array)).map_err(Into::into),
+        Value::CharArray(array) => (str2double_char_array(array)).map_err(Into::into),
+        Value::Cell(cell) => (str2double_cell_array(cell)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

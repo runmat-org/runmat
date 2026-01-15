@@ -202,8 +202,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
-fn mpower_builtin(base: Value, exponent: Value) -> Result<Value, String> {
-    mpower_eval(&base, &exponent)
+fn mpower_builtin(base: Value, exponent: Value) -> crate::BuiltinResult<Value> {
+    mpower_eval(&base, &exponent).map_err(Into::into)
 }
 
 pub(crate) fn mpower_eval(base: &Value, exponent: &Value) -> Result<Value, String> {

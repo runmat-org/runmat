@@ -236,7 +236,7 @@ const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer s
     accel = "none",
     builtin_path = "crate::builtins::strings::transform::join"
 )]
-fn join_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn join_builtin(text: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("join: {e}"))?;
     let mut args = Vec::with_capacity(rest.len());
     for arg in rest {
@@ -258,12 +258,12 @@ fn join_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
     };
 
     if dimension == 0 {
-        return Err(DIMENSION_TYPE_ERROR.to_string());
+        return Err(((DIMENSION_TYPE_ERROR.to_string())).into());
     }
 
     let ndims = input.ndims();
     if dimension > ndims {
-        return input.into_value();
+        return (input.into_value()).map_err(Into::into);
     }
 
     let axis_idx = dimension - 1;
@@ -275,7 +275,7 @@ fn join_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     let (output_data, output_shape) = perform_join(&input.data, &full_shape, axis_idx, &delimiter);
 
-    input.build_output(output_data, output_shape)
+    input.build_output(output_data, output_shape).map_err(Into::into)
 }
 
 fn parse_arguments(args: &[Value]) -> Result<(Option<Value>, Option<usize>), String> {

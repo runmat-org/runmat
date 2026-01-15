@@ -218,12 +218,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
-fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
     if let Some(result) = corrcoef_try_gpu(&args)? {
         return Ok(result);
     }
-    corrcoef_host(args)
+    corrcoef_host(args).map_err(Into::into)
 }
 
 /// Exposed for acceleration providers that need the host reference implementation.

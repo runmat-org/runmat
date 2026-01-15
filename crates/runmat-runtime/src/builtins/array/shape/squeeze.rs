@@ -211,8 +211,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
-fn squeeze_builtin(value: Value) -> Result<Value, String> {
-    squeeze_value(value)
+fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    squeeze_value(value).map_err(Into::into)
 }
 
 fn squeeze_value(value: Value) -> Result<Value, String> {

@@ -228,9 +228,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
-fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("logspace: expected two or three input arguments".to_string());
+        return Err((("logspace: expected two or three input arguments".to_string())).into());
     }
 
     let (start_scalar, start_gpu) = parse_scalar("logspace", start)?;
@@ -243,7 +243,7 @@ fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value
 
     let prefer_gpu =
         sequence_gpu_preference(count, SequenceIntent::Logspace, start_gpu || stop_gpu).prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu).map_err(Into::into)
 }
 
 #[derive(Clone, Copy)]

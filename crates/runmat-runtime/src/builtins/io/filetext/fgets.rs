@@ -296,7 +296,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
-fn fgets_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&fid, &rest)?;
     Ok(eval.first_output())
 }

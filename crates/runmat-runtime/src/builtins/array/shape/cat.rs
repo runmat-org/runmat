@@ -358,35 +358,35 @@ fn extract_like(mut inputs: Vec<Value>) -> Result<(Vec<Value>, LikeSpec), String
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::cat"
 )]
-fn cat_builtin(dim: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
-        return Err("cat: at least two input arrays are required".to_string());
+        return Err((("cat: at least two input arrays are required".to_string())).into());
     }
     let dim_index = tensor::parse_dimension(&dim, "cat")?;
     let dim_zero = dim_index - 1;
 
     let (inputs, like) = extract_like(rest)?;
     if inputs.len() < 2 {
-        return Err("cat: at least two input arrays are required".to_string());
+        return Err((("cat: at least two input arrays are required".to_string())).into());
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
         if !inputs.iter().all(|v| matches!(v, Value::GpuTensor(_))) {
             return Err(
-                "cat: cannot mix gpuArray inputs with host arrays; convert them first".to_string(),
+                (("cat: cannot mix gpuArray inputs with host arrays; convert them first".to_string())).into(),
             );
         }
-        return cat_gpu_tensors(dim_zero, inputs, &like);
+        return (cat_gpu_tensors(dim_zero, inputs, &like)).map_err(Into::into);
     }
 
     let category = determine_category(&inputs, &like)?;
     match category {
-        CatCategory::String => cat_string_arrays(dim_zero, inputs),
-        CatCategory::Char => cat_char_arrays(dim_zero, inputs),
-        CatCategory::Cell => cat_cell_arrays(dim_zero, inputs),
-        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, &like),
-        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, &like),
-        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, &like),
+        CatCategory::String => (cat_string_arrays(dim_zero, inputs)).map_err(Into::into),
+        CatCategory::Char => (cat_char_arrays(dim_zero, inputs)).map_err(Into::into),
+        CatCategory::Cell => (cat_cell_arrays(dim_zero, inputs)).map_err(Into::into),
+        CatCategory::Logical => (cat_logical_arrays(dim_zero, inputs, &like)).map_err(Into::into),
+        CatCategory::Complex => (cat_complex_arrays(dim_zero, inputs, &like)).map_err(Into::into),
+        CatCategory::Numeric => (cat_numeric_tensors(dim_zero, inputs, &like)).map_err(Into::into),
     }
 }
 

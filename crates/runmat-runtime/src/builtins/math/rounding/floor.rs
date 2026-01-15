@@ -243,14 +243,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::floor"
 )]
-fn floor_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn floor_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => floor_gpu(handle, &args)?,
-        Value::Complex(re, im) => Value::Complex(
+        Value::Complex(re, im) => (Value::Complex(
             apply_floor_scalar(re, args.strategy),
             apply_floor_scalar(im, args.strategy),
-        ),
+        )).map_err(Into::into),
         Value::ComplexTensor(ct) => floor_complex_tensor(ct, args.strategy)?,
         Value::CharArray(ca) => floor_char_array(ca, args.strategy)?,
         Value::LogicalArray(logical) => {
@@ -259,11 +259,11 @@ fn floor_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             tensor::tensor_into_value(floored)
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err("floor: expected numeric or logical input".to_string())
+            return Err((("floor: expected numeric or logical input".to_string())).into())
         }
         other => floor_numeric(other, args.strategy)?,
     };
-    apply_output_template(base, &args.output)
+    apply_output_template(base, &args.output).map_err(Into::into)
 }
 
 fn floor_numeric(value: Value, strategy: FloorStrategy) -> Result<Value, String> {

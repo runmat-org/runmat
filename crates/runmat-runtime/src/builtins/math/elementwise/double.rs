@@ -244,7 +244,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::double"
 )]
-fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn double_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(n)),
@@ -253,20 +253,20 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::Tensor(tensor) => Ok(Value::Tensor(tensor)),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
-        Value::LogicalArray(array) => double_from_logical(array),
-        Value::CharArray(chars) => double_from_char_array(chars),
-        Value::GpuTensor(handle) => double_from_gpu(handle),
-        Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
-        Value::Cell(_) => Err(conversion_error("cell")),
-        Value::Struct(_) => Err(conversion_error("struct")),
-        Value::Object(obj) => Err(conversion_error(&obj.class_name)),
-        Value::HandleObject(handle) => Err(conversion_error(&handle.class_name)),
-        Value::Listener(_) => Err(conversion_error("event.listener")),
-        Value::FunctionHandle(_) | Value::Closure(_) => Err(conversion_error("function_handle")),
-        Value::ClassRef(_) => Err(conversion_error("meta.class")),
-        Value::MException(_) => Err(conversion_error("MException")),
+        Value::LogicalArray(array) => (double_from_logical(array)).map_err(Into::into),
+        Value::CharArray(chars) => (double_from_char_array(chars)).map_err(Into::into),
+        Value::GpuTensor(handle) => (double_from_gpu(handle)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err(((conversion_error("string"))).into()),
+        Value::Cell(_) => Err(((conversion_error("cell"))).into()),
+        Value::Struct(_) => Err(((conversion_error("struct"))).into()),
+        Value::Object(obj) => Err(((conversion_error(&obj.class_name))).into()),
+        Value::HandleObject(handle) => Err(((conversion_error(&handle.class_name))).into()),
+        Value::Listener(_) => Err(((conversion_error("event.listener"))).into()),
+        Value::FunctionHandle(_) | Value::Closure(_) => Err(((conversion_error("function_handle"))).into()),
+        Value::ClassRef(_) => Err(((conversion_error("meta.class"))).into()),
+        Value::MException(_) => Err(((conversion_error("MException"))).into()),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).map_err(Into::into)
 }
 
 fn double_from_logical(array: LogicalArray) -> Result<Value, String> {

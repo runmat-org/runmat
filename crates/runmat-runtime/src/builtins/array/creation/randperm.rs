@@ -242,9 +242,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
-fn randperm_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandPerm::parse(args)?;
-    build_output(parsed)
+    build_output(parsed).map_err(Into::into)
 }
 
 struct ParsedRandPerm {

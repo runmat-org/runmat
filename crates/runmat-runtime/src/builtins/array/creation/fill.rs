@@ -289,12 +289,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::fill"
 )]
-fn fill_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_value =
         crate::dispatcher::gather_if_needed(&value).map_err(|e| format!("fill: {e}"))?;
     let scalar = FillScalar::from_value(&gathered_value)?;
     let parsed = ParsedFill::parse(scalar, rest)?;
-    build_output(parsed)
+    build_output(parsed).map_err(Into::into)
 }
 
 struct ParsedFill {

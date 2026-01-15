@@ -246,7 +246,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
-fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_path = gather_if_needed(&filename).map_err(|e| format!("dlmwrite: {e}"))?;
     let path = resolve_path(&gathered_path)?;
 

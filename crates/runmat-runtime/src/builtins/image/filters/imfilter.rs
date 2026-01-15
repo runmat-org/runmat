@@ -206,7 +206,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom-imfilter",
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
-fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_imfilter_options(&rest)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {

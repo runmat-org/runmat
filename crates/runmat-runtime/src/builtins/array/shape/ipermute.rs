@@ -220,7 +220,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
-fn ipermute_builtin(value: Value, order: Value) -> Result<Value, String> {
+fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     let order_vec = parse_order_argument(order).map_err(map_perm_error)?;
     let inverse = inverse_permutation(&order_vec);
 
@@ -272,10 +272,10 @@ fn ipermute_builtin(value: Value, order: Value) -> Result<Value, String> {
                 .map_err(map_perm_error)
                 .map(tensor::tensor_into_value)
         }
-        other => Err(format!(
+        other => Err(((format!(
             "ipermute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",
             other
-        )),
+        ))).into()),
     }
 }
 

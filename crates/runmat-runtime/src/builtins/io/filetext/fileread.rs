@@ -213,7 +213,7 @@ impl FileEncoding {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
-fn fileread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("fileread: {e}"))?;
     let gathered_rest = gather_values(&rest)?;
     let encoding = parse_encoding_args(&gathered_rest)?;

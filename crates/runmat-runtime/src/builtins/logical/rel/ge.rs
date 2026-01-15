@@ -240,31 +240,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::rel::ge"
 )]
-fn ge_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     // Prefer device paths when any operand is a GPU tensor
     match (&lhs, &rhs) {
         (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
             if let Some(result) = try_ge_gpu(a, b) {
-                return result;
+                return (result).map_err(Into::into);
             }
         }
         (Value::GpuTensor(ref a), other) => {
             if let Some(handle) = try_fill_like(a, other) {
                 if let Some(result) = try_ge_gpu(a, &handle) {
-                    return result;
+                    return (result).map_err(Into::into);
                 }
             }
         }
         (other, Value::GpuTensor(ref b)) => {
             if let Some(handle) = try_fill_like(b, other) {
                 if let Some(result) = try_ge_gpu(&handle, b) {
-                    return result;
+                    return (result).map_err(Into::into);
                 }
             }
         }
         _ => {}
     }
-    ge_host(lhs, rhs)
+    ge_host(lhs, rhs).map_err(Into::into)
 }
 
 fn try_ge_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, String>> {

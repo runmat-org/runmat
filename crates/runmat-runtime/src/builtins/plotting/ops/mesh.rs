@@ -93,7 +93,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::mesh"
 )]
-pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
@@ -118,7 +118,7 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<
         axis_equal: false,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let x_axis_vec = x_axis.take().expect("mesh data consumed once");
         let y_axis_vec = y_axis.take().expect("mesh data consumed once");
         let z_arg = z_input.take().expect("mesh data consumed once");
@@ -151,7 +151,7 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<
         style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 pub(crate) fn build_mesh_surface(

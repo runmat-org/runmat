@@ -240,9 +240,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
-fn repmat_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err("repmat: replication factors must be specified".to_string());
+        return Err((("repmat: replication factors must be specified".to_string())).into());
     }
     let raw_reps = parse_replication_factors(&rest)?;
     match value {
@@ -293,8 +293,8 @@ fn repmat_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             let tiled = repmat_cell_array(&ca, &raw_reps)?;
             Ok(Value::Cell(tiled))
         }
-        Value::GpuTensor(handle) => repmat_gpu_tensor(handle, &raw_reps),
-        other => Err(format!("repmat: unsupported input type {:?}", other)),
+        Value::GpuTensor(handle) => (repmat_gpu_tensor(handle, &raw_reps)).map_err(Into::into),
+        other => Err(((format!("repmat: unsupported input type {:?}", other))).into()),
     }
 }
 

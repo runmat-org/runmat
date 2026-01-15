@@ -246,11 +246,11 @@ struct ParsedArguments {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::median"
 )]
-fn median_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => median_gpu(handle, &parsed),
-        other => median_host(other, &parsed),
+        Value::GpuTensor(handle) => (median_gpu(handle, &parsed)).map_err(Into::into),
+        other => (median_host(other, &parsed)).map_err(Into::into),
     }
 }
 

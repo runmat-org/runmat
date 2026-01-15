@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::or"
 )]
-fn or_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn or_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_or(a, b) {
@@ -232,7 +232,7 @@ fn or_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             }
         }
     }
-    or_host(lhs, rhs)
+    or_host(lhs, rhs).map_err(Into::into)
 }
 
 fn or_host(lhs: Value, rhs: Value) -> Result<Value, String> {

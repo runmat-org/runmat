@@ -275,15 +275,15 @@ impl PadOptions {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
-fn pad_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn pad_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_arguments(&rest)?;
     let gathered = gather_if_needed(&value).map_err(|e| format!("pad: {e}"))?;
     match gathered {
-        Value::String(text) => pad_string(text, options),
-        Value::StringArray(array) => pad_string_array(array, options),
-        Value::CharArray(array) => pad_char_array(array, options),
-        Value::Cell(cell) => pad_cell_array(cell, options),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::String(text) => (pad_string(text, options)).map_err(Into::into),
+        Value::StringArray(array) => (pad_string_array(array, options)).map_err(Into::into),
+        Value::CharArray(array) => (pad_char_array(array, options)).map_err(Into::into),
+        Value::Cell(cell) => (pad_cell_array(cell, options)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

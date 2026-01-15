@@ -378,17 +378,17 @@ enum NormParse {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::std"
 )]
-fn std_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw = match value {
         Value::GpuTensor(handle) => std_gpu(handle, &parsed)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err("std: complex inputs are not supported yet".to_string())
+            return Err((("std: complex inputs are not supported yet".to_string())).into())
         }
         other => std_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta)
+    apply_output_template(raw, &parsed.output, &input_meta).map_err(Into::into)
 }
 
 fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {

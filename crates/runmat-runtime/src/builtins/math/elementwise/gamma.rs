@@ -247,11 +247,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
-fn gamma_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn gamma_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => gamma_gpu(handle)?,
-        Value::Complex(re, im) => gamma_complex_scalar_value(Complex64::new(re, im)),
+        Value::Complex(re, im) => (gamma_complex_scalar_value(Complex64::new(re, im))).map_err(Into::into),
         Value::ComplexTensor(ct) => gamma_complex_tensor(ct)?,
         Value::CharArray(ca) => gamma_char_array(ca)?,
         Value::LogicalArray(logical) => {
@@ -259,20 +259,20 @@ fn gamma_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             gamma_tensor(tensor).map(tensor::tensor_into_value)?
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err("gamma: expected numeric input".to_string())
+            return Err((("gamma: expected numeric input".to_string())).into())
         }
         Value::Tensor(tensor) => gamma_tensor(tensor).map(tensor::tensor_into_value)?,
-        Value::Num(n) => Value::Num(gamma_real_scalar(n)),
-        Value::Int(i) => Value::Num(gamma_real_scalar(i.to_f64())),
-        Value::Bool(b) => Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 })),
+        Value::Num(n) => (Value::Num(gamma_real_scalar(n))).map_err(Into::into),
+        Value::Int(i) => (Value::Num(gamma_real_scalar(i.to_f64()))).map_err(Into::into),
+        Value::Bool(b) => (Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 }))).map_err(Into::into),
         other => {
-            return Err(format!(
+            return Err(((format!(
                 "gamma: unsupported input type {:?}; expected numeric or gpuArray input",
                 other
-            ));
+            ))).into());
         }
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).map_err(Into::into)
 }
 
 fn gamma_gpu(handle: GpuTensorHandle) -> Result<Value, String> {

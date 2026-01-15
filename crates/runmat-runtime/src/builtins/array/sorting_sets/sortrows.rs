@@ -243,8 +243,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
-fn sortrows_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_sorted_value())
+fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(value, &rest).map(|eval| eval.into_sorted_value()).map_err(Into::into)
 }
 
 /// Evaluate `sortrows`, returning both sorted values and permutation indices.

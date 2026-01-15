@@ -266,9 +266,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
-fn meshgrid_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&rest)?;
-    eval.first()
+    eval.first().map_err(Into::into)
 }
 
 /// Evaluate the `meshgrid` builtin once and reuse the result for multiple outputs.

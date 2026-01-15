@@ -231,7 +231,7 @@ pub fn evaluate(
     accel = "sink",
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
-fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let evaluation = evaluate(subject, pattern, &rest)?;
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
@@ -241,7 +241,7 @@ fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<V
         Ok(outputs.remove(0))
     } else {
         let len = outputs.len();
-        make_cell(outputs, 1, len)
+        make_cell(outputs, 1, len).map_err(Into::into)
     }
 }
 

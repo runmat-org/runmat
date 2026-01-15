@@ -196,14 +196,14 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
-fn strlength_builtin(value: Value) -> Result<Value, String> {
+fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strlength: {e}"))?;
     match gathered {
-        Value::StringArray(array) => strlength_string_array(array),
+        Value::StringArray(array) => (strlength_string_array(array)).map_err(Into::into),
         Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
-        Value::CharArray(array) => strlength_char_array(array),
-        Value::Cell(cell) => strlength_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::CharArray(array) => (strlength_char_array(array)).map_err(Into::into),
+        Value::Cell(cell) => (strlength_cell_array(cell)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

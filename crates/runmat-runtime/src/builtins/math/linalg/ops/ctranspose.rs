@@ -229,21 +229,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "transpose",
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
-fn ctranspose_builtin(value: Value) -> Result<Value, String> {
+fn ctranspose_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => ctranspose_gpu(handle),
-        Value::Complex(re, im) => ctranspose_complex_scalar(re, im),
-        Value::ComplexTensor(ct) => ctranspose_complex_tensor(ct),
-        Value::Tensor(t) => ctranspose_tensor(t).map(tensor::tensor_into_value),
-        Value::LogicalArray(la) => ctranspose_logical_array(la).map(Value::LogicalArray),
-        Value::CharArray(ca) => ctranspose_char_array(ca).map(Value::CharArray),
-        Value::StringArray(sa) => ctranspose_string_array(sa).map(Value::StringArray),
-        Value::Cell(ca) => ctranspose_cell_array(ca).map(Value::Cell),
+        Value::GpuTensor(handle) => (ctranspose_gpu(handle)).map_err(Into::into),
+        Value::Complex(re, im) => (ctranspose_complex_scalar(re, im)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (ctranspose_complex_tensor(ct)).map_err(Into::into),
+        Value::Tensor(t) => (ctranspose_tensor(t).map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(la) => (ctranspose_logical_array(la).map(Value::LogicalArray)).map_err(Into::into),
+        Value::CharArray(ca) => (ctranspose_char_array(ca).map(Value::CharArray)).map_err(Into::into),
+        Value::StringArray(sa) => (ctranspose_string_array(sa).map(Value::StringArray)).map_err(Into::into),
+        Value::Cell(ca) => (ctranspose_cell_array(ca).map(Value::Cell)).map_err(Into::into),
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
         Value::String(s) => Ok(Value::String(s)),
-        other => Err(format!("ctranspose: unsupported input type {other:?}")),
+        other => Err(((format!("ctranspose: unsupported input type {other:?}"))).into()),
     }
 }
 

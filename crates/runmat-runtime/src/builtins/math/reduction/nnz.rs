@@ -241,11 +241,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
-fn nnz_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn nnz_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let dim = parse_dimension_arg(&rest)?;
     match value {
-        Value::GpuTensor(handle) => nnz_gpu(handle, dim),
-        other => nnz_host_value(other, dim),
+        Value::GpuTensor(handle) => (nnz_gpu(handle, dim)).map_err(Into::into),
+        other => (nnz_host_value(other, dim)).map_err(Into::into),
     }
 }
 

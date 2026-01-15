@@ -234,8 +234,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
-fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(a, b, &rest).map(|eval| eval.into_values_value())
+fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(a, b, &rest).map(|eval| eval.into_values_value()).map_err(Into::into)
 }
 
 /// Evaluate the `intersect` builtin once and expose all outputs.

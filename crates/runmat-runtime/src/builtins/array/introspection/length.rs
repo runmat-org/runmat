@@ -204,7 +204,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::length"
 )]
-fn length_builtin(value: Value) -> Result<Value, String> {
+fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if let Some(count) = map_length(&value) {
         return Ok(Value::Num(count as f64));
     }

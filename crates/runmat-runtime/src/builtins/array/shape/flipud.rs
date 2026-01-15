@@ -229,17 +229,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::flipud"
 )]
-fn flipud_builtin(value: Value) -> Result<Value, String> {
+fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => flip_tensor(tensor, &UD_DIM)
+        Value::Tensor(tensor) => (flip_tensor(tensor, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
-            .map(tensor::tensor_into_value),
-        Value::LogicalArray(array) => flip_logical_array(array, &UD_DIM)
+            .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(array) => (flip_logical_array(array, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::LogicalArray),
-        Value::ComplexTensor(ct) => flip_complex_tensor(ct, &UD_DIM)
+            .map(Value::LogicalArray)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (flip_complex_tensor(ct, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::ComplexTensor),
+            .map(Value::ComplexTensor)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("flipud: {e}"))?;
@@ -247,14 +247,14 @@ fn flipud_builtin(value: Value) -> Result<Value, String> {
                 .map_err(|e| e.replace("flip", "flipud"))
                 .map(complex_tensor_into_value)
         }
-        Value::StringArray(strings) => flip_string_array(strings, &UD_DIM)
+        Value::StringArray(strings) => (flip_string_array(strings, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::StringArray),
-        Value::CharArray(chars) => flip_char_array(chars, &UD_DIM)
+            .map(Value::StringArray)).map_err(Into::into),
+        Value::CharArray(chars) => (flip_char_array(chars, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::CharArray),
+            .map(Value::CharArray)).map_err(Into::into),
         Value::String(scalar) => Ok(Value::String(scalar)),
-        Value::Cell(cell) => flip_cell_array_rows(cell),
+        Value::Cell(cell) => (flip_cell_array_rows(cell)).map_err(Into::into),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))?;
             flip_tensor(tensor, &UD_DIM)
@@ -283,7 +283,7 @@ fn flipud_builtin(value: Value) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("flipud: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("flipud: unsupported input type".to_string())).into()),
     }
 }
 

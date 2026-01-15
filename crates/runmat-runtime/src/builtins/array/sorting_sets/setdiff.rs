@@ -229,8 +229,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::setdiff"
 )]
-fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(a, b, &rest).map(|eval| eval.into_values_value())
+fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(a, b, &rest).map(|eval| eval.into_values_value()).map_err(Into::into)
 }
 
 /// Evaluate `setdiff` once and expose all outputs to the caller.

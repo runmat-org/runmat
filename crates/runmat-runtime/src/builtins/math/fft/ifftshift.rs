@@ -217,9 +217,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::fft::ifftshift"
 )]
-fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("ifftshift: too many input arguments".to_string());
+        return Err((("ifftshift: too many input arguments".to_string())).into());
     }
     let dims_arg = rest.first();
 
@@ -259,7 +259,7 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             ifftshift_gpu(handle, &dims)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err("ifftshift: expected numeric or logical input".to_string())
+            Err((("ifftshift: expected numeric or logical input".to_string())).into())
         }
         Value::Struct(_)
         | Value::Object(_)
@@ -268,7 +268,7 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("ifftshift: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("ifftshift: unsupported input type".to_string())).into()),
     }
 }
 

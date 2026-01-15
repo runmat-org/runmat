@@ -241,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
-fn issorted_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input = normalize_input(value)?;
     let shape = input.shape();
     let args = IssortedArgs::parse(&rest, &shape)?;

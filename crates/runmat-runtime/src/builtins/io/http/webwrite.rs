@@ -220,17 +220,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
-fn webwrite_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_url = gather_if_needed(&url).map_err(|e| format!("webwrite: {e}"))?;
     let url_text = expect_string_scalar(
         &gathered_url,
         "webwrite: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
-        return Err("webwrite: URL must not be empty".to_string());
+        return Err((("webwrite: URL must not be empty".to_string())).into());
     }
     if rest.is_empty() {
-        return Err("webwrite: missing data argument".to_string());
+        return Err((("webwrite: missing data argument".to_string())).into());
     }
 
     let mut gathered = Vec::with_capacity(rest.len());
@@ -244,7 +244,7 @@ fn webwrite_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     let (options, query_params) = parse_arguments(queue)?;
     let body = prepare_request_body(data_value, &options)?;
-    execute_request(&url_text, options, &query_params, body)
+    execute_request(&url_text, options, &query_params, body).map_err(Into::into)
 }
 
 fn parse_arguments(

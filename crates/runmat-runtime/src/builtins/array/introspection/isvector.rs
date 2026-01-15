@@ -247,7 +247,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
-fn isvector_builtin(value: Value) -> Result<Value, String> {
+fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_vector(&value)))
 }
 

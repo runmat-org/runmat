@@ -249,10 +249,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
-fn chol_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest)?;
     if !eval.is_positive_definite() {
-        return Err("Matrix must be positive definite.".to_string());
+        return Err((("Matrix must be positive definite.".to_string())).into());
     }
     Ok(eval.factor())
 }

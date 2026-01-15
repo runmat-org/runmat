@@ -208,10 +208,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cond",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
-fn cond_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cond_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let norm = parse_norm_argument(&rest)?;
     let result = match value {
-        Value::GpuTensor(handle) => return cond_gpu(handle, norm),
+        Value::GpuTensor(handle) => return (cond_gpu(handle, norm)).map_err(Into::into),
         Value::ComplexTensor(matrix) => cond_complex_tensor(&matrix, norm)?,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])

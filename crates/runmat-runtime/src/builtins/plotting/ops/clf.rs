@@ -17,7 +17,7 @@ use super::state::{clear_figure, figure_handles, FigureHandle};
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::clf"
 )]
-pub fn clf_builtin(rest: Vec<Value>) -> Result<String, String> {
+pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let (action, _reset) = parse_clf_action(&rest)?;
     match action {
         ClfAction::Current => {

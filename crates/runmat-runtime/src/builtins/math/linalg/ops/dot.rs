@@ -213,9 +213,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
-fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("dot: too many input arguments".to_string());
+        return Err((("dot: too many input arguments".to_string())).into());
     }
     let dim = rest
         .first()

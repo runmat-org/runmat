@@ -204,13 +204,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
-fn genpath_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(args)?;
     match gathered.len() {
-        0 => generate_from_current_directory(),
-        1 => generate_from_root(&gathered[0], None),
-        2 => generate_from_root(&gathered[0], Some(&gathered[1])),
-        _ => Err("genpath: too many input arguments".to_string()),
+        0 => (generate_from_current_directory()).map_err(Into::into),
+        1 => (generate_from_root(&gathered[0], None)).map_err(Into::into),
+        2 => (generate_from_root(&gathered[0], Some(&gathered[1]))).map_err(Into::into),
+        _ => Err((("genpath: too many input arguments".to_string())).into()),
     }
 }
 

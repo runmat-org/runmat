@@ -211,7 +211,7 @@ fn regexprep_builtin(
     pattern: Value,
     replacement: Value,
     rest: Vec<Value>,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let subject = gather_if_needed(&subject).map_err(|e| format!("regexprep: {e}"))?;
     let pattern = gather_if_needed(&pattern).map_err(|e| format!("regexprep: {e}"))?;
     let replacement = gather_if_needed(&replacement).map_err(|e| format!("regexprep: {e}"))?;
@@ -233,7 +233,7 @@ fn regexprep_builtin(
         results.push(current);
     }
 
-    reconstruct_output(&subjects, results)
+    reconstruct_output(&subjects, results).map_err(Into::into)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

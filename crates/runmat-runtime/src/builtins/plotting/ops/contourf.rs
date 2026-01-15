@@ -64,7 +64,7 @@ behaviour (10).
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::contourf"
 )]
-pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mut args = Some(parse_contour_args("contourf", first, rest)?);
     let opts = PlotRenderOptions {
         title: "Filled Contour Plot",
@@ -73,7 +73,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
         axis_equal: true,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let ContourArgs {
             name,
             x_axis,
@@ -139,7 +139,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String
             }
         }
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 #[cfg(test)]

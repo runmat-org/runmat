@@ -207,7 +207,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
-fn argsort_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let evaluation = sort::evaluate(value, &rest)?;
     Ok(evaluation.indices_value())
 }

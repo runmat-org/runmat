@@ -255,32 +255,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
-fn single_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn single_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let converted = match value {
         Value::Num(n) => Ok(Value::Num(cast_f64_to_single(n))),
         Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) => single_from_tensor(tensor),
+        Value::Tensor(tensor) => (single_from_tensor(tensor)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Complex(
             cast_f64_to_single(re),
             cast_f64_to_single(im),
         )),
-        Value::ComplexTensor(tensor) => single_from_complex_tensor(tensor),
-        Value::LogicalArray(array) => single_from_logical_array(array),
-        Value::CharArray(chars) => single_from_char_array(chars),
-        Value::GpuTensor(handle) => single_from_gpu(handle),
-        Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
-        Value::Cell(_) => Err(conversion_error("cell")),
-        Value::Struct(_) => Err(conversion_error("struct")),
-        Value::Object(obj) => Err(conversion_error(&obj.class_name)),
-        Value::HandleObject(handle) => Err(conversion_error(&handle.class_name)),
-        Value::Listener(_) => Err(conversion_error("event.listener")),
-        Value::FunctionHandle(_) | Value::Closure(_) => Err(conversion_error("function_handle")),
-        Value::ClassRef(_) => Err(conversion_error("meta.class")),
-        Value::MException(_) => Err(conversion_error("MException")),
+        Value::ComplexTensor(tensor) => (single_from_complex_tensor(tensor)).map_err(Into::into),
+        Value::LogicalArray(array) => (single_from_logical_array(array)).map_err(Into::into),
+        Value::CharArray(chars) => (single_from_char_array(chars)).map_err(Into::into),
+        Value::GpuTensor(handle) => (single_from_gpu(handle)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err(((conversion_error("string"))).into()),
+        Value::Cell(_) => Err(((conversion_error("cell"))).into()),
+        Value::Struct(_) => Err(((conversion_error("struct"))).into()),
+        Value::Object(obj) => Err(((conversion_error(&obj.class_name))).into()),
+        Value::HandleObject(handle) => Err(((conversion_error(&handle.class_name))).into()),
+        Value::Listener(_) => Err(((conversion_error("event.listener"))).into()),
+        Value::FunctionHandle(_) | Value::Closure(_) => Err(((conversion_error("function_handle"))).into()),
+        Value::ClassRef(_) => Err(((conversion_error("meta.class"))).into()),
+        Value::MException(_) => Err(((conversion_error("MException"))).into()),
     }?;
-    apply_output_template(converted, &template)
+    apply_output_template(converted, &template).map_err(Into::into)
 }
 
 fn single_from_tensor(tensor: Tensor) -> Result<Value, String> {

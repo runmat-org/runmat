@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "getfield,struct,object,field access",
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
-fn getfield_builtin(base: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
 
     let mut current = base;

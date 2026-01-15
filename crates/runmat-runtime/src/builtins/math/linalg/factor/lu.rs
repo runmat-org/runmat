@@ -243,7 +243,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-fn lu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest)?;
     Ok(eval.combined())
 }

@@ -226,22 +226,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "readline,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::readline"
 )]
-fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INVALID_ARGUMENTS,
             "readline: expected only the tcpclient argument",
-        ));
+        ))).into());
     }
 
     let client = gather_if_needed(&client)?;
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_INVALID_CLIENT,
                 "readline: expected tcpclient struct as first argument",
-            ))
+            ))).into())
         }
     };
 
@@ -256,10 +256,10 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (mut stream, timeout, mut buffer) = {
         let mut guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_NOT_CONNECTED,
                 "readline: tcpclient is disconnected",
-            ));
+            ))).into());
         }
         let stream = guard.stream.try_clone().map_err(|err| {
             runtime_error(
@@ -276,10 +276,10 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
         if let Ok(mut guard) = handle.lock() {
             guard.readline_buffer = buffer;
         }
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INTERNAL,
             format!("readline: unable to configure socket timeout ({err})"),
-        ));
+        ))).into());
     }
 
     let outcome = match read_line(&mut stream, &mut buffer) {
@@ -288,10 +288,10 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
             if let Ok(mut guard) = handle.lock() {
                 guard.readline_buffer = buffer;
             }
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_INTERNAL,
                 format!("readline: socket error ({err})"),
-            ));
+            ))).into());
         }
     };
 
@@ -304,9 +304,9 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 
     let value = match outcome {
-        LineReadResult::Complete(bytes) => value_from_bytes(bytes),
-        LineReadResult::Timeout => empty_double_matrix(),
-        LineReadResult::Closed(bytes) => value_from_bytes(bytes),
+        LineReadResult::Complete(bytes) => (value_from_bytes(bytes)).map_err(Into::into),
+        LineReadResult::Timeout => (empty_double_matrix()).map_err(Into::into),
+        LineReadResult::Closed(bytes) => (value_from_bytes(bytes)).map_err(Into::into),
     };
 
     Ok(value)

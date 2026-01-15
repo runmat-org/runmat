@@ -183,12 +183,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::cd"
 )]
-fn cd_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args)?;
     match gathered.len() {
-        0 => current_directory_value(),
-        1 => change_directory(&gathered[0]),
-        _ => Err("cd: too many input arguments".to_string()),
+        0 => (current_directory_value()).map_err(Into::into),
+        1 => (change_directory(&gathered[0])).map_err(Into::into),
+        _ => Err((("cd: too many input arguments".to_string())).into()),
     }
 }
 

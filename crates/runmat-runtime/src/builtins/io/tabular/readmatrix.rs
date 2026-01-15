@@ -238,13 +238,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
-fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let path_value = gather_if_needed(&path).map_err(|e| format!("readmatrix: {e}"))?;
     let options = parse_options(&rest)?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
     let tensor = read_numeric_matrix(&resolved, &options)?;
-    finalize_output(tensor, &options)
+    finalize_output(tensor, &options).map_err(Into::into)
 }
 
 fn parse_options(args: &[Value]) -> Result<ReadMatrixOptions, String> {

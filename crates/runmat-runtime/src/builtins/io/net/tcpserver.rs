@@ -317,7 +317,7 @@ pub(crate) fn tcpserver_builtin(
     address: Value,
     port: Value,
     rest: Vec<Value>,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let address = gather_if_needed(&address)?;
     let port = gather_if_needed(&port)?;
 

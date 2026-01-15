@@ -221,7 +221,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::compose"
 )]
-fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let format_value = gather_if_needed(&format_spec).map_err(|e| format!("compose: {e}"))?;
     let mut gathered_args = Vec::with_capacity(rest.len());
     for arg in rest {

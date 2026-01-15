@@ -232,12 +232,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
-fn cov_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cov_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
     if let Some(result) = cov_try_gpu(&args)? {
         return Ok(result);
     }
-    cov_host(args)
+    cov_host(args).map_err(Into::into)
 }
 
 /// Public entry point for providers that need the reference implementation.

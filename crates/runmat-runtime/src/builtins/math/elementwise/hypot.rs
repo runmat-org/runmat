@@ -229,9 +229,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
-fn hypot_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn hypot_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => hypot_gpu_pair(a, b),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => (hypot_gpu_pair(a, b)).map_err(Into::into),
         (Value::GpuTensor(a), other) => {
             let gathered = gpu_helpers::gather_tensor(&a)?;
             hypot_host(Value::Tensor(gathered), other)
@@ -240,7 +240,7 @@ fn hypot_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             let gathered = gpu_helpers::gather_tensor(&b)?;
             hypot_host(other, Value::Tensor(gathered))
         }
-        (left, right) => hypot_host(left, right),
+        (left, right) => (hypot_host(left, right)).map_err(Into::into),
     }
 }
 

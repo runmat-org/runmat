@@ -199,10 +199,10 @@ enum CumsumNanMode {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cumsum"
 )]
-fn cumsum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cumsum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => cumsum_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => (cumsum_gpu(handle, dim, direction, nan_mode)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("cumsum: {e}"))?;
@@ -215,7 +215,7 @@ fn cumsum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             let result = cumsum_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
         }
-        other => cumsum_host(other, dim, direction, nan_mode),
+        other => (cumsum_host(other, dim, direction, nan_mode)).map_err(Into::into),
     }
 }
 

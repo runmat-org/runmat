@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
-fn ismatrix_builtin(value: Value) -> Result<Value, String> {
+fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_matrix(&value)))
 }
 

@@ -234,9 +234,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
-fn rem_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn rem_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => (rem_gpu_pair(a, b)).map_err(Into::into),
         (Value::GpuTensor(a), other) => {
             let gathered = gpu_helpers::gather_tensor(&a)?;
             rem_host(Value::Tensor(gathered), other)
@@ -245,7 +245,7 @@ fn rem_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             let gathered = gpu_helpers::gather_tensor(&b)?;
             rem_host(other, Value::Tensor(gathered))
         }
-        (left, right) => rem_host(left, right),
+        (left, right) => (rem_host(left, right)).map_err(Into::into),
     }
 }
 

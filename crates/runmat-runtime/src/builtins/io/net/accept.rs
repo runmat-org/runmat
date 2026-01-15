@@ -364,7 +364,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "accept,tcpserver,tcpclient",
     builtin_path = "crate::builtins::io::net::accept"
 )]
-pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, String> {
+pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let server = gather_if_needed(&server)?;
     let server_id = extract_server_id(&server)?;
 
@@ -375,11 +375,12 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, S
             MESSAGE_ID_INVALID_SERVER,
             "accept: tcpserver handle is no longer valid".to_string(),
         )
+        .into()
     })?;
 
     let server_guard = shared_server
         .lock()
-        .map_err(|_| runtime_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned".into()))?;
+        .map_err(|_| runtime_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned").into())?;
 
     let timeout = options.timeout.unwrap_or(server_guard.timeout);
     validate_timeout(timeout)?;
@@ -388,10 +389,13 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, S
         Ok((stream, peer_addr)) => {
             if let Err(err) = configure_stream(&stream, timeout) {
                 drop(server_guard);
-                return Err(runtime_error(
-                    MESSAGE_ID_INTERNAL,
-                    format!("accept: failed to configure stream timeouts ({err})"),
-                ));
+                return Err(
+                    runtime_error(
+                        MESSAGE_ID_INTERNAL,
+                        format!("accept: failed to configure stream timeouts ({err})"),
+                    )
+                    .into(),
+                );
             }
             let byte_order = server_guard.byte_order.clone();
             let client_id = insert_client(
@@ -408,7 +412,7 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, S
         }
         Err(err) => {
             drop(server_guard);
-            Err(match err.kind() {
+            let message = match err.kind() {
                 ErrorKind::WouldBlock => runtime_error(
                     MESSAGE_ID_TIMEOUT,
                     format!(
@@ -420,7 +424,8 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> Result<Value, S
                     MESSAGE_ID_ACCEPT_FAILED,
                     format!("accept: failed to accept client ({err})"),
                 ),
-            })
+            };
+            Err(message.into())
         }
     }
 }

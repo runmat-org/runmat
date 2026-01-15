@@ -256,7 +256,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
-fn csvread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("csvread: {e}"))?;
     let options = parse_arguments(&rest)?;
     let resolved = resolve_path(&gathered_path)?;

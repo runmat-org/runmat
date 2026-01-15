@@ -208,7 +208,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
-fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn sin_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => sin_gpu(handle)?,
@@ -216,11 +216,11 @@ fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(ct) => sin_complex_tensor(ct)?,
         Value::CharArray(ca) => sin_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err("sin: expected numeric input".to_string())
+            return Err((("sin: expected numeric input".to_string())).into())
         }
         other => sin_real(other)?,
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).map_err(Into::into)
 }
 
 fn sin_gpu(handle: GpuTensorHandle) -> Result<Value, String> {

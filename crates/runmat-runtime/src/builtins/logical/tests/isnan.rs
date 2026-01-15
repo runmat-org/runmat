@@ -218,13 +218,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
-fn isnan_builtin(value: Value) -> Result<Value, String> {
+fn isnan_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             isnan_tensor("isnan", tensor)
         }
-        other => isnan_host(other),
+        other => (isnan_host(other)).map_err(Into::into),
     }
 }
 

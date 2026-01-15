@@ -14,7 +14,7 @@ use super::style::value_as_string;
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::gca"
 )]
-pub fn gca_builtin(rest: Vec<Value>) -> Result<Value, String> {
+pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let state = current_axes_state();
     if rest.is_empty() {
         return Ok(Value::Num(encode_axes_handle(
@@ -31,7 +31,7 @@ pub fn gca_builtin(rest: Vec<Value>) -> Result<Value, String> {
         }
     }
 
-    Err("gca: unsupported arguments (pass no inputs or 'struct')".to_string())
+    Err((("gca: unsupported arguments (pass no inputs or 'struct')".to_string())).into())
 }
 
 fn axes_struct_response(state: FigureAxesState) -> Value {

@@ -211,10 +211,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "inv",
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
-fn inv_builtin(value: Value) -> Result<Value, String> {
+fn inv_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => inv_gpu(handle),
-        Value::ComplexTensor(tensor) => inv_complex_value(tensor),
+        Value::GpuTensor(handle) => (inv_gpu(handle)).map_err(Into::into),
+        Value::ComplexTensor(tensor) => (inv_complex_value(tensor)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("{NAME}: {e}"))?;

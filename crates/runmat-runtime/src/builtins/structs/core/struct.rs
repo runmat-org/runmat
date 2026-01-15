@@ -196,20 +196,20 @@ enum FieldValue {
     keywords = "struct,structure,name-value,record",
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
-fn struct_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn struct_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match rest.len() {
         0 => Ok(Value::Struct(StructValue::new())),
         1 => match rest.into_iter().next().unwrap() {
             Value::Struct(existing) => Ok(Value::Struct(existing.clone())),
-            Value::Cell(cell) => clone_struct_array(&cell),
-            Value::Tensor(tensor) if tensor.data.is_empty() => empty_struct_array(),
-            Value::LogicalArray(logical) if logical.data.is_empty() => empty_struct_array(),
-            other => Err(format!(
+            Value::Cell(cell) => (clone_struct_array(&cell)).map_err(Into::into),
+            Value::Tensor(tensor) if tensor.data.is_empty() => (empty_struct_array()).map_err(Into::into),
+            Value::LogicalArray(logical) if logical.data.is_empty() => (empty_struct_array()).map_err(Into::into),
+            other => Err(((format!(
                 "struct: expected name/value pairs, an existing struct or struct array, or [] to create an empty struct array (got {other:?})"
-            )),
+            ))).into()),
         },
-        len if len % 2 == 0 => build_from_pairs(rest),
-        _ => Err("struct: expected name/value pairs".to_string()),
+        len if len % 2 == 0 => (build_from_pairs(rest)).map_err(Into::into),
+        _ => Err((("struct: expected name/value pairs".to_string())).into()),
     }
 }
 

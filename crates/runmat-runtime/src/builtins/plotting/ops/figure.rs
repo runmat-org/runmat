@@ -59,7 +59,7 @@ fn parse_string_handle(text: &str) -> Result<Option<FigureHandle>, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::figure"
 )]
-pub fn figure_builtin(rest: Vec<Value>) -> Result<f64, String> {
+pub fn figure_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle = if rest.is_empty() {
         new_figure_handle()
     } else {

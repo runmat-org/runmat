@@ -183,7 +183,7 @@ Expected behavior:
   function named `pathdef` that returns the exact character vector stored by
   the `path` builtin, so MathWorks MATLAB and RunMat can both execute it.
 - **How do I restore the path later?** Evaluate the generated `pathdef.m`
-  (for example by calling `run('~/pathdef.m')`) and pass the returned value to
+  for example by calling `run('~/pathdef.m')`) and pass the returned value to
   `path()`. Future RunMat releases will load the default file automatically.
 - **Can I store multiple path definitions?** Absolutely. Call `savepath` with
   different filenames for each profile, then run the desired file to switch.
@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
-fn savepath_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args)?;
     Ok(eval.first_output())
 }

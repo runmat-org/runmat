@@ -196,13 +196,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isfield,struct,field existence",
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
-fn isfield_builtin(target: Value, names: Value) -> Result<Value, String> {
+fn isfield_builtin(target: Value, names: Value) -> crate::BuiltinResult<Value> {
     let context = classify_struct(&target)?;
     let parsed = parse_field_names(names)?;
     match context {
-        StructContext::Struct(struct_value) => evaluate_scalar(struct_value, parsed),
-        StructContext::StructArray(cell) => evaluate_struct_array(cell, parsed),
-        StructContext::NonStruct => evaluate_non_struct(parsed),
+        StructContext::Struct(struct_value) => (evaluate_scalar(struct_value, parsed)).map_err(Into::into),
+        StructContext::StructArray(cell) => (evaluate_struct_array(cell, parsed)).map_err(Into::into),
+        StructContext::NonStruct => (evaluate_non_struct(parsed)).map_err(Into::into),
     }
 }
 

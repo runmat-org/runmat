@@ -216,9 +216,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
-fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("linspace: expected at most three input arguments".to_string());
+        return Err((("linspace: expected at most three input arguments".to_string())).into());
     }
 
     let (start_scalar, start_gpu) = parse_scalar("linspace", start)?;
@@ -240,7 +240,7 @@ fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value
         );
     }
     let prefer_gpu = residency.prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu).map_err(Into::into)
 }
 
 #[derive(Clone, Copy)]

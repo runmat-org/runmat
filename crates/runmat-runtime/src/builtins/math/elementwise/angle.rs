@@ -231,16 +231,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
-fn angle_builtin(value: Value) -> Result<Value, String> {
+fn angle_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => angle_gpu(handle),
+        Value::GpuTensor(handle) => (angle_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
-        Value::ComplexTensor(ct) => angle_complex_tensor(ct),
-        Value::CharArray(ca) => angle_char_array(ca),
+        Value::ComplexTensor(ct) => (angle_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (angle_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("angle: expected numeric input".to_string())
+            Err((("angle: expected numeric input".to_string())).into())
         }
-        other => angle_real(other),
+        other => (angle_real(other)).map_err(Into::into),
     }
 }
 

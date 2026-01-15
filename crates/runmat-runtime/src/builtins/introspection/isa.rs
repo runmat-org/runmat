@@ -242,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::introspection::isa"
 )]
-fn isa_builtin(value: Value, class_designator: Value) -> Result<Value, String> {
+fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
     let type_name = parse_type_name(&class_designator)?;
     let result = value_is_a(&value, &type_name);
     Ok(Value::Bool(result))

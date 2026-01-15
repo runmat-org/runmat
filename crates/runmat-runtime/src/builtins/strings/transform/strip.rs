@@ -295,14 +295,14 @@ impl PatternSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
-fn strip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn strip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strip: {e}"))?;
     match gathered {
-        Value::String(text) => strip_string(text, &rest),
-        Value::StringArray(array) => strip_string_array(array, &rest),
-        Value::CharArray(array) => strip_char_array(array, &rest),
-        Value::Cell(cell) => strip_cell_array(cell, &rest),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::String(text) => (strip_string(text, &rest)).map_err(Into::into),
+        Value::StringArray(array) => (strip_string_array(array, &rest)).map_err(Into::into),
+        Value::CharArray(array) => (strip_char_array(array, &rest)).map_err(Into::into),
+        Value::Cell(cell) => (strip_cell_array(cell, &rest)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

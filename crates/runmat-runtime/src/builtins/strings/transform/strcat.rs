@@ -423,9 +423,9 @@ fn cell_element_to_text(value: &Value) -> Result<TextElement, String> {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
-fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn strcat_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(ERROR_NOT_ENOUGH_INPUTS.to_string());
+        return Err(((ERROR_NOT_ENOUGH_INPUTS.to_string())).into());
     }
 
     let mut operands = Vec::with_capacity(rest.len());
@@ -461,16 +461,17 @@ fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
             }
             buffer.push_str(&element.text);
         }
-        match output_kind {
-            OutputKind::String if any_missing => concatenated.push(String::from("<missing>")),
-            _ => concatenated.push(buffer),
+        if matches!(output_kind, OutputKind::String) && any_missing {
+            concatenated.push(String::from("<missing>"));
+        } else {
+            concatenated.push(buffer);
         }
     }
 
     match output_kind {
-        OutputKind::String => build_string_output(concatenated, &output_shape),
-        OutputKind::Cell => build_cell_output(concatenated, &output_shape),
-        OutputKind::Char => build_char_output(concatenated),
+        OutputKind::String => (build_string_output(concatenated, &output_shape)).map_err(Into::into),
+        OutputKind::Cell => (build_cell_output(concatenated, &output_shape)).map_err(Into::into),
+        OutputKind::Char => (build_char_output(concatenated)).map_err(Into::into),
     }
 }
 

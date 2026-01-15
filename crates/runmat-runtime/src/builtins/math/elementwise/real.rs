@@ -217,22 +217,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
-fn real_builtin(value: Value) -> Result<Value, String> {
+fn real_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => real_gpu(handle),
+        Value::GpuTensor(handle) => (real_gpu(handle)).map_err(Into::into),
         Value::Complex(re, _) => Ok(Value::Num(re)),
-        Value::ComplexTensor(ct) => real_complex_tensor(ct),
-        Value::CharArray(ca) => real_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("real: expected numeric input".to_string()),
+        Value::ComplexTensor(ct) => (real_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (real_char_array(ca)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err((("real: expected numeric input".to_string())).into()),
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
-        | Value::Bool(_)) => real_real(x),
-        other => Err(format!(
+        | Value::Bool(_)) => (real_real(x)).map_err(Into::into),
+        other => Err(((format!(
             "real: unsupported input type {:?}; expected numeric, logical, or char input",
             other
-        )),
+        ))).into()),
     }
 }
 

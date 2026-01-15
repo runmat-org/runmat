@@ -197,7 +197,7 @@ pub(crate) fn tcpclient_builtin(
     host: Value,
     port: Value,
     rest: Vec<Value>,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let host = gather_if_needed(&host)?;
     let port = gather_if_needed(&port)?;
 
@@ -225,10 +225,10 @@ pub(crate) fn tcpclient_builtin(
         })?;
 
     if let Err(err) = configure_stream(&stream, options.timeout) {
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INTERNAL,
             format!("tcpclient: failed to configure stream timeouts ({err})"),
-        ));
+        ))).into());
     }
 
     let peer_addr = stream.peer_addr().map_err(|err| {

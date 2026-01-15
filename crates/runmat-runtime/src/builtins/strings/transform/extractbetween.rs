@@ -258,7 +258,7 @@ fn extract_between_builtin(
     start: Value,
     stop: Value,
     rest: Vec<Value>,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("{FN_NAME}: {e}"))?;
     let start = gather_if_needed(&start).map_err(|e| format!("{FN_NAME}: {e}"))?;
     let stop = gather_if_needed(&stop).map_err(|e| format!("{FN_NAME}: {e}"))?;
@@ -270,7 +270,7 @@ fn extract_between_builtin(
     let stop_boundary = BoundaryArg::from_value(stop)?;
 
     if start_boundary.kind() != stop_boundary.kind() {
-        return Err(BOUNDARY_TYPE_ERROR.to_string());
+        return Err(((BOUNDARY_TYPE_ERROR.to_string())).into());
     }
     let boundary_kind = start_boundary.kind();
     let effective_mode = mode_override.unwrap_or(match boundary_kind {
@@ -285,12 +285,12 @@ fn extract_between_builtin(
     let shape_ts = broadcast_shapes(FN_NAME, text_shape, start_shape)?;
     let output_shape = broadcast_shapes(FN_NAME, &shape_ts, stop_shape)?;
     if !normalized_text.supports_shape(&output_shape) {
-        return Err(SIZE_MISMATCH_ERROR.to_string());
+        return Err(((SIZE_MISMATCH_ERROR.to_string())).into());
     }
 
     let total: usize = output_shape.iter().copied().product();
     if total == 0 {
-        return normalized_text.into_value(Vec::new(), output_shape);
+        return (normalized_text.into_value(Vec::new(), output_shape)).map_err(Into::into);
     }
 
     let text_strides = compute_strides(text_shape);
@@ -321,7 +321,7 @@ fn extract_between_builtin(
         results.push(result);
     }
 
-    normalized_text.into_value(results, output_shape)
+    normalized_text.into_value(results, output_shape).map_err(Into::into)
 }
 
 fn parse_boundaries_option(args: &[Value]) -> Result<Option<BoundariesMode>, String> {

@@ -256,15 +256,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::math::elementwise::power"
 )]
-fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base_result = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb),
-        (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs),
-        (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb),
-        (lhs, rhs) => power_host(lhs, rhs),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => (power_gpu_pair(la, lb)).map_err(Into::into),
+        (Value::GpuTensor(la), rhs) => (power_gpu_host_left(la, rhs)).map_err(Into::into),
+        (lhs, Value::GpuTensor(rb)) => (power_gpu_host_right(lhs, rb)).map_err(Into::into),
+        (lhs, rhs) => (power_host(lhs, rhs)).map_err(Into::into),
     }?;
-    apply_output_template(base_result, &template)
+    apply_output_template(base_result, &template).map_err(Into::into)
 }
 
 #[derive(Clone)]

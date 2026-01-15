@@ -204,8 +204,8 @@ const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
     sink = true,
     builtin_path = "crate::builtins::timing::tic"
 )]
-pub fn tic_builtin() -> Result<f64, String> {
-    record_tic()
+pub fn tic_builtin() -> crate::BuiltinResult<f64> {
+    record_tic().map_err(Into::into)
 }
 
 /// Record a `tic` start time and return the encoded handle.

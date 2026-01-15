@@ -230,7 +230,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fieldnames,struct,introspection,fields",
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
-fn fieldnames_builtin(value: Value) -> Result<Value, String> {
+fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let names = match &value {
         Value::Struct(st) => collect_struct_fieldnames(st),
         Value::Cell(cell) => collect_struct_array_fieldnames(cell)?,
@@ -238,9 +238,9 @@ fn fieldnames_builtin(value: Value) -> Result<Value, String> {
         Value::HandleObject(handle) => collect_handle_fieldnames(handle)?,
         Value::Listener(listener) => collect_listener_fieldnames(listener),
         other => {
-            return Err(format!(
+            return Err(((format!(
                 "fieldnames: expected struct, struct array, or object (got {other:?})"
-            ))
+            ))).into())
         }
     };
 
@@ -249,7 +249,9 @@ fn fieldnames_builtin(value: Value) -> Result<Value, String> {
         .into_iter()
         .map(|name| Value::CharArray(CharArray::new_row(&name)))
         .collect();
-    crate::make_cell(cells, rows, 1).map_err(|e| format!("fieldnames: {e}"))
+    crate::make_cell(cells, rows, 1)
+        .map_err(|e| format!("fieldnames: {e}"))
+        .map_err(Into::into)
 }
 
 fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {

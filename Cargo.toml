@@ -25,7 +25,9 @@ members = [
     "crates/runmat-time",
     "crates/runmat-wasm",
     "crates/runmat-thread-local",
-    "crates/runmat-filesystem", "tools/wasm-paths",
+    "crates/runmat-filesystem",
+    "tools/wasm-paths",
+    "tools/builtin-controlflow-migrate",
     "crates/runmat-config",
 ]
 resolver = "2"

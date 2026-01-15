@@ -225,19 +225,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::exp"
 )]
-fn exp_builtin(value: Value) -> Result<Value, String> {
+fn exp_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => exp_gpu(handle),
+        Value::GpuTensor(handle) => (exp_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Complex(
             exp_complex_re(re, im),
             exp_complex_im(re, im),
         )),
-        Value::ComplexTensor(ct) => exp_complex_tensor(ct),
-        Value::CharArray(ca) => exp_char_array(ca),
+        Value::ComplexTensor(ct) => (exp_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (exp_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("exp: expected numeric input, got string".to_string())
+            Err((("exp: expected numeric input, got string".to_string())).into())
         }
-        other => exp_real(other),
+        other => (exp_real(other)).map_err(Into::into),
     }
 }
 

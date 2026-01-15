@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::string"
 )]
-fn string_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         let gathered = gather_if_needed(&value).map_err(|e| format!("string: {e}"))?;
         let array = convert_to_string_array(gathered, StringEncoding::Utf8)?;

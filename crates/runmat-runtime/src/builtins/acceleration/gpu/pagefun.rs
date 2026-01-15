@@ -196,13 +196,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
-fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let operation = PageOperation::from_callable(func)?;
     let mut operands = Vec::with_capacity(rest.len() + 1);
     operands.push(first);
     operands.extend(rest);
     if operands.is_empty() {
-        return Err("pagefun: requires at least one array input".to_string());
+        return Err((("pagefun: requires at least one array input".to_string())).into());
     }
 
     operation.validate_arity(operands.len())?;
@@ -249,12 +249,12 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                 if target == 1 {
                     target = size;
                 } else if target != size {
-                    return Err(format!(
+                    return Err(((format!(
                         "pagefun: page dimension {} mismatch ({} vs {})",
                         dim + 3,
                         target,
                         size
-                    ));
+                    ))).into());
                 }
             }
         }
@@ -280,13 +280,13 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
         operation.output_matrix_shape(&prepared_inputs, output_kind)?;
 
     if page_volume == 0 {
-        return finalise_empty_output(
+        return (finalise_empty_output(
             &operation,
             &prepared_inputs,
             &result_page_dims,
             output_kind,
             all_gpu,
-        );
+        )).map_err(Into::into);
     }
 
     let mut real_data: Option<Vec<f64>> = None;
@@ -312,7 +312,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                     result_cols = cols;
                     real_data = Some(Vec::with_capacity(rows * cols * page_volume));
                 } else if rows != result_rows || cols != result_cols {
-                    return Err("pagefun: result matrices must be the same size".to_string());
+                    return Err((("pagefun: result matrices must be the same size".to_string())).into());
                 }
                 if let Some(vec) = real_data.as_mut() {
                     vec.extend(data);
@@ -325,7 +325,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
                     result_cols = cols;
                     complex_data = Some(Vec::with_capacity(rows * cols * page_volume));
                 } else if rows != result_rows || cols != result_cols {
-                    return Err("pagefun: result matrices must be the same size".to_string());
+                    return Err((("pagefun: result matrices must be the same size".to_string())).into());
                 }
                 if let Some(vec) = complex_data.as_mut() {
                     vec.extend(data);
@@ -356,7 +356,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
         }
     };
 
-    output.into_value(all_gpu)
+    output.into_value(all_gpu).map_err(Into::into)
 }
 
 fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Option<Value>, String> {

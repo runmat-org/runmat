@@ -230,7 +230,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
-fn fclose_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args)?;
     Ok(eval.first_output())
 }

@@ -215,7 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "conversion",
     builtin_path = "crate::builtins::strings::core::char"
 )]
-fn char_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         let empty = CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("char: {e}"))?;
         return Ok(Value::CharArray(empty));

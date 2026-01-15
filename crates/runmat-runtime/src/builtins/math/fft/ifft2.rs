@@ -195,11 +195,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ifft2,inverse fft,image reconstruction,gpu",
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
-fn ifft2_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ifft2_gpu(handle, (len_rows, len_cols), symmetric),
-        other => ifft2_host(other, (len_rows, len_cols), symmetric),
+        Value::GpuTensor(handle) => (ifft2_gpu(handle, (len_rows, len_cols), symmetric)).map_err(Into::into),
+        other => (ifft2_host(other, (len_rows, len_cols), symmetric)).map_err(Into::into),
     }
 }
 

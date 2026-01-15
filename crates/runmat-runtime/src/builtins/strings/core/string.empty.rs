@@ -234,7 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "none",
     builtin_path = "crate::builtins::strings::core::string_empty"
 )]
-fn string_empty_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let shape = parse_shape(&rest)?;
     let total: usize = shape.iter().product();
     debug_assert_eq!(total, 0, "string.empty must produce an empty array");

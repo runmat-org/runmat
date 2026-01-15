@@ -237,9 +237,9 @@ enum Align {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::disp"
 )]
-fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err("disp: too many input arguments".to_string());
+        return Err((("disp: too many input arguments".to_string())).into());
     }
 
     let host_value = gather_if_needed(&value).map_err(|e| format!("disp: {e}"))?;

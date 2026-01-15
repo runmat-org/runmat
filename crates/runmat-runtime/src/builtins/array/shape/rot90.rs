@@ -241,29 +241,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
-fn rot90_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("rot90: too many input arguments".to_string());
+        return Err((("rot90: too many input arguments".to_string())).into());
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
-        Value::Tensor(tensor) => rot90_tensor(tensor, steps).map(tensor::tensor_into_value),
-        Value::LogicalArray(logical) => rot90_logical(logical, steps).map(Value::LogicalArray),
-        Value::ComplexTensor(ct) => rot90_complex_tensor(ct, steps).map(Value::ComplexTensor),
+        Value::Tensor(tensor) => (rot90_tensor(tensor, steps).map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(logical) => (rot90_logical(logical, steps).map(Value::LogicalArray)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (rot90_complex_tensor(ct, steps).map(Value::ComplexTensor)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("rot90: {e}"))?;
             rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)
         }
-        Value::StringArray(strings) => rot90_string_array(strings, steps).map(Value::StringArray),
-        Value::CharArray(chars) => rot90_char_array(chars, steps).map(Value::CharArray),
+        Value::StringArray(strings) => (rot90_string_array(strings, steps).map(Value::StringArray)).map_err(Into::into),
+        Value::CharArray(chars) => (rot90_char_array(chars, steps).map(Value::CharArray)).map_err(Into::into),
         Value::String(s) => Ok(Value::String(s)),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
             let tensor = tensor::value_into_tensor_for("rot90", v)?;
             rot90_tensor(tensor, steps).map(tensor::tensor_into_value)
         }
-        Value::GpuTensor(handle) => rot90_gpu(handle, steps),
-        Value::Cell(_) => Err("rot90: cell arrays are not yet supported".to_string()),
+        Value::GpuTensor(handle) => (rot90_gpu(handle, steps)).map_err(Into::into),
+        Value::Cell(_) => Err((("rot90: cell arrays are not yet supported".to_string())).into()),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -271,7 +271,7 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("rot90: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("rot90: unsupported input type".to_string())).into()),
     }
 }
 

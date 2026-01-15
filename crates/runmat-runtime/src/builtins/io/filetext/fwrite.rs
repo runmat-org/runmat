@@ -244,7 +244,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
-fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&fid, &data, &rest)?;
     Ok(Value::Num(eval.count as f64))
 }

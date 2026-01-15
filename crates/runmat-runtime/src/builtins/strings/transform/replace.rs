@@ -256,7 +256,7 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::replace"
 )]
-fn replace_builtin(text: Value, old: Value, new: Value) -> Result<Value, String> {
+fn replace_builtin(text: Value, old: Value, new: Value) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("replace: {e}"))?;
     let old = gather_if_needed(&old).map_err(|e| format!("replace: {e}"))?;
     let new = gather_if_needed(&new).map_err(|e| format!("replace: {e}"))?;
@@ -265,10 +265,10 @@ fn replace_builtin(text: Value, old: Value, new: Value) -> Result<Value, String>
 
     match text {
         Value::String(s) => Ok(Value::String(replace_string_scalar(s, &spec))),
-        Value::StringArray(sa) => replace_string_array(sa, &spec),
-        Value::CharArray(ca) => replace_char_array(ca, &spec),
-        Value::Cell(cell) => replace_cell_array(cell, &spec),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(sa) => (replace_string_array(sa, &spec)).map_err(Into::into),
+        Value::CharArray(ca) => (replace_char_array(ca, &spec)).map_err(Into::into),
+        Value::Cell(cell) => (replace_cell_array(cell, &spec)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

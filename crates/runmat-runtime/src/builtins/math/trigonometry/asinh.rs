@@ -243,16 +243,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
-fn asinh_builtin(value: Value) -> Result<Value, String> {
+fn asinh_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asinh_gpu(handle),
+        Value::GpuTensor(handle) => (asinh_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),
-        Value::ComplexTensor(ct) => asinh_complex_tensor(ct),
-        Value::CharArray(ca) => asinh_char_array(ca),
+        Value::ComplexTensor(ct) => (asinh_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (asinh_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("asinh: expected numeric input".to_string())
+            Err((("asinh: expected numeric input".to_string())).into())
         }
-        other => asinh_real(other),
+        other => (asinh_real(other)).map_err(Into::into),
     }
 }
 

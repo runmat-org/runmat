@@ -255,16 +255,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
-fn atanh_builtin(value: Value) -> Result<Value, String> {
+fn atanh_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => atanh_gpu(handle),
+        Value::GpuTensor(handle) => (atanh_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),
-        Value::ComplexTensor(ct) => atanh_complex_tensor(ct),
-        Value::CharArray(ca) => atanh_char_array(ca),
+        Value::ComplexTensor(ct) => (atanh_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (atanh_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("atanh: expected numeric input".to_string())
+            Err((("atanh: expected numeric input".to_string())).into())
         }
-        other => atanh_real(other),
+        other => (atanh_real(other)).map_err(Into::into),
     }
 }
 

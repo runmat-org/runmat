@@ -262,7 +262,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
-fn fread_builtin(fid: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&fid, &rest)?;
     Ok(eval.first_output())
 }

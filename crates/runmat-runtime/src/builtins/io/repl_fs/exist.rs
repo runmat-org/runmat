@@ -208,9 +208,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
-fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("exist: too many input arguments".to_string());
+        return Err((("exist: too many input arguments".to_string())).into());
     }
 
     let name_host = gather_if_needed(&name).map_err(|err| format!("exist: {err}"))?;
@@ -226,7 +226,7 @@ fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
         .unwrap_or(ExistQuery::Any);
 
     let result = match query {
-        ExistQuery::Handle => exist_handle(&name_host),
+        ExistQuery::Handle => (exist_handle(&name_host)).map_err(Into::into),
         _ => {
             let text = value_to_string(&name_host).ok_or_else(|| ERROR_NAME_ARG.to_string())?;
             exist_for_query(&text, query)?

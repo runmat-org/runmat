@@ -120,7 +120,7 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlF
                 return call_builtin(&ctor.function_name, args);
             }
             // Otherwise default-construct object
-            return new_object_builtin(name.to_string()).map_err(Into::into);
+            return new_object_builtin(name.to_string());
         }
         return Err(RuntimeControlFlow::Error(format!(
             "{}: Undefined function: {name}",

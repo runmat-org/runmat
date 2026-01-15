@@ -252,7 +252,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
-fn tan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn tan_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => tan_gpu(handle)?,
@@ -263,11 +263,11 @@ fn tan_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(ct) => tan_complex_tensor(ct)?,
         Value::CharArray(ca) => tan_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err("tan: expected numeric input".to_string())
+            return Err((("tan: expected numeric input".to_string())).into())
         }
         other => tan_real(other)?,
     };
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).map_err(Into::into)
 }
 
 fn tan_gpu(handle: GpuTensorHandle) -> Result<Value, String> {

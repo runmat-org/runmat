@@ -205,24 +205,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
-fn delete_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INVALID_INPUT,
             "delete: missing filename input".to_string(),
-        ));
+        ))).into());
     }
     let gathered = gather_arguments(&args)?;
 
     if gathered.iter().all(is_handle_input) {
-        return delete_handles(&gathered);
+        return (delete_handles(&gathered)).map_err(Into::into);
     }
 
     if gathered.iter().any(contains_handle_input) {
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INVALID_HANDLE,
             "delete: cannot mix handle and filename inputs".to_string(),
-        ));
+        ))).into());
     }
 
     let mut raw_targets = Vec::new();

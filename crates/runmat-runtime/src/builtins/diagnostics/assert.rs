@@ -180,9 +180,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
-fn assert_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(build_error(MIN_INPUT_IDENTIFIER, MIN_INPUT_MESSAGE));
+        return Err(((build_error(MIN_INPUT_IDENTIFIER, MIN_INPUT_MESSAGE))).into());
     }
 
     let mut iter = args.into_iter();
@@ -194,7 +194,7 @@ fn assert_builtin(args: Vec<Value>) -> Result<Value, String> {
         ConditionOutcome::Pass => Ok(Value::Num(0.0)),
         ConditionOutcome::Fail => {
             let payload = failure_payload(&rest)?;
-            Err(build_error(&payload.identifier, &payload.message))
+            Err(((build_error(&payload.identifier, &payload.message))).into())
         }
     }
 }

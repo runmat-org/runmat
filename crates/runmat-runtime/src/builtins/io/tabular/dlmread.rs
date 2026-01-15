@@ -258,7 +258,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
-fn dlmread_builtin(path: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_path = gather_if_needed(&path).map_err(|e| format!("dlmread: {e}"))?;
     let options = parse_arguments(&rest)?;
     let resolved = resolve_path(&gathered_path)?;

@@ -385,7 +385,7 @@ enum MeanAxes {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
@@ -400,7 +400,7 @@ fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(ct) => mean_host_complex_tensor(ct, &parsed)?,
         other => mean_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta)
+    apply_output_template(raw, &parsed.output, &input_meta).map_err(Into::into)
 }
 
 fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {

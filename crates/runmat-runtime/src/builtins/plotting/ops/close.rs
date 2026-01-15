@@ -17,7 +17,7 @@ use super::state::{close_figure, figure_handles, FigureHandle};
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::close"
 )]
-pub fn close_builtin(rest: Vec<Value>) -> Result<String, String> {
+pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     match parse_close_action(&rest)? {
         CloseAction::Current => {
             let closed = close_figure(None).map_err(|err| format!("close: {err}"))?;

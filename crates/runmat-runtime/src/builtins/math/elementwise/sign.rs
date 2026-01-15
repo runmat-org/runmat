@@ -135,7 +135,7 @@ S = sign(G);
 
 `S` stays on the GPU when the provider implements `unary_sign`; otherwise RunMat gathers to the host and
 falls back to the CPU implementation behind the scenes. When `sign` participates in a fused expression
-(for example `sign(G).*abs(G)`), the planner keeps the whole chain device-resident whenever the provider
+for example `sign(G).*abs(G)`), the planner keeps the whole chain device-resident whenever the provider
 supports the fused kernel.
 
 ### Handling infinities and NaNs
@@ -239,19 +239,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
-fn sign_builtin(value: Value) -> Result<Value, String> {
+fn sign_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sign_gpu(handle),
+        Value::GpuTensor(handle) => (sign_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
-        Value::ComplexTensor(ct) => sign_complex_tensor(ct),
-        Value::CharArray(ca) => sign_char_array(ca),
+        Value::ComplexTensor(ct) => (sign_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (sign_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("sign: expected numeric, logical, or character input".to_string())
+            Err((("sign: expected numeric, logical, or character input".to_string())).into())
         }
-        other => sign_real(other),
+        other => (sign_real(other)).map_err(Into::into),
     }
 }
 

@@ -172,13 +172,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
-fn path_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args)?;
     match gathered.len() {
         0 => Ok(path_value()),
-        1 => set_single_argument(&gathered[0]),
-        2 => set_two_arguments(&gathered[0], &gathered[1]),
-        _ => Err("path: too many input arguments".to_string()),
+        1 => (set_single_argument(&gathered[0])).map_err(Into::into),
+        2 => (set_two_arguments(&gathered[0], &gathered[1])).map_err(Into::into),
+        _ => Err((("path: too many input arguments".to_string())).into()),
     }
 }
 

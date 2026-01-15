@@ -239,7 +239,7 @@ enum PatternKind {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
-fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> Result<Value, String> {
+fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> crate::BuiltinResult<Value> {
     let gathered_str = gather_if_needed(&str_value).map_err(|e| format!("strrep: {e}"))?;
     let gathered_old = gather_if_needed(&old_value).map_err(|e| format!("strrep: {e}"))?;
     let gathered_new = gather_if_needed(&new_value).map_err(|e| format!("strrep: {e}"))?;
@@ -247,17 +247,17 @@ fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> Resul
     let (old_text, old_kind) = parse_pattern(gathered_old)?;
     let (new_text, new_kind) = parse_pattern(gathered_new)?;
     if old_kind != new_kind {
-        return Err(PATTERN_MISMATCH_ERROR.to_string());
+        return Err(((PATTERN_MISMATCH_ERROR.to_string())).into());
     }
 
     match gathered_str {
         Value::String(text) => Ok(Value::String(strrep_string_value(
             text, &old_text, &new_text,
         ))),
-        Value::StringArray(array) => strrep_string_array(array, &old_text, &new_text),
-        Value::CharArray(array) => strrep_char_array(array, &old_text, &new_text),
-        Value::Cell(cell) => strrep_cell_array(cell, &old_text, &new_text),
-        _ => Err(ARGUMENT_TYPE_ERROR.to_string()),
+        Value::StringArray(array) => (strrep_string_array(array, &old_text, &new_text)).map_err(Into::into),
+        Value::CharArray(array) => (strrep_char_array(array, &old_text, &new_text)).map_err(Into::into),
+        Value::Cell(cell) => (strrep_cell_array(cell, &old_text, &new_text)).map_err(Into::into),
+        _ => Err(((ARGUMENT_TYPE_ERROR.to_string())).into()),
     }
 }
 

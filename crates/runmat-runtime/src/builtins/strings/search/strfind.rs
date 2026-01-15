@@ -215,7 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
-fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("strfind: {e}"))?;
     let pattern = gather_if_needed(&pattern).map_err(|e| format!("strfind: {e}"))?;
     let force_cell_output = parse_force_cell_output(&rest)?;
@@ -223,7 +223,7 @@ fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Valu
     let subject = TextCollection::from_subject("strfind", text)?;
     let patterns = TextCollection::from_pattern("strfind", pattern)?;
 
-    evaluate_strfind(&subject, &patterns, force_cell_output)
+    evaluate_strfind(&subject, &patterns, force_cell_output).map_err(Into::into)
 }
 
 fn evaluate_strfind(

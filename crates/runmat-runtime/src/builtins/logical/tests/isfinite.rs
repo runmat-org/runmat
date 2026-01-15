@@ -209,7 +209,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
-fn isfinite_builtin(value: Value) -> Result<Value, String> {
+fn isfinite_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
@@ -220,7 +220,7 @@ fn isfinite_builtin(value: Value) -> Result<Value, String> {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             isfinite_tensor("isfinite", tensor)
         }
-        other => isfinite_host(other),
+        other => (isfinite_host(other)).map_err(Into::into),
     }
 }
 

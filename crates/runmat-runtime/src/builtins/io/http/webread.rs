@@ -216,7 +216,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::http::webread"
 )]
-fn webread_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_url = gather_if_needed(&url).map_err(|e| format!("webread: {e}"))?;
     let gathered_args = gather_arguments(rest)?;
     let url_text = expect_string_scalar(
@@ -224,10 +224,10 @@ fn webread_builtin(url: Value, rest: Vec<Value>) -> Result<Value, String> {
         "webread: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
-        return Err("webread: URL must not be empty".to_string());
+        return Err((("webread: URL must not be empty".to_string())).into());
     }
     let (options, query_params) = parse_arguments(gathered_args)?;
-    execute_request(&url_text, options, &query_params)
+    execute_request(&url_text, options, &query_params).map_err(Into::into)
 }
 
 fn gather_arguments(values: Vec<Value>) -> Result<Vec<Value>, String> {

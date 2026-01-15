@@ -228,8 +228,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
-fn orderfields_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_ordered_value())
+fn orderfields_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(value, &rest).map(|eval| eval.into_ordered_value()).map_err(Into::into)
 }
 
 /// Evaluate the `orderfields` builtin once and expose both outputs.

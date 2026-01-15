@@ -258,8 +258,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
-fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(a, b, &rest).map(|eval| eval.into_values_value())
+fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(a, b, &rest).map(|eval| eval.into_values_value()).map_err(Into::into)
 }
 
 /// Evaluate the `union` builtin once and expose all outputs.

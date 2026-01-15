@@ -252,7 +252,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv"
 )]
-fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mode = parse_mode(&rest)?;
     if let Some(device_value) = try_conv_gpu(&a, &b, mode)? {
         return Ok(device_value);
@@ -262,12 +262,12 @@ fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
     let orientation = output_orientation(&lhs, &rhs);
 
     if lhs.len == 0 || rhs.len == 0 {
-        return convert_output(Vec::new(), orientation);
+        return (convert_output(Vec::new(), orientation)).map_err(Into::into);
     }
 
     let full = convolve(&lhs.data, &rhs.data);
     let shaped = apply_mode(full, mode, lhs.len, rhs.len);
-    convert_output(shaped, orientation)
+    convert_output(shaped, orientation).map_err(Into::into)
 }
 
 const EPS: f64 = 1e-12;

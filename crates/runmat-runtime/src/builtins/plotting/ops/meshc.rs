@@ -64,7 +64,7 @@ tested:
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
     let mut x_axis = Some(x_axis);
@@ -90,7 +90,7 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
         ..Default::default()
     };
     let level_spec = ContourLevelSpec::Count(default_level_count());
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let level_spec = level_spec.clone();
         let x_vec = x_axis.take().expect("meshc X consumed once");
         let y_vec = y_axis.take().expect("meshc Y consumed once");
@@ -142,7 +142,7 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> Result
         figure.add_surface_plot_on_axes(surface, axes);
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 #[cfg(test)]

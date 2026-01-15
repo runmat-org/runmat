@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isinf"
 )]
-fn isinf_builtin(value: Value) -> Result<Value, String> {
+fn isinf_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
@@ -222,7 +222,7 @@ fn isinf_builtin(value: Value) -> Result<Value, String> {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             isinf_tensor("isinf", tensor)
         }
-        other => isinf_host(other),
+        other => (isinf_host(other)).map_err(Into::into),
     }
 }
 

@@ -175,7 +175,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
-fn qr_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest)?;
     Ok(eval.r())
 }
@@ -1112,11 +1112,7 @@ pub(crate) mod tests {
                 .map(|idx| {
                     let row = idx % gpu_q.cols();
                     let col = idx / gpu_q.cols();
-                    if row == col {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                    if row == col { 1.0 } else { 0.0 }
                 })
                 .collect::<Vec<_>>(),
             vec![gpu_q.cols(), gpu_q.cols()],

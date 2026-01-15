@@ -199,9 +199,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::introspection::which"
 )]
-fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(ERROR_NOT_ENOUGH_ARGS.to_string());
+        return Err(((ERROR_NOT_ENOUGH_ARGS.to_string())).into());
     }
 
     let mut name: Option<String> = None;
@@ -224,7 +224,7 @@ fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
         } else if name.is_none() {
             name = Some(text);
         } else {
-            return Err(ERROR_TOO_MANY_ARGS.to_string());
+            return Err(((ERROR_TOO_MANY_ARGS.to_string())).into());
         }
     }
 
@@ -241,7 +241,7 @@ fn which_builtin(args: Vec<Value>) -> Result<Value, String> {
         for entry in &matches {
             cell_values.push(Value::CharArray(CharArray::new_row(entry)));
         }
-        return make_cell(cell_values, matches.len(), 1).map_err(|e| format!("which: {e}"));
+        return (make_cell(cell_values, matches.len(), 1).map_err(|e| format!("which: {e}"))).map_err(Into::into);
     }
 
     Ok(Value::CharArray(CharArray::new_row(

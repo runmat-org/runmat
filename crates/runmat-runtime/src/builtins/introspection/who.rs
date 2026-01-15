@@ -190,7 +190,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::introspection::who"
 )]
-fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         // Only install the WGPU provider if none is currently registered to avoid clobbering
@@ -211,7 +211,7 @@ fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
     let request = parse_request(&gathered)?;
 
     let mut entries = match &request.source {
-        WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
+        WhoSource::Workspace => (crate::workspace::snapshot().unwrap_or_default()).map_err(Into::into),
         WhoSource::File(path) => {
             read_mat_file(path).map_err(|err| err.replacen("load:", "who:", 1))?
         }
@@ -247,7 +247,7 @@ fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
         cells.push(Value::String(name));
     }
     let rows = cells.len();
-    make_cell(cells, rows, 1)
+    make_cell(cells, rows, 1).map_err(Into::into)
 }
 
 #[derive(Debug)]

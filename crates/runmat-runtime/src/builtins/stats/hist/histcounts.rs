@@ -222,8 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
-fn histcounts_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(data, &rest).map(|eval| eval.into_counts_value())
+fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(data, &rest).map(|eval| eval.into_counts_value()).map_err(Into::into)
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.

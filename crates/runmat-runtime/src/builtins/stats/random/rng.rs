@@ -248,10 +248,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rng,seed,twister,shuffle,state",
     builtin_path = "crate::builtins::stats::random::rng"
 )]
-fn rng_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn rng_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         let current = random::snapshot()?;
-        return snapshot_to_value(current);
+        return (snapshot_to_value(current)).map_err(Into::into);
     }
 
     let previous = random::snapshot()?;
@@ -259,7 +259,7 @@ fn rng_builtin(args: Vec<Value>) -> Result<Value, String> {
     apply_command(command)?;
     let current = random::snapshot()?;
     sync_provider_state(current.state);
-    snapshot_to_value(previous)
+    snapshot_to_value(previous).map_err(Into::into)
 }
 
 #[derive(Debug, Clone)]

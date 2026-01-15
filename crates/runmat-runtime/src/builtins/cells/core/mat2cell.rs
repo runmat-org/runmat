@@ -222,9 +222,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mat2cell,cell array,partition,block",
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
-fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err("mat2cell: expected at least one size vector".to_string());
+        return Err((("mat2cell: expected at least one size vector".to_string())).into());
     }
 
     let host_value = gather_if_needed(&value).map_err(|e| format!("mat2cell: {e}"))?;
@@ -236,7 +236,7 @@ fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     let input = Mat2CellInput::try_new(host_value)?;
     let partitions = parse_partitions(input.normalized_dims(), &size_args)?;
-    split_into_cells(&input, partitions)
+    split_into_cells(&input, partitions).map_err(Into::into)
 }
 
 #[derive(Debug)]

@@ -247,7 +247,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "host",
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
-fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> {
+fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let callable = Callable::from_function(func)?;
 
     let mut uniform_output = true;
@@ -263,12 +263,12 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
         match name.trim().to_ascii_lowercase().as_str() {
             "uniformoutput" => uniform_output = parse_uniform_output(value)?,
             "errorhandler" => error_handler = Some(Callable::from_function(value)?),
-            other => return Err(format!("arrayfun: unknown name-value argument '{other}'")),
+            other => return Err(format!("arrayfun: unknown name-value argument '{other}'").into()),
         }
     }
 
     if rest.is_empty() {
-        return Err("arrayfun: expected at least one input array".to_string());
+        return Err("arrayfun: expected at least one input array".to_string().into());
     }
 
     let inputs_snapshot = rest.clone();
@@ -298,11 +298,11 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
     for (idx, raw) in rest.into_iter().enumerate() {
         if matches!(raw, Value::Cell(_)) {
             return Err(
-                "arrayfun: cell inputs are not supported (use cellfun instead)".to_string(),
+                (("arrayfun: cell inputs are not supported (use cellfun instead)".to_string())).into(),
             );
         }
         if matches!(raw, Value::Struct(_)) {
-            return Err("arrayfun: struct inputs are not supported".to_string());
+            return Err((("arrayfun: struct inputs are not supported".to_string())).into());
         }
 
         let host_value =
@@ -318,10 +318,10 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
                 if len > 1 {
                     let shape = input.shape_vec();
                     if shape != base_shape {
-                        return Err(format!(
+                        return Err(((format!(
                             "arrayfun: input {} does not match the size of the first array",
                             idx + 1
-                        ));
+                        ))).into());
                     }
                 }
             } else if len == 1 {
@@ -333,35 +333,35 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
                     let prior_len = prior.len();
                     if prior_len == len {
                         if prior.shape_vec() != base_shape {
-                            return Err(format!(
+                            return Err(((format!(
                                 "arrayfun: input {} does not match the size of the first array",
                                 idx
-                            ));
+                            ))).into());
                         }
                     } else if prior_len == 1 {
                         prior.is_scalar = true;
                     } else if prior_len == 0 && len == 0 {
                         continue;
                     } else {
-                        return Err(format!(
+                        return Err(((format!(
                             "arrayfun: input {} does not match the size of the first array",
                             idx
-                        ));
+                        ))).into());
                     }
                 }
             } else if len == 0 && current == 0 {
                 let shape = input.shape_vec();
                 if shape != base_shape {
-                    return Err(format!(
+                    return Err(((format!(
                         "arrayfun: input {} does not match the size of the first array",
                         idx + 1
-                    ));
+                    ))).into());
                 }
             } else {
-                return Err(format!(
+                return Err(((format!(
                     "arrayfun: input {} does not match the size of the first array",
                     idx + 1
-                ));
+                ))).into());
             }
         } else {
             base_len = Some(len);
@@ -377,8 +377,8 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
         if uniform_output {
             return Ok(empty_uniform(&base_shape));
         } else {
-            return make_cell_with_shape(Vec::new(), base_shape)
-                .map_err(|e| format!("arrayfun: {e}"));
+            return (make_cell_with_shape(Vec::new(), base_shape)
+                .map_err(|e| format!("arrayfun: {e}"))).map_err(Into::into);
         }
     }
 
@@ -424,9 +424,11 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
 
     if let Some(collector) = collector {
         let uniform = collector.finish(&base_shape)?;
-        maybe_upload_uniform(uniform, has_gpu_input, gpu_device_id)
+        maybe_upload_uniform(uniform, has_gpu_input, gpu_device_id).map_err(Into::into)
     } else {
-        make_cell_with_shape(cell_outputs, base_shape).map_err(|e| format!("arrayfun: {e}"))
+        make_cell_with_shape(cell_outputs, base_shape)
+            .map_err(|e| format!("arrayfun: {e}"))
+            .map_err(Into::into)
     }
 }
 
@@ -1428,7 +1430,7 @@ pub(crate) mod tests {
         name = "__arrayfun_test_handler",
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]
-    fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
+    fn arrayfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _ = rest;
         Ok(seed)
     }

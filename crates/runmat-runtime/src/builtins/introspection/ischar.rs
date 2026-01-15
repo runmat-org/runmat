@@ -201,7 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::introspection::ischar"
 )]
-fn ischar_builtin(value: Value) -> Result<Value, String> {
+fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(matches!(value, Value::CharArray(_))))
 }
 

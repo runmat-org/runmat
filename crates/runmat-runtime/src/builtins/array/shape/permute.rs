@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::permute"
 )]
-fn permute_builtin(value: Value, order: Value) -> Result<Value, String> {
+fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     let order_vec = parse_order_argument(order)?;
     match value {
         Value::Tensor(t) => {
@@ -243,10 +243,10 @@ fn permute_builtin(value: Value, order: Value) -> Result<Value, String> {
             validate_rank(&order_vec, tensor.shape.len())?;
             permute_tensor(tensor, &order_vec).map(tensor::tensor_into_value)
         }
-        other => Err(format!(
+        other => Err(((format!(
             "permute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",
             other
-        )),
+        ))).into()),
     }
 }
 

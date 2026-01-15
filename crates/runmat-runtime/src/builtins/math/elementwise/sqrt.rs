@@ -239,14 +239,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
-fn sqrt_builtin(value: Value) -> Result<Value, String> {
+fn sqrt_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => sqrt_gpu(handle),
+        Value::GpuTensor(handle) => (sqrt_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
-        Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
-        Value::CharArray(ca) => sqrt_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("sqrt: expected numeric input".to_string()),
-        other => sqrt_real(other),
+        Value::ComplexTensor(ct) => (sqrt_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (sqrt_char_array(ca)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err((("sqrt: expected numeric input".to_string())).into()),
+        other => (sqrt_real(other)).map_err(Into::into),
     }
 }
 

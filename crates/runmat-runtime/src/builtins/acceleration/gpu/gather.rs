@@ -239,14 +239,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
-fn gather_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args)?;
     let len = eval.len();
     if len == 1 {
         Ok(eval.into_first())
     } else {
         let outputs = eval.into_outputs();
-        make_cell(outputs, 1, len)
+        make_cell(outputs, 1, len).map_err(Into::into)
     }
 }
 

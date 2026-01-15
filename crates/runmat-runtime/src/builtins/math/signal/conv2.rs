@@ -238,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
-fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
 
@@ -260,7 +260,7 @@ fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> 
             let result = conv2_matrices(&signal, &kernel, mode);
             matrix_to_value(result)
         }
-        _ => Err("conv2: expected at most four input arguments".to_string()),
+        _ => Err((("conv2: expected at most four input arguments".to_string())).into()),
     }
 }
 

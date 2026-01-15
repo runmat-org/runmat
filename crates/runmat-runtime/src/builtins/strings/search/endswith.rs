@@ -230,7 +230,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::endswith"
 )]
-fn endswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn endswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("endsWith: {e}"))?;
     let pattern = gather_if_needed(&pattern).map_err(|e| format!("endsWith: {e}"))?;
     let mut option_args = Vec::with_capacity(rest.len());
@@ -240,7 +240,7 @@ fn endswith_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Val
     let ignore_case = parse_ignore_case("endsWith", &option_args)?;
     let subject = TextCollection::from_subject("endsWith", text)?;
     let patterns = TextCollection::from_pattern("endsWith", pattern)?;
-    evaluate_endswith(&subject, &patterns, ignore_case)
+    evaluate_endswith(&subject, &patterns, ignore_case).map_err(Into::into)
 }
 
 fn evaluate_endswith(

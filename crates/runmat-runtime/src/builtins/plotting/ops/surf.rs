@@ -110,7 +110,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let x_tensor = Tensor::try_from(&x).map_err(|e| format!("surf: {e}"))?;
     let y_tensor = Tensor::try_from(&y).map_err(|e| format!("surf: {e}"))?;
     let x_axis = numeric_vector(x_tensor);
@@ -137,7 +137,7 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<St
         axis_equal: false,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let x_axis_vec = x_axis.take().expect("surf: X axis consumed once");
         let y_axis_vec = y_axis.take().expect("surf: Y axis consumed once");
         let z_arg = z_input.take().expect("surf: Z consumed once");
@@ -166,7 +166,7 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<St
         style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 pub(crate) fn build_surface(

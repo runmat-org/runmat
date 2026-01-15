@@ -110,7 +110,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
     let mut x_input = Some(StairsInput::from_value(x)?);
     let mut y_input = Some(StairsInput::from_value(y)?);
@@ -120,7 +120,7 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let appearance = parsed_style.appearance.clone();
         let marker_meta = marker_metadata_from_appearance(&appearance);
         let label = parsed_style
@@ -145,7 +145,7 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
         let plot = build_stairs_plot(x_vals, y_vals, &appearance, marker_meta, &label)?;
         figure.add_stairs_plot_on_axes(plot, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 fn build_stairs_plot(

@@ -243,14 +243,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::ceil"
 )]
-fn ceil_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn ceil_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => ceil_gpu(handle, &args)?,
-        Value::Complex(re, im) => Value::Complex(
+        Value::Complex(re, im) => (Value::Complex(
             apply_ceil_scalar(re, args.strategy),
             apply_ceil_scalar(im, args.strategy),
-        ),
+        )).map_err(Into::into),
         Value::ComplexTensor(ct) => ceil_complex_tensor(ct, args.strategy)?,
         Value::CharArray(ca) => ceil_char_array(ca, args.strategy)?,
         Value::LogicalArray(logical) => {
@@ -259,11 +259,11 @@ fn ceil_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             tensor::tensor_into_value(ceiled)
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err("ceil: expected numeric or logical input".to_string())
+            return Err((("ceil: expected numeric or logical input".to_string())).into())
         }
         other => ceil_numeric(other, args.strategy)?,
     };
-    apply_output_template(base, &args.output)
+    apply_output_template(base, &args.output).map_err(Into::into)
 }
 
 fn ceil_numeric(value: Value, strategy: CeilStrategy) -> Result<Value, String> {

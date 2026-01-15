@@ -193,10 +193,10 @@ enum CumprodNanMode {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
-fn cumprod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cumprod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dim, direction, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode),
+        Value::GpuTensor(handle) => (cumprod_gpu(handle, dim, direction, nan_mode)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("cumprod: {e}"))?;
@@ -209,7 +209,7 @@ fn cumprod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             let result = cumprod_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
         }
-        other => cumprod_host(other, dim, direction, nan_mode),
+        other => (cumprod_host(other, dim, direction, nan_mode)).map_err(Into::into),
     }
 }
 

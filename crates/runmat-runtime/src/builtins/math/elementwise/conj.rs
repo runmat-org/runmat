@@ -222,22 +222,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::conj"
 )]
-fn conj_builtin(value: Value) -> Result<Value, String> {
+fn conj_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => conj_gpu(handle),
-        Value::Complex(re, im) => conj_complex_scalar(re, im),
-        Value::ComplexTensor(ct) => conj_complex_tensor(ct),
-        Value::CharArray(ca) => conj_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("conj: expected numeric input".to_string()),
+        Value::GpuTensor(handle) => (conj_gpu(handle)).map_err(Into::into),
+        Value::Complex(re, im) => (conj_complex_scalar(re, im)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (conj_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (conj_char_array(ca)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err((("conj: expected numeric input".to_string())).into()),
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
-        | Value::Bool(_)) => conj_real(x),
-        other => Err(format!(
+        | Value::Bool(_)) => (conj_real(x)).map_err(Into::into),
+        other => Err(((format!(
             "conj: unsupported input type {:?}; expected numeric, logical, or char data",
             other
-        )),
+        ))).into()),
     }
 }
 

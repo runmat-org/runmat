@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "graph",
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
-fn symrcm_builtin(matrix: Value) -> Result<Value, String> {
+fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
     match matrix {
         Value::ComplexTensor(ct) => {
             let ordering = symrcm_host_complex_tensor(&ct)?;
@@ -252,7 +252,7 @@ fn symrcm_builtin(matrix: Value) -> Result<Value, String> {
             let ordering = symrcm_host_complex_tensor(&tensor)?;
             permutation_to_value(&ordering)
         }
-        Value::GpuTensor(handle) => symrcm_gpu(handle),
+        Value::GpuTensor(handle) => (symrcm_gpu(handle)).map_err(Into::into),
         other => {
             let tensor = tensor::value_into_tensor_for("symrcm", other)?;
             let ordering = symrcm_host_real_tensor(&tensor)?;

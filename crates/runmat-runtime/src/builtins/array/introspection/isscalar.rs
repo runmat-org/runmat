@@ -214,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
-fn isscalar_builtin(value: Value) -> Result<Value, String> {
+fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(value_is_scalar(&value)))
 }
 

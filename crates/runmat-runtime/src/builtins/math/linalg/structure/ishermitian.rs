@@ -231,10 +231,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
-fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol),
+        Value::GpuTensor(handle) => (ishermitian_gpu(handle, mode, tol)).map_err(Into::into),
         other => {
             let matrix = MatrixInput::from_value(other)?;
             let result = evaluate_matrix(&matrix, mode, tol);

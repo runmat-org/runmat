@@ -229,12 +229,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::io::json::jsondecode"
 )]
-fn jsondecode_builtin(text: Value) -> Result<Value, String> {
+fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&text).map_err(|e| format!("jsondecode: {e}"))?;
     let source = extract_text(gathered)?;
     let parsed: JsonValue =
         serde_json::from_str(&source).map_err(|err| format!("{PARSE_ERROR_PREFIX} ({err})"))?;
-    value_from_json(&parsed)
+    value_from_json(&parsed).map_err(Into::into)
 }
 
 pub(crate) fn decode_json_text(text: &str) -> Result<Value, String> {

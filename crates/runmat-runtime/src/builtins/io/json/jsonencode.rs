@@ -279,7 +279,7 @@ enum JsonNumber {
     accel = "cpu",
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
-fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let host_value =
         gather_if_needed(&value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
     let gathered_args: Vec<Value> = rest

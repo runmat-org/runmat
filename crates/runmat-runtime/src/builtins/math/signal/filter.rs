@@ -235,8 +235,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::filter"
 )]
-fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(b, a, x, &rest).map(|eval| eval.into_value())
+fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(b, a, x, &rest).map(|eval| eval.into_value()).map_err(Into::into)
 }
 
 /// Evaluate the builtin once and expose both filter output and final state.

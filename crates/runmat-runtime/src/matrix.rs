@@ -164,35 +164,35 @@ pub fn matrix_eye(n: usize) -> Tensor {
 
 // Simple built-in function for testing matrix operations
 #[runtime_builtin(name = "matrix_zeros", builtin_path = "crate::matrix")]
-fn matrix_zeros_builtin(rows: i32, cols: i32) -> Result<Tensor, String> {
+fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
+        return Err((("Matrix dimensions must be non-negative".to_string())).into());
     }
     Ok(Tensor::zeros(vec![rows as usize, cols as usize]))
 }
 
 #[runtime_builtin(name = "matrix_ones", builtin_path = "crate::matrix")]
-fn matrix_ones_builtin(rows: i32, cols: i32) -> Result<Tensor, String> {
+fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
+        return Err((("Matrix dimensions must be non-negative".to_string())).into());
     }
     Ok(Tensor::ones(vec![rows as usize, cols as usize]))
 }
 
 #[runtime_builtin(name = "matrix_eye", builtin_path = "crate::matrix")]
-fn matrix_eye_builtin(n: i32) -> Result<Tensor, String> {
+fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
     if n < 0 {
-        return Err("Matrix size must be non-negative".to_string());
+        return Err((("Matrix size must be non-negative".to_string())).into());
     }
     Ok(matrix_eye(n as usize))
 }
 
 #[runtime_builtin(name = "matrix_transpose", builtin_path = "crate::matrix")]
-fn matrix_transpose_builtin(a: Tensor) -> Result<Tensor, String> {
+fn matrix_transpose_builtin(a: Tensor) -> crate::BuiltinResult<Tensor> {
     let args = [Value::Tensor(a)];
     let result = crate::call_builtin("transpose", &args)?;
     match result {
         Value::Tensor(tensor) => Ok(tensor),
-        other => Err(format!("matrix_transpose: expected tensor, got {other:?}")),
+        other => Err(((format!("matrix_transpose: expected tensor, got {other:?}"))).into()),
     }
 }

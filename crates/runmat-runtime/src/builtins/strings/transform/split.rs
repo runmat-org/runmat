@@ -241,7 +241,7 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::split"
 )]
-fn split_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn split_builtin(text: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("split: {e}"))?;
     let mut args: Vec<Value> = Vec::with_capacity(rest.len());
     for arg in rest {
@@ -250,7 +250,7 @@ fn split_builtin(text: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     let options = SplitOptions::parse(&args)?;
     let matrix = TextMatrix::from_value(text)?;
-    matrix.into_split_result(&options)
+    matrix.into_split_result(&options).map_err(Into::into)
 }
 
 #[derive(Clone)]

@@ -245,7 +245,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
-fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;
     let raw_format = extract_format_string(&gathered_spec, "sprintf")?;
     let format_string = decode_escape_sequences("sprintf", &raw_format)?;
@@ -260,8 +260,8 @@ fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
                 return Err(
-                    "sprintf: formatSpec contains no conversion specifiers but additional arguments were supplied"
-                        .to_string(),
+                    (("sprintf: formatSpec contains no conversion specifiers but additional arguments were supplied"
+                        .to_string())).into(),
                 );
             }
             break;
@@ -272,7 +272,7 @@ fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String
         }
     }
 
-    char_row_value(&output)
+    char_row_value(&output).map_err(Into::into)
 }
 
 fn char_row_value(text: &str) -> Result<Value, String> {

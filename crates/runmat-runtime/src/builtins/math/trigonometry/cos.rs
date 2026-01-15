@@ -213,7 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
-fn cos_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cos_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => cos_gpu(handle)?,
@@ -221,11 +221,11 @@ fn cos_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(ct) => cos_complex_tensor(ct)?,
         Value::CharArray(ca) => cos_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err("cos: expected numeric input".to_string())
+            return Err((("cos: expected numeric input".to_string())).into())
         }
         other => cos_real(other)?,
     };
-    apply_output_template(base, &template)
+    apply_output_template(base, &template).map_err(Into::into)
 }
 
 fn cos_gpu(handle: GpuTensorHandle) -> Result<Value, String> {

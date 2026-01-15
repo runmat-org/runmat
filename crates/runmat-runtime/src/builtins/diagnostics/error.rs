@@ -162,12 +162,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::diagnostics::error"
 )]
-fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(build_error(
+        return Err(((build_error(
             DEFAULT_IDENTIFIER,
             "error: missing message argument",
-        ));
+        ))).into());
     }
 
     let mut iter = args.into_iter();
@@ -177,24 +177,24 @@ fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
     match first {
         Value::MException(mex) => {
             if !rest.is_empty() {
-                return Err(build_error(
+                return Err(((build_error(
                     DEFAULT_IDENTIFIER,
                     "error: additional arguments are not allowed when passing an MException",
-                ));
+                ))).into());
             }
-            Err(build_error(&mex.identifier, &mex.message))
+            Err(((build_error(&mex.identifier, &mex.message))).into())
         }
         Value::Struct(ref st) => {
             if !rest.is_empty() {
-                return Err(build_error(
+                return Err(((build_error(
                     DEFAULT_IDENTIFIER,
                     "error: additional arguments are not allowed when passing a message struct",
-                ));
+                ))).into());
             }
             let (identifier, message) = extract_struct_error_fields(st)?;
-            Err(build_error(&identifier, &message))
+            Err(((build_error(&identifier, &message))).into())
         }
-        other => handle_message_arguments(other, rest),
+        other => (handle_message_arguments(other, rest)).map_err(Into::into),
     }
 }
 

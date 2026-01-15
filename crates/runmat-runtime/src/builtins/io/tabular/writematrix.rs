@@ -227,9 +227,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
-fn writematrix_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err("writematrix: filename is required".to_string());
+        return Err((("writematrix: filename is required".to_string())).into());
     }
 
     let filename_value = gather_if_needed(&rest[0]).map_err(|e| format!("writematrix: {e}"))?;

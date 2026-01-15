@@ -541,39 +541,41 @@ struct KeyCandidate {
     sink = true,
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_constructor_args(args)?;
     let store = build_store(parsed)?;
-    allocate_handle(store)
+    allocate_handle(store).map_err(Into::into)
 }
 
 #[runtime_builtin(
     name = "containers.Map.keys",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_keys(map: Value) -> Result<Value, String> {
+fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
     with_store(&map, |store| {
         let values = store.keys();
         make_row_cell(values)
     })
+    .map_err(Into::into)
 }
 
 #[runtime_builtin(
     name = "containers.Map.values",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_values(map: Value) -> Result<Value, String> {
+fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
     with_store(&map, |store| {
         let values = store.values();
         make_row_cell(values)
     })
+    .map_err(Into::into)
 }
 
 #[runtime_builtin(
     name = "containers.Map.isKey",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
+fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
     with_store(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
         let mut flags = Vec::with_capacity(collection.values.len());
@@ -590,13 +592,14 @@ fn containers_map_is_key(map: Value, key_spec: Value) -> Result<Value, String> {
             Ok(Value::LogicalArray(logical))
         }
     })
+    .map_err(Into::into)
 }
 
 #[runtime_builtin(
     name = "containers.Map.remove",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
+fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
     with_store_mut(&map, |store| {
         let collection = collect_key_spec(&key_spec, store.key_type)?;
         for value in &collection.values {
@@ -612,27 +615,27 @@ fn containers_map_remove(map: Value, key_spec: Value) -> Result<Value, String> {
     name = "containers.Map.subsref",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Value, String> {
+fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     if !matches!(map, Value::HandleObject(_)) {
-        return Err(format!(
+        return Err(((format!(
             "containers.Map: subsref expects a containers.Map handle, got {map:?}"
-        ));
+        ))).into());
     }
     match kind.as_str() {
         "()" => {
             let mut args = extract_key_arguments(&payload)?;
             if args.is_empty() {
-                return Err("containers.Map: indexing requires at least one key".to_string());
+                return Err((("containers.Map: indexing requires at least one key".to_string())).into());
             }
             if args.len() != 1 {
-                return Err("containers.Map: indexing expects a single key argument".to_string());
+                return Err((("containers.Map: indexing expects a single key argument".to_string())).into());
             }
             let key_arg = args.remove(0);
             with_store(&map, |store| {
                 let collection = collect_key_spec(&key_arg, store.key_type)?;
                 if collection.values.is_empty() {
-                    return crate::make_cell_with_shape(Vec::new(), collection.shape.clone())
-                        .map_err(|e| format!("containers.Map: {e}"));
+                    return (crate::make_cell_with_shape(Vec::new(), collection.shape.clone())
+                        .map_err(|e| format!("containers.Map: {e}"))).map_err(Into::into);
                 }
                 if collection.values.len() == 1 {
                     let normalized = normalize_key(&collection.values[0], store.key_type)?;
@@ -657,15 +660,15 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> Result<Va
             let field = string_from_value(&payload, "containers.Map: property name must be text")?;
             with_store(&map, |store| match field.to_ascii_lowercase().as_str() {
                 "count" => Ok(Value::Num(store.len() as f64)),
-                "keytype" => char_array_value(store.key_type.matlab_name()),
-                "valuetype" => char_array_value(store.value_type.matlab_name()),
-                other => Err(format!("containers.Map: no such property '{other}'")),
+                "keytype" => (char_array_value(store.key_type.matlab_name())).map_err(Into::into),
+                "valuetype" => (char_array_value(store.value_type.matlab_name())).map_err(Into::into),
+                other => Err(((format!("containers.Map: no such property '{other}'"))).into()),
             })
         }
-        "{}" => Err("containers.Map: curly-brace indexing is not supported.".to_string()),
-        other => Err(format!(
+        "{}" => Err((("containers.Map: curly-brace indexing is not supported.".to_string())).into()),
+        other => Err(((format!(
             "containers.Map: unsupported indexing kind '{other}'"
-        )),
+        ))).into()),
     }
 }
 
@@ -678,20 +681,20 @@ fn containers_map_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if !matches!(map, Value::HandleObject(_)) {
-        return Err(format!(
+        return Err(((format!(
             "containers.Map: subsasgn expects a containers.Map handle, got {map:?}"
-        ));
+        ))).into());
     }
     match kind.as_str() {
         "()" => {
             let mut args = extract_key_arguments(&payload)?;
             if args.is_empty() {
-                return Err("containers.Map: assignment requires at least one key".to_string());
+                return Err((("containers.Map: assignment requires at least one key".to_string())).into());
             }
             if args.len() != 1 {
-                return Err("containers.Map: assignment expects a single key argument".to_string());
+                return Err((("containers.Map: assignment expects a single key argument".to_string())).into());
             }
             let key_arg = args.remove(0);
             with_store_mut(&map, move |store| {
@@ -712,11 +715,11 @@ fn containers_map_subsasgn(
             })?;
             Ok(map)
         }
-        "." => Err("containers.Map: property assignments are not supported.".to_string()),
-        "{}" => Err("containers.Map: curly-brace assignment is not supported.".to_string()),
-        other => Err(format!(
+        "." => Err((("containers.Map: property assignments are not supported.".to_string())).into()),
+        "{}" => Err((("containers.Map: curly-brace assignment is not supported.".to_string())).into()),
+        other => Err(((format!(
             "containers.Map: unsupported assignment kind '{other}'"
-        )),
+        ))).into()),
     }
 }
 

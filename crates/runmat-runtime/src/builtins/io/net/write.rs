@@ -194,7 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "write,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::write"
 )]
-fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let client = gather_if_needed(&client)
         .map_err(|err| runtime_error(MESSAGE_ID_INVALID_CLIENT, format!("write: {err}")))?;
     let data = gather_if_needed(&data)
@@ -213,10 +213,10 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, 
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_INVALID_CLIENT,
                 "write: expected tcpclient struct as first argument",
-            ))
+            ))).into())
         }
     };
 
@@ -231,10 +231,10 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, 
     let (mut stream, timeout, byte_order) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_NOT_CONNECTED,
                 "write: tcpclient is disconnected",
-            ));
+            ))).into());
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
@@ -245,10 +245,10 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, 
     };
 
     if let Err(err) = configure_stream(&stream, timeout) {
-        return Err(runtime_error(
+        return Err(((runtime_error(
             MESSAGE_ID_INTERNAL,
             format!("write: unable to configure socket timeout ({err})"),
-        ));
+        ))).into());
     }
 
     let payload = prepare_payload(&data, datatype, byte_order)?;
@@ -258,23 +258,23 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> Result<Value, 
 
     match write_bytes(&mut stream, &payload.bytes) {
         Ok(_) => Ok(Value::Num(payload.elements as f64)),
-        Err(WriteError::Timeout) => Err(runtime_error(
+        Err(WriteError::Timeout) => Err(((runtime_error(
             MESSAGE_ID_TIMEOUT,
             "write: timed out while sending data",
-        )),
+        ))).into()),
         Err(WriteError::ConnectionClosed) => {
             if let Ok(mut guard) = handle.lock() {
                 guard.connected = false;
             }
-            Err(runtime_error(
+            Err(((runtime_error(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "write: connection closed before all data was sent",
-            ))
+            ))).into())
         }
-        Err(WriteError::Io(err)) => Err(runtime_error(
+        Err(WriteError::Io(err)) => Err(((runtime_error(
             MESSAGE_ID_INTERNAL,
             format!("write: socket error ({err})"),
-        )),
+        ))).into()),
     }
 }
 

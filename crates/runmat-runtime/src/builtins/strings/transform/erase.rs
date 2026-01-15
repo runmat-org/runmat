@@ -218,7 +218,7 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
-fn erase_builtin(text: Value, pattern: Value) -> Result<Value, String> {
+fn erase_builtin(text: Value, pattern: Value) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("erase: {e}"))?;
     let pattern = gather_if_needed(&pattern).map_err(|e| format!("erase: {e}"))?;
 
@@ -226,10 +226,10 @@ fn erase_builtin(text: Value, pattern: Value) -> Result<Value, String> {
 
     match text {
         Value::String(s) => Ok(Value::String(erase_string_scalar(s, &patterns))),
-        Value::StringArray(sa) => erase_string_array(sa, &patterns),
-        Value::CharArray(ca) => erase_char_array(ca, &patterns),
-        Value::Cell(cell) => erase_cell_array(cell, &patterns),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(sa) => (erase_string_array(sa, &patterns)).map_err(Into::into),
+        Value::CharArray(ca) => (erase_char_array(ca, &patterns)).map_err(Into::into),
+        Value::Cell(cell) => (erase_cell_array(cell, &patterns)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

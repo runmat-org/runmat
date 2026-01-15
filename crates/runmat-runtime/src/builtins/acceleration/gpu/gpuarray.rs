@@ -255,7 +255,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
-fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_options(&rest)?;
     let incoming_precision = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),

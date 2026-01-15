@@ -222,14 +222,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "setfield,struct,assignment,object property",
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
-fn setfield_builtin(base: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn setfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
     let ParsedArguments {
         leading_index,
         steps,
         value,
     } = parsed;
-    assign_value(base, leading_index, steps, value)
+    assign_value(base, leading_index, steps, value).map_err(Into::into)
 }
 
 struct ParsedArguments {

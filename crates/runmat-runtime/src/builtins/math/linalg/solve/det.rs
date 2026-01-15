@@ -234,10 +234,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "det",
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
-fn det_builtin(value: Value) -> Result<Value, String> {
+fn det_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => det_gpu(handle),
-        Value::ComplexTensor(tensor) => det_complex_value(tensor),
+        Value::GpuTensor(handle) => (det_gpu(handle)).map_err(Into::into),
+        Value::ComplexTensor(tensor) => (det_complex_value(tensor)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         other => {
             let tensor = tensor::value_into_tensor_for(NAME, other)?;

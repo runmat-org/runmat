@@ -126,7 +126,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter"
 )]
-pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -136,7 +136,7 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, S
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")?;
@@ -162,7 +162,7 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, S
         let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)?;
         figure.add_scatter_plot_on_axes(scatter, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 fn build_scatter_plot(

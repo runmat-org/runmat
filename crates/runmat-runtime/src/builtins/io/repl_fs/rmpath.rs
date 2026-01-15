@@ -193,9 +193,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
-fn rmpath_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(((ERROR_TOO_FEW_ARGS.to_string())).into());
     }
 
     let gathered = gather_arguments(&args)?;

@@ -123,7 +123,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
-pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
     let mut x_input = Some(ScatterInput::from_value(x)?);
     let mut y_input = Some(ScatterInput::from_value(y)?);
@@ -135,7 +135,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Resul
         axis_equal: true,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")?;
@@ -168,7 +168,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> Resul
         let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)?;
         figure.add_scatter3_plot_on_axes(scatter, axes);
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 const DEFAULT_POINT_SIZE: f32 = 6.0;

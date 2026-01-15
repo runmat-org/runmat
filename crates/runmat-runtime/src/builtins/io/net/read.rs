@@ -212,17 +212,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "read,tcpclient,networking",
     builtin_path = "crate::builtins::io::net::read"
 )]
-fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let client = gather_if_needed(&client)?;
     let options = parse_arguments(rest)?;
 
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_INVALID_CLIENT,
                 "read: expected tcpclient struct as first argument",
-            ))
+            ))).into())
         }
     };
 
@@ -237,10 +237,10 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     let (stream, timeout, byte_order, connected) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_NOT_CONNECTED,
                 "read: tcpclient is disconnected",
-            ));
+            ))).into());
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
@@ -253,10 +253,10 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
     // Ensure cloned descriptor uses the configured timeout.
     if connected {
         if let Err(err) = configure_stream(&stream, timeout) {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_INTERNAL,
                 format!("read: unable to configure socket timeout ({err})"),
-            ));
+            ))).into());
         }
     }
 
@@ -272,17 +272,17 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes.is_empty() && count > 0 {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
-            ));
+            ))).into());
         }
         let expected = count.saturating_mul(element_size);
         if read_result.bytes.len() != expected {
-            return Err(runtime_error(
+            return Err(((runtime_error(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
-            ));
+            ))).into());
         }
     }
 

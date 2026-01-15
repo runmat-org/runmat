@@ -209,8 +209,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "mrdivide",
     builtin_path = "crate::builtins::math::linalg::ops::mrdivide"
 )]
-fn mrdivide_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
-    mrdivide_eval(&lhs, &rhs)
+fn mrdivide_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    mrdivide_eval(&lhs, &rhs).map_err(Into::into)
 }
 
 pub(crate) fn mrdivide_eval(lhs: &Value, rhs: &Value) -> Result<Value, String> {

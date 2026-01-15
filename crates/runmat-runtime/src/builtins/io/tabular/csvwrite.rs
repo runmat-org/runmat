@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
-fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let filename_value = gather_if_needed(&filename).map_err(|e| format!("csvwrite: {e}"))?;
     let path = resolve_path(&filename_value)?;
 

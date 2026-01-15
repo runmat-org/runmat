@@ -205,10 +205,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
-fn ls_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args)?;
     if gathered.len() > 1 {
-        return Err("ls: too many input arguments".to_string());
+        return Err((("ls: too many input arguments".to_string())).into());
     }
 
     let entries = if let Some(value) = gathered.first() {
@@ -218,7 +218,7 @@ fn ls_builtin(args: Vec<Value>) -> Result<Value, String> {
     };
 
     emit_listing_stdout(&entries);
-    rows_to_char_array(&entries)
+    rows_to_char_array(&entries).map_err(Into::into)
 }
 
 fn list_from_value(value: &Value) -> Result<Vec<String>, String> {

@@ -214,11 +214,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "pinv",
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
-fn pinv_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn pinv_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest)?;
     match value {
-        Value::GpuTensor(handle) => pinv_gpu(handle, tol),
-        Value::ComplexTensor(t) => pinv_complex_value(t, tol),
+        Value::GpuTensor(handle) => (pinv_gpu(handle, tol)).map_err(Into::into),
+        Value::ComplexTensor(t) => (pinv_complex_value(t, tol)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("{NAME}: {e}"))?;

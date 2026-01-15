@@ -210,7 +210,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
-fn isempty_builtin(value: Value) -> Result<Value, String> {
+fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let is_empty = value_is_empty(&value);
     Ok(Value::Bool(is_empty))
 }

@@ -217,14 +217,14 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
-fn strtrim_builtin(value: Value) -> Result<Value, String> {
+fn strtrim_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("strtrim: {e}"))?;
     match gathered {
         Value::String(text) => Ok(Value::String(trim_string(text))),
-        Value::StringArray(array) => strtrim_string_array(array),
-        Value::CharArray(array) => strtrim_char_array(array),
-        Value::Cell(cell) => strtrim_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(array) => (strtrim_string_array(array)).map_err(Into::into),
+        Value::CharArray(array) => (strtrim_char_array(array)).map_err(Into::into),
+        Value::Cell(cell) => (strtrim_cell_array(cell)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

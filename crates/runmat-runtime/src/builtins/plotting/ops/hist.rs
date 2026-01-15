@@ -348,7 +348,7 @@ impl HistWeightsInput {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::hist"
 )]
-pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<Value, String> {
+pub fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let evaluation = evaluate(data, &rest)?;
     evaluation.render_plot()?;
     Ok(evaluation.counts_value())

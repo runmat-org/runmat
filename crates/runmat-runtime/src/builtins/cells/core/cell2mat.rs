@@ -266,12 +266,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "gather",
     builtin_path = "crate::builtins::cells::core::cell2mat"
 )]
-fn cell2mat_builtin(value: Value) -> Result<Value, String> {
+fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Cell(ca) => cell_array_to_matrix(&ca),
-        other => Err(format!(
+        Value::Cell(ca) => (cell_array_to_matrix(&ca)).map_err(Into::into),
+        other => Err(((format!(
             "cell2mat: expected a cell array input, got {other:?}"
-        )),
+        ))).into()),
     }
 }
 

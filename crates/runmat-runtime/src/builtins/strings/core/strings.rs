@@ -257,7 +257,7 @@ enum FillKind {
     accel = "array_construct",
     builtin_path = "crate::builtins::strings::core::strings"
 )]
-fn strings_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ParsedStrings { shape, fill } = parse_arguments(rest)?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)

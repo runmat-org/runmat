@@ -232,10 +232,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
-fn prod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     if matches!(input_meta.class, InputClass::Complex) {
-        return Err("prod: complex inputs are not yet supported".to_string());
+        return Err((("prod: complex inputs are not yet supported".to_string())).into());
     }
     let parsed = parse_arguments(&rest)?;
     let raw_result = match value {
@@ -246,13 +246,13 @@ fn prod_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::Int(_)
         | Value::Bool(_) => prod_host(value, &parsed)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err("prod: complex inputs are not yet supported".to_string())
+            return Err((("prod: complex inputs are not yet supported".to_string())).into())
         }
         other => {
-            return Err(format!("prod: unsupported input value {other:?}"));
+            return Err(((format!("prod: unsupported input value {other:?}"))).into());
         }
     };
-    apply_output_template(raw_result, &parsed.output, &input_meta)
+    apply_output_template(raw_result, &parsed.output, &input_meta).map_err(Into::into)
 }
 
 #[derive(Clone, PartialEq, Eq)]

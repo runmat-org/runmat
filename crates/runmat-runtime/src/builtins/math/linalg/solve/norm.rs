@@ -217,10 +217,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
-fn norm_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn norm_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let order = parse_order(&rest)?;
     match value {
-        Value::GpuTensor(handle) => norm_gpu(handle, order),
+        Value::GpuTensor(handle) => (norm_gpu(handle, order)).map_err(Into::into),
         Value::ComplexTensor(tensor) => {
             let norm = norm_complex_tensor(&tensor, order)?;
             Ok(Value::Num(norm))

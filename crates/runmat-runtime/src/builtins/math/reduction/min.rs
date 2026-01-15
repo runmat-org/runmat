@@ -244,8 +244,8 @@ impl MinEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-fn min_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_value())
+fn min_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(value, &rest).map(|eval| eval.into_value()).map_err(Into::into)
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).

@@ -63,7 +63,7 @@ need to implement custom kernels for this builtin.
 
 ## GPU residency in RunMat (Do I need `gpuArray`?)
 RunMat automatically keeps string data on the host for now. If text originates from GPU-based computations
-(for example as numeric code points stored on the device), `lower` gathers those values before applying the
+for example as numeric code points stored on the device), `lower` gathers those values before applying the
 transformation, so you never need to call `gpuArray` explicitly for this builtin.
 
 ## Examples of using the `lower` function in MATLAB / RunMat
@@ -210,14 +210,14 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
-fn lower_builtin(value: Value) -> Result<Value, String> {
+fn lower_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("lower: {e}"))?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
-        Value::StringArray(array) => lower_string_array(array),
-        Value::CharArray(array) => lower_char_array(array),
-        Value::Cell(cell) => lower_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(array) => (lower_string_array(array)).map_err(Into::into),
+        Value::CharArray(array) => (lower_char_array(array)).map_err(Into::into),
+        Value::Cell(cell) => (lower_cell_array(cell)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

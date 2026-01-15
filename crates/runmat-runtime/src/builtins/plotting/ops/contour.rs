@@ -319,7 +319,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::contour"
 )]
-pub fn contour_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mut call = Some(ContourCall::parse("contour", first, rest)?);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
@@ -328,10 +328,10 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> Result<String, String>
         axis_equal: true,
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let current = call.take().expect("contour call consumed once");
         current.render(figure, axes)
-    })
+    })).map_err(Into::into)
 }
 
 struct ContourCall {

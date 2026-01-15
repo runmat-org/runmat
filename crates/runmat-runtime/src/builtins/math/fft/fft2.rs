@@ -187,11 +187,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
-fn fft2_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let lengths = parse_fft2_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => fft2_gpu(handle, lengths),
-        other => fft2_host(other, lengths),
+        Value::GpuTensor(handle) => (fft2_gpu(handle, lengths)).map_err(Into::into),
+        other => (fft2_host(other, lengths)).map_err(Into::into),
     }
 }
 

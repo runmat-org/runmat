@@ -347,10 +347,10 @@ pub fn spec_from_request(filter: &FspecialFilter) -> Result<FspecialFilterSpec, 
     accel = "array_construct",
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
-fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let spec = build_filter_spec(&kind, &rest)?;
     let tensor = spec.generate_tensor()?;
-    finalize_output(&spec, tensor)
+    finalize_output(&spec, tensor).map_err(Into::into)
 }
 
 fn build_filter_spec(kind: &Value, rest: &[Value]) -> Result<FspecialFilterSpec, String> {

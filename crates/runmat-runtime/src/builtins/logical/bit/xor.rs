@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::xor"
 )]
-fn xor_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn xor_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_xor(a, b) {
@@ -233,7 +233,7 @@ fn xor_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             }
         }
     }
-    xor_host(lhs, rhs)
+    xor_host(lhs, rhs).map_err(Into::into)
 }
 
 fn xor_host(lhs: Value, rhs: Value) -> Result<Value, String> {

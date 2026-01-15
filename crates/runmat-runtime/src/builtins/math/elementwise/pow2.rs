@@ -240,11 +240,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
-fn pow2_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn pow2_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match rest.len() {
-        0 => pow2_unary(first),
-        1 => pow2_binary(first, rest.into_iter().next().unwrap()),
-        _ => Err("pow2: expected at most two arguments".to_string()),
+        0 => (pow2_unary(first)).map_err(Into::into),
+        1 => (pow2_binary(first, rest.into_iter().next().unwrap())).map_err(Into::into),
+        _ => Err((("pow2: expected at most two arguments".to_string())).into()),
     }
 }
 

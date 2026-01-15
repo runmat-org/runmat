@@ -230,14 +230,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::tril"
 )]
-fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("tril: too many input arguments".to_string());
+        return Err((("tril: too many input arguments".to_string())).into());
     }
     let offset = parse_diagonal_offset(&rest)?;
     match value {
-        Value::Tensor(tensor) => tril_tensor(tensor, offset).map(tensor::tensor_into_value),
-        Value::LogicalArray(array) => tril_logical_array(array, offset).map(Value::LogicalArray),
+        Value::Tensor(tensor) => (tril_tensor(tensor, offset).map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(array) => (tril_logical_array(array, offset).map(Value::LogicalArray)).map_err(Into::into),
         Value::ComplexTensor(tensor) => {
             tril_complex_tensor(tensor, offset).map(Value::ComplexTensor)
         }
@@ -246,32 +246,32 @@ fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
                 ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("tril: {e}"))?;
             tril_complex_tensor(tensor, offset).map(complex_tensor_into_value)
         }
-        Value::Num(n) => tril_tensor(
+        Value::Num(n) => (tril_tensor(
             tensor::value_into_tensor_for("tril", Value::Num(n))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
-        Value::Int(i) => tril_tensor(
+        .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::Int(i) => (tril_tensor(
             tensor::value_into_tensor_for("tril", Value::Int(i.clone()))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
-        Value::Bool(flag) => tril_tensor(
+        .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::Bool(flag) => (tril_tensor(
             tensor::value_into_tensor_for("tril", Value::Bool(flag))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
+        .map(tensor::tensor_into_value)).map_err(Into::into),
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|e| format!("tril: {e}"))?;
             tril_tensor(tensor, offset).map(tensor::tensor_into_value)
         }
-        Value::GpuTensor(handle) => tril_gpu(handle, offset),
+        Value::GpuTensor(handle) => (tril_gpu(handle, offset)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("tril: string arrays are not supported".to_string())
+            Err((("tril: string arrays are not supported".to_string())).into())
         }
-        Value::Cell(_) => Err("tril: cell arrays are not supported".to_string()),
+        Value::Cell(_) => Err((("tril: cell arrays are not supported".to_string())).into()),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -279,7 +279,7 @@ fn tril_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("tril: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("tril: unsupported input type".to_string())).into()),
     }
 }
 

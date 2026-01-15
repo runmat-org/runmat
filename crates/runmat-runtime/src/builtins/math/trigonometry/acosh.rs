@@ -253,16 +253,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
-fn acosh_builtin(value: Value) -> Result<Value, String> {
+fn acosh_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => acosh_gpu(handle),
+        Value::GpuTensor(handle) => (acosh_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
-        Value::ComplexTensor(ct) => acosh_complex_tensor(ct),
-        Value::CharArray(ca) => acosh_char_array(ca),
+        Value::ComplexTensor(ct) => (acosh_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (acosh_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("acosh: expected numeric input".to_string())
+            Err((("acosh: expected numeric input".to_string())).into())
         }
-        other => acosh_real(other),
+        other => (acosh_real(other)).map_err(Into::into),
     }
 }
 

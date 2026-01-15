@@ -219,7 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::and"
 )]
-fn and_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn and_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_and(a, b) {
@@ -227,7 +227,7 @@ fn and_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
             }
         }
     }
-    and_host(lhs, rhs)
+    and_host(lhs, rhs).map_err(Into::into)
 }
 
 fn and_host(lhs: Value, rhs: Value) -> Result<Value, String> {

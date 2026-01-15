@@ -205,22 +205,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::imag"
 )]
-fn imag_builtin(value: Value) -> Result<Value, String> {
+fn imag_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => imag_gpu(handle),
+        Value::GpuTensor(handle) => (imag_gpu(handle)).map_err(Into::into),
         Value::Complex(_, im) => Ok(Value::Num(im)),
-        Value::ComplexTensor(ct) => imag_complex_tensor(ct),
-        Value::CharArray(ca) => imag_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("imag: expected numeric input".to_string()),
+        Value::ComplexTensor(ct) => (imag_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (imag_char_array(ca)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err((("imag: expected numeric input".to_string())).into()),
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
-        | Value::Bool(_)) => imag_real(x),
-        other => Err(format!(
+        | Value::Bool(_)) => (imag_real(x)).map_err(Into::into),
+        other => Err(((format!(
             "imag: unsupported input type {:?}; expected numeric, logical, or char input",
             other
-        )),
+        ))).into()),
     }
 }
 

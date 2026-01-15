@@ -117,7 +117,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mut args = Vec::with_capacity(2 + rest.len());
     args.push(x);
     args.push(y);
@@ -133,12 +133,12 @@ pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, Stri
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         if let Some(order) = line_style_order.clone() {
             set_line_style_order_for_axes(axes, &order);
         }
         render_series(figure, axes, &mut series_plans)
-    })
+    })).map_err(Into::into)
 }
 
 fn build_line_plot(

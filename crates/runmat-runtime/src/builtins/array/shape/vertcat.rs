@@ -226,9 +226,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
-fn vertcat_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return empty_double();
+        return empty_double().map_err(Into::into);
     }
     if args.len() == 1 {
         return Ok(args.into_iter().next().unwrap());
@@ -240,6 +240,7 @@ fn vertcat_builtin(args: Vec<Value>) -> Result<Value, String> {
     crate::call_builtin("cat", &forwarded)
         .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
         .map_err(adapt_cat_error)
+        .map_err(Into::into)
 }
 
 fn empty_double() -> Result<Value, String> {

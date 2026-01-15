@@ -242,7 +242,7 @@ impl Default for FilewriteOptions {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
-fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn filewrite_builtin(path: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let path = gather_if_needed(&path).map_err(|e| format!("filewrite: {e}"))?;
     let data = gather_if_needed(&data).map_err(|e| format!("filewrite: {e}"))?;
     let rest = gather_values(&rest)?;

@@ -259,9 +259,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::cells::core::cell"
 )]
-fn cell_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedCell::parse(args)?;
-    build_cell(parsed)
+    build_cell(parsed).map_err(Into::into)
 }
 
 struct ParsedCell {

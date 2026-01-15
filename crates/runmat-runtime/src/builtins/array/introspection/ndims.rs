@@ -210,7 +210,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
-fn ndims_builtin(value: Value) -> Result<Value, String> {
+fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let rank = value_ndims(&value) as f64;
     Ok(Value::Num(rank))
 }

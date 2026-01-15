@@ -203,7 +203,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
-fn numel_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Ok(Value::Num(value_numel(&value) as f64));
     }

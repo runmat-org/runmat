@@ -257,7 +257,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "host",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
-fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let callable = Callable::from_function(func)?;
     let mut args = rest;
 
@@ -279,13 +279,13 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
                 error_handler = Some(Callable::from_function(value)?);
             }
             unknown => {
-                return Err(format!("cellfun: unknown name-value argument '{unknown}'"));
+                return Err(((format!("cellfun: unknown name-value argument '{unknown}'"))).into());
             }
         }
     }
 
     if args.is_empty() {
-        return Err("cellfun: expected at least one cell array input".to_string());
+        return Err((("cellfun: expected at least one cell array input".to_string())).into());
     }
 
     let mut cell_inputs: Vec<CellArray> = Vec::new();
@@ -294,9 +294,9 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     for value in args.into_iter() {
         match value {
-            Value::Cell(ca) if !seen_non_cell => cell_inputs.push(ca),
+            Value::Cell(ca) if !seen_non_cell => (cell_inputs.push(ca)).map_err(Into::into),
             Value::Cell(_) => {
-                return Err("cellfun: cell array inputs must precede extra arguments".to_string())
+                return Err((("cellfun: cell array inputs must precede extra arguments".to_string())).into())
             }
             other => {
                 seen_non_cell = true;
@@ -306,16 +306,16 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 
     if cell_inputs.is_empty() {
-        return Err("cellfun: expected at least one cell array input".to_string());
+        return Err((("cellfun: expected at least one cell array input".to_string())).into());
     }
 
     let reference_shape = cell_inputs[0].shape.clone();
     for (idx, ca) in cell_inputs.iter().enumerate().skip(1) {
         if ca.shape != reference_shape {
-            return Err(format!(
+            return Err(((format!(
                 "cellfun: cell array input {} does not match the size of the first input",
                 idx + 1
-            ));
+            ))).into());
         }
     }
 
@@ -1201,7 +1201,7 @@ pub(crate) mod tests {
         name = "__cellfun_test_handler",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> Result<Value, String> {
+    fn cellfun_test_handler(seed: Value, _err: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         // Return the captured seed regardless of the inputs; ensure rest is present for coverage.
         let _ = rest;
         Ok(seed)
@@ -1211,7 +1211,7 @@ pub(crate) mod tests {
         name = "__cellfun_add",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_add(lhs: Value, rhs: Value) -> Result<Value, String> {
+    fn cellfun_add(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         let a: f64 = (&lhs).try_into()?;
         let b: f64 = (&rhs).try_into()?;
         Ok(Value::Num(a + b))
@@ -1221,7 +1221,7 @@ pub(crate) mod tests {
         name = "__cellfun_identity",
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
-    fn cellfun_identity(value: Value) -> Result<Value, String> {
+    fn cellfun_identity(value: Value) -> crate::BuiltinResult<Value> {
         Ok(value)
     }
 

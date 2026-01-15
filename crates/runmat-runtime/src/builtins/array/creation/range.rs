@@ -242,11 +242,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::array::creation::range"
 )]
-fn range_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => range_gpu(handle, dim_selection, nan_mode),
-        other => range_host(other, dim_selection, nan_mode),
+        Value::GpuTensor(handle) => (range_gpu(handle, dim_selection, nan_mode)).map_err(Into::into),
+        other => (range_host(other, dim_selection, nan_mode)).map_err(Into::into),
     }
 }
 

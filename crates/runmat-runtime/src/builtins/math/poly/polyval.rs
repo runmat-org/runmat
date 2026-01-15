@@ -254,7 +254,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
-fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(p, x, &rest, false)?;
     Ok(eval.value())
 }

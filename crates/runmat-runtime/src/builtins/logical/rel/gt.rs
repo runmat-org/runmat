@@ -240,13 +240,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::rel::gt"
 )]
-fn gt_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn gt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_gt_gpu(a, b) {
-            return result;
+            return (result).map_err(Into::into);
         }
     }
-    gt_host(lhs, rhs)
+    gt_host(lhs, rhs).map_err(Into::into)
 }
 
 fn try_gt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, String>> {

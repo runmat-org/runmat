@@ -222,11 +222,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
-fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String> {
+fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
     let dims = parse_dims(&dims_value)?;
     if dims.is_empty() {
-        return Err("Size vector must have at least one element.".to_string());
+        return Err((("Size vector must have at least one element.".to_string())).into());
     }
 
     let total = total_elements(&dims)?;
@@ -268,7 +268,7 @@ fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String>
         outputs.push(tensor::tensor_into_value(tensor));
     }
 
-    make_cell(outputs, 1, dims.len())
+    make_cell(outputs, 1, dims.len()).map_err(Into::into)
 }
 
 fn try_gpu_ind2sub(

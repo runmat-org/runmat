@@ -229,15 +229,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
-fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
     let dims = parse_dims(&dims_value)?;
     if dims.is_empty() {
-        return Err("Size vector must have at least one element.".to_string());
+        return Err((("Size vector must have at least one element.".to_string())).into());
     }
 
     if rest.len() != dims.len() {
-        return Err("The number of subscripts supplied must equal the number of dimensions in the size vector.".to_string());
+        return Err((("The number of subscripts supplied must equal the number of dimensions in the size vector.".to_string())).into());
     }
 
     if let Some(value) = try_gpu_sub2ind(&dims, &rest)? {
@@ -277,7 +277,7 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
     }
 
-    build_host_value(result_data, result_shape)
+    build_host_value(result_data, result_shape).map_err(Into::into)
 }
 
 fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, String> {

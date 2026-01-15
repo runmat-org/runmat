@@ -259,7 +259,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
-fn eig_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest, false)?;
     Ok(eval.eigenvalues())
 }

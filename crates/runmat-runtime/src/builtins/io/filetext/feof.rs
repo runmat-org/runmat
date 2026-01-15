@@ -201,7 +201,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
-fn feof_builtin(fid: Value) -> Result<Value, String> {
+fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
     let at_end = evaluate(&fid)?;
     Ok(Value::Bool(at_end))
 }

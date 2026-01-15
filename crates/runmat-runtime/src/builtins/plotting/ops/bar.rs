@@ -113,7 +113,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
+pub fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args("bar", &rest, defaults)?;
     let mut input = Some(BarInput::from_value(values)?);
@@ -123,7 +123,7 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
         y_label: "Value",
         ..Default::default()
     };
-    render_active_plot(opts, move |figure, axes| {
+    (render_active_plot(opts, move |figure, axes| {
         let style = style.clone();
         let arg = input.take().expect("bar input consumed once");
         if !style.requires_cpu_path() {
@@ -152,7 +152,7 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
             figure.add_bar_chart_on_axes(bar, axes);
         }
         Ok(())
-    })
+    })).map_err(Into::into)
 }
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;

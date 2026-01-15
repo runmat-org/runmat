@@ -205,7 +205,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rmfield,struct,remove field,struct array",
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
-fn rmfield_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn rmfield_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let names = parse_field_names(&rest)?;
     if names.is_empty() {
         return Ok(value);
@@ -220,9 +220,9 @@ fn rmfield_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
             let updated = remove_fields_from_struct_array(&cell, &names)?;
             Ok(Value::Cell(updated))
         }
-        other => Err(format!(
+        other => Err(((format!(
             "rmfield: expected struct or struct array, got {other:?}"
-        )),
+        ))).into()),
     }
 }
 

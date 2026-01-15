@@ -219,10 +219,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
-fn isreal_builtin(value: Value) -> Result<Value, String> {
+fn isreal_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => isreal_gpu(handle),
-        other => isreal_host(other),
+        Value::GpuTensor(handle) => (isreal_gpu(handle)).map_err(Into::into),
+        other => (isreal_host(other)).map_err(Into::into),
     }
 }
 

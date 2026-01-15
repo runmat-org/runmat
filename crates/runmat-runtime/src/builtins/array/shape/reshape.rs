@@ -202,14 +202,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "shape",
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
-fn reshape_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err("reshape: size information missing".to_string());
+        return Err((("reshape: size information missing".to_string())).into());
     }
     let tokens = parse_size_arguments(&rest)?;
     let numel = value_numel(&value);
     let dims = finalize_dimensions(tokens, numel)?;
-    reshape_value(value, &dims)
+    reshape_value(value, &dims).map_err(Into::into)
 }
 
 fn reshape_value(value: Value, dims: &[usize]) -> Result<Value, String> {

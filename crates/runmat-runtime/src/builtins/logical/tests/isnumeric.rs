@@ -236,9 +236,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
-fn isnumeric_builtin(value: Value) -> Result<Value, String> {
+fn isnumeric_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => isnumeric_gpu(handle),
+        Value::GpuTensor(handle) => (isnumeric_gpu(handle)).map_err(Into::into),
         other => Ok(Value::Bool(isnumeric_value(&other))),
     }
 }

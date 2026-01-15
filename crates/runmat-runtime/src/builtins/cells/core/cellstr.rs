@@ -241,13 +241,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "gather",
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
-fn cellstr_builtin(value: Value) -> Result<Value, String> {
+fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let host = gather_if_needed(&value).map_err(|e| format!("cellstr: {e}"))?;
     match host {
-        Value::CharArray(ca) => cellstr_from_char_array(ca),
-        Value::StringArray(sa) => cellstr_from_string_array(sa),
-        Value::String(text) => cellstr_from_string(text),
-        Value::Cell(cell) => cellstr_from_cell(cell),
+        Value::CharArray(ca) => (cellstr_from_char_array(ca)).map_err(Into::into),
+        Value::StringArray(sa) => (cellstr_from_string_array(sa)).map_err(Into::into),
+        Value::String(text) => (cellstr_from_string(text)).map_err(Into::into),
+        Value::Cell(cell) => (cellstr_from_cell(cell)).map_err(Into::into),
         Value::LogicalArray(_)
         | Value::Bool(_)
         | Value::Int(_)
@@ -262,9 +262,9 @@ fn cellstr_builtin(value: Value) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ERR_INPUT_NOT_TEXT.to_string()),
+        | Value::MException(_) => Err(((ERR_INPUT_NOT_TEXT.to_string())).into()),
         Value::GpuTensor(_) => {
-            Err("cellstr: input must be gathered to the host before conversion".to_string())
+            Err((("cellstr: input must be gathered to the host before conversion".to_string())).into())
         }
     }
 }

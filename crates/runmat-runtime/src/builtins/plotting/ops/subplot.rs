@@ -38,7 +38,7 @@ fn to_positive_index(value: f64, name: &str) -> Result<usize, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::subplot"
 )]
-pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> Result<String, String> {
+pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> crate::BuiltinResult<String> {
     let m = scalar_from_value(&rows, "subplot")?;
     let n = scalar_from_value(&cols, "subplot")?;
     let p = scalar_from_value(&position, "subplot")?;

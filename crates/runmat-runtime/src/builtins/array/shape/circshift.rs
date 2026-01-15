@@ -252,9 +252,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
-fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("circshift: too many input arguments".to_string());
+        return Err((("circshift: too many input arguments".to_string())).into());
     }
     let spec = parse_circshift_spec(&shift, &rest)?;
     let dims = &spec.dims;
@@ -262,30 +262,42 @@ fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Val
 
     match value {
         Value::Tensor(tensor) => {
-            circshift_tensor(tensor, dims, shifts).map(tensor::tensor_into_value)
+            circshift_tensor(tensor, dims, shifts)
+                .map(tensor::tensor_into_value)
+                .map_err(Into::into)
         }
         Value::LogicalArray(array) => {
-            circshift_logical_array(array, dims, shifts).map(Value::LogicalArray)
+            circshift_logical_array(array, dims, shifts)
+                .map(Value::LogicalArray)
+                .map_err(Into::into)
         }
         Value::ComplexTensor(ct) => {
-            circshift_complex_tensor(ct, dims, shifts).map(Value::ComplexTensor)
+            circshift_complex_tensor(ct, dims, shifts)
+                .map(Value::ComplexTensor)
+                .map_err(Into::into)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("circshift: {e}"))?;
-            circshift_complex_tensor(tensor, dims, shifts).map(complex_tensor_into_value)
+            circshift_complex_tensor(tensor, dims, shifts)
+                .map(complex_tensor_into_value)
+                .map_err(Into::into)
         }
         Value::StringArray(strings) => {
-            circshift_string_array(strings, dims, shifts).map(Value::StringArray)
+            circshift_string_array(strings, dims, shifts)
+                .map(Value::StringArray)
+                .map_err(Into::into)
         }
-        Value::CharArray(chars) => circshift_char_array(chars, dims, shifts),
+        Value::CharArray(chars) => (circshift_char_array(chars, dims, shifts)).map_err(Into::into),
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("circshift", value)?;
-            circshift_tensor(tensor, dims, shifts).map(tensor::tensor_into_value)
+            circshift_tensor(tensor, dims, shifts)
+                .map(tensor::tensor_into_value)
+                .map_err(Into::into)
         }
-        Value::GpuTensor(handle) => circshift_gpu(handle, dims, shifts),
-        Value::Cell(_) => Err("circshift: cell arrays are not yet supported".to_string()),
+        Value::GpuTensor(handle) => (circshift_gpu(handle, dims, shifts)).map_err(Into::into),
+        Value::Cell(_) => Err((("circshift: cell arrays are not yet supported".to_string())).into()),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -293,7 +305,7 @@ fn circshift_builtin(value: Value, shift: Value, rest: Vec<Value>) -> Result<Val
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("circshift: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("circshift: unsupported input type".to_string())).into()),
     }
 }
 

@@ -240,17 +240,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
-fn fliplr_builtin(value: Value) -> Result<Value, String> {
+fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => flip_tensor(tensor, &LR_DIM)
+        Value::Tensor(tensor) => (flip_tensor(tensor, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
-            .map(tensor::tensor_into_value),
-        Value::LogicalArray(array) => flip_logical_array(array, &LR_DIM)
+            .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(array) => (flip_logical_array(array, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
-            .map(Value::LogicalArray),
-        Value::ComplexTensor(ct) => flip_complex_tensor(ct, &LR_DIM)
+            .map(Value::LogicalArray)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (flip_complex_tensor(ct, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
-            .map(Value::ComplexTensor),
+            .map(Value::ComplexTensor)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("fliplr: {e}"))?;
@@ -258,12 +258,12 @@ fn fliplr_builtin(value: Value) -> Result<Value, String> {
                 .map_err(|e| e.replace("flip", "fliplr"))
                 .map(complex_tensor_into_value)
         }
-        Value::StringArray(strings) => flip_string_array(strings, &LR_DIM)
+        Value::StringArray(strings) => (flip_string_array(strings, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
-            .map(Value::StringArray),
-        Value::CharArray(chars) => flip_char_array(chars, &LR_DIM)
+            .map(Value::StringArray)).map_err(Into::into),
+        Value::CharArray(chars) => (flip_char_array(chars, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
-            .map(Value::CharArray),
+            .map(Value::CharArray)).map_err(Into::into),
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Num(n))?;
@@ -286,7 +286,7 @@ fn fliplr_builtin(value: Value) -> Result<Value, String> {
         Value::GpuTensor(handle) => {
             flip_gpu(handle, &LR_DIM).map_err(|e| e.replace("flip", "fliplr"))
         }
-        Value::Cell(_) => Err("fliplr: cell arrays are not yet supported".to_string()),
+        Value::Cell(_) => Err((("fliplr: cell arrays are not yet supported".to_string())).into()),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -294,7 +294,7 @@ fn fliplr_builtin(value: Value) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("fliplr: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("fliplr: unsupported input type".to_string())).into()),
     }
 }
 

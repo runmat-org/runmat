@@ -211,14 +211,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::math::poly::roots"
 )]
-fn roots_builtin(coefficients: Value) -> Result<Value, String> {
+fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
     let coeffs = coefficients_to_complex(coefficients)?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
-        return empty_column();
+        return (empty_column()).map_err(Into::into);
     }
     let roots = solve_roots(&trimmed)?;
-    roots_to_value(&roots)
+    roots_to_value(&roots).map_err(Into::into)
 }
 
 fn coefficients_to_complex(value: Value) -> Result<Vec<Complex64>, String> {

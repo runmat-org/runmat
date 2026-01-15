@@ -183,7 +183,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
-fn weboptions_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
         gathered.push(gather_if_needed(&value).map_err(|e| format!("weboptions: {e}"))?);

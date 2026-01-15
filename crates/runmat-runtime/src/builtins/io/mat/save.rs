@@ -199,7 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::io::mat::save"
 )]
-fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
         host_args.push(
@@ -222,7 +222,7 @@ fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
 
     let request = parse_arguments(&host_args[option_start..])?;
     if request.append {
-        return Err("save: -append is not supported yet".to_string());
+        return Err((("save: -append is not supported yet".to_string())).into());
     }
 
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
@@ -260,10 +260,10 @@ fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
             let struct_value = match value {
                 Value::Struct(s) => s,
                 _ => {
-                    return Err(format!(
+                    return Err(((format!(
                         "save: variable '{}' is not a struct",
                         struct_req.source
-                    ))
+                    ))).into())
                 }
             };
             append_struct_fields(
@@ -291,13 +291,13 @@ fn save_builtin(args: Vec<Value>) -> Result<Value, String> {
                 }
             }
             if matched == 0 {
-                return Err("save: no variables matched '-regexp' patterns".to_string());
+                return Err((("save: no variables matched '-regexp' patterns".to_string())).into());
             }
         }
     }
 
     if entries.is_empty() {
-        return Err("save: no variables selected".to_string());
+        return Err((("save: no variables selected".to_string())).into());
     }
 
     // Deduplicate while preserving the last occurrence for MATLAB compatibility

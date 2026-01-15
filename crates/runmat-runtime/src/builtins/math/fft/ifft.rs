@@ -211,11 +211,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
-fn ifft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (length, dimension, symmetric) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric),
-        other => ifft_host(other, length, dimension, symmetric),
+        Value::GpuTensor(handle) => (ifft_gpu(handle, length, dimension, symmetric)).map_err(Into::into),
+        other => (ifft_host(other, length, dimension, symmetric)).map_err(Into::into),
     }
 }
 

@@ -188,11 +188,11 @@ const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
     keywords = "toc,timing,profiling,benchmark",
     builtin_path = "crate::builtins::timing::toc"
 )]
-pub fn toc_builtin(args: Vec<Value>) -> Result<f64, String> {
+pub fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     match args.len() {
-        0 => latest_elapsed(),
-        1 => elapsed_from_value(&args[0]),
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        0 => (latest_elapsed()).map_err(Into::into),
+        1 => (elapsed_from_value(&args[0])).map_err(Into::into),
+        _ => Err(((ERR_TOO_MANY_INPUTS.to_string())).into()),
     }
 }
 

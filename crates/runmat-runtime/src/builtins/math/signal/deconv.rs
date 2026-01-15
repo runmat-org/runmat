@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
-fn deconv_builtin(numerator: Value, denominator: Value) -> Result<Value, String> {
+fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
     let eval = evaluate(numerator, denominator)?;
     Ok(eval.quotient())
 }

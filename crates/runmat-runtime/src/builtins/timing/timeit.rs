@@ -168,7 +168,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "helper",
     builtin_path = "crate::builtins::timing::timeit"
 )]
-fn timeit_builtin(func: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let requested_outputs = parse_num_outputs(&rest)?;
     let callable = prepare_callable(func, requested_outputs)?;
 
@@ -381,7 +381,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_default",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_default() -> Result<Value, String> {
+    fn helper_counter_default() -> crate::BuiltinResult<Value> {
         COUNTER_DEFAULT.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -390,7 +390,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_outputs",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_outputs() -> Result<Value, String> {
+    fn helper_counter_outputs() -> crate::BuiltinResult<Value> {
         COUNTER_NUM_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -399,7 +399,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_counter_invalid",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_invalid() -> Result<Value, String> {
+    fn helper_counter_invalid() -> crate::BuiltinResult<Value> {
         COUNTER_INVALID.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(1.0))
     }
@@ -408,7 +408,7 @@ pub(crate) mod tests {
         name = "__timeit_helper_zero_outputs",
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
-    fn helper_counter_zero_outputs() -> Result<Value, String> {
+    fn helper_counter_zero_outputs() -> crate::BuiltinResult<Value> {
         COUNTER_ZERO_OUTPUTS.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Num(0.0))
     }

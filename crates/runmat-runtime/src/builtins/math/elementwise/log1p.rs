@@ -237,19 +237,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
-fn log1p_builtin(value: Value) -> Result<Value, String> {
+fn log1p_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => log1p_gpu(handle),
+        Value::GpuTensor(handle) => (log1p_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => {
             let (real, imag) = log1p_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
         }
-        Value::ComplexTensor(ct) => log1p_complex_tensor(ct),
-        Value::CharArray(ca) => log1p_char_array(ca),
+        Value::ComplexTensor(ct) => (log1p_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (log1p_char_array(ca)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("log1p: expected numeric input".to_string())
+            Err((("log1p: expected numeric input".to_string())).into())
         }
-        other => log1p_real(other),
+        other => (log1p_real(other)).map_err(Into::into),
     }
 }
 

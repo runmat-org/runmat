@@ -192,9 +192,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
-fn pwd_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err("pwd: too many input arguments".to_string());
+        return Err((("pwd: too many input arguments".to_string())).into());
     }
     let current = env::current_dir()
         .map_err(|err| format!("pwd: unable to determine current directory ({err})"))?;

@@ -204,9 +204,9 @@ where
     suppress_auto_output = true,
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
-fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return handle_query_default();
+        return (handle_query_default()).map_err(Into::into);
     }
 
     let first = &args[0];
@@ -215,7 +215,7 @@ fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
     match first {
         Value::Struct(_) | Value::Cell(_) => {
             if !rest.is_empty() {
-                return Err("warning: state restoration accepts a single argument".to_string());
+                return Err((("warning: state restoration accepts a single argument".to_string())).into());
             }
             apply_state_value(first)?;
             Ok(Value::Num(0.0))
@@ -223,8 +223,8 @@ fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
         Value::MException(mex) => {
             if !rest.is_empty() {
                 return Err(
-                    "warning: additional arguments are not allowed when passing an MException"
-                        .to_string(),
+                    (("warning: additional arguments are not allowed when passing an MException"
+                        .to_string())).into(),
                 );
             }
             reissue_exception(mex)
@@ -232,7 +232,7 @@ fn warning_builtin(args: Vec<Value>) -> Result<Value, String> {
         _ => {
             let first_string = value_to_string("warning", first)?;
             if let Some(command) = parse_command(&first_string) {
-                return handle_command(command, rest);
+                return (handle_command(command, rest)).map_err(Into::into);
             }
             handle_message_call(None, first_string, rest)
         }

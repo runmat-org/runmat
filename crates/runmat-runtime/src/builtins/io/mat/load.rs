@@ -189,7 +189,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::io::mat::load"
 )]
-fn load_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args)?;
     Ok(eval.first_output())
 }

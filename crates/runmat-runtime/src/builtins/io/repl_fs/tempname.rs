@@ -213,7 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
-fn tempname_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => {
             let base = default_temp_directory()?;
@@ -224,7 +224,7 @@ fn tempname_builtin(args: Vec<Value>) -> Result<Value, String> {
             let folder = parse_folder_argument(&gathered)?;
             Ok(path_to_value(&generate_unique_path(&folder)?))
         }
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        _ => Err(((ERR_TOO_MANY_INPUTS.to_string())).into()),
     }
 }
 

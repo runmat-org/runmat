@@ -226,11 +226,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::all"
 )]
-fn all_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn all_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (spec, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => all_gpu(handle, spec, nan_mode),
-        other => all_host(other, spec, nan_mode),
+        Value::GpuTensor(handle) => (all_gpu(handle, spec, nan_mode)).map_err(Into::into),
+        other => (all_host(other, spec, nan_mode)).map_err(Into::into),
     }
 }
 

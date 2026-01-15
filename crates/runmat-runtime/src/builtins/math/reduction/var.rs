@@ -248,14 +248,14 @@ enum NormParse {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-fn var_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => var_gpu(handle, &parsed),
+        Value::GpuTensor(handle) => (var_gpu(handle, &parsed)).map_err(Into::into),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("var: complex inputs are not supported yet".to_string())
+            Err((("var: complex inputs are not supported yet".to_string())).into())
         }
-        other => var_host(other, &parsed),
+        other => (var_host(other, &parsed)).map_err(Into::into),
     }
 }
 

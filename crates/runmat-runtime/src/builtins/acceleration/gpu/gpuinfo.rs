@@ -180,11 +180,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "disp(gpuInfo())",
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
-fn gpu_info_builtin() -> Result<Value, String> {
+fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
     match active_device_struct() {
         Ok(info) => Ok(Value::String(format_summary(Some(&info)))),
         Err(err) if err == gpudevice::ERR_NO_PROVIDER => Ok(Value::String(format_summary(None))),
-        Err(err) => Err(err.to_string()),
+        Err(err) => Err(((err.to_string())).into()),
     }
 }
 

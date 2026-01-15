@@ -215,7 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "close,tcpclient,tcpserver,networking",
     builtin_path = "crate::builtins::io::net::close"
 )]
-fn close_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         let closed = close_everything();
         return Ok(Value::Num(if closed { 1.0 } else { 0.0 }));

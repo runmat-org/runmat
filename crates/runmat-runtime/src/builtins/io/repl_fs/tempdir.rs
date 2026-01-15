@@ -213,18 +213,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     builtin_path = "crate::builtins::io::repl_fs::tempdir"
 )]
-fn tempdir_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn tempdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err(ERR_TOO_MANY_INPUTS.to_string());
+        return Err(((ERR_TOO_MANY_INPUTS.to_string())).into());
     }
     let path = env::temp_dir();
     if path.as_os_str().is_empty() {
-        return Err(ERR_UNABLE_TO_DETERMINE.to_string());
+        return Err(((ERR_UNABLE_TO_DETERMINE.to_string())).into());
     }
     let value = path_to_char_array(&path);
     if let Ok(text) = String::try_from(&value) {
         if text.is_empty() {
-            return Err(ERR_UNABLE_TO_DETERMINE.to_string());
+            return Err(((ERR_UNABLE_TO_DETERMINE.to_string())).into());
         }
     }
     Ok(value)

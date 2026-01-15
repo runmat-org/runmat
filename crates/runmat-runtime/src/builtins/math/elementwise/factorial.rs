@@ -256,24 +256,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::factorial"
 )]
-fn factorial_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn factorial_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => factorial_gpu(handle)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             return Err(
-                "factorial: complex inputs are not supported; use gamma(z + 1) instead".to_string(),
+                (("factorial: complex inputs are not supported; use gamma(z + 1) instead".to_string())).into(),
             )
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            return Err("factorial: expected numeric or logical input".to_string())
+            return Err((("factorial: expected numeric or logical input".to_string())).into())
         }
         other => {
             let tensor = tensor::value_into_tensor_for("factorial", other)?;
             factorial_tensor(tensor).map(tensor::tensor_into_value)?
         }
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &output).map_err(Into::into)
 }
 
 #[derive(Clone)]

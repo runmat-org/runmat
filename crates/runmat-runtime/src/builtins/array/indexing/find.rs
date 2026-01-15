@@ -225,9 +225,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::indexing::find"
 )]
-fn find_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest)?;
-    eval.linear_value()
+    eval.linear_value().map_err(Into::into)
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.

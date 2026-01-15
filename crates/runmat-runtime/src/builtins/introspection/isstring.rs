@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::introspection::isstring"
 )]
-fn isstring_builtin(value: Value) -> Result<Value, String> {
+fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(matches!(
         value,
         Value::String(_) | Value::StringArray(_)

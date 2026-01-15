@@ -235,11 +235,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rank",
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
-fn rank_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn rank_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest)?;
     match value {
-        Value::GpuTensor(handle) => rank_gpu(handle, tol),
-        Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),
+        Value::GpuTensor(handle) => (rank_gpu(handle, tol)).map_err(Into::into),
+        Value::ComplexTensor(tensor) => (rank_complex_tensor_value(tensor, tol)).map_err(Into::into),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("{NAME}: {e}"))?;

@@ -260,14 +260,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
-fn asin_builtin(value: Value) -> Result<Value, String> {
+fn asin_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => asin_gpu(handle),
+        Value::GpuTensor(handle) => (asin_gpu(handle)).map_err(Into::into),
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
-        Value::ComplexTensor(ct) => asin_complex_tensor(ct),
-        Value::CharArray(ca) => asin_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err("asin: expected numeric input".to_string()),
-        other => asin_real(other),
+        Value::ComplexTensor(ct) => (asin_complex_tensor(ct)).map_err(Into::into),
+        Value::CharArray(ca) => (asin_char_array(ca)).map_err(Into::into),
+        Value::String(_) | Value::StringArray(_) => Err((("asin: expected numeric input".to_string())).into()),
+        other => (asin_real(other)).map_err(Into::into),
     }
 }
 

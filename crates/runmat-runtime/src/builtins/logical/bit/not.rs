@@ -210,7 +210,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::not"
 )]
-fn not_builtin(value: Value) -> Result<Value, String> {
+fn not_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if let Value::GpuTensor(ref handle) = value {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(device_out) = provider.logical_not(handle) {
@@ -218,7 +218,7 @@ fn not_builtin(value: Value) -> Result<Value, String> {
             }
         }
     }
-    not_host(value)
+    not_host(value).map_err(Into::into)
 }
 
 fn not_host(value: Value) -> Result<Value, String> {

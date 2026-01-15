@@ -222,16 +222,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
-fn dir_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args)?;
     let records = match gathered.len() {
         0 => list_current_directory()?,
         1 => list_from_single_value(&gathered[0])?,
         2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
-        _ => return Err("dir: too many input arguments".to_string()),
+        _ => return Err((("dir: too many input arguments".to_string())).into()),
     };
     emit_dir_stdout(&records);
-    records_to_value(records)
+    records_to_value(records).map_err(Into::into)
 }
 
 #[derive(Clone)]

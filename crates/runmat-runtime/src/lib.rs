@@ -19,6 +19,9 @@ pub mod plotting_hooks;
 pub mod warning_store;
 pub mod workspace;
 
+/// Standard result type for runtime builtins.
+pub type BuiltinResult<T> = Result<T, runmat_async::RuntimeControlFlow>;
+
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
 #[cfg(feature = "blas-lapack")]
@@ -68,10 +71,10 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
 
 // Internal builtin to construct a cell from a vector of values (used by ignition)
 #[runmat_macros::runtime_builtin(name = "__make_cell", builtin_path = "crate")]
-fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn make_cell_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let rows = 1usize;
     let cols = rest.len();
-    make_cell(rest, rows, cols)
+    make_cell(rest, rows, cols).map_err(Into::into)
 }
 
 fn to_string_scalar(v: &Value) -> Result<String, String> {
@@ -101,14 +104,14 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "strtrim", builtin_path = "crate")]
-fn strtrim_builtin(a: Value) -> Result<Value, String> {
+fn strtrim_builtin(a: Value) -> crate::BuiltinResult<Value> {
     let s = to_string_scalar(&a)?;
     Ok(Value::String(s.trim().to_string()))
 }
 
 // Adjust strjoin semantics: join rows (row-wise)
 #[runmat_macros::runtime_builtin(name = "strjoin", builtin_path = "crate")]
-fn strjoin_rowwise(a: Value, delim: Value) -> Result<Value, String> {
+fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> {
     let d = to_string_scalar(&delim)?;
     let sa = to_string_array(&a)?;
     let rows = *sa.shape.first().unwrap_or(&sa.data.len());
@@ -137,25 +140,25 @@ fn strjoin_rowwise(a: Value, delim: Value) -> Result<Value, String> {
 
 // deal: distribute inputs to multiple outputs (via cell for expansion)
 #[runmat_macros::runtime_builtin(name = "deal", builtin_path = "crate")]
-fn deal_builtin(rest: Vec<Value>) -> Result<Value, String> {
+fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     // Return cell row vector of inputs for expansion
     let cols = rest.len();
-    make_cell(rest, 1, cols)
+    make_cell(rest, 1, cols).map_err(Into::into)
 }
 
 // Object/handle utilities used by interpreter lowering for OOP/func handles
 
 #[runmat_macros::runtime_builtin(name = "rethrow", builtin_path = "crate")]
-fn rethrow_builtin(e: Value) -> Result<Value, String> {
+fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
-        Value::MException(me) => Err(format!("{}: {}", me.identifier, me.message)),
-        Value::String(s) => Err(s),
-        other => Err(format!("MATLAB:error: {other:?}")),
+        Value::MException(me) => Err(((format!("{}: {}", me.identifier, me.message))).into()),
+        Value::String(s) => Err(((s)).into()),
+        other => Err(((format!("MATLAB:error: {other:?}"))).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "call_method", builtin_path = "crate")]
-fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<Value, String> {
+fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match base {
         Value::Object(obj) => {
             // Simple dynamic dispatch via builtin registry: method name may be qualified as Class.method
@@ -187,9 +190,9 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
             }
             Ok(crate::call_builtin(&method, &args)?)
         }
-        other => Err(format!(
+        other => Err(((format!(
             "call_method unsupported on {other:?} for method '{method}'"
-        )),
+        ))).into()),
     }
 }
 
@@ -200,7 +203,7 @@ fn subsasgn_dispatch(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsasgn", o.class_name);
@@ -215,12 +218,12 @@ fn subsasgn_dispatch(
             let qualified = format!("{class_name}.subsasgn");
             Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])?)
         }
-        other => Err(format!("subsasgn: receiver must be object, got {other:?}")),
+        other => Err(((format!("subsasgn: receiver must be object, got {other:?}"))).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
-fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, String> {
+fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.subsref", o.class_name);
@@ -235,14 +238,14 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
             let qualified = format!("{class_name}.subsref");
             Ok(crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])?)
         }
-        other => Err(format!("subsref: receiver must be object, got {other:?}")),
+        other => Err(((format!("subsref: receiver must be object, got {other:?}"))).into()),
     }
 }
 
 // -------- Handle classes & events --------
 
 #[runmat_macros::runtime_builtin(name = "new_handle_object", builtin_path = "crate")]
-fn new_handle_object_builtin(class_name: String) -> Result<Value, String> {
+fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     // Create an underlying object instance and wrap it in a handle
     let obj = new_object_builtin(class_name.clone())?;
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
@@ -254,7 +257,7 @@ fn new_handle_object_builtin(class_name: String) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "isvalid", builtin_path = "crate")]
-fn isvalid_builtin(v: Value) -> Result<Value, String> {
+fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
     match v {
         Value::HandleObject(h) => Ok(Value::Bool(h.valid)),
         Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
@@ -281,11 +284,11 @@ fn addlistener_builtin(
     target: Value,
     event_name: String,
     callback: Value,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err("addlistener: target must be handle or object".to_string()),
+        _ => return Err((("addlistener: target must be handle or object".to_string())).into()),
     };
     let mut reg = events().lock().unwrap();
     let id = {
@@ -316,11 +319,11 @@ fn addlistener_builtin(
 }
 
 #[runmat_macros::runtime_builtin(name = "notify", builtin_path = "crate")]
-fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> Result<Value, String> {
+fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err("notify: target must be handle or object".to_string()),
+        _ => return Err((("notify: target must be handle or object".to_string())).into()),
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
     {
@@ -365,7 +368,7 @@ fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> Result
 // property named 'p', the VM will try to call get.p / set.p. We provide generic
 // implementations that read/write a conventional backing field 'p_backing'.
 #[runmat_macros::runtime_builtin(name = "get.p", builtin_path = "crate")]
-fn get_p_builtin(obj: Value) -> Result<Value, String> {
+fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(o) => {
             if let Some(v) = o.properties.get("p_backing") {
@@ -374,33 +377,33 @@ fn get_p_builtin(obj: Value) -> Result<Value, String> {
                 Ok(Value::Num(0.0))
             }
         }
-        other => Err(format!("get.p requires object, got {other:?}")),
+        other => Err(((format!("get.p requires object, got {other:?}"))).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "set.p", builtin_path = "crate")]
-fn set_p_builtin(obj: Value, val: Value) -> Result<Value, String> {
+fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(mut o) => {
             o.properties.insert("p_backing".to_string(), val);
             Ok(Value::Object(o))
         }
-        other => Err(format!("set.p requires object, got {other:?}")),
+        other => Err(((format!("set.p requires object, got {other:?}"))).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "make_handle", builtin_path = "crate")]
-fn make_handle_builtin(name: String) -> Result<Value, String> {
+fn make_handle_builtin(name: String) -> crate::BuiltinResult<Value> {
     Ok(Value::String(format!("@{name}")))
 }
 
 #[runmat_macros::runtime_builtin(name = "make_anon", builtin_path = "crate")]
-fn make_anon_builtin(params: String, body: String) -> Result<Value, String> {
+fn make_anon_builtin(params: String, body: String) -> crate::BuiltinResult<Value> {
     Ok(Value::String(format!("@anon({params}) {body}")))
 }
 
 #[runmat_macros::runtime_builtin(name = "new_object", builtin_path = "crate")]
-pub(crate) fn new_object_builtin(class_name: String) -> Result<Value, String> {
+pub(crate) fn new_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
         let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
@@ -438,12 +441,12 @@ pub(crate) fn new_object_builtin(class_name: String) -> Result<Value, String> {
 // handle-object builtins removed for now
 
 #[runmat_macros::runtime_builtin(name = "classref", builtin_path = "crate")]
-fn classref_builtin(class_name: String) -> Result<Value, String> {
+fn classref_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     Ok(Value::ClassRef(class_name))
 }
 
 #[runmat_macros::runtime_builtin(name = "__register_test_classes", builtin_path = "crate")]
-fn register_test_classes_builtin() -> Result<Value, String> {
+fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
     use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
     props.insert(
@@ -652,7 +655,7 @@ pub fn test_register_classes() {
 
 // Example method implementation: Point.move(obj, dx, dy) -> updated obj
 #[runmat_macros::runtime_builtin(name = "Point.move", builtin_path = "crate")]
-fn point_move_method(obj: Value, dx: f64, dy: f64) -> Result<Value, String> {
+fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(mut o) => {
             let mut x = 0.0;
@@ -667,14 +670,14 @@ fn point_move_method(obj: Value, dx: f64, dy: f64) -> Result<Value, String> {
             o.properties.insert("y".to_string(), Value::Num(y + dy));
             Ok(Value::Object(o))
         }
-        other => Err(format!(
+        other => Err(((format!(
             "Point.move requires object receiver, got {other:?}"
-        )),
+        ))).into()),
     }
 }
 
 #[runmat_macros::runtime_builtin(name = "Point.origin", builtin_path = "crate")]
-fn point_origin_method() -> Result<Value, String> {
+fn point_origin_method() -> crate::BuiltinResult<Value> {
     let mut o = runmat_builtins::ObjectInstance::new("Point".to_string());
     o.properties.insert("x".to_string(), Value::Num(0.0));
     o.properties.insert("y".to_string(), Value::Num(0.0));
@@ -682,12 +685,12 @@ fn point_origin_method() -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "Shape.area", builtin_path = "crate")]
-fn shape_area_method(_obj: Value) -> Result<Value, String> {
+fn shape_area_method(_obj: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Num(0.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "Circle.area", builtin_path = "crate")]
-fn circle_area_method(obj: Value) -> Result<Value, String> {
+fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(o) => {
             let r = if let Some(Value::Num(v)) = o.properties.get("r") {
@@ -697,15 +700,15 @@ fn circle_area_method(obj: Value) -> Result<Value, String> {
             };
             Ok(Value::Num(std::f64::consts::PI * r * r))
         }
-        other => Err(format!(
+        other => Err(((format!(
             "Circle.area requires object receiver, got {other:?}"
-        )),
+        ))).into()),
     }
 }
 
 // --- Test-only helpers to validate constructors and subsref/subsasgn ---
 #[runmat_macros::runtime_builtin(name = "Ctor.Ctor", builtin_path = "crate")]
-fn ctor_ctor_method(x: f64) -> Result<Value, String> {
+fn ctor_ctor_method(x: f64) -> crate::BuiltinResult<Value> {
     // Construct object with property 'x' initialized
     let mut o = runmat_builtins::ObjectInstance::new("Ctor".to_string());
     o.properties.insert("x".to_string(), Value::Num(x));
@@ -714,17 +717,17 @@ fn ctor_ctor_method(x: f64) -> Result<Value, String> {
 
 // --- Test-only package functions to exercise import precedence ---
 #[runmat_macros::runtime_builtin(name = "PkgF.foo", builtin_path = "crate")]
-fn pkgf_foo() -> Result<Value, String> {
+fn pkgf_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(10.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "PkgG.foo", builtin_path = "crate")]
-fn pkgg_foo() -> Result<Value, String> {
+fn pkgg_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(20.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.subsref", builtin_path = "crate")]
-fn overidx_subsref(obj: Value, kind: String, payload: Value) -> Result<Value, String> {
+fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
         (Value::Object(_), "()", Value::Cell(_)) => Ok(Value::Num(99.0)),
@@ -751,7 +754,7 @@ fn overidx_subsref(obj: Value, kind: String, payload: Value) -> Result<Value, St
                 Ok(Value::Num(77.0))
             }
         }
-        _ => Err("subsref: unsupported payload".to_string()),
+        _ => Err((("subsref: unsupported payload".to_string())).into()),
     }
 }
 
@@ -761,7 +764,7 @@ fn overidx_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     match (&mut obj, kind.as_str(), payload) {
         (Value::Object(o), "()", Value::Cell(_)) => {
             // Store into 'last' property
@@ -781,16 +784,16 @@ fn overidx_subsasgn(
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))
         }
-        _ => Err("subsasgn: unsupported payload".to_string()),
+        _ => Err((("subsasgn: unsupported payload".to_string())).into()),
     }
 }
 
 // --- Operator overloading methods for OverIdx (test scaffolding) ---
 #[runmat_macros::runtime_builtin(name = "OverIdx.plus", builtin_path = "crate")]
-fn overidx_plus(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.plus: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.plus: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -802,10 +805,10 @@ fn overidx_plus(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.times", builtin_path = "crate")]
-fn overidx_times(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.times: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.times: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -817,10 +820,10 @@ fn overidx_times(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.mtimes", builtin_path = "crate")]
-fn overidx_mtimes(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.mtimes: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.mtimes: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -832,10 +835,10 @@ fn overidx_mtimes(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.lt", builtin_path = "crate")]
-fn overidx_lt(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.lt: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.lt: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -847,10 +850,10 @@ fn overidx_lt(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.gt", builtin_path = "crate")]
-fn overidx_gt(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.gt: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.gt: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -862,10 +865,10 @@ fn overidx_gt(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.eq", builtin_path = "crate")]
-fn overidx_eq(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.eq: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.eq: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -877,16 +880,16 @@ fn overidx_eq(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.uplus", builtin_path = "crate")]
-fn overidx_uplus(obj: Value) -> Result<Value, String> {
+fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
     // Identity
     Ok(obj)
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.rdivide", builtin_path = "crate")]
-fn overidx_rdivide(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.rdivide: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.rdivide: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -898,10 +901,10 @@ fn overidx_rdivide(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.ldivide", builtin_path = "crate")]
-fn overidx_ldivide(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.ldivide: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.ldivide: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -913,10 +916,10 @@ fn overidx_ldivide(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.and", builtin_path = "crate")]
-fn overidx_and(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.and: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.and: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -928,10 +931,10 @@ fn overidx_and(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.or", builtin_path = "crate")]
-fn overidx_or(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.or: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.or: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -943,10 +946,10 @@ fn overidx_or(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.xor", builtin_path = "crate")]
-fn overidx_xor(obj: Value, rhs: Value) -> Result<Value, String> {
+fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
         Value::Object(o) => o,
-        _ => return Err("OverIdx.xor: receiver must be object".to_string()),
+        _ => return Err((("OverIdx.xor: receiver must be object".to_string())).into()),
     };
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
@@ -960,16 +963,16 @@ fn overidx_xor(obj: Value, rhs: Value) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
-fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match f {
         // Current handles are strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
                 Ok(crate::call_builtin(name, &rest)?)
             } else {
-                Err(format!(
+                Err(((format!(
                     "feval: expected function handle string starting with '@', got {s}"
-                ))
+                ))).into())
             }
         }
         // Also accept character row vector handles like '@max'
@@ -979,12 +982,12 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
                 if let Some(name) = s.strip_prefix('@') {
                     Ok(crate::call_builtin(name, &rest)?)
                 } else {
-                    Err(format!(
+                    Err(((format!(
                         "feval: expected function handle string starting with '@', got {s}"
-                    ))
+                    ))).into())
                 }
             } else {
-                Err("feval: function handle char array must be a row vector".to_string())
+                Err((("feval: function handle char array must be a row vector".to_string())).into())
             }
         }
         Value::Closure(c) => {
@@ -993,7 +996,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
             Ok(crate::call_builtin(&c.function_name, &args)?)
         }
         // Future: support Value::Function variants
-        other => Err(format!("feval: unsupported function value {other:?}")),
+        other => Err(((format!("feval: unsupported function value {other:?}"))).into()),
     }
 }
 
@@ -1072,18 +1075,18 @@ fn prod_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "prod", builtin_path = "crate")]
-fn prod_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn prod_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return prod_all_or_cols(a);
+        return (prod_all_or_cols(a)).map_err(Into::into);
     }
     if rest.len() == 1 {
         match &rest[0] {
-            Value::Num(d) => return prod_dim(a, *d),
-            Value::Int(i) => return prod_dim(a, i.to_i64() as f64),
+            Value::Num(d) => return (prod_dim(a, *d)).map_err(Into::into),
+            Value::Int(i) => return (prod_dim(a, i.to_i64() as f64)).map_err(Into::into),
             _ => {}
         }
     }
-    Err("prod: unsupported arguments".to_string())
+    Err((("prod: unsupported arguments".to_string())).into())
 }
 
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
@@ -1163,18 +1166,18 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "any", builtin_path = "crate")]
-fn any_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn any_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return any_all_or_cols(a);
+        return (any_all_or_cols(a)).map_err(Into::into);
     }
     if rest.len() == 1 {
         match &rest[0] {
-            Value::Num(d) => return any_dim(a, *d),
-            Value::Int(i) => return any_dim(a, i.to_i64() as f64),
+            Value::Num(d) => return (any_dim(a, *d)).map_err(Into::into),
+            Value::Int(i) => return (any_dim(a, i.to_i64() as f64)).map_err(Into::into),
             _ => {}
         }
     }
-    Err("any: unsupported arguments".to_string())
+    Err((("any: unsupported arguments".to_string())).into())
 }
 
 fn all_all_or_cols(a: Value) -> Result<Value, String> {
@@ -1254,29 +1257,29 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "all", builtin_path = "crate")]
-fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn all_var_builtin(a: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return all_all_or_cols(a);
+        return (all_all_or_cols(a)).map_err(Into::into);
     }
     if rest.len() == 1 {
         match &rest[0] {
-            Value::Num(d) => return all_dim(a, *d),
-            Value::Int(i) => return all_dim(a, i.to_i64() as f64),
+            Value::Num(d) => return (all_dim(a, *d)).map_err(Into::into),
+            Value::Int(i) => return (all_dim(a, i.to_i64() as f64)).map_err(Into::into),
             _ => {}
         }
     }
-    Err("all: unsupported arguments".to_string())
+    Err((("all: unsupported arguments".to_string())).into())
 }
 
 #[runmat_macros::runtime_builtin(name = "warning", sink = true, builtin_path = "crate")]
-fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
+fn warning_builtin(fmt: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let s = format_variadic(&fmt, &rest)?;
     tracing::warn!("Warning: {s}");
     Ok(Value::Num(0.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "getmethod", builtin_path = "crate")]
-fn getmethod_builtin(obj: Value, name: String) -> Result<Value, String> {
+fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(o) => {
             // Return a closure capturing the receiver; feval will call runtime builtin call_method
@@ -1286,6 +1289,6 @@ fn getmethod_builtin(obj: Value, name: String) -> Result<Value, String> {
             }))
         }
         Value::ClassRef(cls) => Ok(Value::String(format!("@{cls}.{name}"))),
-        other => Err(format!("getmethod unsupported on {other:?}")),
+        other => Err(((format!("getmethod unsupported on {other:?}"))).into()),
     }
 }

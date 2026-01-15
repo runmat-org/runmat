@@ -229,16 +229,16 @@ enum KronInput {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::kron"
 )]
-fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err("kron: too many input arguments".to_string());
+        return Err((("kron: too many input arguments".to_string())).into());
     }
 
     match (a, b) {
-        (Value::GpuTensor(left), Value::GpuTensor(right)) => kron_gpu_gpu(left, right),
-        (Value::GpuTensor(left), right) => kron_gpu_mixed_left(left, right),
-        (left, Value::GpuTensor(right)) => kron_gpu_mixed_right(left, right),
-        (left, right) => kron_host(left, right),
+        (Value::GpuTensor(left), Value::GpuTensor(right)) => (kron_gpu_gpu(left, right)).map_err(Into::into),
+        (Value::GpuTensor(left), right) => (kron_gpu_mixed_left(left, right)).map_err(Into::into),
+        (left, Value::GpuTensor(right)) => (kron_gpu_mixed_right(left, right)).map_err(Into::into),
+        (left, right) => (kron_host(left, right)).map_err(Into::into),
     }
 }
 

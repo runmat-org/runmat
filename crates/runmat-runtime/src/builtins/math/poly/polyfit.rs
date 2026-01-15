@@ -241,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
-fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(x, y, degree, &rest)?;
     Ok(eval.coefficients())
 }

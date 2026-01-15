@@ -192,7 +192,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
-fn strncmp_builtin(a: Value, b: Value, n: Value) -> Result<Value, String> {
+fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
     let a = gather_if_needed(&a).map_err(|e| format!("{FN_NAME}: {e}"))?;
     let b = gather_if_needed(&b).map_err(|e| format!("{FN_NAME}: {e}"))?;
     let n = gather_if_needed(&n).map_err(|e| format!("{FN_NAME}: {e}"))?;
@@ -200,7 +200,7 @@ fn strncmp_builtin(a: Value, b: Value, n: Value) -> Result<Value, String> {
     let limit = parse_prefix_length(n)?;
     let left = TextCollection::from_argument(FN_NAME, a, "first argument")?;
     let right = TextCollection::from_argument(FN_NAME, b, "second argument")?;
-    evaluate_strncmp(&left, &right, limit)
+    evaluate_strncmp(&left, &right, limit).map_err(Into::into)
 }
 
 fn evaluate_strncmp(

@@ -199,10 +199,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "size,dimensions,shape,gpu,introspection",
     builtin_path = "crate::builtins::array::introspection::size"
 )]
-fn size_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value);
     match rest.len() {
-        0 => dimensions_to_value(&dims),
+        0 => (dimensions_to_value(&dims)).map_err(Into::into),
         1 => match parse_dim_selection(&rest[0])? {
             DimSelection::Single(dim) => {
                 let extent = dimension_extent(&dims, dim);
@@ -213,10 +213,10 @@ fn size_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
                     .into_iter()
                     .map(|dim| dimension_extent(&dims, dim))
                     .collect();
-                dimensions_to_value(&extents)
+                dimensions_to_value(&extents).map_err(Into::into)
             }
         },
-        _ => Err("size: too many input arguments".to_string()),
+        _ => Err((("size: too many input arguments".to_string())).into()),
     }
 }
 

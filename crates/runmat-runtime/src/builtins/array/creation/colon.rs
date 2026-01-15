@@ -243,9 +243,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
-fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("colon: expected two or three input arguments".to_string());
+        return Err((("colon: expected two or three input arguments".to_string())).into());
     }
 
     let start_scalar = parse_real_scalar("colon", start)?;
@@ -267,10 +267,11 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
             explicit_gpu,
             char_mode,
         )
+        .map_err(Into::into)
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end)?;
         if step_scalar.value == 0.0 {
-            return Err("colon: increment must be nonzero".to_string());
+            return Err((("colon: increment must be nonzero".to_string())).into());
         }
         let stop_scalar = parse_real_scalar("colon", rest[0].clone())?;
         let char_mode =
@@ -287,6 +288,7 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
             explicit_gpu,
             char_mode,
         )
+        .map_err(Into::into)
     }
 }
 

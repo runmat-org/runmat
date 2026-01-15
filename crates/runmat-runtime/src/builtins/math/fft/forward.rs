@@ -195,11 +195,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fft,fourier transform,complex,gpu",
     builtin_path = "crate::builtins::math::fft::forward"
 )]
-fn fft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (length, dimension) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension),
-        other => fft_host(other, length, dimension),
+        Value::GpuTensor(handle) => (fft_gpu(handle, length, dimension)).map_err(Into::into),
+        other => (fft_host(other, length, dimension)).map_err(Into::into),
     }
 }
 

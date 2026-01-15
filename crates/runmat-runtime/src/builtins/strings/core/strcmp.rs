@@ -197,12 +197,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
-fn strcmp_builtin(a: Value, b: Value) -> Result<Value, String> {
+fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
     let a = gather_if_needed(&a).map_err(|e| format!("strcmp: {e}"))?;
     let b = gather_if_needed(&b).map_err(|e| format!("strcmp: {e}"))?;
     let left = TextCollection::from_argument("strcmp", a, "first argument")?;
     let right = TextCollection::from_argument("strcmp", b, "second argument")?;
-    evaluate_strcmp(&left, &right)
+    (evaluate_strcmp(&left, &right)).map_err(Into::into)
 }
 
 fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Value, String> {

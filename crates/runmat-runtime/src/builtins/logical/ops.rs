@@ -227,11 +227,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::logical::ops"
 )]
-fn logical_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err("logical: too many input arguments".to_string());
+        return Err((("logical: too many input arguments".to_string())).into());
     }
-    convert_value_to_logical(value)
+    (convert_value_to_logical(value)).map_err(Into::into)
 }
 
 fn convert_value_to_logical(value: Value) -> Result<Value, String> {

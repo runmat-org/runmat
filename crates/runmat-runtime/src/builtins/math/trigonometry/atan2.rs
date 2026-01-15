@@ -223,18 +223,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
-fn atan2_builtin(y: Value, x: Value) -> Result<Value, String> {
+fn atan2_builtin(y: Value, x: Value) -> crate::BuiltinResult<Value> {
     match (y, x) {
-        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh),
+        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => (atan2_gpu_pair(yh, xh)).map_err(Into::into),
         (Value::GpuTensor(yh), other) => {
             let gathered = gpu_helpers::gather_tensor(&yh)?;
-            atan2_host(Value::Tensor(gathered), other)
+            atan2_host(Value::Tensor(gathered), other).map_err(Into::into)
         }
         (other, Value::GpuTensor(xh)) => {
             let gathered = gpu_helpers::gather_tensor(&xh)?;
-            atan2_host(other, Value::Tensor(gathered))
+            atan2_host(other, Value::Tensor(gathered)).map_err(Into::into)
         }
-        (lhs, rhs) => atan2_host(lhs, rhs),
+        (lhs, rhs) => (atan2_host(lhs, rhs)).map_err(Into::into),
     }
 }
 

@@ -228,13 +228,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
-fn trace_builtin(value: Value) -> Result<Value, String> {
+fn trace_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => trace_gpu(handle),
-        Value::ComplexTensor(ct) => trace_complex_tensor(ct),
+        Value::GpuTensor(handle) => (trace_gpu(handle)).map_err(Into::into),
+        Value::ComplexTensor(ct) => (trace_complex_tensor(ct)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
-        Value::CharArray(ca) => trace_char_array(ca),
-        other => trace_numeric(other),
+        Value::CharArray(ca) => (trace_char_array(ca)).map_err(Into::into),
+        other => (trace_numeric(other)).map_err(Into::into),
     }
 }
 

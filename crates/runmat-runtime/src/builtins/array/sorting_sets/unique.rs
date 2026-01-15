@@ -183,8 +183,7 @@ C =
 IA =
 IC =
 ```
-(all outputs are empty with compatible dimensions.)
-
+all outputs are empty with compatible dimensions.).map_err(Into::into)
 ### Using `unique` on GPU Arrays
 ```matlab
 G = gpuArray([5 3 5 1]);
@@ -322,8 +321,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
-fn unique_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    evaluate(value, &rest).map(|eval| eval.into_values_value())
+fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    evaluate(value, &rest).map(|eval| eval.into_values_value()).map_err(Into::into)
 }
 
 /// Evaluate `unique` once and expose all outputs to the caller.

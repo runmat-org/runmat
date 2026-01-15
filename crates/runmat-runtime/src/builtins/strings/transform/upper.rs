@@ -211,14 +211,14 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
-fn upper_builtin(value: Value) -> Result<Value, String> {
+fn upper_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("upper: {e}"))?;
     match gathered {
         Value::String(text) => Ok(Value::String(uppercase_preserving_missing(text))),
-        Value::StringArray(array) => upper_string_array(array),
-        Value::CharArray(array) => upper_char_array(array),
-        Value::Cell(cell) => upper_cell_array(cell),
-        _ => Err(ARG_TYPE_ERROR.to_string()),
+        Value::StringArray(array) => (upper_string_array(array)).map_err(Into::into),
+        Value::CharArray(array) => (upper_char_array(array)).map_err(Into::into),
+        Value::Cell(cell) => (upper_cell_array(cell)).map_err(Into::into),
+        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
     }
 }
 

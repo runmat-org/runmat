@@ -203,9 +203,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rcond",
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
-fn rcond_builtin(value: Value) -> Result<Value, String> {
+fn rcond_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let estimate = match value {
-        Value::GpuTensor(handle) => return rcond_gpu(handle),
+        Value::GpuTensor(handle) => return (rcond_gpu(handle)).map_err(Into::into),
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])

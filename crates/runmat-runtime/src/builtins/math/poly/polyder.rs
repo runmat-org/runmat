@@ -258,11 +258,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyder,polynomial,derivative,product,quotient",
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
-fn polyder_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match rest.len() {
-        0 => derivative_single(first),
-        1 => derivative_product(first, rest.into_iter().next().unwrap()),
-        _ => Err("polyder: too many input arguments".to_string()),
+        0 => (derivative_single(first)).map_err(Into::into),
+        1 => (derivative_product(first, rest.into_iter().next().unwrap())).map_err(Into::into),
+        _ => Err((("polyder: too many input arguments".to_string())).into()),
     }
 }
 

@@ -248,7 +248,7 @@ enum BandSelector {
     accel = "structure",
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
-fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let selector = parse_selector(&rest)?;
     let data = MatrixData::from_value(matrix)?;
     let (lower, upper) = data.bandwidth()?;

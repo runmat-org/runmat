@@ -216,7 +216,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
-fn mkdir_builtin(args: Vec<Value>) -> Result<Value, String> {
+fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args)?;
     Ok(eval.first_output())
 }

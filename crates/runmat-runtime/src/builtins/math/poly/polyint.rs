@@ -228,9 +228,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyint,polynomial,integral,antiderivative",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
-fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("polyint: too many input arguments".to_string());
+        return Err((("polyint: too many input arguments".to_string())).into());
     }
 
     let constant = rest
@@ -247,7 +247,7 @@ fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
 
     let was_gpu = matches!(coeffs, Value::GpuTensor(_));
-    polyint_host_value(coeffs, constant, was_gpu)
+    polyint_host_value(coeffs, constant, was_gpu).map_err(Into::into)
 }
 
 fn polyint_host_value(coeffs: Value, constant: Complex64, was_gpu: bool) -> Result<Value, String> {

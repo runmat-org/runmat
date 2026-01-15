@@ -220,13 +220,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::search::contains"
 )]
-fn contains_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn contains_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let text = gather_if_needed(&text).map_err(|e| format!("contains: {e}"))?;
     let pattern = gather_if_needed(&pattern).map_err(|e| format!("contains: {e}"))?;
     let ignore_case = parse_ignore_case("contains", &rest)?;
     let subject = TextCollection::from_subject("contains", text)?;
     let patterns = TextCollection::from_pattern("contains", pattern)?;
-    evaluate_contains(&subject, &patterns, ignore_case)
+    evaluate_contains(&subject, &patterns, ignore_case).map_err(Into::into)
 }
 
 fn evaluate_contains(

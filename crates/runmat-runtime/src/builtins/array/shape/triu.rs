@@ -225,14 +225,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::triu"
 )]
-fn triu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("triu: too many input arguments".to_string());
+        return Err((("triu: too many input arguments".to_string())).into());
     }
     let offset = parse_diagonal_offset(&rest)?;
     match value {
-        Value::Tensor(tensor) => triu_tensor(tensor, offset).map(tensor::tensor_into_value),
-        Value::LogicalArray(array) => triu_logical_array(array, offset).map(Value::LogicalArray),
+        Value::Tensor(tensor) => (triu_tensor(tensor, offset).map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::LogicalArray(array) => (triu_logical_array(array, offset).map(Value::LogicalArray)).map_err(Into::into),
         Value::ComplexTensor(tensor) => {
             triu_complex_tensor(tensor, offset).map(Value::ComplexTensor)
         }
@@ -241,32 +241,32 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
                 ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("triu: {e}"))?;
             triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)
         }
-        Value::Num(n) => triu_tensor(
+        Value::Num(n) => (triu_tensor(
             tensor::value_into_tensor_for("triu", Value::Num(n))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
-        Value::Int(i) => triu_tensor(
+        .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::Int(i) => (triu_tensor(
             tensor::value_into_tensor_for("triu", Value::Int(i.clone()))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
-        Value::Bool(flag) => triu_tensor(
+        .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::Bool(flag) => (triu_tensor(
             tensor::value_into_tensor_for("triu", Value::Bool(flag))?,
             offset,
         )
-        .map(tensor::tensor_into_value),
+        .map(tensor::tensor_into_value)).map_err(Into::into),
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|e| format!("triu: {e}"))?;
             triu_tensor(tensor, offset).map(tensor::tensor_into_value)
         }
-        Value::GpuTensor(handle) => triu_gpu(handle, offset),
+        Value::GpuTensor(handle) => (triu_gpu(handle, offset)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {
-            Err("triu: string arrays are not supported".to_string())
+            Err((("triu: string arrays are not supported".to_string())).into())
         }
-        Value::Cell(_) => Err("triu: cell arrays are not supported".to_string()),
+        Value::Cell(_) => Err((("triu: cell arrays are not supported".to_string())).into()),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -274,7 +274,7 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("triu: unsupported input type".to_string()),
+        | Value::MException(_) => Err((("triu: unsupported input type".to_string())).into()),
     }
 }
 

@@ -234,7 +234,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
-fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw_result = match value {
@@ -243,7 +243,7 @@ fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::Complex(re, im) => sum_host_complex_scalar(re, im, &parsed)?,
         other => sum_host(other, &parsed)?,
     };
-    apply_output_template(raw_result, &parsed.output, &input_meta)
+    apply_output_template(raw_result, &parsed.output, &input_meta).map_err(Into::into)
 }
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {

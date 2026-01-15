@@ -49,7 +49,7 @@ fn parse_mode_str(text: &str) -> Result<HoldMode, String> {
     suppress_auto_output = true,
     builtin_path = "crate::builtins::plotting::hold"
 )]
-pub fn hold_builtin(rest: Vec<Value>) -> Result<String, String> {
+pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let mode = if rest.is_empty() {
         HoldMode::Toggle
     } else {

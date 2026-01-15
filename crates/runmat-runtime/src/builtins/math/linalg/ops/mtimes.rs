@@ -251,8 +251,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
-fn mtimes_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
-    mtimes_eval(&lhs, &rhs)
+fn mtimes_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    mtimes_eval(&lhs, &rhs).map_err(Into::into)
 }
 
 pub(crate) fn mtimes_eval(lhs: &Value, rhs: &Value) -> Result<Value, String> {

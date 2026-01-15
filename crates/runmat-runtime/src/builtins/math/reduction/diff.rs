@@ -207,7 +207,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "diff",
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
-fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (order, dim) = parse_arguments(&rest)?;
     if order == 0 {
         return Ok(value);
@@ -237,12 +237,12 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         Value::ComplexTensor(tensor) => {
             diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
         }
-        Value::CharArray(chars) => diff_char_array(chars, order, dim),
-        Value::GpuTensor(handle) => diff_gpu(handle, order, dim),
-        other => Err(format!(
+        Value::CharArray(chars) => (diff_char_array(chars, order, dim)).map_err(Into::into),
+        Value::GpuTensor(handle) => (diff_gpu(handle, order, dim)).map_err(Into::into),
+        other => Err(((format!(
             "diff: unsupported input type {:?}; expected numeric, logical, or character data",
             other
-        )),
+        ))).into()),
     }
 }
 

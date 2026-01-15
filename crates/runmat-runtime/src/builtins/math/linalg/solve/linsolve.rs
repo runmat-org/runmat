@@ -227,7 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "linsolve",
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
-fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate_args(lhs, rhs, &rest)?;
     Ok(eval.solution())
 }
