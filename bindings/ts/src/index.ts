@@ -209,16 +209,6 @@ export type ResumeInputValue = ResumeInputScalar | ResumeInputPayload;
 export type InputHandlerResult = ResumeInputValue | Promise<ResumeInputValue>;
 export type InputHandler = (request: InputRequest) => InputHandlerResult;
 
-export interface PendingStdinRequest {
-  id: string;
-  request: {
-    prompt: string;
-    kind: "line" | "keyPress";
-    echo: boolean;
-  };
-  waitingMs: number;
-}
-
 export interface AxesInfo {
   handle: number;
   axesRows: number;
@@ -268,22 +258,6 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
-  pendingRequest?: PendingRequest;
-}
-
-export type PendingRequestVisibility = "external" | "internal";
-
-export type PendingRequestKind =
-  | { type: "line"; echo: boolean }
-  | { type: "keyPress" }
-  | { type: "internal" };
-
-export interface PendingRequest {
-  id: string;
-  kind: PendingRequestKind;
-  label: string;
-  waitingMs: number;
-  visibility: PendingRequestVisibility;
 }
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
@@ -425,8 +399,6 @@ export interface RunMatSessionHandle {
   cancelExecution(): void;
   cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
-  resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult>;
-  pendingStdinRequests(): Promise<PendingStdinRequest[]>;
   materializeVariable(
     selector: WorkspaceMaterializeSelector,
     options?: MaterializeVariableOptions
@@ -468,8 +440,6 @@ interface RunMatNativeSession {
   cancelExecution?: () => void;
   cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
-  resumeInput?: (requestId: string, value: ResumeInputWireValue) => Promise<ExecuteResult>;
-  pendingStdinRequests?: () => PendingStdinRequest[];
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
     options?: MaterializeVariableOptionsWire
@@ -477,12 +447,6 @@ interface RunMatNativeSession {
   setFusionPlanEnabled?: (enabled: boolean) => void;
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
-}
-
-interface ResumeInputWireValue {
-  kind?: "line" | "keyPress";
-  value?: string;
-  error?: string;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -529,8 +493,6 @@ interface RunMatNativeModule {
   setLogFilter?: (filter: string) => void;
   subscribeTraceEvents?: (listener: (entries: TraceEvent[]) => void) => number;
   unsubscribeTraceEvents?: (id: number) => void;
-  resumeInput?: (requestId: string, value: ResumeInputWireValue) => ExecuteResult;
-  pendingStdinRequests?: () => PendingStdinRequest[];
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -903,21 +865,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.native.setInputHandler(handler ? (request: InputRequest) => handler(request) : null);
   }
 
-  async resumeInput(requestId: string, value: ResumeInputValue): Promise<ExecuteResult> {
-    this.ensureActive();
-    requireNativeFunction(this.native, "resumeInput");
-    const payload = normalizeResumeInputValue(value);
-    return await this.native.resumeInput(requestId, payload);
-  }
-
-  async pendingStdinRequests(): Promise<PendingStdinRequest[]> {
-    this.ensureActive();
-    if (typeof this.native.pendingStdinRequests !== "function") {
-      return [];
-    }
-    return this.native.pendingStdinRequests();
-  }
-
   async materializeVariable(
     selector: WorkspaceMaterializeSelector,
     options?: MaterializeVariableOptions
@@ -1167,23 +1114,6 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
   throw new Error("Unsupported snapshot buffer type");
 }
 
-function normalizeResumeInputValue(input: ResumeInputValue): ResumeInputWireValue {
-  if (isResumeInputPayload(input)) {
-    if (typeof input.error === "string") {
-      return { error: input.error };
-    }
-    if (input.kind === "keyPress") {
-      return { kind: "keyPress" };
-    }
-    const raw = input.value ?? input.line;
-    return { kind: "line", value: coerceResumeValue(raw) };
-  }
-  if (input === null || input === undefined) {
-    return { kind: "line", value: "" };
-  }
-  return { kind: "line", value: String(input) };
-}
-
 function normalizeMaterializeSelector(
   selector: WorkspaceMaterializeSelector
 ): WorkspaceMaterializeSelectorWire {
@@ -1255,34 +1185,10 @@ function normalizeSliceVector(values?: number[], requirePositive = false): numbe
   return normalized;
 }
 
-function coerceResumeValue(value: string | number | boolean | undefined): string {
-  if (value === undefined) {
-    return "";
-  }
-  return String(value);
-}
-
-function isResumeInputPayload(value: ResumeInputValue): value is ResumeInputPayload {
-  if (value === null || value === undefined) {
-    return false;
-  }
-  if (typeof value !== "object") {
-    return false;
-  }
-  const payload = value as Record<string, unknown>;
-  return (
-    "value" in payload ||
-    "line" in payload ||
-    "kind" in payload ||
-    "error" in payload
-  );
-}
-
 export const __internals = {
   resolveSnapshotSource,
   fetchSnapshotFromUrl,
   coerceFigureError,
-  normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,
   setNativeModuleOverride(module: RunMatNativeModule | RunMatNativeSession | null): void {
     nativeModuleOverride = module;

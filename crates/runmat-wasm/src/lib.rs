@@ -18,7 +18,7 @@ use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, PendingInput, PendingRequest, PendingRequestKind,
+    InputResponse, MaterializedVariable, PendingRequest, PendingRequestKind,
     PendingRequestVisibility, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSliceOptions,
     WorkspaceSnapshot,
@@ -354,32 +354,6 @@ impl RunMatWasm {
         }
     }
 
-    #[wasm_bindgen(js_name = resumeInput)]
-    pub async fn resume_input(&self, request_id: String, value: JsValue) -> Result<JsValue, JsValue> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let uuid = Uuid::parse_str(request_id.trim())
-                .map_err(|_| js_error("resumeInput: invalid request id"))?;
-            let response = coerce_resume_payload(value)?;
-            let result = self
-                .session
-                .borrow_mut()
-                .resume_input(uuid, response)
-                .map_err(|err| js_error(&format!("RunMat resumeInput failed: {err}")))?;
-            let result = self.drain_pending_requests(result).await?;
-            let payload = ExecutionPayload::from(result);
-            return serde_wasm_bindgen::to_value(&payload)
-                .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")));
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = (request_id, value);
-            Err(js_error(
-                "resumeInput is only available when targeting wasm32",
-            ))
-        }
-    }
-
     async fn drain_pending_requests(
         &self,
         mut result: ExecutionResult,
@@ -402,9 +376,7 @@ impl RunMatWasm {
                     merge_execution_results(&mut result, next);
                 }
                 PendingRequestVisibility::External => {
-                    let Some(response) = self.try_fulfill_stdin_request(pending).await? else {
-                        return Ok(result);
-                    };
+                    let response = self.fulfill_stdin_request(pending).await?;
                     let request_id = pending.id;
                     let next = self
                         .session
@@ -418,13 +390,15 @@ impl RunMatWasm {
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn try_fulfill_stdin_request(
+    async fn fulfill_stdin_request(
         &self,
         pending: &PendingRequest,
-    ) -> Result<Option<Result<InputResponse, String>>, JsValue> {
+    ) -> Result<Result<InputResponse, String>, JsValue> {
         let handler = JS_STDIN_HANDLER.with(|slot| slot.borrow().clone());
         let Some(handler) = handler else {
-            return Ok(None);
+            return Err(js_error(
+                "RunMat: stdin requested but no input handler is installed. Call setInputHandler().",
+            ));
         };
 
         // Only stdin-style pending requests can be fulfilled here.
@@ -437,7 +411,11 @@ impl RunMatWasm {
                 prompt: pending.label.clone(),
                 kind: InputRequestKind::KeyPress,
             },
-            PendingRequestKind::GpuMapRead => return Ok(None),
+            PendingRequestKind::GpuMapRead => {
+                return Err(js_error(
+                    "RunMat internal error: attempted to fulfill non-stdin pending request via stdin handler.",
+                ));
+            }
         };
 
         let js_request = js_sys::Object::new();
@@ -473,58 +451,36 @@ impl RunMatWasm {
         }
 
         if value_should_pending(&value) {
-            return Ok(None);
+            return Err(js_error(
+                "RunMat: input handler returned pending/null/undefined. It must return a value or a Promise of a value.",
+            ));
         }
 
         if let Some(err) = extract_error_message(&value) {
-            return Ok(Some(Err(err)));
+            return Ok(Err(err));
         }
 
         match request.kind {
             InputRequestKind::Line { .. } => {
                 if let Some(text) = extract_line_value(&value) {
-                    Ok(Some(Ok(InputResponse::Line(text))))
+                    Ok(Ok(InputResponse::Line(text)))
                 } else {
-                    Ok(Some(Err(
+                    Ok(Err(
                         "stdin handler must return a string (or { value }) for line input"
                             .to_string(),
-                    )))
+                    ))
                 }
             }
-            InputRequestKind::KeyPress => Ok(Some(Ok(InputResponse::KeyPress))),
+            InputRequestKind::KeyPress => Ok(Ok(InputResponse::KeyPress)),
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn try_fulfill_stdin_request(
+    async fn fulfill_stdin_request(
         &self,
         _pending: &PendingRequest,
-    ) -> Result<Option<Result<InputResponse, String>>, JsValue> {
-        Ok(None)
-    }
-
-    #[wasm_bindgen(js_name = pendingStdinRequests)]
-    pub fn pending_stdin_requests(&self) -> Result<JsValue, JsValue> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let session = self.session.borrow();
-            let pending: Vec<PendingInputPayload> = session
-                .pending_requests()
-                .into_iter()
-                .map(PendingInputPayload::from)
-                .collect();
-            return serde_wasm_bindgen::to_value(&pending).map_err(|err| {
-                js_error(&format!(
-                    "Failed to serialize pending stdin requests: {err}"
-                ))
-            });
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Err(js_error(
-                "pendingStdinRequests is only available when targeting wasm32",
-            ))
-        }
+    ) -> Result<Result<InputResponse, String>, JsValue> {
+        Err(js_error("RunMat: stdin handler is only supported when targeting wasm32"))
     }
 
     #[wasm_bindgen(js_name = setFusionPlanEnabled)]
@@ -1139,52 +1095,6 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn coerce_resume_payload(value: JsValue) -> Result<Result<InputResponse, String>, JsValue> {
-    if value.is_object() {
-        let obj = js_sys::Object::from(value.clone());
-        if let Ok(err) = Reflect::get(&obj, &JsValue::from_str("error")) {
-            if let Some(text) = err.as_string() {
-                return Ok(Err(text));
-            }
-        }
-        if let Ok(kind) = Reflect::get(&obj, &JsValue::from_str("kind")) {
-            if let Some(text) = kind.as_string() {
-                match text.as_str() {
-                    "keyPress" => return Ok(Ok(InputResponse::KeyPress)),
-                    "line" => {}
-                    other => {
-                        return Err(js_error(&format!(
-                        "resumeInput: unsupported kind '{other}'. Expected 'line' or 'keyPress'."
-                    )))
-                    }
-                }
-            }
-        }
-    }
-    if let Some(text) = extract_line_value(&value) {
-        return Ok(Ok(InputResponse::Line(text)));
-    }
-    if value.is_null() || value.is_undefined() {
-        return Ok(Ok(InputResponse::Line(String::new())));
-    }
-    if let Some(num) = value.as_f64() {
-        if num.is_finite() {
-            return Ok(Ok(InputResponse::Line(num.to_string())));
-        }
-    }
-    if let Some(flag) = value.as_bool() {
-        return Ok(Ok(InputResponse::Line(if flag {
-            "1".to_string()
-        } else {
-            "0".to_string()
-        })));
-    }
-    Err(js_error(
-        "resumeInput expects a string, number, boolean, or { value, kind } payload",
-    ))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1887,39 +1797,6 @@ fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
     ))
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PendingInputPayload {
-    id: String,
-    request: InputRequestPayload,
-    waiting_ms: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PendingRequestPayload {
-    id: String,
-    kind: PendingRequestKindPayload,
-    label: String,
-    waiting_ms: u64,
-    visibility: PendingRequestVisibilityPayload,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-enum PendingRequestVisibilityPayload {
-    External,
-    Internal,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
-enum PendingRequestKindPayload {
-    Line { echo: bool },
-    KeyPress,
-    GpuMapRead,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MaterializeSelectorPayload {
@@ -1942,52 +1819,6 @@ struct MaterializeSlicePayload {
     shape: Vec<usize>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InputRequestPayload {
-    prompt: String,
-    kind: &'static str,
-    echo: bool,
-}
-
-impl From<PendingInput> for PendingInputPayload {
-    fn from(input: PendingInput) -> Self {
-        let (kind, echo) = match input.request.kind {
-            InputRequestKind::Line { echo } => ("line", echo),
-            InputRequestKind::KeyPress => ("keyPress", false),
-        };
-        Self {
-            id: input.id.to_string(),
-            request: InputRequestPayload {
-                prompt: input.request.prompt,
-                kind,
-                echo,
-            },
-            waiting_ms: input.waiting_ms,
-        }
-    }
-}
-
-impl From<PendingRequest> for PendingRequestPayload {
-    fn from(input: PendingRequest) -> Self {
-        let kind = match input.kind {
-            PendingRequestKind::Line { echo } => PendingRequestKindPayload::Line { echo },
-            PendingRequestKind::KeyPress => PendingRequestKindPayload::KeyPress,
-            PendingRequestKind::GpuMapRead => PendingRequestKindPayload::GpuMapRead,
-        };
-        let visibility = match input.visibility {
-            PendingRequestVisibility::External => PendingRequestVisibilityPayload::External,
-            PendingRequestVisibility::Internal => PendingRequestVisibilityPayload::Internal,
-        };
-        Self {
-            id: input.id.to_string(),
-            kind,
-            label: input.label,
-            waiting_ms: input.waiting_ms,
-            visibility,
-        }
-    }
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2005,7 +1836,6 @@ struct ExecutionPayload {
     stdin_events: Vec<StdinEventPayload>,
     profiling: Option<ProfilingPayload>,
     fusion_plan: Option<FusionPlanPayload>,
-    pending_request: Option<PendingRequestPayload>,
 }
 
 #[derive(Serialize)]
@@ -2045,7 +1875,6 @@ impl From<ExecutionResult> for ExecutionPayload {
                 .collect(),
             profiling: result.profiling.map(ProfilingPayload::from),
             fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
-            pending_request: result.pending_request.map(PendingRequestPayload::from),
         }
     }
 }
