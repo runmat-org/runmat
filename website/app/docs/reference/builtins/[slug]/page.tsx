@@ -106,11 +106,11 @@ function renderBuiltinDoc(doc: BuiltinDocEntry): string {
   }
 
   if (doc.gpu_behavior && doc.gpu_behavior.length > 0) {
-    pushSection(lines, toSentenceCase('gpu_behavior'), renderParagraphs(doc.gpu_behavior));
+    pushSection(lines, toGPUCase('gpu_behavior'), renderParagraphs(doc.gpu_behavior));
   }
 
   if (hasText(doc.gpu_residency)) {
-    pushSection(lines, toSentenceCase('gpu_residency'), renderMarkdownBlock(doc.gpu_residency));
+    pushSection(lines, toGPUCase('gpu_residency'), renderMarkdownBlock(doc.gpu_residency));
   }
 
   if (doc.examples && doc.examples.length > 0) {
@@ -325,6 +325,11 @@ function wrapInlineCode(value: string): string {
 function toSentenceCase(value: string): string {
   const spaced = value.replace(/_/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+}
+
+function toGPUCase(value: string): string {
+    const parts = value.split('_');
+    return parts.map(p => (p.toLowerCase() === 'gpu') ? p.toUpperCase() : p.toLowerCase()).join(' ');
 }
 
 function hasText(value?: string | null): value is string {
