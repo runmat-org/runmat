@@ -222,11 +222,11 @@ fn pinv_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("{NAME}: {e}"))?;
-            pinv_complex_value(tensor, tol)
+            Ok(pinv_complex_value(tensor, tol)?)
         }
         other => {
             let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            pinv_real_value(tensor, tol)
+            Ok(pinv_real_value(tensor, tol)?)
         }
     }
 }

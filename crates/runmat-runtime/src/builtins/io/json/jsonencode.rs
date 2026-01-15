@@ -281,7 +281,7 @@ enum JsonNumber {
 )]
 fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let host_value =
-        gather_if_needed(&value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+        gather_if_needed(&value)?;
     let gathered_args: Vec<Value> = rest
         .iter()
         .map(|v| {

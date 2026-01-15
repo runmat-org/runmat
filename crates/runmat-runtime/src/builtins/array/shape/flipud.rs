@@ -243,9 +243,9 @@ fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("flipud: {e}"))?;
-            flip_complex_tensor(tensor, &UD_DIM)
+            Ok(flip_complex_tensor(tensor, &UD_DIM)
                 .map_err(|e| e.replace("flip", "flipud"))
-                .map(complex_tensor_into_value)
+                .map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => (flip_string_array(strings, &UD_DIM)
             .map_err(|e| e.replace("flip", "flipud"))
@@ -257,24 +257,24 @@ fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Cell(cell) => (flip_cell_array_rows(cell)).map_err(Into::into),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))?;
-            flip_tensor(tensor, &UD_DIM)
+            Ok(flip_tensor(tensor, &UD_DIM)
                 .map_err(|e| e.replace("flip", "flipud"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Int(i))?;
-            flip_tensor(tensor, &UD_DIM)
+            Ok(flip_tensor(tensor, &UD_DIM)
                 .map_err(|e| e.replace("flip", "flipud"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Bool(flag))?;
-            flip_tensor(tensor, &UD_DIM)
+            Ok(flip_tensor(tensor, &UD_DIM)
                 .map_err(|e| e.replace("flip", "flipud"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            flip_gpu(handle, &UD_DIM).map_err(|e| e.replace("flip", "flipud"))
+            Ok(flip_gpu(handle, &UD_DIM).map_err(|e| e.replace("flip", "flipud"))?)
         }
         Value::FunctionHandle(_)
         | Value::Closure(_)

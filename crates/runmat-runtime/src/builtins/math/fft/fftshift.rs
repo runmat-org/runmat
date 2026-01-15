@@ -226,37 +226,37 @@ fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
     match value {
         Value::Tensor(tensor) => {
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "fftshift")?;
-            fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
             let dims = compute_shift_dims(&ct.shape, dims_arg, "fftshift")?;
-            fftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)
+            Ok(fftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
             let dims = compute_shift_dims(&array.shape, dims_arg, "fftshift")?;
-            fftshift_logical(array, &dims).map(Value::LogicalArray)
+            Ok(fftshift_logical(array, &dims).map(Value::LogicalArray)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("fftshift: {e}"))?;
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "fftshift")?;
-            fftshift_complex_tensor(tensor, &dims).map(|result| {
+            Ok(fftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.data.len() == 1 {
                     let (r, i) = result.data[0];
                     Value::Complex(r, i)
                 } else {
                     Value::ComplexTensor(result)
                 }
-            })
+            })?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("fftshift", value)?;
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "fftshift")?;
-            fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
             let dims = compute_shift_dims(&handle.shape, dims_arg, "fftshift")?;
-            fftshift_gpu(handle, &dims)
+            Ok(fftshift_gpu(handle, &dims)?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
             Err((("fftshift: expected numeric or logical input".to_string())).into())

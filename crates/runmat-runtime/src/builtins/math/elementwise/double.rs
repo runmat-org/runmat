@@ -246,7 +246,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn double_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
-    let converted = match value {
+    let converted: crate::BuiltinResult<Value> = match value {
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
@@ -265,7 +265,8 @@ fn double_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
         Value::FunctionHandle(_) | Value::Closure(_) => Err(((conversion_error("function_handle"))).into()),
         Value::ClassRef(_) => Err(((conversion_error("meta.class"))).into()),
         Value::MException(_) => Err(((conversion_error("MException"))).into()),
-    }?;
+    };
+    let converted = converted?;
     apply_output_template(converted, &template).map_err(Into::into)
 }
 

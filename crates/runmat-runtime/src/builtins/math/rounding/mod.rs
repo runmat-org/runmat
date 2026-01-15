@@ -246,11 +246,11 @@ fn mod_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => (mod_gpu_pair(a, b)).map_err(Into::into),
         (Value::GpuTensor(a), other) => {
             let gathered = gpu_helpers::gather_tensor(&a)?;
-            mod_host(Value::Tensor(gathered), other)
+            Ok(mod_host(Value::Tensor(gathered), other)?)
         }
         (other, Value::GpuTensor(b)) => {
             let gathered = gpu_helpers::gather_tensor(&b)?;
-            mod_host(other, Value::Tensor(gathered))
+            Ok(mod_host(other, Value::Tensor(gathered))?)
         }
         (left, right) => (mod_host(left, right)).map_err(Into::into),
     }

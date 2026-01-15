@@ -226,14 +226,14 @@ fn filter2_builtin(kernel: Value, image: Value, rest: Vec<Value>) -> crate::Buil
     let options = parse_filter2_options(&rest)?;
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
-            filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options)
+            Ok(filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options)?)
         }
         (Value::GpuTensor(kernel_handle), image_value) => {
             let kernel_tensor = gpu_helpers::gather_tensor(&kernel_handle)?;
-            filter2_host(Value::Tensor(kernel_tensor), image_value, &options)
+            Ok(filter2_host(Value::Tensor(kernel_tensor), image_value, &options)?)
         }
         (kernel_value, Value::GpuTensor(image_handle)) => {
-            filter2_gpu(kernel_value, image_handle, &options)
+            Ok(filter2_gpu(kernel_value, image_handle, &options)?)
         }
         (kernel_value, image_value) => (filter2_host(kernel_value, image_value, &options)).map_err(Into::into),
     }

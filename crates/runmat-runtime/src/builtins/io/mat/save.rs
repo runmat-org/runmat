@@ -203,7 +203,7 @@ fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
         host_args.push(
-            gather_if_needed(value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+            gather_if_needed(value)?,
         );
     }
 

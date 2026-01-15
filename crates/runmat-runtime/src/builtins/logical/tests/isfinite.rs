@@ -218,7 +218,7 @@ fn isfinite_builtin(value: Value) -> crate::BuiltinResult<Value> {
                 }
             }
             let tensor = gpu_helpers::gather_tensor(&handle)?;
-            isfinite_tensor("isfinite", tensor)
+            Ok(isfinite_tensor("isfinite", tensor)?)
         }
         other => (isfinite_host(other)).map_err(Into::into),
     }

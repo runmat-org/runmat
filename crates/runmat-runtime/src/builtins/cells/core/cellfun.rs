@@ -294,7 +294,7 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
 
     for value in args.into_iter() {
         match value {
-            Value::Cell(ca) if !seen_non_cell => (cell_inputs.push(ca)).map_err(Into::into),
+            Value::Cell(ca) if !seen_non_cell => { cell_inputs.push(ca); }
             Value::Cell(_) => {
                 return Err((("cellfun: cell array inputs must precede extra arguments".to_string())).into())
             }
@@ -320,21 +320,21 @@ fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
     }
 
     if uniform_output {
-        execute_uniform(
+        Ok(execute_uniform(
             &callable,
             &cell_inputs,
             &extra_args,
             error_handler,
             &reference_shape,
-        )
+        )?)
     } else {
-        execute_cell(
+        Ok(execute_cell(
             &callable,
             &cell_inputs,
             &extra_args,
             error_handler,
             &reference_shape,
-        )
+        )?)
     }
 }
 

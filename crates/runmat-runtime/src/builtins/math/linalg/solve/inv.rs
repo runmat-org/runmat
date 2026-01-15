@@ -218,11 +218,11 @@ fn inv_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("{NAME}: {e}"))?;
-            inv_complex_value(tensor)
+            Ok(inv_complex_value(tensor)?)
         }
         other => {
             let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            inv_real_value(tensor)
+            Ok(inv_real_value(tensor)?)
         }
     }
 }

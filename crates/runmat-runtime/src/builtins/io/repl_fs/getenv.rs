@@ -248,7 +248,7 @@ fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         0 => Ok(getenv_all()),
         1 => {
             let gathered = gather_if_needed(&args[0]).map_err(|err| format!("getenv: {err}"))?;
-            getenv_one(gathered)
+            Ok(getenv_one(gathered)?)
         }
         _ => Err(((ERR_TOO_MANY_INPUTS.to_string())).into()),
     }

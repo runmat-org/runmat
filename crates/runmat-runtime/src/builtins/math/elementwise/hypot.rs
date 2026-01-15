@@ -234,11 +234,11 @@ fn hypot_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => (hypot_gpu_pair(a, b)).map_err(Into::into),
         (Value::GpuTensor(a), other) => {
             let gathered = gpu_helpers::gather_tensor(&a)?;
-            hypot_host(Value::Tensor(gathered), other)
+            Ok(hypot_host(Value::Tensor(gathered), other)?)
         }
         (other, Value::GpuTensor(b)) => {
             let gathered = gpu_helpers::gather_tensor(&b)?;
-            hypot_host(other, Value::Tensor(gathered))
+            Ok(hypot_host(other, Value::Tensor(gathered))?)
         }
         (left, right) => (hypot_host(left, right)).map_err(Into::into),
     }

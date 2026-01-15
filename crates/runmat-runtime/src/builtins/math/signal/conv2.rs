@@ -250,7 +250,7 @@ fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             let left = convert_matrix(a, "conv2", "A")?;
             let right = convert_matrix(b, "conv2", "B")?;
             let result = conv2_matrices(&left, &right, mode);
-            matrix_to_value(result)
+            Ok(matrix_to_value(result)?)
         }
         1 => {
             let signal = convert_matrix(extras.remove(0), "conv2", "A")?;
@@ -258,7 +258,7 @@ fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             let row = convert_vector(b, "conv2", "H row")?;
             let kernel = outer_product(&column, &row);
             let result = conv2_matrices(&signal, &kernel, mode);
-            matrix_to_value(result)
+            Ok(matrix_to_value(result)?)
         }
         _ => Err((("conv2: expected at most four input arguments".to_string())).into()),
     }

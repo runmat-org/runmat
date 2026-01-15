@@ -241,59 +241,59 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "custom",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
-fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err("flip: too many input arguments".to_string());
+        return Err("flip: too many input arguments".to_string().into());
     }
     let spec = parse_flip_spec(&rest)?;
     match value {
         Value::Tensor(tensor) => {
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(array) => {
             let dims = resolve_dims(&spec, &array.shape);
-            flip_logical_array(array, &dims).map(Value::LogicalArray)
+            Ok(flip_logical_array(array, &dims).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
             let dims = resolve_dims(&spec, &ct.shape);
-            flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)
+            Ok(flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
             let tensor =
                 ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("flip: {e}"))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)
+            Ok(flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => {
             let dims = resolve_dims(&spec, &strings.shape);
-            flip_string_array(strings, &dims).map(Value::StringArray)
+            Ok(flip_string_array(strings, &dims).map(Value::StringArray)?)
         }
         Value::CharArray(chars) => {
             let dims = resolve_dims(&spec, &[chars.rows, chars.cols]);
-            flip_char_array(chars, &dims).map(Value::CharArray)
+            Ok(flip_char_array(chars, &dims).map(Value::CharArray)?)
         }
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Int(i))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Bool(flag))?;
             let dims = resolve_dims(&spec, &tensor.shape);
-            flip_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
             let dims = resolve_dims(&spec, &handle.shape);
-            flip_gpu(handle, &dims)
+            Ok(flip_gpu(handle, &dims)?)
         }
-        Value::Cell(_) => Err("flip: cell arrays are not yet supported".to_string()),
+        Value::Cell(_) => Err("flip: cell arrays are not yet supported".to_string().into()),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -301,7 +301,7 @@ fn flip_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("flip: unsupported input type".to_string()),
+        | Value::MException(_) => Err("flip: unsupported input type".to_string().into()),
     }
 }
 

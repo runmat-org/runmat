@@ -220,7 +220,7 @@ fn isinf_builtin(value: Value) -> crate::BuiltinResult<Value> {
                 }
             }
             let tensor = gpu_helpers::gather_tensor(&handle)?;
-            isinf_tensor("isinf", tensor)
+            Ok(isinf_tensor("isinf", tensor)?)
         }
         other => (isinf_host(other)).map_err(Into::into),
     }

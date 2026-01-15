@@ -210,18 +210,18 @@ fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> crate::Bui
     let options = parse_imfilter_options(&rest)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
-            imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options)
+            Ok(imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options)?)
         }
         (Value::GpuTensor(image_handle), filter_value) => {
-            imfilter_gpu(image_handle, filter_value, options)
+            Ok(imfilter_gpu(image_handle, filter_value, options)?)
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
             let filter_tensor = gpu_helpers::gather_tensor(&filter_handle)?;
-            imfilter_host_value(image_value, filter_tensor, options)
+            Ok(imfilter_host_value(image_value, filter_tensor, options)?)
         }
         (image_value, filter_value) => {
             let filter_tensor = tensor::value_into_tensor_for("imfilter", filter_value)?;
-            imfilter_host_value(image_value, filter_tensor, options)
+            Ok(imfilter_host_value(image_value, filter_tensor, options)?)
         }
     }
 }

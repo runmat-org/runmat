@@ -241,7 +241,7 @@ fn det_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         other => {
             let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            det_real_value(tensor)
+            Ok(det_real_value(tensor)?)
         }
     }
 }

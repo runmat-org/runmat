@@ -228,49 +228,49 @@ fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         Value::Tensor(t) => {
             validate_rank(&order_vec, t.shape.len())
                 .map_err(map_perm_error)?;
-            permute_tensor(t, &inverse)
+            Ok(permute_tensor(t, &inverse)
                 .map_err(map_perm_error)
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(la) => {
             validate_rank(&order_vec, la.shape.len())
                 .map_err(map_perm_error)?;
-            permute_logical_array(la, &inverse)
+            Ok(permute_logical_array(la, &inverse)
                 .map_err(map_perm_error)
-                .map(Value::LogicalArray)
+                .map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
             validate_rank(&order_vec, ct.shape.len())
                 .map_err(map_perm_error)?;
-            permute_complex_tensor(ct, &inverse)
+            Ok(permute_complex_tensor(ct, &inverse)
                 .map_err(map_perm_error)
-                .map(Value::ComplexTensor)
+                .map(Value::ComplexTensor)?)
         }
         Value::StringArray(sa) => {
             validate_rank(&order_vec, sa.shape.len())
                 .map_err(map_perm_error)?;
-            permute_string_array(sa, &inverse)
+            Ok(permute_string_array(sa, &inverse)
                 .map_err(map_perm_error)
-                .map(Value::StringArray)
+                .map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
             validate_rank(&order_vec, 2).map_err(map_perm_error)?;
-            permute_char_array(ca, &inverse)
+            Ok(permute_char_array(ca, &inverse)
                 .map_err(map_perm_error)
-                .map(Value::CharArray)
+                .map(Value::CharArray)?)
         }
         Value::GpuTensor(handle) => {
             validate_rank(&order_vec, handle.shape.len())
                 .map_err(map_perm_error)?;
-            ipermute_gpu(handle, &inverse)
+            Ok(ipermute_gpu(handle, &inverse)?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("ipermute", value)?;
             validate_rank(&order_vec, tensor.shape.len())
                 .map_err(map_perm_error)?;
-            permute_tensor(tensor, &inverse)
+            Ok(permute_tensor(tensor, &inverse)
                 .map_err(map_perm_error)
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         other => Err(((format!(
             "ipermute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",

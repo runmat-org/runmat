@@ -254,7 +254,7 @@ fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult
     };
 
     if lhs_gpu || rhs_gpu {
-        promote_result_to_gpu(value)
+        Ok(promote_result_to_gpu(value)?)
     } else {
         Ok(value)
     }

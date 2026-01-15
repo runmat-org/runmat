@@ -216,32 +216,32 @@ fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(t) => {
             validate_rank(&order_vec, t.shape.len())?;
-            permute_tensor(t, &order_vec).map(tensor::tensor_into_value)
+            Ok(permute_tensor(t, &order_vec).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(la) => {
             validate_rank(&order_vec, la.shape.len())?;
-            permute_logical_array(la, &order_vec).map(Value::LogicalArray)
+            Ok(permute_logical_array(la, &order_vec).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
             validate_rank(&order_vec, ct.shape.len())?;
-            permute_complex_tensor(ct, &order_vec).map(Value::ComplexTensor)
+            Ok(permute_complex_tensor(ct, &order_vec).map(Value::ComplexTensor)?)
         }
         Value::StringArray(sa) => {
             validate_rank(&order_vec, sa.shape.len())?;
-            permute_string_array(sa, &order_vec).map(Value::StringArray)
+            Ok(permute_string_array(sa, &order_vec).map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
             validate_rank(&order_vec, 2)?;
-            permute_char_array(ca, &order_vec).map(Value::CharArray)
+            Ok(permute_char_array(ca, &order_vec).map(Value::CharArray)?)
         }
         Value::GpuTensor(handle) => {
             validate_rank(&order_vec, handle.shape.len())?;
-            permute_gpu(handle, &order_vec)
+            Ok(permute_gpu(handle, &order_vec)?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("permute", value)?;
             validate_rank(&order_vec, tensor.shape.len())?;
-            permute_tensor(tensor, &order_vec).map(tensor::tensor_into_value)
+            Ok(permute_tensor(tensor, &order_vec).map(tensor::tensor_into_value)?)
         }
         other => Err(((format!(
             "permute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",

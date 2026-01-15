@@ -631,7 +631,7 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                 return Err((("containers.Map: indexing expects a single key argument".to_string())).into());
             }
             let key_arg = args.remove(0);
-            with_store(&map, |store| {
+            Ok(with_store(&map, |store| {
                 let collection = collect_key_spec(&key_arg, store.key_type)?;
                 if collection.values.is_empty() {
                     return (crate::make_cell_with_shape(Vec::new(), collection.shape.clone())
@@ -654,16 +654,16 @@ fn containers_map_subsref(map: Value, kind: String, payload: Value) -> crate::Bu
                     crate::make_cell_with_shape(results, collection.shape.clone())
                         .map_err(|e| format!("containers.Map: {e}"))
                 }
-            })
+            })?)
         }
         "." => {
             let field = string_from_value(&payload, "containers.Map: property name must be text")?;
-            with_store(&map, |store| match field.to_ascii_lowercase().as_str() {
+            Ok(with_store(&map, |store| match field.to_ascii_lowercase().as_str() {
                 "count" => Ok(Value::Num(store.len() as f64)),
                 "keytype" => (char_array_value(store.key_type.matlab_name())).map_err(Into::into),
                 "valuetype" => (char_array_value(store.value_type.matlab_name())).map_err(Into::into),
                 other => Err(((format!("containers.Map: no such property '{other}'"))).into()),
-            })
+            })?)
         }
         "{}" => Err((("containers.Map: curly-brace indexing is not supported.".to_string())).into()),
         other => Err(((format!(

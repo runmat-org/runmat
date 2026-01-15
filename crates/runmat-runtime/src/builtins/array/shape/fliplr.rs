@@ -254,9 +254,9 @@ fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("fliplr: {e}"))?;
-            flip_complex_tensor(tensor, &LR_DIM)
+            Ok(flip_complex_tensor(tensor, &LR_DIM)
                 .map_err(|e| e.replace("flip", "fliplr"))
-                .map(complex_tensor_into_value)
+                .map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => (flip_string_array(strings, &LR_DIM)
             .map_err(|e| e.replace("flip", "fliplr"))
@@ -267,24 +267,24 @@ fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Num(n))?;
-            flip_tensor(tensor, &LR_DIM)
+            Ok(flip_tensor(tensor, &LR_DIM)
                 .map_err(|e| e.replace("flip", "fliplr"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Int(i))?;
-            flip_tensor(tensor, &LR_DIM)
+            Ok(flip_tensor(tensor, &LR_DIM)
                 .map_err(|e| e.replace("flip", "fliplr"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Bool(flag))?;
-            flip_tensor(tensor, &LR_DIM)
+            Ok(flip_tensor(tensor, &LR_DIM)
                 .map_err(|e| e.replace("flip", "fliplr"))
-                .map(tensor::tensor_into_value)
+                .map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            flip_gpu(handle, &LR_DIM).map_err(|e| e.replace("flip", "fliplr"))
+            Ok(flip_gpu(handle, &LR_DIM).map_err(|e| e.replace("flip", "fliplr"))?)
         }
         Value::Cell(_) => Err((("fliplr: cell arrays are not yet supported".to_string())).into()),
         Value::FunctionHandle(_)

@@ -234,12 +234,12 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         Value::Tensor(tensor) => (triu_tensor(tensor, offset).map(tensor::tensor_into_value)).map_err(Into::into),
         Value::LogicalArray(array) => (triu_logical_array(array, offset).map(Value::LogicalArray)).map_err(Into::into),
         Value::ComplexTensor(tensor) => {
-            triu_complex_tensor(tensor, offset).map(Value::ComplexTensor)
+            Ok(triu_complex_tensor(tensor, offset).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
             let tensor =
                 ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("triu: {e}"))?;
-            triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)
+            Ok(triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
         Value::Num(n) => (triu_tensor(
             tensor::value_into_tensor_for("triu", Value::Num(n))?,
@@ -260,7 +260,7 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|e| format!("triu: {e}"))?;
-            triu_tensor(tensor, offset).map(tensor::tensor_into_value)
+            Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => (triu_gpu(handle, offset)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => {

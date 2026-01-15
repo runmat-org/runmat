@@ -304,9 +304,9 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     }
 
     let value = match outcome {
-        LineReadResult::Complete(bytes) => (value_from_bytes(bytes)).map_err(Into::into),
-        LineReadResult::Timeout => (empty_double_matrix()).map_err(Into::into),
-        LineReadResult::Closed(bytes) => (value_from_bytes(bytes)).map_err(Into::into),
+        LineReadResult::Complete(bytes) => value_from_bytes(bytes),
+        LineReadResult::Timeout => empty_double_matrix(),
+        LineReadResult::Closed(bytes) => value_from_bytes(bytes),
     };
 
     Ok(value)

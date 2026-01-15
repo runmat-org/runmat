@@ -226,7 +226,7 @@ fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         .unwrap_or(ExistQuery::Any);
 
     let result = match query {
-        ExistQuery::Handle => (exist_handle(&name_host)).map_err(Into::into),
+        ExistQuery::Handle => exist_handle(&name_host),
         _ => {
             let text = value_to_string(&name_host).ok_or_else(|| ERROR_NAME_ARG.to_string())?;
             exist_for_query(&text, query)?

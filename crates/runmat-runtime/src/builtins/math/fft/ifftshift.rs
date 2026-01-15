@@ -226,37 +226,37 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     match value {
         Value::Tensor(tensor) => {
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
-            ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
             let dims = compute_shift_dims(&ct.shape, dims_arg, "ifftshift")?;
-            ifftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)
+            Ok(ifftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
             let dims = compute_shift_dims(&array.shape, dims_arg, "ifftshift")?;
-            ifftshift_logical(array, &dims).map(Value::LogicalArray)
+            Ok(ifftshift_logical(array, &dims).map(Value::LogicalArray)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("ifftshift: {e}"))?;
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
-            ifftshift_complex_tensor(tensor, &dims).map(|result| {
+            Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.data.len() == 1 {
                     let (r, i) = result.data[0];
                     Value::Complex(r, i)
                 } else {
                     Value::ComplexTensor(result)
                 }
-            })
+            })?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("ifftshift", value)?;
             let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
-            ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)
+            Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
             let dims = compute_shift_dims(&handle.shape, dims_arg, "ifftshift")?;
-            ifftshift_gpu(handle, &dims)
+            Ok(ifftshift_gpu(handle, &dims)?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
             Err((("ifftshift: expected numeric or logical input".to_string())).into())

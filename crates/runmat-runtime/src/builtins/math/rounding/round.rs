@@ -225,7 +225,7 @@ fn round_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
         Value::CharArray(ca) => (round_char_array(ca, strategy)).map_err(Into::into),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            round_tensor(tensor, strategy).map(tensor::tensor_into_value)
+            Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
         Value::String(_) | Value::StringArray(_) => {
             Err((("round: expected numeric or logical input".to_string())).into())
@@ -257,7 +257,7 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> Result<Value, String>
         Value::Tensor(t) => round_tensor(t, strategy).map(tensor::tensor_into_value),
         other => {
             let tensor = tensor::value_into_tensor_for("round", other)?;
-            round_tensor(tensor, strategy).map(tensor::tensor_into_value)
+            Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
     }
 }

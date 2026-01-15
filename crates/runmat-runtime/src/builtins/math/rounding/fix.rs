@@ -210,7 +210,7 @@ fn fix_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::CharArray(ca) => (fix_char_array(ca)).map_err(Into::into),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            fix_tensor(tensor).map(tensor::tensor_into_value)
+            Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
         }
         Value::String(_) | Value::StringArray(_) => {
             Err((("fix: expected numeric or logical input".to_string())).into())
@@ -237,7 +237,7 @@ fn fix_numeric(value: Value) -> Result<Value, String> {
         Value::Tensor(t) => fix_tensor(t).map(tensor::tensor_into_value),
         other => {
             let tensor = tensor::value_into_tensor_for("fix", other)?;
-            fix_tensor(tensor).map(tensor::tensor_into_value)
+            Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
         }
     }
 }

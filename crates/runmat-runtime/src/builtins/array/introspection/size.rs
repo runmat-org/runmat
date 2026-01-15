@@ -202,7 +202,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value);
     match rest.len() {
-        0 => (dimensions_to_value(&dims)).map_err(Into::into),
+        0 => dimensions_to_value(&dims),
         1 => match parse_dim_selection(&rest[0])? {
             DimSelection::Single(dim) => {
                 let extent = dimension_extent(&dims, dim);
@@ -213,14 +213,14 @@ fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                     .into_iter()
                     .map(|dim| dimension_extent(&dims, dim))
                     .collect();
-                dimensions_to_value(&extents).map_err(Into::into)
+                dimensions_to_value(&extents)
             }
         },
         _ => Err((("size: too many input arguments".to_string())).into()),
     }
 }
 
-fn dimensions_to_value(dimensions: &[usize]) -> Result<Value, String> {
+fn dimensions_to_value(dimensions: &[usize]) -> crate::BuiltinResult<Value> {
     let tensor =
         dims_to_row_tensor(dimensions).map_err(|e| format!("size: failed to build output: {e}"))?;
     Ok(tensor::tensor_into_value(tensor))

@@ -222,7 +222,7 @@ fn isnan_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
-            isnan_tensor("isnan", tensor)
+            Ok(isnan_tensor("isnan", tensor)?)
         }
         other => (isnan_host(other)).map_err(Into::into),
     }

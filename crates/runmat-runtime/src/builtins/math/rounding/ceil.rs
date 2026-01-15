@@ -247,10 +247,10 @@ fn ceil_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => ceil_gpu(handle, &args)?,
-        Value::Complex(re, im) => (Value::Complex(
+        Value::Complex(re, im) => Value::Complex(
             apply_ceil_scalar(re, args.strategy),
             apply_ceil_scalar(im, args.strategy),
-        )).map_err(Into::into),
+        ),
         Value::ComplexTensor(ct) => ceil_complex_tensor(ct, args.strategy)?,
         Value::CharArray(ca) => ceil_char_array(ca, args.strategy)?,
         Value::LogicalArray(logical) => {

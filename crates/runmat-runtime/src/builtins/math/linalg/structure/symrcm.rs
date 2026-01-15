@@ -244,19 +244,19 @@ fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
     match matrix {
         Value::ComplexTensor(ct) => {
             let ordering = symrcm_host_complex_tensor(&ct)?;
-            permutation_to_value(&ordering)
+            Ok(permutation_to_value(&ordering)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("symrcm: {e}"))?;
             let ordering = symrcm_host_complex_tensor(&tensor)?;
-            permutation_to_value(&ordering)
+            Ok(permutation_to_value(&ordering)?)
         }
         Value::GpuTensor(handle) => (symrcm_gpu(handle)).map_err(Into::into),
         other => {
             let tensor = tensor::value_into_tensor_for("symrcm", other)?;
             let ordering = symrcm_host_real_tensor(&tensor)?;
-            permutation_to_value(&ordering)
+            Ok(permutation_to_value(&ordering)?)
         }
     }
 }

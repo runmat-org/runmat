@@ -371,16 +371,15 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinR
     let options = parse_accept_options(rest)?;
 
     let shared_server = server_handle(server_id).ok_or_else(|| {
-        runtime_error(
+        runmat_async::RuntimeControlFlow::Error(runtime_error(
             MESSAGE_ID_INVALID_SERVER,
             "accept: tcpserver handle is no longer valid".to_string(),
-        )
-        .into()
+        ))
     })?;
 
     let server_guard = shared_server
         .lock()
-        .map_err(|_| runtime_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned").into())?;
+        .map_err(|_| runmat_async::RuntimeControlFlow::Error(runtime_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned".to_string())))?;
 
     let timeout = options.timeout.unwrap_or(server_guard.timeout);
     validate_timeout(timeout)?;

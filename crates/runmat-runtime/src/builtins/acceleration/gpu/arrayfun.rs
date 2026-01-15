@@ -306,7 +306,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
         }
 
         let host_value =
-            gather_if_needed(&raw).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+            gather_if_needed(&raw)?;
         let data = ArrayData::from_value(host_value)?;
         let len = data.len();
         let is_scalar = len == 1;
@@ -412,8 +412,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
         };
 
         let host_result =
-            gather_if_needed(&result)
-                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+            gather_if_needed(&result)?;
 
         if let Some(collector) = collector.as_mut() {
             collector.push(&host_result)?;

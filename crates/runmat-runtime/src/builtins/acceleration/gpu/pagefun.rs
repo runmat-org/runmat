@@ -215,8 +215,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
         host_values.push(
-            gather_if_needed(&value)
-                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+            gather_if_needed(&value)?,
         );
     }
 
@@ -302,8 +301,7 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> crate::Builti
 
         let mut evaluated = operation.evaluate(&page_args)?;
         evaluated =
-            gather_if_needed(&evaluated)
-                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+            gather_if_needed(&evaluated)?;
         match output_kind {
             OutputKind::Real => {
                 let (data, rows, cols) = tensor_matrix_data(evaluated)?;

@@ -15,6 +15,22 @@ struct Args {
     #[arg(long)]
     check: bool,
 
+    /// Remove incorrect `RuntimeControlFlow -> String` conversions like
+    /// `map_err(|e: RuntimeControlFlow| e.to_string())?` inside `#[runtime_builtin]` functions.
+    /// These conversions erase `Suspend(...)` and break poll-driven execution.
+    #[arg(long)]
+    remove_stringified_controlflow: bool,
+
+    /// Promote *local* helper functions in a file from `Result<T, String>` to `crate::BuiltinResult<T>`
+    /// when that helper is already being called via `.map_err(Into::into)` in the same file.
+    ///
+    /// This is intentionally conservative and idempotent:
+    /// - Only affects helpers in the same file (no cross-file call graph assumptions).
+    /// - Only affects helpers that have evidence of being used in a builtin-facing way
+    ///   (i.e. call sites already had `.map_err(Into::into)`).
+    #[arg(long)]
+    promote_local_results: bool,
+
     /// After converting return types, also coerce legacy `Result<_, String>` return expressions
     /// inside builtin functions by wrapping them with `.map_err(Into::into)`.
     #[arg(long)]
@@ -42,7 +58,13 @@ fn main() -> Result<()> {
 
     let mut changed_files = Vec::new();
     for file in rust_files {
-        let changed = process_file(&file, args.check, args.coerce_returns)
+        let changed = process_file(
+            &file,
+            args.check,
+            args.coerce_returns,
+            args.remove_stringified_controlflow,
+            args.promote_local_results,
+        )
             .with_context(|| format!("processing {}", file.display()))?;
         if changed {
             changed_files.push(file);
@@ -70,7 +92,13 @@ fn is_hidden(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with('.'))
 }
 
-fn process_file(path: &Path, check_only: bool, coerce_returns: bool) -> Result<bool> {
+fn process_file(
+    path: &Path,
+    check_only: bool,
+    coerce_returns: bool,
+    remove_stringified_controlflow: bool,
+    promote_local_results: bool,
+) -> Result<bool> {
     let mut content = fs::read_to_string(path)?;
     let line_offsets = line_offsets(&content);
     let syntax: File = syn::parse_file(&content)?;
@@ -85,6 +113,18 @@ fn process_file(path: &Path, check_only: bool, coerce_returns: bool) -> Result<b
         let mut coercer = BuiltinReturnCollector::new(&line_offsets, &content, true);
         coercer.visit_file(&syntax);
         edits.extend(coercer.into_edits());
+    }
+
+    if remove_stringified_controlflow {
+        let mut fixer = BadControlFlowStringifyFixer::new(&line_offsets, &content);
+        fixer.visit_file(&syntax);
+        edits.extend(fixer.into_edits());
+    }
+
+    if promote_local_results {
+        let mut promoter = LocalResultPromoter::new(&line_offsets, &content);
+        promoter.visit_file(&syntax);
+        edits.extend(promoter.into_edits());
     }
 
     if edits.is_empty() {
@@ -402,6 +442,261 @@ fn attr_path(attr: &Attribute) -> String {
         .map(|seg| seg.ident.to_string())
         .collect::<Vec<_>>()
         .join("::")
+}
+
+// --- Targeted fixer: prevent `RuntimeControlFlow -> String` conversion (breaks Suspend) ---
+
+struct BadControlFlowStringifyFixer<'a> {
+    line_offsets: &'a [usize],
+    content: &'a str,
+    in_builtin: bool,
+    edits: Vec<Edit>,
+}
+
+impl<'a> BadControlFlowStringifyFixer<'a> {
+    fn new(line_offsets: &'a [usize], content: &'a str) -> Self {
+        Self {
+            line_offsets,
+            content,
+            in_builtin: false,
+            edits: Vec::new(),
+        }
+    }
+
+    fn into_edits(self) -> Vec<Edit> {
+        self.edits
+    }
+}
+
+impl<'a, 'ast> Visit<'ast> for BadControlFlowStringifyFixer<'a> {
+    fn visit_item_fn(&mut self, i: &'ast ItemFn) {
+        if !BuiltinReturnCollector::has_runtime_builtin_attr(&i.attrs) {
+            return;
+        }
+        self.in_builtin = true;
+        syn::visit::visit_item_fn(self, i);
+        self.in_builtin = false;
+    }
+
+    fn visit_expr_try(&mut self, i: &'ast syn::ExprTry) {
+        if self.in_builtin {
+            // Match: `<recv>.map_err(<closure>)?` where closure is `|e: RuntimeControlFlow| e.to_string()/String::from(e)`
+            if let syn::Expr::MethodCall(mc) = i.expr.as_ref() {
+                if mc.method == "map_err" && mc.args.len() == 1 {
+                    if let syn::Expr::Closure(cl) = mc.args.first().unwrap() {
+                        if closure_converts_runtime_control_flow_to_string(cl) {
+                            let start = span_start(i.span(), self.line_offsets);
+                            let end = span_end(i.span(), self.line_offsets);
+                            let recv_span = mc.receiver.span();
+                            let recv_start = span_start(recv_span, self.line_offsets);
+                            let recv_end = span_end(recv_span, self.line_offsets);
+                            let recv_src =
+                                self.content.get(recv_start..recv_end).unwrap_or("").to_string();
+                            self.edits.push(Edit {
+                                start,
+                                end,
+                                replacement: format!("{recv_src}?"),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_try(self, i);
+    }
+}
+
+fn closure_converts_runtime_control_flow_to_string(cl: &syn::ExprClosure) -> bool {
+    // Require typed param `RuntimeControlFlow` to reduce false positives.
+    let param_is_rcf = cl.inputs.iter().any(|pat| match pat {
+        syn::Pat::Type(pt) => match pt.ty.as_ref() {
+            syn::Type::Path(tp) => tp
+                .path
+                .segments
+                .last()
+                .is_some_and(|seg| seg.ident == "RuntimeControlFlow"),
+            _ => false,
+        },
+        _ => false,
+    });
+    if !param_is_rcf {
+        return false;
+    }
+
+    match cl.body.as_ref() {
+        // String::from(e)
+        syn::Expr::Call(call) => {
+            if let syn::Expr::Path(p) = call.func.as_ref() {
+                return p.path.segments.len() == 2
+                    && p.path.segments[0].ident == "String"
+                    && p.path.segments[1].ident == "from";
+            }
+            false
+        }
+        // e.to_string()
+        syn::Expr::MethodCall(mc) => mc.method == "to_string",
+        _ => false,
+    }
+}
+
+// --- Conservative local helper promotion: Result<T, String> -> BuiltinResult<T> ---
+
+#[derive(Clone)]
+struct LocalFnInfo {
+    name: String,
+    ok_tokens: String,
+    return_ty_span: Span,
+}
+
+struct LocalResultPromoter<'a> {
+    line_offsets: &'a [usize],
+    content: &'a str,
+    fns: Vec<LocalFnInfo>,
+    promote: std::collections::HashSet<String>,
+    in_builtin: bool,
+    in_promoted_fn: Option<String>,
+    edits: Vec<Edit>,
+}
+
+impl<'a> LocalResultPromoter<'a> {
+    fn new(line_offsets: &'a [usize], content: &'a str) -> Self {
+        Self {
+            line_offsets,
+            content,
+            fns: Vec::new(),
+            promote: std::collections::HashSet::new(),
+            in_builtin: false,
+            in_promoted_fn: None,
+            edits: Vec::new(),
+        }
+    }
+
+    fn into_edits(self) -> Vec<Edit> {
+        self.edits
+    }
+}
+
+impl<'a, 'ast> Visit<'ast> for LocalResultPromoter<'a> {
+    fn visit_file(&mut self, i: &'ast File) {
+        // Pass 1: collect candidate helper fns.
+        for item in &i.items {
+            let syn::Item::Fn(f) = item else { continue };
+            let ReturnType::Type(_, ty) = &f.sig.output else { continue };
+            let Some((ok_ty, err_ty)) = split_result_type(ty.as_ref()) else { continue };
+            if !is_string_type(err_ty) {
+                continue;
+            }
+            let ok_tokens = quote! { #ok_ty }.to_string();
+            self.fns.push(LocalFnInfo {
+                name: f.sig.ident.to_string(),
+                ok_tokens,
+                return_ty_span: ty.span(),
+            });
+        }
+
+        // Pass 2: detect call sites `foo(...).map_err(Into::into)` and mark foo for promotion,
+        // and also plan removal of the `.map_err(Into::into)` wrapper for those call sites.
+        syn::visit::visit_file(self, i);
+
+        // Pass 3: update signatures for promoted fns.
+        for info in &self.fns {
+            if !self.promote.contains(&info.name) {
+                continue;
+            }
+            let start = span_start(info.return_ty_span, self.line_offsets);
+            let end = span_end(info.return_ty_span, self.line_offsets);
+            let replacement = format!("crate::BuiltinResult<{}>", info.ok_tokens);
+            self.edits.push(Edit { start, end, replacement });
+        }
+    }
+
+    fn visit_item_fn(&mut self, i: &'ast ItemFn) {
+        let fn_name = i.sig.ident.to_string();
+        let is_builtin = BuiltinReturnCollector::has_runtime_builtin_attr(&i.attrs);
+
+        if is_builtin {
+            self.in_builtin = true;
+        }
+
+        if self.promote.contains(&fn_name) {
+            self.in_promoted_fn = Some(fn_name.clone());
+            syn::visit::visit_item_fn(self, i);
+            self.in_promoted_fn = None;
+        } else {
+            syn::visit::visit_item_fn(self, i);
+        }
+
+        if is_builtin {
+            self.in_builtin = false;
+        }
+    }
+
+    fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
+        // Detect `.map_err(Into::into)` call sites to local helper functions.
+        // Only consider wrappers occurring inside `#[runtime_builtin]` functions to keep this conservative.
+        if self.in_builtin && i.method == "map_err" && i.args.len() == 1 {
+            if let syn::Expr::Path(p) = i.args.first().unwrap() {
+                if p.path.segments.iter().any(|s| s.ident == "Into") {
+                    // receiver can be `foo(...)` or `(foo(...))`
+                    let receiver = i.receiver.as_ref();
+                    let call_expr = match receiver {
+                        syn::Expr::Call(c) => Some(c),
+                        syn::Expr::Paren(p) => match p.expr.as_ref() {
+                            syn::Expr::Call(c) => Some(c),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some(call) = call_expr {
+                        if let syn::Expr::Path(func_path) = call.func.as_ref() {
+                            if let Some(seg) = func_path.path.segments.last() {
+                                let name = seg.ident.to_string();
+                                if self.fns.iter().any(|f| f.name == name) {
+                                    self.promote.insert(name);
+                                    // Replace the whole method call with just the receiver source.
+                                    let start = span_start(i.span(), self.line_offsets);
+                                    let end = span_end(i.span(), self.line_offsets);
+                                    let recv_span = receiver.span();
+                                    let recv_start = span_start(recv_span, self.line_offsets);
+                                    let recv_end = span_end(recv_span, self.line_offsets);
+                                    let recv_src = self
+                                        .content
+                                        .get(recv_start..recv_end)
+                                        .unwrap_or("")
+                                        .to_string();
+                                    self.edits.push(Edit { start, end, replacement: recv_src });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        syn::visit::visit_expr_method_call(self, i);
+    }
+
+    fn visit_expr_call(&mut self, i: &'ast syn::ExprCall) {
+        // Inside promoted helper: convert `Err(<string-ish>)` -> `Err((<string-ish>).into())`.
+        if self.in_promoted_fn.is_some() {
+            if let syn::Expr::Path(p) = i.func.as_ref() {
+                if let Some(seg) = p.path.segments.last() {
+                    if seg.ident == "Err" {
+                        if let Some(arg0) = i.args.first() {
+                            let span = arg0.span();
+                            let start = span_start(span, self.line_offsets);
+                            let end = span_end(span, self.line_offsets);
+                            let original =
+                                self.content.get(start..end).unwrap_or("").to_string();
+                            let replacement = format!("({original}).into()");
+                            self.edits.push(Edit { start, end, replacement });
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, i);
+    }
 }
 
 

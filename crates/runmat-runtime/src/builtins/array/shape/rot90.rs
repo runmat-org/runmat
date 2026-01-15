@@ -253,14 +253,14 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| format!("rot90: {e}"))?;
-            rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)
+            Ok(rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => (rot90_string_array(strings, steps).map(Value::StringArray)).map_err(Into::into),
         Value::CharArray(chars) => (rot90_char_array(chars, steps).map(Value::CharArray)).map_err(Into::into),
         Value::String(s) => Ok(Value::String(s)),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
             let tensor = tensor::value_into_tensor_for("rot90", v)?;
-            rot90_tensor(tensor, steps).map(tensor::tensor_into_value)
+            Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => (rot90_gpu(handle, steps)).map_err(Into::into),
         Value::Cell(_) => Err((("rot90: cell arrays are not yet supported".to_string())).into()),

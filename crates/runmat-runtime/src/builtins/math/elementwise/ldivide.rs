@@ -261,7 +261,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => (ldivide_gpu_pair(la, lb)).map_err(Into::into),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => (ldivide_gpu_pair(la, lb)).map_err(runmat_async::RuntimeControlFlow::Error),
         (Value::GpuTensor(la), rhs) => (ldivide_gpu_host_left(la, rhs)).map_err(Into::into),
         (lhs, Value::GpuTensor(rb)) => (ldivide_gpu_host_right(lhs, rb)).map_err(Into::into),
         (lhs, rhs) => (ldivide_host(lhs, rhs)).map_err(Into::into),

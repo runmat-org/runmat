@@ -239,11 +239,11 @@ fn rem_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => (rem_gpu_pair(a, b)).map_err(Into::into),
         (Value::GpuTensor(a), other) => {
             let gathered = gpu_helpers::gather_tensor(&a)?;
-            rem_host(Value::Tensor(gathered), other)
+            Ok(rem_host(Value::Tensor(gathered), other)?)
         }
         (other, Value::GpuTensor(b)) => {
             let gathered = gpu_helpers::gather_tensor(&b)?;
-            rem_host(other, Value::Tensor(gathered))
+            Ok(rem_host(other, Value::Tensor(gathered))?)
         }
         (left, right) => (rem_host(left, right)).map_err(Into::into),
     }

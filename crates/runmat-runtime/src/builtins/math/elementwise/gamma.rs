@@ -251,7 +251,7 @@ fn gamma_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => gamma_gpu(handle)?,
-        Value::Complex(re, im) => (gamma_complex_scalar_value(Complex64::new(re, im))).map_err(Into::into),
+        Value::Complex(re, im) => gamma_complex_scalar_value(Complex64::new(re, im)),
         Value::ComplexTensor(ct) => gamma_complex_tensor(ct)?,
         Value::CharArray(ca) => gamma_char_array(ca)?,
         Value::LogicalArray(logical) => {
@@ -262,9 +262,9 @@ fn gamma_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
             return Err((("gamma: expected numeric input".to_string())).into())
         }
         Value::Tensor(tensor) => gamma_tensor(tensor).map(tensor::tensor_into_value)?,
-        Value::Num(n) => (Value::Num(gamma_real_scalar(n))).map_err(Into::into),
-        Value::Int(i) => (Value::Num(gamma_real_scalar(i.to_f64()))).map_err(Into::into),
-        Value::Bool(b) => (Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 }))).map_err(Into::into),
+        Value::Num(n) => Value::Num(gamma_real_scalar(n)),
+        Value::Int(i) => Value::Num(gamma_real_scalar(i.to_f64())),
+        Value::Bool(b) => Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 })),
         other => {
             return Err(((format!(
                 "gamma: unsupported input type {:?}; expected numeric or gpuArray input",

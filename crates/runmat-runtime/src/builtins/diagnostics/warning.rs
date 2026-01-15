@@ -227,14 +227,14 @@ fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                         .to_string())).into(),
                 );
             }
-            reissue_exception(mex)
+            Ok(reissue_exception(mex)?)
         }
         _ => {
             let first_string = value_to_string("warning", first)?;
             if let Some(command) = parse_command(&first_string) {
                 return (handle_command(command, rest)).map_err(Into::into);
             }
-            handle_message_call(None, first_string, rest)
+            Ok(handle_message_call(None, first_string, rest)?)
         }
     }
 }

@@ -215,15 +215,15 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     match value {
         Value::Tensor(tensor) => {
-            diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
+            Ok(diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
+            Ok(diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("diff", value)?;
-            diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
+            Ok(diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor {
@@ -232,10 +232,10 @@ fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 rows: 1,
                 cols: 1,
             };
-            diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
+            Ok(diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)?)
         }
         Value::ComplexTensor(tensor) => {
-            diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
+            Ok(diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)?)
         }
         Value::CharArray(chars) => (diff_char_array(chars, order, dim)).map_err(Into::into),
         Value::GpuTensor(handle) => (diff_gpu(handle, order, dim)).map_err(Into::into),

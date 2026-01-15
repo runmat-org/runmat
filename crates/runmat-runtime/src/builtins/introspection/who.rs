@@ -204,14 +204,13 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
         gathered.push(
-            gather_if_needed(&arg)
-                .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+            gather_if_needed(&arg)?,
         );
     }
     let request = parse_request(&gathered)?;
 
     let mut entries = match &request.source {
-        WhoSource::Workspace => (crate::workspace::snapshot().unwrap_or_default()).map_err(Into::into),
+        WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
         WhoSource::File(path) => {
             read_mat_file(path).map_err(|err| err.replacen("load:", "who:", 1))?
         }
