@@ -35,8 +35,7 @@
     "gpu": "builtins::math::elementwise::power::tests::power_gpu_pair_roundtrip",
     "wgpu": "builtins::math::elementwise::power::tests::power_wgpu_matches_cpu_elementwise",
     "like_gpu": "builtins::math::elementwise::power::tests::power_like_gpu_residency",
-    "like_complex": "builtins::math::elementwise::power::tests::power_like_complex_promotes_output",
-    "doc": "builtins::math::elementwise::power::tests::doc_examples_present"
+    "like_complex": "builtins::math::elementwise::power::tests::power_like_complex_promotes_output"
   },
   "description": "`Y = power(A, B)` (or `A .^ B`) raises each element of `A` to the corresponding element of `B` using MATLAB's implicit-expansion rules. Scalars broadcast automatically, and complex inputs produce complex outputs that match MATLAB behaviour.",
   "behaviors": [
@@ -101,7 +100,7 @@
     },
     {
       "question": "Can I force the result to stay on the GPU?",
-      "answer": "Yes\u2014pass `'like', gpuArrayPrototype`. The runtime mirrors the residency of the prototype and uploads the result when necessary."
+      "answer": "Yes—pass `'like', gpuArrayPrototype`. The runtime mirrors the residency of the prototype and uploads the result when necessary."
     }
   ],
   "links": [

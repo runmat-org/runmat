@@ -31,62 +31,6 @@ use super::point::{
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "scatter3",
-        builtin_path = "crate::builtins::plotting::scatter3"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "scatter3"
-category: "plotting"
-keywords: ["scatter3", "3-D scatter", "point cloud", "gpuArray"]
-summary: "Create MATLAB-compatible 3-D scatter plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/scatter3.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Rendering runs on the host or WebGPU canvas after gathering gpuArray data when necessary."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::scatter3::tests"
----
-
-# What does `scatter3` do?
-`scatter3(x, y, z)` plots points in 3-D space using MATLAB-compatible defaults. Each input must
-contain the same number of elements; row and column vectors are both accepted.
-
-## Behaviour highlights
-- Inputs may be real doubles, single-precision tensors, or gathered gpuArray values. Complex data
-  currently raises an error matching MATLAB.
-- Points inherit MATLAB’s default styling: blue markers with mild transparency. Future work will
-  add size/color arguments, but existing scripts using the basic call form work today.
-- Fusion graphs terminate at `scatter3`, and gpuArray inputs are gathered so the renderer can access
-  dense host memory or a shared WebGPU buffer depending on the build.
-
-## Examples
-
-```matlab
-t = linspace(0, 4*pi, 200);
-scatter3(cos(t), sin(t), t);
-```
-
-## GPU residency
-`scatter3` gathers GPU tensors before plotting today. The new shared-device renderer keeps future
-implementations zero-copy. Until that lands, expect the builtin to behave like MATLAB: data moves
-to the host, rendering completes, and execution returns immediately.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter3",

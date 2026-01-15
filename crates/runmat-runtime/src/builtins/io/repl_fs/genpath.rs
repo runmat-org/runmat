@@ -18,155 +18,6 @@ use std::path::{Path, PathBuf};
 const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";
 const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector or string scalar";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "genpath",
-        builtin_path = "crate::builtins::io::repl_fs::genpath"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "genpath"
-category: "io/repl_fs"
-keywords: ["genpath", "recursive path", "search path", "addpath"]
-summary: "Generate a MATLAB-style search path string for a folder tree."
-references:
-  - https://www.mathworks.com/help/matlab/ref/genpath.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::repl_fs::genpath::tests"
-  integration: "builtins::io::repl_fs::genpath::tests::genpath_excludes_specified_directories"
----
-
-# What does the `genpath` function do in MATLAB / RunMat?
-`genpath` walks a folder tree and returns a character vector that lists the folder
-and every subfolder in depth-first order. Each entry is separated by the platform
-`pathsep` character (`:` on Linux/macOS, `;` on Windows), making the result a
-drop-in argument for `addpath`, `rmpath`, and other path-editing utilities.
-
-## How does the `genpath` function behave in MATLAB / RunMat?
-- `genpath()` with no inputs uses the current working directory (`pwd`) as the
-  root folder. `genpath(folder)` accepts either an absolute or relative path.
-- MATLAB-reserved directories named `private` or `resources`, as well as class
-  folders (`@MyClass`) and namespace folders (`+pkg`), are skipped automatically
-  along with all of their descendants. The root folder is still included even if
-  it matches one of these reserved names.
-- All returned entries are absolute, canonicalised paths beginning with the root
-  directory, followed by each descendant directory in lexical order. The walking
-  order matches MATLAB's depth-first behaviour.
-- Duplicate directories are removed automatically. Symlinked folders that resolve
-  to the same physical location only appear once in the output.
-- `genpath(folder, excludes)` omits any folder listed in `excludes` together with
-  its descendants. The `excludes` argument is a character vector of absolute or
-  relative paths separated by `pathsep`. Relative entries are resolved against the
-  supplied root folder before canonicalisation.
-- If a folder in the tree cannot be read (for example due to permissions), RunMat
-  silently skips that branch while keeping the rest of the result intact.
-- If the requested root folder does not exist, RunMat raises
-  `genpath: folder '<name>' not found`, matching MATLAB error semantics.
-
-## `genpath` Function GPU Execution Behaviour
-`genpath` operates entirely on the host filesystem. Any string inputs that reside
-on the GPU are gathered back to the CPU before processing. No acceleration
-provider hooks are invoked and no device kernels are launched.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `genpath` manipulates host-side strings and filesystem metadata. Supplying
-`gpuArray` values provides no benefit—RunMat gathers the data automatically.
-
-## Examples of using the `genpath` function in MATLAB / RunMat
-
-### Generate a recursive path for the current working folder
-```matlab
-p = genpath();
-addpath(p);   % Add the current folder and all subfolders to the MATLAB path
-```
-
-### Build a search path for a project toolbox
-```matlab
-toolboxRoot = "toolbox/signal";
-toolboxPath = genpath(toolboxRoot);
-addpath(toolboxPath, "-end");
-```
-
-### Exclude build output directories from the generated path
-```matlab
-root = "projects/solver";
-excludes = strjoin([
-    fullfile(root, "build"),
-    fullfile(root, "dist")
-], pathsep);
-p = genpath(root, excludes);
-```
-
-### Skip a private utilities folder while including the rest of the tree
-```matlab
-root = "analysis";
-p = genpath(root, fullfile(root, "private"));
-```
-
-### Automatically skip MATLAB-reserved folders
-```matlab
-root = "toolbox";
-mkdir(root, "private");
-mkdir(root, "+package");
-p = genpath(root);
-```
-
-Expected output:
-```matlab
-% `p` only includes `toolbox` and subfolders that are not named `private` or
-% `resources`, and that do not begin with `@` or `+`.
-```
-
-### Combine `genpath` with `savepath` for persistent tooling setup
-```matlab
-p = genpath("third_party/toolchain");
-addpath(p);
-savepath();
-```
-
-## FAQ
-- **Does `genpath` include package (`+pkg`) and class (`@Class`) folders?** No.
-  These directories are excluded automatically, along with folders named
-  `private` or `resources`. Use the `excludes` argument for additional rules.
-- **How do I exclude multiple folders?** Build a character vector or string using
-  `pathsep` (for example, `strjoin({path1, path2}, pathsep)`) and pass it as the
-  second argument. Relative entries are interpreted relative to the root folder.
-- **Why are some folders missing from the result?** RunMat only omits folders that
-  you explicitly exclude or that cannot be read due to filesystem permissions.
-- **What happens if the root folder does not exist?** `genpath` raises
-  `genpath: folder '<name>' not found`, matching MATLAB. Create the folder first
-  or adjust the argument.
-- **Can I call `genpath` on a GPU array?** Yes—the input is gathered to the CPU
-  before processing, and the result is returned as a standard character vector.
-- **Is the result always absolute paths?** Yes. RunMat resolves the root and all
-  discovered folders to their absolute, canonical locations to avoid duplicates.
-- **Will symbolic links be traversed?** Yes, but the target directory only appears
-  once in the output. Directory cycles are prevented by tracking canonical paths.
-- **Can I feed `genpath` output directly into `addpath` or `rmpath`?** Absolutely.
-  The output string is `pathsep`-delimited specifically for that purpose.
-
-## See Also
-[addpath](./addpath), [rmpath](./rmpath), [path](./path), [which](./which)
-
-## Source & Feedback
-- Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs)
-- Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with steps to reproduce.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "genpath",
@@ -562,7 +413,6 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
     use std::fs;
@@ -914,12 +764,5 @@ pub(crate) mod tests {
         let missing = Value::String("this/does/not/exist".into());
         let err = genpath_builtin(vec![missing]).expect_err("expected error");
         assert!(err.contains("not found"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

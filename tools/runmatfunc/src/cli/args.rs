@@ -61,8 +61,6 @@ pub enum BuiltinAction {
         codex: bool,
         #[arg(long)]
         diff: bool,
-        #[arg(long = "show-doc")]
-        show_doc: bool,
     },
 }
 

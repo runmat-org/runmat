@@ -30,8 +30,7 @@
   "tested": {
     "unit": "builtins::logical::tests::isnumeric::tests",
     "integration": "builtins::logical::tests::isnumeric::tests::gpu_numeric_and_logical_handles",
-    "gpu": "builtins::logical::tests::isnumeric::tests::isnumeric_wgpu_handles_respect_metadata",
-    "doc": "builtins::logical::tests::isnumeric::tests::doc_examples_present"
+    "gpu": "builtins::logical::tests::isnumeric::tests::isnumeric_wgpu_handles_respect_metadata"
   },
   "description": "`tf = isnumeric(x)` returns a logical scalar that is `true` when `x` stores numeric data and `false` otherwise. Numeric data includes doubles, singles, integers, and complex numbers, as well as dense numeric arrays that live on the CPU or GPU.",
   "behaviors": [
@@ -84,7 +83,7 @@
     },
     {
       "question": "Does `isnumeric` gather GPU data back to the host?",
-      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host\u2194device transfers."
+      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host↔device transfers."
     },
     {
       "question": "Do logical masks return `true`?",

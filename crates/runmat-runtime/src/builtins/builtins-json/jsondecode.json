@@ -36,8 +36,7 @@
       "builtins::io::json::jsondecode::tests::jsondecode_rectangular_cell_array_preserves_layout",
       "builtins::io::json::jsondecode::tests::jsondecode_array_of_objects_returns_cell",
       "builtins::io::json::jsondecode::tests::jsondecode_null_returns_empty_double",
-      "builtins::io::json::jsondecode::tests::jsondecode_round_trip_with_jsonencode",
-      "builtins::io::json::jsondecode::tests::jsondecode_doc_examples_present"
+      "builtins::io::json::jsondecode::tests::jsondecode_round_trip_with_jsonencode"
     ]
   },
   "description": "`jsondecode` converts UTF-8 JSON text into MATLAB-compatible data. Numbers become doubles, logicals become `logical`, character vectors become char arrays, objects become structs, and arrays expand to numeric/logical/string arrays when rectangular or cell arrays when heterogeneous.",

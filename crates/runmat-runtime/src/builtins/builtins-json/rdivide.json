@@ -34,7 +34,6 @@
     "integration": "builtins::math::elementwise::rdivide::tests::rdivide_row_column_broadcast",
     "gpu": "builtins::math::elementwise::rdivide::tests::rdivide_gpu_pair_roundtrip",
     "wgpu": "builtins::math::elementwise::rdivide::tests::rdivide_wgpu_matches_cpu_elementwise",
-    "doc": "builtins::math::elementwise::rdivide::tests::doc_examples_present",
     "like_gpu": "builtins::math::elementwise::rdivide::tests::rdivide_like_gpu_prototype_keeps_residency",
     "like_host": "builtins::math::elementwise::rdivide::tests::rdivide_like_host_gathers_gpu_value",
     "like_complex": "builtins::math::elementwise::rdivide::tests::rdivide_like_complex_prototype_yields_complex"
@@ -44,7 +43,7 @@
     "Supports real, complex, logical, and character inputs; logical and character data are promoted to double precision before division.",
     "Implicit expansion works across any dimension, provided the non-singleton extents match. Size mismatches raise the standard MATLAB-compatible error.",
     "Complex operands follow the analytic rule `(a + ib) ./ (c + id) = ((ac + bd) + i(bc - ad)) / (c^2 + d^2)`, matching MATLAB's behaviour for infinities and NaNs.",
-    "Empty dimensions propagate naturally\u2014if the broadcasted shape contains a zero extent, the result is empty with that shape.",
+    "Empty dimensions propagate naturally—if the broadcasted shape contains a zero extent, the result is empty with that shape.",
     "Integer inputs promote to double precision, mirroring the behaviour of other RunMat arithmetic builtins.",
     "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, letting you keep implicit-expansion expressions on the device without manual `gpuArray` calls. When the prototype is complex, the result remains a complex host array (complex gpuArray prototypes are not yet supported)."
   ],
@@ -155,6 +154,6 @@
   },
   "gpu_residency": "RunMat's auto-offload planner keeps tensors on the GPU whenever fused expressions benefit from device execution. Explicit `gpuArray` / `gather` calls are still supported for MATLAB code that manages residency manually. When the active provider lacks the kernels needed for a particular call (for example, implicit expansion between gpuArrays of different shapes), RunMat gathers back to the host, computes the MATLAB-accurate result, and resumes execution seamlessly.",
   "gpu_behavior": [
-    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_div` hook so the entire computation stays on device memory. 2. If one operand is a scalar (host or device) and the other is a gpuArray, the runtime calls `scalar_div` (`tensor ./ scalar`) or `scalar_rdiv` (`scalar ./ tensor`) accordingly. 3. The fusion planner treats `rdivide` as a fusible elementwise node, so adjacent elementwise producers or consumers can execute inside a single WGSL kernel or provider-optimised pipeline, reducing host\u2194device transfers. 4. Implicit-expansion workloads (for example, combining a row vector with a column vector) or unsupported operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor. When you request `'like'` with a complex prototype, RunMat gathers to the host, performs the conversion, and returns a complex host value so downstream code still sees MATLAB-compatible types."
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_div` hook so the entire computation stays on device memory. 2. If one operand is a scalar (host or device) and the other is a gpuArray, the runtime calls `scalar_div` (`tensor ./ scalar`) or `scalar_rdiv` (`scalar ./ tensor`) accordingly. 3. The fusion planner treats `rdivide` as a fusible elementwise node, so adjacent elementwise producers or consumers can execute inside a single WGSL kernel or provider-optimised pipeline, reducing host↔device transfers. 4. Implicit-expansion workloads (for example, combining a row vector with a column vector) or unsupported operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor. When you request `'like'` with a complex prototype, RunMat gathers to the host, performs the conversion, and returns a complex host value so downstream code still sees MATLAB-compatible types."
   ]
 }

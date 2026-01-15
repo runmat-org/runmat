@@ -31,8 +31,7 @@
   "tested": {
     "unit": "builtins::math::linalg::solve::det::tests",
     "gpu": "builtins::math::linalg::solve::det::tests::det_gpu_roundtrip_matches_cpu",
-    "wgpu": "builtins::math::linalg::solve::det::tests::det_wgpu_matches_cpu",
-    "doc": "builtins::math::linalg::solve::det::tests::doc_examples_present"
+    "wgpu": "builtins::math::linalg::solve::det::tests::det_wgpu_matches_cpu"
   },
   "description": "`det(A)` returns the determinant of a real or complex square matrix `A`. Scalars behave like `det(1x1) = A(1,1)`, and the empty matrix (`[]`) has determinant `1`, matching MATLAB's convention.",
   "behaviors": [

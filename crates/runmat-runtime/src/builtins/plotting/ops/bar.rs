@@ -22,61 +22,6 @@ use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "bar",
-        builtin_path = "crate::builtins::plotting::bar"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "bar"
-category: "plotting"
-keywords: ["bar", "bar chart", "categories", "gpuArray"]
-summary: "Render MATLAB-compatible bar charts."
-references:
-  - https://www.mathworks.com/help/matlab/ref/bar.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArray vectors stay on the device and feed the shared WebGPU renderer; other inputs gather automatically."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::bar::tests"
----
-
-# What does `bar` do?
-`bar(y)` plots the values of `y` as vertical bars with MATLAB-compatible defaults. RunMat matches
-MATLAB's behaviour for 1-D inputs: categories are labelled `1,2,...,n`, grid lines are enabled, and
-the current figure receives a descriptive title and axis labels.
-
-## Behaviour highlights
-- Inputs must be numeric vectors. Scalars produce a single bar; empty inputs raise MATLAB-style
-  errors.
-- Single-precision gpuArray inputs stay on the device and stream directly into the shared renderer
-  for zero-copy plotting when WebGPU is available. Other data gathers automatically.
-- Future work will add grouped/stacked variants; this initial builtin focuses on the common `bar(y)`
-  form used throughout the standard library tests.
-
-## Examples
-```matlab
-values = [3 5 2 9];
-bar(values);
-```
-
-## GPU residency
-`bar` terminates fusion graphs. Single-precision gpuArray vectors reuse provider buffers via the
-shared WebGPU context; other precisions gather to the host before plotting.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::bar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bar",

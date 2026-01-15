@@ -66,7 +66,6 @@ runmatfunc --help                   # view CLI options
 runmatfunc manifest                 # print builtin metadata summary
 runmatfunc docs --out-dir docs/generated  # emit docs bundle
 runmatfunc builtin generate --name sin --category math/trigonometry --codex  # generate builtin skeleton (and assemble authoring context)
-runmatfunc builtin generate --name sin --category math/trigonometry --codex --show-doc  # include DOC_MD in CLI output when needed
 runmatfunc browse                   # interactive TUI (↑/↓ navigate, t run tests, d emit docs, q quit)
 runmatfunc builtin generate --name sin --category math/trigonometry --diff  # show git diff for builtin-related files alongside context
 runmatfunc queue add sin --codex    # enqueue a headless job (stored under artifacts/runmatfunc/queue.json)
@@ -90,7 +89,6 @@ The Codex CLI (`codex exec`) must be available on `PATH` (or pointed to via
 ### Builtin generator
 
 - The `builtin generate` command creates a skeleton at `crates/runmat-runtime/src/builtins/<cat>/<subcat>/<name>.rs`, wires the `mod.rs` chain, and includes:
-  - A DOC_MD stub with YAML frontmatter.
   - A `#[runtime_builtin]` function stub returning a placeholder error.
   - A minimal smoke test named `<name>_compiles_smoke` so filtered tests pass.
 - After generation, rebuild the workspace so the new builtin is registered in the inventory:

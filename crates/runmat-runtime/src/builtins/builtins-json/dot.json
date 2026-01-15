@@ -31,8 +31,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::linalg::ops::dot::tests",
-    "integration": "builtins::math::linalg::ops::dot::tests::dot_gpu_roundtrip",
-    "doc": "builtins::math::linalg::ops::dot::tests::doc_examples_present"
+    "integration": "builtins::math::linalg::ops::dot::tests::dot_gpu_roundtrip"
   },
   "description": "`dot(A, B)` evaluates the inner product between matching slices of `A` and `B`. Inputs must have the same size, and complex vectors follow MATLAB's convention `sum(conj(A) .* B)`.",
   "behaviors": [
@@ -126,8 +125,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` explicitly for `dot`. If the provider lacks a dedicated dot kernel, RunMat will gather the operands, compute the host result, and\u2014when the output is real\u2014upload it back to the provider automatically. Complex outputs remain on the host until GPU complex datatypes are implemented; in mixed pipelines consider reintroducing `gpuArray` explicitly after the call if residency is critical.",
+  "gpu_residency": "You rarely need to call `gpuArray` explicitly for `dot`. If the provider lacks a dedicated dot kernel, RunMat will gather the operands, compute the host result, and—when the output is real—upload it back to the provider automatically. Complex outputs remain on the host until GPU complex datatypes are implemented; in mixed pipelines consider reintroducing `gpuArray` explicitly after the call if residency is critical.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps GPU-resident tensors on the device whenever the active provider exposes a `dot` hook. When the hook is missing, RunMat gathers both operands to the host, evaluates the reference path, and\u2014when the result is real\u2014uploads it back to the provider so downstream GPU code continues without manual transfers. Complex outputs remain on the host until provider support lands."
+    "RunMat Accelerate keeps GPU-resident tensors on the device whenever the active provider exposes a `dot` hook. When the hook is missing, RunMat gathers both operands to the host, evaluates the reference path, and—when the result is real—uploads it back to the provider so downstream GPU code continues without manual transfers. Complex outputs remain on the host until provider support lands."
   ]
 }

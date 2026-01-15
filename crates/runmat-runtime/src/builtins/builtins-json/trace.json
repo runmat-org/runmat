@@ -19,7 +19,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Prefers provider diag+sum hooks; otherwise gathers once, computes on the CPU, and re-uploads a 1\u00d71 result so downstream GPU work can continue."
+    "notes": "Prefers provider diag+sum hooks; otherwise gathers once, computes on the CPU, and re-uploads a 1×1 result so downstream GPU work can continue."
   },
   "fusion": {
     "elementwise": false,
@@ -31,18 +31,17 @@
   "tested": {
     "unit": "builtins::math::linalg::ops::trace::tests",
     "integration": "builtins::math::linalg::ops::trace::tests::trace_gpu_provider_roundtrip",
-    "gpu": "builtins::math::linalg::ops::trace::tests::trace_wgpu_matches_cpu",
-    "doc": "builtins::math::linalg::ops::trace::tests::doc_examples_present"
+    "gpu": "builtins::math::linalg::ops::trace::tests::trace_wgpu_matches_cpu"
   },
   "description": "`trace(A)` returns the sum of the elements on the main diagonal of `A`. The result matches MATLAB for scalars, vectors, rectangular matrices, logical masks, and complex inputs. When the argument is a `gpuArray`, RunMat keeps the result on the GPU whenever the active provider exposes the required hooks.",
   "behaviors": [
     "Operates on the leading two dimensions. Higher dimensions must be singleton; otherwise an error is raised.",
     "Works for non-square matrices by summing up to `min(size(A, 1), size(A, 2))`.",
     "Scalars (real or complex) return their own value.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`).",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).",
     "Complex inputs retain both real and imaginary parts in the result.",
     "Empty matrices yield `0`. Empty complex matrices yield `0 + 0i`.",
-    "`gpuArray` inputs stay on the device when the provider implements diagonal extraction and sum reductions; otherwise RunMat gathers once, computes on the host, and uploads a 1\u00d71 scalar."
+    "`gpuArray` inputs stay on the device when the provider implements diagonal extraction and sum reductions; otherwise RunMat gathers once, computes on the host, and uploads a 1×1 scalar."
   ],
   "examples": [
     {
@@ -143,8 +142,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nThe auto-offload planner keeps residency on the GPU when expressions benefit from it. When the active provider exposes both `diag_extract` and `reduce_sum`, `trace` executes entirely on the GPU. If either hook is missing, RunMat performs a single gather, computes the scalar on the CPU, and uploads a 1\u00d71 result back to the device so downstream fused expressions continue to operate on GPU data.\n\nTo preserve backwards compatibility with MathWorks MATLAB\u2014and for situations where you want to explicitly manage residency\u2014you can wrap inputs with `gpuArray`. This mirrors MATLAB while still letting RunMat's planner decide whether the GPU offers an advantage for the surrounding code.",
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nThe auto-offload planner keeps residency on the GPU when expressions benefit from it. When the active provider exposes both `diag_extract` and `reduce_sum`, `trace` executes entirely on the GPU. If either hook is missing, RunMat performs a single gather, computes the scalar on the CPU, and uploads a 1×1 result back to the device so downstream fused expressions continue to operate on GPU data.\n\nTo preserve backwards compatibility with MathWorks MATLAB—and for situations where you want to explicitly manage residency—you can wrap inputs with `gpuArray`. This mirrors MATLAB while still letting RunMat's planner decide whether the GPU offers an advantage for the surrounding code.",
   "gpu_behavior": [
-    "1. When the input already lives on the GPU and the active provider exposes both `diag_extract` and `reduce_sum`, RunMat extracts the diagonal on device and performs the reduction there, returning a `1\u00d71` gpuArray that stays resident for downstream work. 2. If either hook is missing or the provider declines (unsupported precision, shape, or size), RunMat gathers the matrix exactly once, computes the diagonal sum on the CPU, and uploads the scalar back to the provider so subsequent GPU-friendly code keeps running on device memory. 3. Mixed-residency calls automatically upload host matrices before these steps, matching MATLAB's `gpuArray` behaviour while letting the auto-offload planner decide which tier benefits the most."
+    "1. When the input already lives on the GPU and the active provider exposes both `diag_extract` and `reduce_sum`, RunMat extracts the diagonal on device and performs the reduction there, returning a `1×1` gpuArray that stays resident for downstream work. 2. If either hook is missing or the provider declines (unsupported precision, shape, or size), RunMat gathers the matrix exactly once, computes the diagonal sum on the CPU, and uploads the scalar back to the provider so subsequent GPU-friendly code keeps running on device memory. 3. Mixed-residency calls automatically upload host matrices before these steps, matching MATLAB's `gpuArray` behaviour while letting the auto-offload planner decide which tier benefits the most."
   ]
 }

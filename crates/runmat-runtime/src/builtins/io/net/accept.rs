@@ -168,168 +168,6 @@ pub(super) fn remove_client_for_test(id: u64) {
     }
 }
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "accept",
-        builtin_path = "crate::builtins::io::net::accept"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "accept"
-category: "io/net"
-keywords: ["accept", "tcpserver", "tcpclient", "socket", "networking"]
-summary: "Accept a pending client connection on a TCP server."
-references:
-  - https://www.mathworks.com/help/matlab/ref/accept.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Networking runs on the host CPU. GPU-resident metadata is gathered automatically before accepting connections."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::net::accept::tests"
-  integration: "builtins::io::net::accept::tests::accept_establishes_client_connection"
----
-
-# What does `accept` do in MATLAB / RunMat?
-`accept(server)` waits for a pending TCP connection on the socket created by `tcpserver`. When a client connects, the builtin returns a MATLAB-compatible struct that mirrors the `tcpclient` object. The struct tracks connection metadata (remote address, port, byte order, and timeout settings) and holds an opaque identifier that other RunMat networking builtins use to operate on the live socket.
-
-## How does `accept` behave in MATLAB / RunMat?
-- The first argument must be the struct returned from `tcpserver`. RunMat validates that the struct contains a `__tcpserver_id` field and raises `MATLAB:accept:InvalidTcpServer` when the identifier is missing or no longer points to an active listener.
-- By default, `accept` uses the timeout configured when the server was created (`Timeout` name-value pair on `tcpserver`). You can override it per call with `accept(server, "Timeout", seconds)`. The timeout must be non-negative; the builtin raises `MATLAB:accept:InvalidNameValue` when the value is NaN, negative, or non-scalar.
-- Successful calls return immediately with a struct whose fields mirror MATLAB’s `tcpclient` properties (`Address`, `Port`, `NumBytesAvailable`, `BytesAvailableFcn`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`). The struct also contains hidden fields `__tcpserver_id` and `__tcpclient_id` so higher-level builtins can operate on the live socket.
-- If no client connects before the timeout expires, the builtin raises `MATLAB:accept:Timeout`.
-- When the underlying OS reports an accept failure (for example, because the socket closed), the builtin raises `MATLAB:accept:AcceptFailed` with the platform error message.
-- Networking occurs on the host CPU. If the server struct or timeout value lives on the GPU, RunMat gathers it to the host automatically before waiting for connections.
-
-## `accept` Function GPU Execution Behaviour
-`accept` does not involve the GPU. Any inputs that originate on the GPU are gathered before validation to make sure socket operations run on the host. The returned struct is always CPU-resident. No acceleration-provider hooks are required for this builtin, and future GPU-aware networking features will continue to gather metadata automatically while keeping sockets on the host.
-
-## Examples of using the `accept` function in MATLAB / RunMat
-
-### Accepting a localhost client connection
-```matlab
-srv = tcpserver("127.0.0.1", 0);
-port = srv.ServerPort;
-% In another MATLAB/RunMat session (or any TCP client script), connect to the port above.
-client = accept(srv);
-disp(client.Address)
-disp(client.Port)
-```
-
-Expected output:
-```matlab
-127.0.0.1
-55000    % varies per run
-```
-
-### Overriding the timeout for a single accept call
-```matlab
-srv = tcpserver("0.0.0.0", 40000, "Timeout", 10);
-try
-    client = accept(srv, "Timeout", 0.25);
-catch err
-    disp(err.identifier)
-end
-```
-
-Expected output:
-```matlab
-MATLAB:accept:Timeout
-```
-
-### Inspecting connection metadata after accepting a client
-```matlab
-srv = tcpserver("::1", 45000);
-client = accept(srv);
-fprintf("Remote peer %s:%d\\n", client.Address, client.Port);
-fprintf("Byte order: %s\\n", client.ByteOrder);
-```
-
-Expected output:
-```matlab
-Remote peer ::1:51432
-Byte order: little-endian
-```
-
-### Handling multiple queued clients sequentially
-```matlab
-srv = tcpserver("127.0.0.1", 47000);
-% Connect two clients (for example, two tcpclient calls) before running accept twice.
-client1 = accept(srv);
-client2 = accept(srv);
-fprintf("First connection from %s\\n", client1.Address);
-fprintf("Second connection from %s\\n", client2.Address);
-```
-
-Expected output:
-```matlab
-First connection from 127.0.0.1
-Second connection from 127.0.0.1
-```
-
-### Using the returned identifier with other networking builtins
-```matlab
-srv = tcpserver("127.0.0.1", 52000);
-% Connect a client from another process, then accept it.
-client = accept(srv);
-clientId = client.__tcpclient_id;
-fprintf("Opaque client identifier: %d\\n", clientId);
-```
-
-Expected output:
-```matlab
-Opaque client identifier: 42   % identifier value varies per run
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. TCP sockets run on the host, and `accept` gathers any GPU-resident scalars or structs before waiting for a connection. Keeping metadata on the GPU offers no benefit, and the builtin always returns CPU-resident structs with identifiers that reference host networking resources.
-
-## FAQ
-### What happens if the server struct is invalid or already closed?
-RunMat reports `MATLAB:accept:InvalidTcpServer`. Ensure you pass the struct returned by `tcpserver` and that the server is still active.
-
-### Can I accept multiple clients with the same server?
-Yes. Call `accept` repeatedly; each successful call registers a new client and returns its own struct while keeping the listener active.
-
-### How do I change the timeout globally?
-Configure it when creating the server (`tcpserver(..., "Timeout", seconds)`). You can override it per call with `accept(srv, "Timeout", value)` if needed.
-
-### Does RunMat support IPv6 clients?
-Yes. The builtin accepts IPv4 or IPv6 clients and records their string representation in the returned struct’s `Address` field.
-
-### Is there a queue limit for pending connections?
-The OS backlog applies. If the queue is full, new clients may be refused before `accept` sees them. Increase the backlog with OS-level tuning if needed.
-
-### Can I use `accept` in parallel workers?
-Yes. The listener must exist in the worker where you call `accept`, just like MATLAB. Future high-level helpers will coordinate cross-worker sharing.
-
-### How do I close the accepted client?
-Use forthcoming networking close helpers (or invoke platform APIs directly). Dropping the struct does not close the socket automatically; RunMat networking builtins reference the opaque identifier.
-
-### What does `NumBytesAvailable` represent?
-It mirrors MATLAB: the number of bytes buffered and ready to read. Initially zero; reading functions update it as data arrives.
-
-### Does the builtin support TLS?
-Not yet. TLS will be layered on top of the same client identifier once RunMat’s TLS provider lands.
-
-## See also
-[tcpserver](./tcpserver)
-
-## Source & Feedback
-- Source: `crates/runmat-runtime/src/builtins/io/net/accept.rs`
-- Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "accept",
@@ -663,7 +501,6 @@ pub(crate) mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::Value;
     use std::net::TcpStream;
     use std::thread;
@@ -777,13 +614,6 @@ pub(crate) mod tests {
         .unwrap_err();
         assert!(err.starts_with(MESSAGE_ID_INVALID_NAME_VALUE));
         remove_server_for_test(server_id(&server_value));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

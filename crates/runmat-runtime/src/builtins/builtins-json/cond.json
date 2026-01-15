@@ -32,8 +32,7 @@
   "tested": {
     "unit": "builtins::math::linalg::solve::cond::tests",
     "gpu": "builtins::math::linalg::solve::cond::tests::cond_gpu_round_trip_matches_cpu",
-    "wgpu": "builtins::math::linalg::solve::cond::tests::cond_wgpu_matches_cpu",
-    "doc": "builtins::math::linalg::solve::cond::tests::doc_examples_present"
+    "wgpu": "builtins::math::linalg::solve::cond::tests::cond_wgpu_matches_cpu"
   },
   "description": "`k = cond(A)` returns the condition number of matrix `A`, measuring how sensitive solutions to linear systems are to small perturbations in `A` or in the right-hand side. By default, `cond` computes the 2-norm condition number using the ratio of the largest to smallest singular values.",
   "behaviors": [

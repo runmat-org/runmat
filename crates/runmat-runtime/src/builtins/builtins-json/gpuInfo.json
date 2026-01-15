@@ -29,7 +29,6 @@
   "tested": {
     "unit": "builtins::acceleration::gpu::gpuinfo::tests::gpu_info_with_provider_formats_summary",
     "fallback": "builtins::acceleration::gpu::gpuinfo::tests::gpu_info_placeholder_matches_expectation",
-    "doc": "builtins::acceleration::gpu::gpuinfo::tests::doc_examples_present",
     "wgpu": "builtins::acceleration::gpu::gpuinfo::tests::gpuInfo_wgpu_provider_reports_backend"
   },
   "description": "`gpuInfo()` returns a concise, human-readable string that summarises the active GPU acceleration provider. It is a convenience wrapper around [`gpuDevice`](./gpudevice), intended for logging or displaying status information in the REPL and notebooks.",

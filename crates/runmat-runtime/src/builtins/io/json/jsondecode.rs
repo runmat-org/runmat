@@ -17,183 +17,6 @@ const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
 
 #[allow(clippy::too_many_lines)]
-#[runmat_macros::register_doc_text(
-    name = "jsondecode",
-    builtin_path = "crate::builtins::io::json::jsondecode"
-)]
-pub const DOC_MD: &str = r#"---
-title: "jsondecode"
-category: "io/json"
-keywords: ["jsondecode", "json", "parse json", "struct from json", "gpu gather"]
-summary: "Parse UTF-8 JSON text into MATLAB-compatible RunMat values."
-references:
-  - https://www.mathworks.com/help/matlab/ref/jsondecode.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "jsondecode gathers GPU-resident text operands to host memory before parsing and executes entirely on the CPU."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::json::jsondecode::tests"
-  integration:
-    - "builtins::io::json::jsondecode::tests::jsondecode_matrix_to_tensor"
-    - "builtins::io::json::jsondecode::tests::jsondecode_object_to_struct"
-    - "builtins::io::json::jsondecode::tests::jsondecode_string_array"
-    - "builtins::io::json::jsondecode::tests::jsondecode_mixed_array_returns_cell"
-    - "builtins::io::json::jsondecode::tests::jsondecode_rectangular_cell_array_preserves_layout"
-    - "builtins::io::json::jsondecode::tests::jsondecode_array_of_objects_returns_cell"
-    - "builtins::io::json::jsondecode::tests::jsondecode_null_returns_empty_double"
-    - "builtins::io::json::jsondecode::tests::jsondecode_round_trip_with_jsonencode"
-    - "builtins::io::json::jsondecode::tests::jsondecode_doc_examples_present"
----
-
-# What does the `jsondecode` function do in MATLAB / RunMat?
-`jsondecode` converts UTF-8 JSON text into MATLAB-compatible data. Numbers become doubles, logicals
-become `logical`, character vectors become char arrays, objects become structs, and arrays expand to
-numeric/logical/string arrays when rectangular or cell arrays when heterogeneous.
-
-## How does the `jsondecode` function behave in MATLAB / RunMat?
-- Accepts a character vector or string scalar containing UTF-8 JSON data; leading and trailing whitespace is ignored.
-- JSON numbers decode to double-precision scalars or dense tensors that follow MATLAB's column-major layout.
-- JSON booleans decode to logical scalars or logical arrays with the same shape as the source JSON array.
-- JSON strings decode to char row vectors; homogeneous JSON arrays of strings become string arrays with matching dimensions.
-- JSON objects decode to scalar structs whose field names match the JSON keys; arrays of objects become cell arrays of structs that preserve element order.
-- JSON arrays decode to numeric, logical, or string arrays when every element shares the same type and the array is perfectly rectangular. Rectangular heterogeneous arrays (including those that mix `null` with other types) become cell arrays that preserve the original row/column layout, while irregular arrays fall back to 1-by-N cell vectors that keep element order.
-- JSON `null` decodes to the empty double `[]`. When it appears inside a heterogeneous array it becomes a cell element containing `[]`.
-- Invalid JSON raises `jsondecode: invalid JSON text (...)` with the underlying parser message.
-
-## Examples of using the `jsondecode` function in MATLAB / RunMat
-
-### Parsing a scalar number
-```matlab
-value = jsondecode("42");
-```
-Expected output:
-```matlab
-value = 42
-```
-
-### Decoding a matrix of doubles
-```matlab
-text = "[[1,2,3],[4,5,6]]";
-matrix = jsondecode(text);
-```
-Expected output:
-```matlab
-matrix =
-     1     2     3
-     4     5     6
-```
-
-### Converting a JSON object into a struct
-```matlab
-person = jsondecode('{"name":"Ada","age":37}');
-disp(person.name);
-disp(person.age);
-```
-Expected output:
-```matlab
-Ada
-    37
-```
-
-### Decoding an array of objects into a cell array
-```matlab
-text = '[{"name":"Ada","role":"Researcher"},{"name":"Grace","role":"Engineer"}]';
-people = jsondecode(text);
-people{1}.name
-people{2}.role
-```
-Expected output:
-```matlab
-people =
-  1x2 cell array
-    {1x1 struct}    {1x1 struct}
-
-ans = 'Ada'
-ans = 'Engineer'
-```
-
-### Handling heterogeneous arrays with cell arrays
-```matlab
-text = '["RunMat", 42, true]';
-data = jsondecode(text);
-```
-Expected output:
-```matlab
-data =
-  1x3 cell array
-    {"RunMat"}    {[42]}    {[1]}
-```
-
-### Working with null and empty JSON values
-```matlab
-value = jsondecode("null");
-disp(value);
-isempty(value)
-```
-Expected output:
-```matlab
-[]
-ans = logical 1
-```
-
-## `jsondecode` Function GPU Execution Behaviour
-`jsondecode` does not execute on the GPU. Because the builtin registers as `accel = "sink"` and uses
-`ResidencyPolicy::GatherImmediately`, any `gpuArray` input is synchronously gathered to host memory
-through the active provider before parsing. Providers do not expose specialised hooks for JSON parsing,
-so all work stays on the CPU.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You rarely need to manage residency manually. The auto-offload planner gathers GPU-resident text for
-`jsondecode` automatically. For MATLAB compatibility, you can still call `gather` yourself, but it is
-not required, and fusion graphs terminate at `jsondecode` so downstream results always live on the host.
-
-## FAQ
-
-### What encodings does `jsondecode` support?
-JSON text must be UTF-8. RunMat preserves surrogate pairs and Unicode code points exactly as provided.
-
-### How are JSON objects represented?
-As scalar structs. Array-of-object JSON values become cell arrays of structs to preserve ordering.
-
-### What happens with JSON numbers that overflow double?
-Values must fit in the IEEE-754 double range. When a literal exceeds that range, the parser reports
-`number out of range`, which surfaces as a `jsondecode: invalid JSON text (...)` error.
-
-### Does `jsondecode` support comments or trailing commas?
-No. The JSON must adhere to RFC 8259. The builtin reports an error when encountering comments or
-other non-standard extensions.
-
-### How are JSON arrays of strings represented?
-Rectangular arrays of strings become `string` arrays. Mixed content falls back to cell arrays.
-
-### How does `jsondecode` treat `null`?
-`null` decodes to the empty double `[]`. When it appears inside an otherwise homogeneous numeric array,
-the array is promoted to a cell array so that the `[]` value can be preserved alongside other elements.
-
-### Can I decode deeply nested arrays?
-Yes. Rectangular arrays of numbers, logicals, or strings produce dense tensors/string arrays with the
-appropriate dimensionality. Irregular arrays return nested cell arrays.
-
-### What if the input is not valid JSON?
-The builtin raises `jsondecode: invalid JSON text (...)` with the parser error message.
-
-### Does whitespace or newlines matter?
-Leading and trailing whitespace is ignored, and embedded newlines are permitted as long as the text
-remains valid JSON.
-
-## See Also
-[jsonencode](./jsonencode), [struct](./struct), [cell](./cell), [fileread](./fileread)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "jsondecode",
@@ -596,8 +419,6 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, Tensor};
 
-    use crate::builtins::common::test_support;
-
     fn char_row(text: &str) -> Value {
         Value::CharArray(CharArray::new_row(text))
     }
@@ -848,13 +669,6 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {:?}", other),
         }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn jsondecode_doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

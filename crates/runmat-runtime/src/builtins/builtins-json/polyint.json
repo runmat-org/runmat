@@ -31,8 +31,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::poly::polyint::tests",
-    "integration": "builtins::math::poly::polyint::tests::polyint_gpu_roundtrip",
-    "doc": "builtins::math::poly::polyint::tests::doc_examples_present"
+    "integration": "builtins::math::poly::polyint::tests::polyint_gpu_roundtrip"
   },
   "description": "`polyint(p)` returns the polynomial that integrates the coefficient vector `p` once, appending the constant of integration at the end of the coefficient list. Coefficients follow MATLAB's descending power convention: `p(1)` multiplies the highest power of `x`, and `p(end)` is the constant term.",
   "behaviors": [

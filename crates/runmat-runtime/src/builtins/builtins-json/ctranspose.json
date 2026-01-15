@@ -32,8 +32,7 @@
   "tested": {
     "unit": "builtins::math::linalg::ops::ctranspose::tests",
     "integration": "builtins::math::linalg::ops::ctranspose::tests::ctranspose_gpu_roundtrip",
-    "gpu": "builtins::math::linalg::ops::ctranspose::tests::ctranspose_wgpu_matches_cpu",
-    "doc": "builtins::math::linalg::ops::ctranspose::tests::doc_examples_present"
+    "gpu": "builtins::math::linalg::ops::ctranspose::tests::ctranspose_wgpu_matches_cpu"
   },
   "description": "`B = ctranspose(A)` (or `B = A'`) flips the first two dimensions of `A` **and** conjugates complex values. Real-valued inputs therefore behave like `transpose`, while complex inputs receive Hermitian conjugation.",
   "behaviors": [

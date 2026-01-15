@@ -32,10 +32,9 @@
   "tested": {
     "unit": "builtins::math::poly::polyder::tests",
     "integration": "builtins::math::poly::polyder::tests::{gpu_inputs_remain_on_device,gpu_product_matches_cpu,gpu_quotient_matches_cpu,wgpu_polyder_single_matches_cpu,wgpu_polyder_product_matches_cpu,wgpu_polyder_quotient_matches_cpu}",
-    "vm": "ignition::vm polyder multi-output dispatch",
-    "doc": "builtins::math::poly::polyder::tests::doc_examples_present"
+    "vm": "ignition::vm polyder multi-output dispatch"
   },
-  "description": "`polyder` differentiates polynomials represented by their coefficient vectors. The coefficients follow MATLAB\u2019s convention: the first element corresponds to the highest power of `x`. The builtin supports three related operations:\n\n1. `polyder(p)` returns the derivative of a polynomial `p`. 2. `polyder(p, a)` applies the product rule to the convolution `conv(p, a)`. 3. `[num, den] = polyder(u, v)` returns the derivative of a rational function `u(x) / v(x)` using the quotient rule, yielding the numerator `num` and denominator `den`.",
+  "description": "`polyder` differentiates polynomials represented by their coefficient vectors. The coefficients follow MATLAB’s convention: the first element corresponds to the highest power of `x`. The builtin supports three related operations:\n\n1. `polyder(p)` returns the derivative of a polynomial `p`. 2. `polyder(p, a)` applies the product rule to the convolution `conv(p, a)`. 3. `[num, den] = polyder(u, v)` returns the derivative of a rational function `u(x) / v(x)` using the quotient rule, yielding the numerator `num` and denominator `den`.",
   "behaviors": [
     "Accepts real or complex scalars, row vectors, column vectors, or empty vectors. Inputs with more than one non-singleton dimension raise MATLAB-compatible errors.",
     "Logical and integer coefficients are promoted to double precision before differentiation.",
@@ -100,7 +99,7 @@
     },
     {
       "question": "Does the builtin launch GPU kernels?",
-      "answer": "Yes whenever the active acceleration provider implements the `polyder` hooks. The in-process and WGPU backends both execute the derivative on the device. Providers that lack the hooks\u2014or inputs that require complex arithmetic\u2014fall back to the CPU reference implementation, returning the result on the host. Wrap the output in `gpuArray` manually if you need to restore device residency in that case."
+      "answer": "Yes whenever the active acceleration provider implements the `polyder` hooks. The in-process and WGPU backends both execute the derivative on the device. Providers that lack the hooks—or inputs that require complex arithmetic—fall back to the CPU reference implementation, returning the result on the host. Wrap the output in `gpuArray` manually if you need to restore device residency in that case."
     },
     {
       "question": "What if I request more than two outputs?",
@@ -116,7 +115,7 @@
     },
     {
       "question": "How precise is the computation?",
-      "answer": "All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB\u2019s default numeric type."
+      "answer": "All arithmetic uses IEEE 754 double precision (`f64`), matching MATLAB’s default numeric type."
     }
   ],
   "links": [
@@ -150,6 +149,6 @@
     "url": ""
   },
   "gpu_behavior": [
-    "When a provider advertises the `polyder` hooks (the in-process and WGPU backends both do), single polynomials and the product/quotient forms execute fully on the GPU. Outputs preserve the orientation of the leading input while trimming leading zeros exactly as the CPU path does. If the provider declines the request\u2014because the coefficients are complex or the backend lacks support\u2014 RunMat automatically gathers the inputs and falls back to the CPU reference implementation to preserve MATLAB compatibility."
+    "When a provider advertises the `polyder` hooks (the in-process and WGPU backends both do), single polynomials and the product/quotient forms execute fully on the GPU. Outputs preserve the orientation of the leading input while trimming leading zeros exactly as the CPU path does. If the provider declines the request—because the coefficients are complex or the backend lacks support— RunMat automatically gathers the inputs and falls back to the CPU reference implementation to preserve MATLAB compatibility."
   ]
 }

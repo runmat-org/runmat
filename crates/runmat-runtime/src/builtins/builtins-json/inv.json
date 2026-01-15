@@ -32,8 +32,7 @@
   "tested": {
     "unit": "builtins::math::linalg::solve::inv::tests",
     "gpu": "builtins::math::linalg::solve::inv::tests::inv_gpu_round_trip_matches_cpu",
-    "wgpu": "builtins::math::linalg::solve::inv::tests::inv_wgpu_matches_cpu",
-    "doc": "builtins::math::linalg::solve::inv::tests::doc_examples_present"
+    "wgpu": "builtins::math::linalg::solve::inv::tests::inv_wgpu_matches_cpu"
   },
   "description": "`X = inv(A)` returns the matrix inverse of a square, full-rank matrix `A`. The result satisfies `A * X = eye(size(A))` within round-off. Scalars behave like `1 ./ A`, matching MATLAB semantics.",
   "behaviors": [

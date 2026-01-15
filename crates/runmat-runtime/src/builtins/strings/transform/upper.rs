@@ -9,167 +9,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "upper",
-        builtin_path = "crate::builtins::strings::transform::upper"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "upper"
-category: "strings/transform"
-keywords: ["upper", "uppercase", "convert to uppercase", "string case", "character arrays"]
-summary: "Convert strings, character arrays, and cell arrays of character vectors to uppercase."
-references:
-  - https://www.mathworks.com/help/matlab/ref/upper.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs on the CPU; GPU-resident inputs are gathered before conversion to keep MATLAB parity."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::transform::upper::tests"
-  integration: "builtins::strings::transform::upper::tests::upper_cell_array_mixed_content"
----
-
-# What does the `upper` function do in MATLAB / RunMat?
-`upper(text)` converts every alphabetic character in `text` to uppercase. It accepts string scalars,
-string arrays, character arrays, and cell arrays of character vectors, mirroring MATLAB behaviour.
-Non-alphabetic characters are returned unchanged.
-
-## How does the `upper` function behave in MATLAB / RunMat?
-- String inputs stay as strings. String arrays preserve their size, orientation, and missing values.
-- Character arrays are processed row by row. The result remains a rectangular char array; if any row
-  grows after uppercasing (for example `'ß' → "SS"`), the array widens and shorter rows are padded with spaces.
-- Cell arrays must contain string scalars or character vectors. The result is a cell array of the same size
-  with each element converted to uppercase; other types raise MATLAB-compatible errors.
-- Missing string scalars (`string(missing)`) remain `<missing>` so downstream code behaves like MATLAB.
-- Inputs that are numeric, logical, structs, or GPU tensors raise MATLAB-compatible type errors.
-
-## `upper` Function GPU Execution Behaviour
-`upper` executes on the CPU. Text values currently reside in host memory, so providers do not offer device
-kernels for this builtin. When you pass a container that still holds GPU handles (for example, a struct
-whose string fields were gathered lazily), RunMat gathers those handles before performing the conversion.
-If you store characters as numeric code points on the GPU, gather and convert them to text before calling
-`upper`.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-RunMat keeps text data in host memory, so you typically work with ordinary string and character arrays.
-When text originates from GPU computations (for example, numeric code points produced by kernels), gather
-those values to the host and convert them to text before calling `upper`.
-
-## Examples of using the `upper` function in MATLAB / RunMat
-
-### Convert a string scalar to uppercase
-```matlab
-txt = "RunMat";
-result = upper(txt);
-```
-Expected output:
-```matlab
-result = "RUNMAT"
-```
-
-### Uppercase each element of a string array
-```matlab
-labels = ["north" "South"; "East" "west"];
-uppered = upper(labels);
-```
-Expected output:
-```matlab
-uppered = 2×2 string
-    "NORTH"    "SOUTH"
-    "EAST"     "WEST"
-```
-
-### Uppercase character array rows while preserving shape
-```matlab
-animals = char("cat", "doge");
-result = upper(animals);
-```
-Expected output:
-```matlab
-result =
-
-  2×4 char array
-
-    'CAT '
-    'DOGE'
-```
-
-### Uppercase a cell array of character vectors
-```matlab
-C = {'hello', 'World'};
-out = upper(C);
-```
-Expected output:
-```matlab
-out = 1×2 cell array
-    {'HELLO'}    {'WORLD'}
-```
-
-### Keep missing strings as missing
-```matlab
-vals = ["data", string(missing), "gpu"];
-converted = upper(vals);
-```
-Expected output:
-```matlab
-converted = 1×3 string
-    "DATA"    <missing>    "GPU"
-```
-
-### Handle text stored on a GPU input
-```matlab
-codes = gpuArray(uint16('runmat'));
-txt = char(gather(codes));
-result = upper(txt);
-```
-Expected output:
-```matlab
-result = 'RUNMAT'
-```
-
-## FAQ
-
-### Does `upper` change non-alphabetic characters?
-No. Digits, punctuation, whitespace, and symbols remain untouched. Only alphabetic code points that have
-distinct uppercase forms are converted.
-
-### What happens to character array dimensions?
-RunMat uppercases each row independently and pads with spaces when an uppercase mapping increases the row
-length. This mirrors MATLAB’s behaviour so the result always has rectangular dimensions.
-
-### Can I pass numeric arrays to `upper`?
-No. Passing numeric, logical, or struct inputs raises a MATLAB-compatible error. Convert the data to a string
-or character array first (for example with `string` or `char`).
-
-### How are missing strings handled?
-Missing string scalars remain `<missing>` and are returned unchanged. This matches MATLAB’s handling of
-missing values in text processing functions.
-
-### Will `upper` ever execute on the GPU?
-Not today. The builtin gathers GPU-resident data automatically and performs the conversion on the CPU so the
-results match MATLAB exactly. Providers may add device-side kernels in the future, but behaviour will remain
-compatible.
-
-## See Also
-[lower](./lower), [string](./string), [char](./char), [regexprep](./regexprep), [strcmpi](./strcmpi)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/upper.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/upper.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "upper",
@@ -291,7 +130,6 @@ fn upper_cell_element(value: &Value) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -460,12 +298,5 @@ pub(crate) mod tests {
         let err = upper_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err, ARG_TYPE_ERROR);
         provider.free(&handle).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }
