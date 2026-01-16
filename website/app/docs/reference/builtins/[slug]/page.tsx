@@ -133,10 +133,6 @@ function renderBuiltinDoc(doc: BuiltinDocEntry): string {
     }
   }
 
-  if (doc.references && doc.references.length > 0) {
-    pushSection(lines, toSentenceCase('references'), renderReferenceLinks(doc.references));
-  }
-
   if (doc.source && hasText(doc.source.url)) {
     pushSection(lines, 'Source & Feedback', renderSourceSection(doc.source));
   }
@@ -170,18 +166,6 @@ function renderFaqs(faqs: BuiltinDocFAQ[]): string[] {
     lines.push(...renderMarkdownBlock(faq.answer));
   }
   return lines;
-}
-
-function renderReferenceLinks(references: string[]): string[] {
-  return references
-    .map((ref) => ref.trim())
-    .filter(Boolean)
-    .map((ref) => {
-      if (/^https?:\/\//i.test(ref)) {
-        return `- [${ref}](${ref})`;
-      }
-      return `- ${escapeMarkdownText(ref)}`;
-    });
 }
 
 function renderSourceSection(source: BuiltinDocLink): string[] {
