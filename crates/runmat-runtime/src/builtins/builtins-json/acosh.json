@@ -61,7 +61,7 @@
     {
       "description": "Computing `acosh` on GPU-resident data when the domain stays real",
       "input": "G = gpuArray(linspace(1, 5, 5));\nresult_gpu = acosh(G);\nresult = gather(result_gpu);",
-      "output": "result = [0 1.31696 1.76275 2.06344 2.29243]"
+      "output": "result = [0 1.31696 1.76274 2.06344 2.29243]"
     },
     {
       "description": "Evaluating `acosh` for complex numbers",
