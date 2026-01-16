@@ -1,9 +1,11 @@
 use std::fmt;
-use std::cell::RefCell;
 use std::sync::{Mutex, OnceLock};
 use std::task::Waker;
 
 use thiserror::Error;
+
+pub mod runtime_error;
+pub use runtime_error::{runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
 
 /// Narrow set of interaction kinds that can suspend execution.
 ///
@@ -27,55 +29,28 @@ pub struct PendingInteraction {
 /// Typed channel for runtime control flow. This replaces string sentinels like
 /// `__RUNMAT_PENDING_INTERACTION__`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeControlFlow {
+pub enum RuntimeControlFlow<E = String> {
     Suspend(PendingInteraction),
-    Error(String),
+    Error(E),
 }
 
-impl From<String> for RuntimeControlFlow {
+impl From<String> for RuntimeControlFlow<String> {
     fn from(value: String) -> Self {
         RuntimeControlFlow::Error(value)
     }
 }
 
-impl From<&str> for RuntimeControlFlow {
+impl From<&str> for RuntimeControlFlow<String> {
     fn from(value: &str) -> Self {
         RuntimeControlFlow::Error(value.to_string())
     }
 }
 
-impl fmt::Display for RuntimeControlFlow {
+impl<E: fmt::Display> fmt::Display for RuntimeControlFlow<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RuntimeControlFlow::Suspend(pending) => write!(f, "suspend: {}", pending.prompt),
             RuntimeControlFlow::Error(message) => write!(f, "{message}"),
-        }
-    }
-}
-
-thread_local! {
-    // Transitional bridge for legacy `Result<_, String>` call stacks: if a `Suspend` needs to
-    // bubble through string-returning code, we stash the typed payload here and return a normal
-    // string. Callers must *not* pattern-match on the string.
-    static LAST_SUSPEND: RefCell<Option<PendingInteraction>> = const { RefCell::new(None) };
-}
-
-/// Take the most recent suspension payload stashed by `String::from(RuntimeControlFlow::Suspend)`.
-pub fn take_last_suspend() -> Option<PendingInteraction> {
-    LAST_SUSPEND.with(|slot| slot.borrow_mut().take())
-}
-
-impl From<RuntimeControlFlow> for String {
-    fn from(value: RuntimeControlFlow) -> Self {
-        match value {
-            RuntimeControlFlow::Error(e) => e,
-            RuntimeControlFlow::Suspend(pending) => {
-                LAST_SUSPEND.with(|slot| {
-                    *slot.borrow_mut() = Some(pending);
-                });
-                // Not a sentinel: callers must consult `take_last_suspend()` instead.
-                "suspend".to_string()
-            }
         }
     }
 }

@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::RuntimeControlFlow;
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -183,8 +184,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
     match active_device_struct() {
         Ok(info) => Ok(Value::String(format_summary(Some(&info)))),
-        Err(err) if err == gpudevice::ERR_NO_PROVIDER => Ok(Value::String(format_summary(None))),
-        Err(err) => Err(((err.to_string())).into()),
+        Err(RuntimeControlFlow::Error(err)) if err.message() == gpudevice::ERR_NO_PROVIDER => {
+            Ok(Value::String(format_summary(None)))
+        }
+        Err(RuntimeControlFlow::Error(err)) => Err(err.into()),
+        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending)),
     }
 }
 

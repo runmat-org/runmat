@@ -285,7 +285,7 @@ fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let gathered_args: Vec<Value> = rest
         .iter()
         .map(|v| {
-            gather_if_needed(v).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
+            gather_if_needed(v).map_err(|e: crate::RuntimeControlFlow| e.to_string())
         })
         .collect::<Result<_, _>>()?;
 

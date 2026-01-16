@@ -3,12 +3,10 @@
 //! Implements language-style matrix indexing and access patterns.
 
 use runmat_builtins::{Tensor, Value};
-use runmat_async::RuntimeControlFlow;
 
 /// Get a single element from a matrix (1-based indexing like language)
 pub fn matrix_get_element(matrix: &Tensor, row: usize, col: usize) -> Result<f64, String> {
     if row == 0 || col == 0 {
-        let _ = RuntimeControlFlow::Error("MATLAB uses 1-based indexing".to_string());
         return Err("MATLAB uses 1-based indexing".to_string());
     }
     matrix.get2(row - 1, col - 1) // Convert to 0-based
@@ -22,7 +20,6 @@ pub fn matrix_set_element(
     value: f64,
 ) -> Result<(), String> {
     if row == 0 || col == 0 {
-        let _ = RuntimeControlFlow::Error("The MATLAB language uses 1-based indexing".to_string());
         return Err("The MATLAB language uses 1-based indexing".to_string());
     }
     matrix.set2(row - 1, col - 1, value) // Convert to 0-based

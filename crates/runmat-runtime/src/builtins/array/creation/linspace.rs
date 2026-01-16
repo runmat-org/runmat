@@ -258,7 +258,18 @@ impl Scalar {
     }
 }
 
-fn parse_scalar(name: &str, value: Value) -> Result<(Scalar, bool), String> {
+fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let scalar = tensor_scalar(name, &tensor)?;
+            Ok((scalar, true))
+        }
+        other => parse_scalar_host(name, other).map_err(Into::into),
+    }
+}
+
+fn parse_scalar_host(name: &str, value: Value) -> Result<(Scalar, bool), String> {
     match value {
         Value::Num(n) => Ok((Scalar::Real(n), false)),
         Value::Int(i) => Ok((Scalar::Real(i.to_f64()), false)),
@@ -266,10 +277,7 @@ fn parse_scalar(name: &str, value: Value) -> Result<(Scalar, bool), String> {
         Value::Complex(re, im) => Ok((Scalar::Complex { re, im }, false)),
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
-        }
+        Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_scalar"),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(format!(
             "{name}: endpoints must be numeric scalars; received a string-like value"
         )),
@@ -294,7 +302,20 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> Result<Scalar, S
     Ok(Scalar::Complex { re, im })
 }
 
-fn parse_count(value: &Value) -> Result<usize, String> {
+fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(handle)?;
+            if !tensor::is_scalar_tensor(&tensor) {
+                return Err("linspace: number of points must be a scalar".to_string().into());
+            }
+            Ok(parse_numeric_count(tensor.data[0])?)
+        }
+        other => parse_count_host(other).map_err(Into::into),
+    }
+}
+
+fn parse_count_host(value: &Value) -> Result<usize, String> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
@@ -313,13 +334,7 @@ fn parse_count(value: &Value) -> Result<usize, String> {
             }
             parse_numeric_count(t.data[0])
         }
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(handle)?;
-            if !tensor::is_scalar_tensor(&tensor) {
-                return Err("linspace: number of points must be a scalar".to_string());
-            }
-            parse_numeric_count(tensor.data[0])
-        }
+        Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_count"),
         other => Err(format!(
             "linspace: number of points must be numeric, got {other:?}"
         )),

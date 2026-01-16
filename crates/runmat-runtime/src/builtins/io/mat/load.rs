@@ -226,7 +226,7 @@ pub fn evaluate(args: &[Value]) -> Result<LoadEval, String> {
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
         host_args.push(
-            gather_if_needed(arg).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?,
+            gather_if_needed(arg).map_err(|e: crate::RuntimeControlFlow| e.to_string())?,
         );
     }
 
@@ -804,7 +804,7 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
         other => {
             let gathered =
                 gather_if_needed(other)
-                    .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                    .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
             extract_names(&gathered)
         }
     }

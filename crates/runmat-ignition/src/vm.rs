@@ -1268,8 +1268,8 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn is_suspend_flow(flow: &runmat_async::RuntimeControlFlow) -> bool {
-    matches!(flow, runmat_async::RuntimeControlFlow::Suspend(_))
+fn is_suspend_flow(flow: &runmat_runtime::RuntimeControlFlow) -> bool {
+    matches!(flow, runmat_runtime::RuntimeControlFlow::Suspend(_))
 }
 
 fn resolve_emit_label_text(
@@ -2955,13 +2955,13 @@ fn run_interpreter(
                                 stack.push(arg.clone());
                             }
                             match e {
-                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
+                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
                                     suspend_pending!({}, pending);
                                 }
-                                runmat_async::RuntimeControlFlow::Error(_) => {}
+                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
                             }
                         }
-                        let runmat_async::RuntimeControlFlow::Error(e) = e else {
+                        let runmat_runtime::RuntimeControlFlow::Error(e) = e else {
                             unreachable!("suspend handled above");
                         };
                         // Specific-import matches: import pkg.foo; name == foo
@@ -2981,10 +2981,10 @@ fn run_interpreter(
                                                 stack.push(arg.clone());
                                             }
                                             match err {
-                                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
+                                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
                                                     suspend_pending!({}, pending);
                                                 }
-                                                runmat_async::RuntimeControlFlow::Error(_) => {}
+                                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
                                             }
                                         }
                                     }
@@ -3030,10 +3030,10 @@ fn run_interpreter(
                                                 stack.push(arg.clone());
                                             }
                                             match err {
-                                                runmat_async::RuntimeControlFlow::Suspend(pending) => {
+                                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
                                                     suspend_pending!({}, pending);
                                                 }
-                                                runmat_async::RuntimeControlFlow::Error(_) => {}
+                                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
                                             }
                                         }
                                     }
@@ -3074,7 +3074,7 @@ fn run_interpreter(
                                     pc = catch_pc;
                                     continue;
                                 } else {
-                                    return Err(e);
+                                    return Err(e.to_string());
                                 }
                             }
                         }
@@ -11382,10 +11382,14 @@ fn clear_residency(value: &Value) {
     }
 }
 
-fn parse_exception(err: &str) -> runmat_builtins::MException {
+fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MException {
+    if let Some(identifier) = err.identifier() {
+        return runmat_builtins::MException::new(identifier.to_string(), err.message().to_string());
+    }
+    let message = err.message();
     // Prefer the last occurrence of ": " to split IDENT: message, preserving nested identifiers
-    if let Some(idx) = err.rfind(": ") {
-        let (id, msg) = err.split_at(idx);
+    if let Some(idx) = message.rfind(": ") {
+        let (id, msg) = message.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
             format!("{ERROR_NAMESPACE}:error")
@@ -11395,8 +11399,8 @@ fn parse_exception(err: &str) -> runmat_builtins::MException {
         return runmat_builtins::MException::new(ident, message);
     }
     // Fallback: if any ':' present, use the last as separator
-    if let Some(idx) = err.rfind(':') {
-        let (id, msg) = err.split_at(idx);
+    if let Some(idx) = message.rfind(':') {
+        let (id, msg) = message.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
             format!("{ERROR_NAMESPACE}:error")
@@ -11405,7 +11409,7 @@ fn parse_exception(err: &str) -> runmat_builtins::MException {
         };
         runmat_builtins::MException::new(ident, message)
     } else {
-        runmat_builtins::MException::new(format!("{ERROR_NAMESPACE}:error"), err.to_string())
+        runmat_builtins::MException::new(format!("{ERROR_NAMESPACE}:error"), message.to_string())
     }
 }
 

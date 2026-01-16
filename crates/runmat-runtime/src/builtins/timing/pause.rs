@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg(not(test))]
 use crate::interaction;
 #[cfg_attr(
@@ -183,36 +184,33 @@ enum PauseWait {
     sink = true,
     builtin_path = "crate::builtins::timing::pause"
 )]
-fn pause_builtin(args: Vec<Value>) -> Result<Value, runmat_async::RuntimeControlFlow> {
+fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
         0 => {
             perform_wait(PauseWait::Default)?;
             Ok(empty_return_value())
         }
-        1 => match classify_argument(&args[0]).map_err(runmat_async::RuntimeControlFlow::Error)? {
+        1 => match classify_argument(&args[0])? {
             PauseArgument::Wait(wait) => {
                 perform_wait(wait)?;
                 Ok(empty_return_value())
             }
             PauseArgument::SetState(next_state) => {
-                let previous = set_pause_enabled(next_state)
-                    .map_err(runmat_async::RuntimeControlFlow::Error)?;
+                let previous = set_pause_enabled(next_state).map_err(Into::into)?;
                 Ok(state_value(previous))
             }
             PauseArgument::Query => {
                 let current =
-                    pause_enabled().map_err(runmat_async::RuntimeControlFlow::Error)?;
+                    pause_enabled().map_err(Into::into)?;
                 Ok(state_value(current))
             }
         },
-        _ => Err(runmat_async::RuntimeControlFlow::Error(
-            ERR_TOO_MANY_INPUTS.to_string(),
-        )),
+        _ => Err(runtime_error(ERR_TOO_MANY_INPUTS).build().into()),
     }
 }
 
-fn perform_wait(wait: PauseWait) -> Result<(), runmat_async::RuntimeControlFlow> {
-    if !pause_enabled().map_err(runmat_async::RuntimeControlFlow::Error)? {
+fn perform_wait(wait: PauseWait) -> Result<(), RuntimeControlFlow> {
+    if !pause_enabled().map_err(Into::into)? {
         return Ok(());
     }
 
@@ -230,7 +228,7 @@ fn perform_wait(wait: PauseWait) -> Result<(), runmat_async::RuntimeControlFlow>
     }
 }
 
-fn wait_for_key_press() -> Result<(), runmat_async::RuntimeControlFlow> {
+fn wait_for_key_press() -> Result<(), RuntimeControlFlow> {
     #[cfg(test)]
     {
         Ok(())
@@ -241,34 +239,35 @@ fn wait_for_key_press() -> Result<(), runmat_async::RuntimeControlFlow> {
     }
 }
 
-fn classify_argument(arg: &Value) -> Result<PauseArgument, String> {
-    let host_value = gpu_helpers::gather_value(arg).map_err(|e| format!("pause: {e}"))?;
+fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
+    let host_value = gpu_helpers::gather_value(arg)
+        .map_err(|e| runtime_error(format!("pause: {e}")).build().into())?;
     match host_value {
-        Value::String(text) => parse_command(&text),
+        Value::String(text) => parse_command(&text).map_err(Into::into),
         Value::CharArray(ca) => {
             if ca.rows == 0 || ca.data.is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if ca.rows == 1 {
                 let text: String = ca.data.iter().collect();
-                parse_command(&text)
+                parse_command(&text).map_err(Into::into)
             } else {
-                Err(ERR_INVALID_ARG.to_string())
+                Err(runtime_error(ERR_INVALID_ARG).build().into())
             }
         }
         Value::StringArray(sa) => {
             if sa.data.is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if sa.data.len() == 1 {
-                parse_command(&sa.data[0])
+                parse_command(&sa.data[0]).map_err(Into::into)
             } else {
-                Err(ERR_INVALID_ARG.to_string())
+                Err(runtime_error(ERR_INVALID_ARG).build().into())
             }
         }
-        Value::Num(value) => parse_numeric(value),
-        Value::Int(int_value) => parse_numeric(int_value.to_f64()),
-        Value::Bool(flag) => parse_numeric(if flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) => parse_tensor(tensor),
-        Value::LogicalArray(logical) => parse_logical(logical),
+        Value::Num(value) => parse_numeric(value).map_err(Into::into),
+        Value::Int(int_value) => parse_numeric(int_value.to_f64()).map_err(Into::into),
+        Value::Bool(flag) => parse_numeric(if flag { 1.0 } else { 0.0 }).map_err(Into::into),
+        Value::Tensor(tensor) => parse_tensor(tensor).map_err(Into::into),
+        Value::LogicalArray(logical) => parse_logical(logical).map_err(Into::into),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             parse_tensor(tensor)
@@ -283,7 +282,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(ERR_INVALID_ARG.to_string()),
+        | Value::MException(_) => Err(runtime_error(ERR_INVALID_ARG).build().into()),
     }
 }
 

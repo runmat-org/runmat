@@ -466,7 +466,22 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
     tol.max(f64::EPSILON)
 }
 
-fn parse_real_scalar(name: &str, value: Value) -> Result<ParsedScalar, String> {
+fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let scalar = tensor_scalar(name, &tensor)?;
+            Ok(ParsedScalar {
+                value: scalar,
+                prefer_gpu: true,
+                origin: ScalarOrigin::Numeric,
+            })
+        }
+        other => parse_real_scalar_host(name, other).map_err(Into::into),
+    }
+}
+
+fn parse_real_scalar_host(name: &str, value: Value) -> Result<ParsedScalar, String> {
     match value {
         Value::Num(n) => ensure_finite(name, n).map(|v| ParsedScalar {
             value: v,
@@ -508,17 +523,10 @@ fn parse_real_scalar(name: &str, value: Value) -> Result<ParsedScalar, String> {
             prefer_gpu: false,
             origin: ScalarOrigin::Char,
         }),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            tensor_scalar(name, &tensor).map(|v| ParsedScalar {
-                value: v,
-                prefer_gpu: true,
-                origin: ScalarOrigin::Numeric,
-            })
-        }
         Value::String(_) | Value::StringArray(_) => Err(format!(
             "{name}: inputs must be real scalar values; received a string-like argument"
         )),
+        Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_real_scalar"),
         other => Err(format!(
             "{name}: inputs must be real scalar values; received {other:?}"
         )),

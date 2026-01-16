@@ -330,7 +330,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
 
     for ptr in &ca.data {
         let gathered =
-            gather_if_needed(ptr).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+            gather_if_needed(ptr).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
         let entry = parse_cell_entry(gathered)?;
         if let Some(kind) = detected_kind {
             if kind != entry.kind {

@@ -14,7 +14,15 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{runtime_error, BuiltinResult, RuntimeError};
+
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
+
+fn gpu_array_error(message: impl Into<String>) -> RuntimeError {
+    runtime_error(message)
+        .with_builtin("gpuArray")
+        .build()
+}
 
 #[cfg_attr(
     feature = "doc_export",
@@ -334,7 +342,7 @@ struct ParsedOptions {
     prototype: Option<Value>,
 }
 
-fn parse_options(rest: &[Value]) -> Result<ParsedOptions, String> {
+fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     let (index_after_dims, dims) = parse_size_arguments(rest)?;
     let mut options = ParsedOptions {
         dims,
@@ -344,39 +352,46 @@ fn parse_options(rest: &[Value]) -> Result<ParsedOptions, String> {
     let mut idx = index_after_dims;
     while idx < rest.len() {
         let tag = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-            format!(
+            gpu_array_error(format!(
                 "gpuArray: unexpected argument {:?}; expected a class string or the keyword 'like'",
                 rest[idx]
-            )
+            ))
         })?;
 
         match tag.as_str() {
             "like" => {
                 idx += 1;
                 if idx >= rest.len() {
-                    return Err("gpuArray: expected a prototype value after 'like'".to_string());
+                    return Err(
+                        gpu_array_error("gpuArray: expected a prototype value after 'like'").into(),
+                    );
                 }
                 if options.prototype.is_some() {
-                    return Err("gpuArray: duplicate 'like' qualifier".to_string());
+                    return Err(gpu_array_error("gpuArray: duplicate 'like' qualifier").into());
                 }
                 options.prototype = Some(rest[idx].clone());
             }
             "distributed" | "codistributed" => {
-                return Err("gpuArray: codistributed arrays are not supported yet".to_string());
+                return Err(
+                    gpu_array_error("gpuArray: codistributed arrays are not supported yet").into(),
+                );
             }
             tag => {
                 if let Some(class) = DataClass::from_tag(tag) {
                     if let Some(existing) = options.explicit_dtype {
                         if existing != class {
                             return Err(
-                                "gpuArray: conflicting type qualifiers supplied".to_string()
+                                gpu_array_error("gpuArray: conflicting type qualifiers supplied")
+                                    .into(),
                             );
                         }
                     } else {
                         options.explicit_dtype = Some(class);
                     }
                 } else if tag != "gpuarray" {
-                    return Err(format!("gpuArray: unrecognised option '{tag}'"));
+                    return Err(
+                        gpu_array_error(format!("gpuArray: unrecognised option '{tag}'")).into(),
+                    );
                 }
             }
         }
@@ -387,7 +402,7 @@ fn parse_options(rest: &[Value]) -> Result<ParsedOptions, String> {
     Ok(options)
 }
 
-fn parse_size_arguments(rest: &[Value]) -> Result<(usize, Option<Vec<usize>>), String> {
+fn parse_size_arguments(rest: &[Value]) -> BuiltinResult<(usize, Option<Vec<usize>>)> {
     let mut idx = 0;
     let mut dims: Vec<usize> = Vec::new();
     let mut vector_consumed = false;
@@ -408,10 +423,10 @@ fn parse_size_arguments(rest: &[Value]) -> Result<(usize, Option<Vec<usize>>), S
             }
             Value::Tensor(t) => {
                 if vector_consumed || !dims.is_empty() {
-                    return Err(
-                        "gpuArray: size vectors cannot be combined with scalar dimensions"
-                            .to_string(),
-                    );
+                    return Err(gpu_array_error(
+                        "gpuArray: size vectors cannot be combined with scalar dimensions",
+                    )
+                    .into());
                 }
                 dims = tensor_to_dims(t)?;
                 vector_consumed = true;
@@ -429,29 +444,33 @@ fn value_to_lower_string(value: &Value) -> Option<String> {
     crate::builtins::common::tensor::value_to_string(value).map(|s| s.trim().to_ascii_lowercase())
 }
 
-fn int_to_dim(value: &IntValue) -> Result<usize, String> {
+fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
     let raw = value.to_i64();
     if raw < 0 {
-        return Err("gpuArray: size arguments must be non-negative integers".to_string());
+        return Err(
+            gpu_array_error("gpuArray: size arguments must be non-negative integers").into(),
+        );
     }
     Ok(raw as usize)
 }
 
-fn float_to_dim(value: f64) -> Result<usize, String> {
+fn float_to_dim(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("gpuArray: size arguments must be finite integers".to_string());
+        return Err(
+            gpu_array_error("gpuArray: size arguments must be finite integers").into(),
+        );
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("gpuArray: size arguments must be integers".to_string());
+        return Err(gpu_array_error("gpuArray: size arguments must be integers").into());
     }
     if rounded < 0.0 {
-        return Err("gpuArray: size arguments must be non-negative".to_string());
+        return Err(gpu_array_error("gpuArray: size arguments must be non-negative").into());
     }
     Ok(rounded as usize)
 }
 
-fn tensor_to_dims(tensor: &Tensor) -> Result<Vec<usize>, String> {
+fn tensor_to_dims(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for value in &tensor.data {
         dims.push(float_to_dim(*value)?);
@@ -459,7 +478,7 @@ fn tensor_to_dims(tensor: &Tensor) -> Result<Vec<usize>, String> {
     Ok(dims)
 }
 
-fn resolve_dtype(value: &Value, options: &ParsedOptions) -> Result<DataClass, String> {
+fn resolve_dtype(value: &Value, options: &ParsedOptions) -> BuiltinResult<DataClass> {
     if let Some(explicit) = options.explicit_dtype {
         return Ok(explicit);
     }
@@ -472,7 +491,7 @@ fn resolve_dtype(value: &Value, options: &ParsedOptions) -> Result<DataClass, St
     Ok(DataClass::Double)
 }
 
-fn infer_dtype_from_prototype(proto: &Value) -> Result<DataClass, String> {
+fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
     match proto {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_is_logical(handle) {
@@ -495,17 +514,29 @@ fn infer_dtype_from_prototype(proto: &Value) -> Result<DataClass, String> {
         Value::Tensor(_) | Value::Num(_) => Ok(DataClass::Double),
         Value::CharArray(_) => Ok(DataClass::Double),
         Value::String(_) => Err(
-            "gpuArray: 'like' does not accept MATLAB string scalars; convert to char() first".to_string(),
+            gpu_array_error(
+                "gpuArray: 'like' does not accept MATLAB string scalars; convert to char() first",
+            )
+            .into(),
         ),
         Value::StringArray(_) => Err(
-            "gpuArray: 'like' does not accept string arrays; convert to char arrays first".to_string(),
+            gpu_array_error(
+                "gpuArray: 'like' does not accept string arrays; convert to char arrays first",
+            )
+            .into(),
         ),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(
-            "gpuArray: complex prototypes are not supported yet; provide real-valued inputs".to_string(),
+            gpu_array_error(
+                "gpuArray: complex prototypes are not supported yet; provide real-valued inputs",
+            )
+            .into(),
         ),
-        other => Err(format!(
-            "gpuArray: unsupported 'like' prototype type {other:?}; expected numeric or logical values"
-        )),
+        other => Err(
+            gpu_array_error(format!(
+                "gpuArray: unsupported 'like' prototype type {other:?}; expected numeric or logical values"
+            ))
+            .into(),
+        ),
     }
 }
 
@@ -522,7 +553,7 @@ struct PreparedHandle {
     logical: bool,
 }
 
-fn upload_host_value(value: Value, dtype: DataClass) -> Result<PreparedHandle, String> {
+fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -531,7 +562,8 @@ fn upload_host_value(value: Value, dtype: DataClass) -> Result<PreparedHandle, S
             );
         }
     }
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| ERR_NO_PROVIDER.to_string())?;
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
     let tensor = coerce_host_value(value)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
@@ -542,7 +574,7 @@ fn upload_host_value(value: Value, dtype: DataClass) -> Result<PreparedHandle, S
     };
     let handle = provider
         .upload(&view)
-        .map_err(|err| format!("gpuArray: {err}"))?;
+        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into())?;
 
     // Drop host tensor eagerly to release memory
     tensor.data.clear();
@@ -553,7 +585,7 @@ fn upload_host_value(value: Value, dtype: DataClass) -> Result<PreparedHandle, S
 fn convert_device_value(
     handle: GpuTensorHandle,
     dtype: DataClass,
-) -> Result<PreparedHandle, String> {
+) -> crate::BuiltinResult<PreparedHandle> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -583,8 +615,9 @@ fn convert_device_value(
         _ => {}
     }
 
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| ERR_NO_PROVIDER.to_string())?;
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(|err| format!("gpuArray: {err}"))?;
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
+    let tensor = gpu_helpers::gather_tensor(&handle)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
     let view = HostTensorView {
@@ -593,7 +626,7 @@ fn convert_device_value(
     };
     let new_handle = provider
         .upload(&view)
-        .map_err(|err| format!("gpuArray: {err}"))?;
+        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into())?;
 
     provider.free(&handle).ok();
     tensor.data.clear();
@@ -604,36 +637,38 @@ fn convert_device_value(
     })
 }
 
-fn coerce_host_value(value: Value) -> Result<Tensor, String> {
+fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| format!("gpuArray: {err}")),
+            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into()),
         Value::Bool(flag) => Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|err| format!("gpuArray: {err}")),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|err| format!("gpuArray: {err}")),
+            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into()),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into()),
         Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|err| format!("gpuArray: {err}")),
+            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into()),
         Value::CharArray(ca) => char_array_to_tensor(&ca),
         Value::String(text) => {
             let ca = CharArray::new_row(&text);
             char_array_to_tensor(&ca)
         }
-        Value::StringArray(_) => Err(
-            "gpuArray: string arrays are not supported yet; convert to char arrays with CHAR first"
-                .to_string(),
-        ),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(
-            "gpuArray: complex inputs are not supported yet; split real and imaginary parts before uploading"
-                .to_string(),
-        ),
-        other => Err(format!(
+        Value::StringArray(_) => Err(gpu_array_error(
+            "gpuArray: string arrays are not supported yet; convert to char arrays with CHAR first",
+        )
+        .into()),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gpu_array_error(
+            "gpuArray: complex inputs are not supported yet; split real and imaginary parts before uploading",
+        )
+        .into()),
+        other => Err(gpu_array_error(format!(
             "gpuArray: unsupported input type for GPU transfer: {other:?}"
-        )),
+        ))
+        .into()),
     }
 }
 
-fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> Result<(Tensor, bool), String> {
+fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
     let logical = match dtype {
         DataClass::Logical => {
             convert_to_logical(&mut tensor.data)?;
@@ -681,10 +716,10 @@ fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> Result<(Tensor, bool), S
     Ok((tensor, logical))
 }
 
-fn convert_to_logical(data: &mut [f64]) -> Result<(), String> {
+fn convert_to_logical(data: &mut [f64]) -> BuiltinResult<()> {
     for value in data.iter_mut() {
         if value.is_nan() {
-            return Err("gpuArray: cannot convert NaN to logical".to_string());
+            return Err(gpu_array_error("gpuArray: cannot convert NaN to logical").into());
         }
         *value = if *value != 0.0 { 1.0 } else { 0.0 };
     }
@@ -712,7 +747,7 @@ fn convert_to_int_range(data: &mut [f64], min: f64, max: f64) {
     }
 }
 
-fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> Result<(), String> {
+fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()> {
     let new_elems: usize = dims.iter().product();
     let current_elems: usize = if handle.shape.is_empty() {
         new_elems
@@ -720,20 +755,22 @@ fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> Result<(), String
         handle.shape.iter().product()
     };
     if new_elems != current_elems {
-        return Err(format!(
+        return Err(gpu_array_error(format!(
             "gpuArray: cannot reshape gpuArray of {current_elems} elements into size {:?}",
             dims
-        ));
+        ))
+        .into());
     }
     handle.shape = dims.to_vec();
     Ok(())
 }
 
-fn char_array_to_tensor(ca: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
     let rows = ca.rows;
     let cols = ca.cols;
     if rows == 0 || cols == 0 {
-        return Tensor::new(Vec::new(), vec![rows, cols]).map_err(|err| format!("gpuArray: {err}"));
+        return Tensor::new(Vec::new(), vec![rows, cols])
+            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into());
     }
     let mut data = vec![0.0; rows * cols];
     // Store in row-major to preserve the original character order when interpreted with column-major indexing
@@ -744,7 +781,8 @@ fn char_array_to_tensor(ca: &CharArray) -> Result<Tensor, String> {
             data[row * cols + col] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|err| format!("gpuArray: {err}"))
+    Tensor::new(data, vec![rows, cols])
+        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")).into())
 }
 
 #[cfg(test)]
@@ -754,7 +792,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray};
 
-    fn call(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         gpu_array_builtin(value, rest)
     }
 
@@ -952,7 +990,7 @@ pub(crate) mod tests {
     fn gpu_array_like_requires_argument() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
+            let err = call(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err().to_string();
             assert!(err.contains("expected a prototype value"));
         });
     }
@@ -962,7 +1000,7 @@ pub(crate) mod tests {
     fn gpu_array_unknown_option_errors() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")]).unwrap_err();
+            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")]).unwrap_err().to_string();
             assert!(err.contains("unrecognised option"));
         });
     }
@@ -1069,7 +1107,7 @@ pub(crate) mod tests {
                 Value::Tensor(tensor),
                 vec![Value::from(2i32), Value::from(2i32)],
             )
-            .unwrap_err();
+            .unwrap_err().to_string();
             assert!(err.contains("cannot reshape"));
         });
     }

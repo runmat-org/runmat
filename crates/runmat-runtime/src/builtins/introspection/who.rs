@@ -422,7 +422,7 @@ fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
                 }
                 let gathered =
                     gather_if_needed(inner)
-                        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                        .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
                 if let Some(text) = value_to_string_scalar(&gathered) {
                     names.push(text);
                 } else {
@@ -436,7 +436,7 @@ fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
         Value::GpuTensor(_) => {
             let gathered =
                 gather_if_needed(value)
-                    .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                    .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
             extract_name_list(&gathered)
         }
         _ => Err(

@@ -238,7 +238,7 @@ fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     forwarded.push(Value::Int(IntValue::I32(1)));
     forwarded.extend(args);
     crate::call_builtin("cat", &forwarded)
-        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
+        .map_err(|e: crate::RuntimeControlFlow| e.to_string())
         .map_err(adapt_cat_error)
         .map_err(Into::into)
 }

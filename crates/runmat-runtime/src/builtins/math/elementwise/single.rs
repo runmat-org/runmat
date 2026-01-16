@@ -261,15 +261,15 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
         Value::Num(n) => Ok(Value::Num(cast_f64_to_single(n))),
         Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) => (single_from_tensor(tensor)).map_err(runmat_async::RuntimeControlFlow::Error),
+        Value::Tensor(tensor) => (single_from_tensor(tensor)).map_err(Into::into),
         Value::Complex(re, im) => Ok(Value::Complex(
             cast_f64_to_single(re),
             cast_f64_to_single(im),
         )),
-        Value::ComplexTensor(tensor) => (single_from_complex_tensor(tensor)).map_err(runmat_async::RuntimeControlFlow::Error),
-        Value::LogicalArray(array) => (single_from_logical_array(array)).map_err(runmat_async::RuntimeControlFlow::Error),
-        Value::CharArray(chars) => (single_from_char_array(chars)).map_err(runmat_async::RuntimeControlFlow::Error),
-        Value::GpuTensor(handle) => (single_from_gpu(handle)).map_err(runmat_async::RuntimeControlFlow::Error),
+        Value::ComplexTensor(tensor) => (single_from_complex_tensor(tensor)).map_err(Into::into),
+        Value::LogicalArray(array) => (single_from_logical_array(array)).map_err(Into::into),
+        Value::CharArray(chars) => (single_from_char_array(chars)).map_err(Into::into),
+        Value::GpuTensor(handle) => (single_from_gpu(handle)).map_err(Into::into),
         Value::String(_) | Value::StringArray(_) => Err(((conversion_error("string"))).into()),
         Value::Cell(_) => Err(((conversion_error("cell"))).into()),
         Value::Struct(_) => Err(((conversion_error("struct"))).into()),
@@ -280,7 +280,7 @@ fn single_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value>
         Value::ClassRef(_) => Err(((conversion_error("meta.class"))).into()),
         Value::MException(_) => Err(((conversion_error("MException"))).into()),
     }?;
-    apply_output_template(converted, &template).map_err(runmat_async::RuntimeControlFlow::Error)
+    apply_output_template(converted, &template).map_err(Into::into)
 }
 
 fn single_from_tensor(tensor: Tensor) -> Result<Value, String> {

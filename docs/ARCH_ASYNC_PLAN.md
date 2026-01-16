@@ -19,8 +19,18 @@ This is the **working plan** for implementing the async/futures architecture des
 
 ### Transitional mechanism (temporary)
 
-We currently have a temporary “pending request” mechanism used to avoid blocking in WASM for WebGPU
-readbacks. This is expected to be removed once the futures-based architecture is in place.
+**As of `feat-async` (compile-green):**
+
+- Evaluation is now **poll-driven** via `ExecuteFuture` (Phase 2 directionally complete).
+- The legacy **string sentinel** suspension mechanism is removed; suspension is represented as
+  **typed control-flow** (`runmat_async::RuntimeControlFlow::Suspend(PendingInteraction)`).
+- WASM no longer requires any host “resume loops” for stdin; input is **Promise-driven** via
+  `setInputHandler` + typed UI responses.
+- WebGPU readback waiting is **waker-driven** (no polling loop), via a GPU map/readback waker hook.
+
+Remaining transitional glue is limited to a small set of legacy `Result<_, String>` call stacks
+where typed control-flow may still need to bubble through string-returning helpers; this surface is
+being retired incrementally as helpers/builtins are migrated to `BuiltinResult<T>`.
 
 ### Target end state
 
@@ -149,13 +159,13 @@ readbacks. This is expected to be removed once the futures-based architecture is
 
 ## Tracking checklist (update as we go)
 
-- [ ] `runmat-async` crate created
-- [ ] `runmat-control-flow` merged/deleted
-- [ ] typed control-flow replaces sentinel strings
-- [ ] `ExecuteFuture` implemented
-- [ ] wasm executor adapter implemented
-- [ ] internal GPU awaitable implemented
-- [ ] external input awaitable implemented
+- [x] `runmat-async` crate created
+- [x] `runmat-control-flow` merged/deleted
+- [x] typed control-flow replaces sentinel strings
+- [x] `ExecuteFuture` implemented
+- [x] wasm executor adapter implemented (Promise-backed `execute`)
+- [x] internal GPU awaitable implemented (waker-driven WebGPU map/readback)
+- [x] external input awaitable implemented (Promise-driven stdin via `setInputHandler`)
 - [ ] language async/await syntax shipped
 - [ ] transitional code removed
 

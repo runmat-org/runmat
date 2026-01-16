@@ -441,7 +441,7 @@ fn collect_workspace_entries() -> Result<Vec<(String, Value)>, String> {
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered =
-            gather_if_needed(&value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+            gather_if_needed(&value).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
         entries.push((name, gathered));
     }
     Ok(entries)
@@ -496,7 +496,7 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
         other => {
             // Gather once, then require a string-like scalar to avoid infinite recursion.
             let gathered =
-                gather_if_needed(other).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                gather_if_needed(other).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
             if let Some(text) = value_to_string_scalar(&gathered) {
                 return Ok(vec![text]);
             }
@@ -525,7 +525,7 @@ fn append_struct_fields(
             match value.fields.get(field) {
                 Some(val) => {
                     let gathered = gather_if_needed(val)
-                        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                        .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
                     out.push((field.clone(), gathered));
                 }
                 None => {
@@ -539,7 +539,7 @@ fn append_struct_fields(
     } else {
         for (field, val) in &value.fields {
             let gathered =
-                gather_if_needed(val).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                gather_if_needed(val).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
             out.push((field.clone(), gathered));
         }
     }
@@ -566,7 +566,7 @@ fn lookup_workspace(name: &str) -> Result<Value, String> {
     workspace::lookup(name)
         .ok_or_else(|| format!("save: variable '{}' was not found in the workspace", name))
         .and_then(|value| {
-            gather_if_needed(&value).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))
+            gather_if_needed(&value).map_err(|e: crate::RuntimeControlFlow| e.to_string())
         })
 }
 
@@ -698,7 +698,7 @@ fn convert_value(value: &Value) -> Result<MatArray, String> {
                     let idx = row * cell.cols + col;
                     let element = unsafe { &*cell.data[idx].as_raw() };
                     let gathered = gather_if_needed(element)
-                        .map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                        .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
                     elements.push(convert_value(&gathered)?);
                 }
             }
@@ -718,7 +718,7 @@ fn convert_value(value: &Value) -> Result<MatArray, String> {
                     .get(field)
                     .ok_or_else(|| format!("save: missing struct field '{field}'"))?;
                 let gathered =
-                    gather_if_needed(val).map_err(|e: runmat_async::RuntimeControlFlow| String::from(e))?;
+                    gather_if_needed(val).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
                 field_values.push(convert_value(&gathered)?);
             }
             Ok(MatArray {

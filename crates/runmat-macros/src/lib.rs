@@ -203,20 +203,29 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> Result<runmat_builtins::Value, runmat_async::RuntimeControlFlow> {
+        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<runmat_builtins::Value> {
             #![allow(unused_variables)]
             if #is_last_variadic {
-                if args.len() < #param_len - 1 { return Err(format!("expected at least {} args, got {}", #param_len - 1, args.len()).into()); }
-            } else {
-                if args.len() != #param_len { return Err(format!("expected {} args, got {}", #param_len, args.len()).into()); }
+                if args.len() < #param_len - 1 {
+                    return Err(crate::RuntimeControlFlow::Error(
+                        crate::runtime_error(format!(
+                            "expected at least {} args, got {}",
+                            #param_len - 1,
+                            args.len()
+                        ))
+                        .build(),
+                    ));
+                }
+            } else if args.len() != #param_len {
+                return Err(crate::RuntimeControlFlow::Error(
+                    crate::runtime_error(format!("expected {} args, got {}", #param_len, args.len()))
+                        .build(),
+                ));
             }
             #(#conv_stmts)*
             let res = match #ident(#(#param_idents),*) {
                 Ok(value) => value,
                 Err(err) => {
-                    if let Some(pending) = runmat_async::take_last_suspend() {
-                        return Err(runmat_async::RuntimeControlFlow::Suspend(pending));
-                    }
                     return Err(err.into());
                 }
             };

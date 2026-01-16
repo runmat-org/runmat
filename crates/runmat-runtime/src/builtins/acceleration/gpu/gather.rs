@@ -4,8 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::make_cell;
-use runmat_async::RuntimeControlFlow;
+use crate::{make_cell, runtime_error, RuntimeError};
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
@@ -231,6 +230,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a residency sink for fusion planning; always materialises host data and clears gpuArray residency tracking.",
 };
 
+fn gather_error(message: impl Into<String>) -> RuntimeError {
+    runtime_error(message)
+        .with_builtin("gather")
+        .build()
+}
+
 #[runtime_builtin(
     name = "gather",
     category = "acceleration/gpu",
@@ -246,7 +251,7 @@ fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         Ok(eval.into_first())
     } else {
         let outputs = eval.into_outputs();
-        make_cell(outputs, 1, len).map_err(Into::into)
+        make_cell(outputs, 1, len).map_err(|err| gather_error(err).into())
     }
 }
 
@@ -290,9 +295,9 @@ impl GatherResult {
 }
 
 /// Evaluate `gather` for arbitrary argument lists and return all outputs.
-pub fn evaluate(args: &[Value]) -> Result<GatherResult, String> {
+pub fn evaluate(args: &[Value]) -> crate::BuiltinResult<GatherResult> {
     if args.is_empty() {
-        return Err("gather: not enough input arguments".to_string());
+        return Err(gather_error("gather: not enough input arguments").into());
     }
     let mut outputs = Vec::with_capacity(args.len());
     for value in args {
@@ -301,18 +306,8 @@ pub fn evaluate(args: &[Value]) -> Result<GatherResult, String> {
     Ok(GatherResult::new(outputs))
 }
 
-fn gather_argument(value: &Value) -> Result<Value, String> {
-    match crate::dispatcher::gather_if_needed(value) {
-        Ok(val) => Ok(val),
-        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending).into()),
-        Err(RuntimeControlFlow::Error(err)) => {
-            if err.trim_start().to_ascii_lowercase().starts_with("gather:") {
-                Err(err)
-            } else {
-                Err(format!("gather: {err}"))
-            }
-        }
-    }
+fn gather_argument(value: &Value) -> crate::BuiltinResult<Value> {
+    crate::dispatcher::gather_if_needed(value)
 }
 
 #[cfg(test)]
@@ -462,7 +457,7 @@ pub(crate) mod tests {
     #[test]
     fn gather_requires_at_least_one_argument() {
         let err = gather_builtin(Vec::new()).expect_err("expected error");
-        assert_eq!(err, "gather: not enough input arguments");
+        assert_eq!(err.to_string(), "gather: not enough input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -976,6 +976,9 @@ pub enum AccelTag {
     ArrayConstruct,
 }
 
+/// Control-flow type for builtins that may suspend or error.
+pub type BuiltinControlFlow = runmat_async::RuntimeControlFlow<runmat_async::RuntimeError>;
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -986,7 +989,7 @@ pub struct BuiltinFunction {
     pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
-    pub implementation: fn(&[Value]) -> Result<Value, runmat_async::RuntimeControlFlow>,
+    pub implementation: fn(&[Value]) -> Result<Value, BuiltinControlFlow>,
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
@@ -1002,7 +1005,7 @@ impl BuiltinFunction {
         examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
-        implementation: fn(&[Value]) -> Result<Value, runmat_async::RuntimeControlFlow>,
+        implementation: fn(&[Value]) -> Result<Value, BuiltinControlFlow>,
         accel_tags: &'static [AccelTag],
         is_sink: bool,
         suppress_auto_output: bool,

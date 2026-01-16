@@ -16,11 +16,16 @@ pub mod elementwise;
 pub mod indexing;
 pub mod matrix;
 pub mod plotting_hooks;
+pub mod runtime_error;
 pub mod warning_store;
 pub mod workspace;
 
 /// Standard result type for runtime builtins.
-pub type BuiltinResult<T> = Result<T, runmat_async::RuntimeControlFlow>;
+pub type BuiltinResult<T> = Result<T, RuntimeControlFlow>;
+
+pub type RuntimeControlFlow = runmat_async::RuntimeControlFlow<RuntimeError>;
+
+pub use runtime_error::{runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
