@@ -844,7 +844,7 @@ unsafe fn platform_snprintf(
     };
 
     let formatted = match parse_float_format(fmt_str) {
-        Some((spec, precision)) => format_with_spec(value, spec, precision),
+        Some(format_info) => format_with_spec(value, format_info),
         None => format!("{}", value),
     };
 
@@ -869,16 +869,60 @@ unsafe fn platform_snprintf(
 }
 
 #[cfg(windows)]
-fn parse_float_format(fmt: &str) -> Option<(char, Option<usize>)> {
+struct FloatFormat {
+    flags: FormatFlags,
+    width: Option<usize>,
+    precision: Option<usize>,
+    spec: char,
+}
+
+#[cfg(windows)]
+struct FormatFlags {
+    plus: bool,      // +
+    minus: bool,     // -
+    space: bool,     // ' ' (space)
+    zero: bool,      // 0
+    hash: bool,      // #
+}
+
+#[cfg(windows)]
+fn parse_float_format(fmt: &str) -> Option<FloatFormat> {
     let bytes = fmt.as_bytes();
     let mut idx = bytes.iter().position(|&b| b == b'%')? + 1;
+    
+    // Parse flags
+    let mut flags = FormatFlags {
+        plus: false,
+        minus: false,
+        space: false,
+        zero: false,
+        hash: false,
+    };
     while idx < bytes.len() && matches!(bytes[idx], b'+' | b'-' | b' ' | b'0' | b'#') {
+        match bytes[idx] {
+            b'+' => flags.plus = true,
+            b'-' => flags.minus = true,
+            b' ' => flags.space = true,
+            b'0' => flags.zero = true,
+            b'#' => flags.hash = true,
+            _ => {}
+        }
         idx += 1;
     }
-    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-        idx += 1;
-    }
+    
+    // Parse width
+    let width = if idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        let start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        let digits_str = std::str::from_utf8(&bytes[start..idx]).ok()?;
+        Some(digits_str.parse().ok()?)
+    } else {
+        None
+    };
 
+    // Parse precision
     let precision = if idx < bytes.len() && bytes[idx] == b'.' {
         idx += 1;
         let start = idx;
@@ -897,21 +941,91 @@ fn parse_float_format(fmt: &str) -> Option<(char, Option<usize>)> {
 
     let spec = *bytes.get(idx)? as char;
     match spec {
-        'e' | 'E' | 'f' | 'F' | 'g' | 'G' => Some((spec, precision)),
+        'e' | 'E' | 'f' | 'F' | 'g' | 'G' => Some(FloatFormat {
+            flags,
+            width,
+            precision,
+            spec,
+        }),
         _ => None,
     }
 }
 
 #[cfg(windows)]
-fn format_with_spec(value: f64, spec: char, precision: Option<usize>) -> String {
-    match spec {
-        'e' => format!("{:.*e}", precision.unwrap_or(6), value),
-        'E' => format!("{:.*E}", precision.unwrap_or(6), value),
-        'f' | 'F' => format!("{:.*}", precision.unwrap_or(6), value),
-        'g' => format_general(value, precision.unwrap_or(6).max(1), false),
-        'G' => format_general(value, precision.unwrap_or(6).max(1), true),
-        _ => format!("{}", value),
+fn format_with_spec(value: f64, format_info: FloatFormat) -> String {
+    let precision = format_info.precision.unwrap_or(6);
+
+    fn is_special_float_token(text: &str) -> bool {
+        let t = text.trim();
+        let t = t.strip_prefix('+').unwrap_or(t);
+        let t = t.strip_prefix('-').unwrap_or(t);
+        t.eq_ignore_ascii_case("nan") || t.eq_ignore_ascii_case("inf")
     }
+    
+    // Format the number based on specifier
+    let mut formatted = match format_info.spec {
+        'e' => format!("{:.*e}", precision, value),
+        'E' => format!("{:.*E}", precision, value),
+        'f' | 'F' => {
+            let mut result = format!("{:.*}", precision, value);
+            // Apply # flag: always show decimal point for f/F
+            if format_info.flags.hash && !result.contains('.') && !is_special_float_token(&result) {
+                result.push('.');
+            }
+            result
+        }
+        'g' => format_general(value, precision.max(1), false),
+        'G' => format_general(value, precision.max(1), true),
+        _ => format!("{}", value),
+    };
+    
+    // Apply # flag for g/G: always show decimal point
+    if (format_info.spec == 'g' || format_info.spec == 'G') && format_info.flags.hash {
+        if !is_special_float_token(&formatted) {
+            if let Some(exp_pos) = formatted.find(['e', 'E']) {
+                if !formatted[..exp_pos].contains('.') {
+                    formatted.insert(exp_pos, '.');
+                }
+            } else if !formatted.contains('.') {
+                formatted.push('.');
+            }
+        }
+    }
+    
+    // Apply sign flags: + or space (only if not already present)
+    let has_sign = formatted.starts_with(['+', '-']);
+    // For positive values (including positive infinity), add sign if flag is set
+    let needs_sign = value >= 0.0 && !value.is_nan() && !has_sign;
+    if needs_sign {
+        if format_info.flags.plus {
+            formatted.insert(0, '+');
+        } else if format_info.flags.space {
+            formatted.insert(0, ' ');
+        }
+    }
+    
+    // Apply width and padding
+    if let Some(width) = format_info.width {
+        let current_len = formatted.len();
+        if current_len < width {
+            let padding_needed = width - current_len;
+            if format_info.flags.minus {
+                // Left-align: pad on right
+                formatted.extend(std::iter::repeat(' ').take(padding_needed));
+            } else if format_info.flags.zero {
+                // Zero-padding: pad with zeros after sign (if present)
+                let sign_pos = if formatted.starts_with(['+', '-', ' ']) { 1 } else { 0 };
+                let padding = std::iter::repeat('0').take(padding_needed).collect::<String>();
+                formatted.insert_str(sign_pos, &padding);
+            } else {
+                // Right-align: pad on left with spaces
+                let padding = std::iter::repeat(' ').take(padding_needed).collect::<String>();
+                formatted.insert_str(0, &padding);
+            }
+        }
+    }
+    
+    formatted
 }
 
 #[cfg(windows)]
@@ -1168,6 +1282,40 @@ mod tests {
         let nl = LineEnding::Pc.as_str();
         assert_eq!(contents, format!("1{nl}2{nl}"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn dlmwrite_hash_flag_does_not_append_decimal_to_special_values() {
+        for (value, fmt) in [
+            (f64::INFINITY, "%#f"),
+            (f64::NEG_INFINITY, "%#f"),
+            (f64::NAN, "%#f"),
+            (f64::INFINITY, "%#g"),
+            (f64::NEG_INFINITY, "%#g"),
+            (f64::NAN, "%#g"),
+        ] {
+            let rendered = c_format(value, fmt).unwrap();
+            assert!(
+                !rendered.ends_with('.'),
+                "unexpected trailing '.' for {value} with {fmt}: {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn dlmwrite_hash_flag_inserts_decimal_before_exponent_for_general_format() {
+        let rendered = c_format(1e10, "%#g").unwrap();
+        let exp_pos = rendered
+            .find(['e', 'E'])
+            .expect("expected exponent notation for %#g with 1e10");
+        assert!(exp_pos > 0, "unexpected exponent at start: {rendered:?}");
+        assert_eq!(
+            rendered.as_bytes()[exp_pos - 1],
+            b'.',
+            "expected '.' immediately before exponent: {rendered:?}"
+        );
     }
 
     #[test]
