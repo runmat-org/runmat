@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
 
 use super::common::numeric_pair;
 use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
+use super::plotting_error;
 use super::state::{
     next_line_style_for_axes, render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
 };
@@ -24,6 +25,8 @@ use super::style::{
 };
 use std::collections::VecDeque;
 use std::convert::TryFrom;
+
+use crate::{BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -108,6 +111,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "plot performs I/O and terminates fusion graphs.",
 };
 
+const BUILTIN_NAME: &str = "plot";
+
 #[runtime_builtin(
     name = "plot",
     category = "plotting",
@@ -133,12 +138,13 @@ pub fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResul
         y_label: "Y",
         ..Default::default()
     };
-    (render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         if let Some(order) = line_style_order.clone() {
             set_line_style_order_for_axes(axes, &order);
         }
         render_series(figure, axes, &mut series_plans)
-    })).map_err(Into::into)
+    })?;
+    Ok(rendered)
 }
 
 fn build_line_plot(
@@ -146,9 +152,9 @@ fn build_line_plot(
     y: Vec<f64>,
     label: &str,
     appearance: &LineAppearance,
-) -> Result<LinePlot, String> {
+) -> BuiltinResult<LinePlot> {
     let mut plot = LinePlot::new(x, y)
-        .map_err(|e| format!("plot: {e}"))?
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?
         .with_label(label)
         .with_style(
             appearance.color,
@@ -166,11 +172,12 @@ enum LineInput {
 }
 
 impl LineInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("plot: {e}"))?;
+                let tensor = Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -183,7 +190,7 @@ impl LineInput {
         }
     }
 
-    fn into_tensor(self, name: &str) -> Result<Tensor, String> {
+    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
@@ -193,7 +200,7 @@ impl LineInput {
 
 fn parse_series_specs(
     args: Vec<Value>,
-) -> Result<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>), String> {
+) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
     let mut queue: VecDeque<Value> = VecDeque::from(args);
     if queue.is_empty() {
         return Err(plot_err("expected at least one data series"));
@@ -243,11 +250,11 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn plot_err(msg: impl Into<String>) -> String {
-    format!("plot: {}", msg.into())
+fn plot_err(msg: impl Into<String>) -> RuntimeControlFlow {
+    plotting_error(BUILTIN_NAME, format!("plot: {}", msg.into()))
 }
 
-fn consume_inline_style_tokens(queue: &mut VecDeque<Value>) -> Result<Vec<Value>, String> {
+fn consume_inline_style_tokens(queue: &mut VecDeque<Value>) -> BuiltinResult<Vec<Value>> {
     let mut tokens = Vec::new();
     loop {
         let should_consume = matches!(queue.front(), Some(Value::String(_) | Value::CharArray(_)));
@@ -295,26 +302,29 @@ fn build_line_gpu_plot(
     y: &GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> Result<LinePlot, String> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "plot: plotting GPU context unavailable".to_string())?;
+) -> BuiltinResult<LinePlot> {
+    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
+        plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable")
+    })?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| "plot: unable to export GPU X data".to_string())?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| "plot: unable to export GPU Y data".to_string())?;
+    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x).ok_or_else(|| {
+        plotting_error(BUILTIN_NAME, "plot: unable to export GPU X data")
+    })?;
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y).ok_or_else(|| {
+        plotting_error(BUILTIN_NAME, "plot: unable to export GPU Y data")
+    })?;
 
     if x_ref.len < 2 {
-        return Err("plot: inputs must contain at least two elements".to_string());
+        return Err(plot_err("inputs must contain at least two elements"));
     }
     if x_ref.len != y_ref.len {
-        return Err("plot: X and Y inputs must have identical lengths".to_string());
+        return Err(plot_err("X and Y inputs must have identical lengths"));
     }
     if x_ref.precision != y_ref.precision {
-        return Err("plot: X and Y gpuArrays must have matching precision".to_string());
+        return Err(plot_err("X and Y gpuArrays must have matching precision"));
     }
     let len_u32 = u32::try_from(x_ref.len)
-        .map_err(|_| "plot: point count exceeds supported range".to_string())?;
+        .map_err(|_| plot_err("point count exceeds supported range"))?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = runmat_plot::gpu::line::LineGpuInputs {
@@ -337,7 +347,7 @@ fn build_line_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("plot: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: failed to build GPU vertices: {e}")))?;
 
     let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
@@ -353,7 +363,7 @@ fn build_line_gpu_plot(
                 &inputs,
                 &marker_params,
             )
-            .map_err(|e| format!("plot: failed to build marker vertices: {e}"))?,
+            .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: failed to build marker vertices: {e}")))?,
         )
     } else {
         None
@@ -387,7 +397,7 @@ fn render_series(
     figure: &mut runmat_plot::plots::Figure,
     axes_index: usize,
     plans: &mut Vec<SeriesRenderPlan>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let total = plans.len();
     for (series_idx, plan) in plans.drain(..).enumerate() {
         let SeriesRenderPlan {
@@ -417,7 +427,10 @@ fn render_series(
                         figure.add_line_plot_on_axes(line_plot, axes_index);
                         continue;
                     }
-                    Err(err) => {
+                    Err(RuntimeControlFlow::Suspend(pending)) => {
+                        return Err(RuntimeControlFlow::Suspend(pending));
+                    }
+                    Err(RuntimeControlFlow::Error(err)) => {
                         warn!("plot GPU path unavailable: {err}");
                     }
                 }
@@ -448,7 +461,7 @@ struct SeriesRenderPlan {
 }
 
 impl PlotSeriesInput {
-    fn new(x: Value, y: Value) -> Result<Self, String> {
+    fn new(x: Value, y: Value) -> BuiltinResult<Self> {
         Ok(Self {
             x: LineInput::from_value(x)?,
             y: LineInput::from_value(y)?,
@@ -462,7 +475,7 @@ impl PlotSeriesInput {
         }
     }
 
-    fn into_tensors(self, name: &str) -> Result<(Tensor, Tensor), String> {
+    fn into_tensors(self, name: &str) -> BuiltinResult<(Tensor, Tensor)> {
         let x = self.x.into_tensor(name)?;
         let y = self.y.into_tensor(name)?;
         Ok((x, y))
@@ -488,12 +501,17 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(msg: &str) {
-        let lower = msg.to_lowercase();
-        assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-            "unexpected error: {msg}"
-        );
+    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                let lower = err.to_string().to_lowercase();
+                assert!(
+                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+                    "unexpected error: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("plot suspended unexpectedly"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -518,8 +536,8 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Vec::new(),
         );
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -550,7 +568,12 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.contains("expected numeric Y argument"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.to_string().contains("expected numeric Y argument"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("plot series parsing suspended unexpectedly"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -559,7 +582,12 @@ pub(crate) mod tests {
         setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.contains("expected numeric X data"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.to_string().contains("expected numeric X data"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("plot series parsing suspended unexpectedly"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -230,26 +231,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val)?;
-    let dims = parse_dims(&dims_value)?;
+    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "sub2ind")?;
+    let dims = parse_dims(&dims_value, "sub2ind")?;
     if dims.is_empty() {
-        return Err((("Size vector must have at least one element.".to_string())).into());
+        return Err(sub2ind_error("Size vector must have at least one element."));
     }
 
     if rest.len() != dims.len() {
-        return Err((("The number of subscripts supplied must equal the number of dimensions in the size vector.".to_string())).into());
+        return Err(sub2ind_error(
+            "The number of subscripts supplied must equal the number of dimensions in the size vector.",
+        ));
     }
 
     if let Some(value) = try_gpu_sub2ind(&dims, &rest)? {
+
         return Ok(value);
     }
 
     let mut saw_gpu = dims_was_gpu;
     let mut subscripts: Vec<Tensor> = Vec::with_capacity(rest.len());
     for value in rest {
-        let (materialised, was_gpu) = materialize_value(value)?;
+        let (materialised, was_gpu) = materialize_value(value, "sub2ind")?;
         saw_gpu |= was_gpu;
-        let tensor = tensor::value_into_tensor_for("sub2ind", materialised)?;
+        let tensor = tensor::value_into_tensor_for("sub2ind", materialised)
+            .map_err(|message| sub2ind_error(message))?;
         subscripts.push(tensor);
     }
 
@@ -277,10 +282,10 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
     }
 
-    build_host_value(result_data, result_shape).map_err(Into::into)
+    build_host_value(result_data, result_shape)
 }
 
-fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, String> {
+fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Option<Value>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if subs
@@ -314,7 +319,9 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, Stri
     }
 
     if handles.len() != dims.len() {
-        return Err("The number of subscripts supplied must equal the number of dimensions in the size vector.".to_string());
+        return Err(sub2ind_error(
+            "The number of subscripts supplied must equal the number of dimensions in the size vector.",
+        ));
     }
 
     let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
@@ -330,7 +337,7 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, Stri
             saw_non_scalar = true;
             if let Some(existing) = &target_shape {
                 if existing != &handle.shape {
-                    return Err("Subscript inputs must have the same size.".to_string());
+                    return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
             } else {
                 target_shape = Some(handle.shape.clone());
@@ -346,7 +353,7 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, Stri
         result_len = tensor::element_count(shape);
     }
 
-    let strides = build_strides(dims)?;
+    let strides = build_strides(dims, "sub2ind")?;
     if dims.iter().any(|&d| d > u32::MAX as usize)
         || strides.iter().any(|&s| s > u32::MAX as usize)
         || result_len > u32::MAX as usize
@@ -364,14 +371,14 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, Stri
         &output_shape,
     ) {
         Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-        Err(err) => Err(err.to_string()),
+        Err(err) => Err(sub2ind_error(err.to_string())),
     }
 }
 
 fn compute_indices(
     dims: &[usize],
     subscripts: &[Tensor],
-) -> Result<(Vec<f64>, Option<Vec<usize>>), String> {
+) -> crate::BuiltinResult<(Vec<f64>, Option<Vec<usize>>)> {
     let mut target_shape: Option<Vec<usize>> = None;
     let mut result_len: usize = 1;
     let mut has_non_scalar = false;
@@ -381,7 +388,7 @@ fn compute_indices(
             has_non_scalar = true;
             if let Some(shape) = &target_shape {
                 if &tensor.shape != shape {
-                    return Err("Subscript inputs must have the same size.".to_string());
+                    return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
             } else {
                 target_shape = Some(tensor.shape.clone());
@@ -400,7 +407,7 @@ fn compute_indices(
         return Ok((Vec::new(), target_shape));
     }
 
-    let strides = build_strides(dims)?;
+    let strides = build_strides(dims, "sub2ind")?;
     let mut output = Vec::with_capacity(result_len);
 
     for idx in 0..result_len {
@@ -411,10 +418,10 @@ fn compute_indices(
             let term = coerced
                 .checked_sub(1)
                 .and_then(|v| v.checked_mul(strides[dim_index]))
-                .ok_or_else(|| "Index exceeds array dimensions.".to_string())?;
+                .ok_or_else(|| sub2ind_error("Index exceeds array dimensions."))?;
             offset = offset
                 .checked_add(term)
-                .ok_or_else(|| "Index exceeds array dimensions.".to_string())?;
+                .ok_or_else(|| sub2ind_error("Index exceeds array dimensions."))?;
         }
         output.push((offset + 1) as f64);
     }
@@ -430,22 +437,26 @@ fn subscript_value(tensor: &Tensor, idx: usize) -> f64 {
     }
 }
 
-fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> Result<usize, String> {
+fn coerce_subscript(
+    value: f64,
+    dim_number: usize,
+    dim_size: usize,
+) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(
-            "Subscript indices must either be real positive integers or logicals.".to_string(),
-        );
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(
-            "Subscript indices must either be real positive integers or logicals.".to_string(),
-        );
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
     }
     if rounded < 1.0 {
-        return Err(
-            "Subscript indices must either be real positive integers or logicals.".to_string(),
-        );
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
     }
     if rounded > dim_size as f64 {
         return Err(dimension_bounds_error(dim_number));
@@ -453,24 +464,32 @@ fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> Result<us
     Ok(rounded as usize)
 }
 
-fn dimension_bounds_error(dim_number: usize) -> String {
-    match dim_number {
+fn dimension_bounds_error(dim_number: usize) -> RuntimeControlFlow {
+    let message = match dim_number {
         1 => format!("Index exceeds the number of rows in dimension {dim_number}."),
         2 => format!("Index exceeds the number of columns in dimension {dim_number}."),
         3 => format!("Index exceeds the number of pages in dimension {dim_number}."),
         _ => "Index exceeds array dimensions.".to_string(),
-    }
+    };
+    sub2ind_error(message)
 }
 
-fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> Result<Value, String> {
+fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> crate::BuiltinResult<Value> {
     let shape = shape.unwrap_or_else(|| vec![1, 1]);
     if data.len() == 1 && tensor::element_count(&shape) == 1 {
         Ok(Value::Num(data[0]))
     } else {
         let tensor = Tensor::new(data, shape)
-            .map_err(|e| format!("Unable to construct sub2ind output: {e}"))?;
+            .map_err(|e| sub2ind_error(format!("Unable to construct sub2ind output: {e}")))?;
         Ok(Value::Tensor(tensor))
     }
+}
+
+fn sub2ind_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("sub2ind")
+        .build()
+        .into()
 }
 
 #[cfg(test)]
@@ -535,7 +554,7 @@ pub(crate) mod tests {
         let err = sub2ind_builtin(Value::Tensor(dims), vec![Value::Num(4.0), Value::Num(1.0)])
             .unwrap_err();
         assert!(
-            err.contains("Index exceeds"),
+            err.to_string().contains("Index exceeds"),
             "expected index bounds error, got {err}"
         );
     }
@@ -552,7 +571,7 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(
-            err.contains("same size"),
+            err.to_string().contains("same size"),
             "expected size mismatch error, got {err}"
         );
     }
@@ -564,7 +583,7 @@ pub(crate) mod tests {
         let err = sub2ind_builtin(Value::Tensor(dims), vec![Value::Num(1.5), Value::Num(1.0)])
             .unwrap_err();
         assert!(
-            err.contains("real positive integers"),
+            err.to_string().contains("real positive integers"),
             "expected integer coercion error, got {err}"
         );
     }

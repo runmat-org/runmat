@@ -4,6 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -11,7 +12,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -268,6 +269,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a plain product; providers can override with specialised kernels when desirable.",
 };
 
+const BUILTIN_NAME: &str = "times";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "times",
     category = "math/elementwise",
@@ -276,15 +283,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::math::elementwise::times"
 )]
-fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => (times_gpu_pair(la, lb)).map_err(Into::into),
-        (Value::GpuTensor(la), rhs) => (times_gpu_host_left(la, rhs)).map_err(Into::into),
-        (lhs, Value::GpuTensor(rb)) => (times_gpu_host_right(lhs, rb)).map_err(Into::into),
-        (lhs, rhs) => (times_host(lhs, rhs)).map_err(Into::into),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb),
+        (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs),
+        (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb),
+        (lhs, rhs) => times_host(lhs, rhs),
     }?;
-    apply_output_template(base, &template).map_err(Into::into)
+    apply_output_template(base, &template)
 }
 
 #[derive(Clone)]
@@ -293,26 +300,30 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     if args.is_empty() {
         return Ok(OutputTemplate::Default);
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err("times: expected prototype after 'like'".to_string());
+            return Err(builtin_error("times: expected prototype after 'like'"));
         }
-        return Err("times: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "times: unsupported option; only 'like' is accepted",
+        ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err("times: unsupported option; only 'like' is accepted".to_string());
+        return Err(builtin_error(
+            "times: unsupported option; only 'like' is accepted",
+        ));
     }
-    Err("times: too many input arguments".to_string())
+    Err(builtin_error("times: too many input arguments"))
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => apply_like_template(value, proto),
@@ -336,7 +347,7 @@ struct LikeAnalysis {
     class: PrototypeClass,
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
+fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
     let analysed = analyse_like_prototype(prototype)?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
@@ -350,28 +361,28 @@ fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String>
     }
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => convert_to_host_like(value),
         DevicePreference::Gpu => convert_to_gpu(value),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
         let temp = Value::GpuTensor(handle);
         gpu_helpers::gather_value(&temp)
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
     } else {
         Ok(value)
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(
-            "times: GPU output requested via 'like' but no acceleration provider is active"
-                .to_string(),
-        );
+        return Err(builtin_error(
+            "times: GPU output requested via 'like' but no acceleration provider is active",
+        ));
     };
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -382,17 +393,17 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| format!("times: failed to upload GPU result: {e}"))?;
+                .map_err(|e| builtin_error(format!("times: failed to upload GPU result: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("times: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| format!("times: {e}"))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
@@ -400,10 +411,10 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("times: GPU prototypes for 'like' only support real numeric outputs".to_string())
+            Err(builtin_error("times: GPU prototypes for 'like' only support real numeric outputs"))
         }
         Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err("times: unsupported prototype conversion to GPU output".to_string())
+            Err(builtin_error("times: unsupported prototype conversion to GPU output"))
         }
         Value::Object(_)
         | Value::HandleObject(_)
@@ -412,12 +423,12 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_) => {
-            Err("times: unsupported prototype conversion to GPU output".to_string())
+            Err(builtin_error("times: unsupported prototype conversion to GPU output"))
         }
     }
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -443,9 +454,10 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
     }
 }
 
-fn gather_like_prototype(value: &Value) -> Result<Value, String> {
+fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(_) => gpu_helpers::gather_value(value),
+        Value::GpuTensor(_) => gpu_helpers::gather_value(value)
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)), 
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -454,24 +466,24 @@ fn gather_like_prototype(value: &Value) -> Result<Value, String> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(format!(
+        _ => Err(builtin_error(format!(
             "times: unsupported prototype for 'like' ({value:?})"
-        )),
+        ))),
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
             let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| format!("times: {e}"))?;
+                ComplexTensor::new(data, t.shape.clone()).map_err(|e| builtin_error(format!("times: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| format!("times: {e}"))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?;
             real_to_complex(Value::Tensor(tensor))
         }
         Value::CharArray(chars) => {
@@ -479,16 +491,17 @@ fn real_to_complex(value: Value) -> Result<Value, String> {
             real_to_complex(Value::Tensor(tensor))
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
+            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             real_to_complex(gathered)
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "times: cannot convert value {other:?} to complex output"
-        )),
+        ))),
     }
 }
 
-fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, String> {
+fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
             if let Ok(handle) = provider.elem_mul(&lhs, &rhs) {
@@ -500,18 +513,22 @@ fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, S
             let made_left = reps_l.iter().any(|&r| r != 1);
             let made_right = reps_r.iter().any(|&r| r != 1);
             let left_expanded = if made_left {
-                provider.repmat(&lhs, &reps_l).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&lhs, &reps_l)
+                    .map_err(|e| builtin_error(format!("times: {e}")))?
             } else {
                 lhs.clone()
             };
             let right_expanded = if made_right {
-                provider.repmat(&rhs, &reps_r).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&rhs, &reps_r)
+                    .map_err(|e| builtin_error(format!("times: {e}")))?
             } else {
                 rhs.clone()
             };
             let result = provider
                 .elem_mul(&left_expanded, &right_expanded)
-                .map_err(|e| e.to_string());
+                .map_err(|e| builtin_error(format!("times: {e}")));
             if made_left {
                 let _ = provider.free(&left_expanded);
             }
@@ -541,8 +558,10 @@ fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value, S
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&lhs)?;
-    let right = gpu_helpers::gather_tensor(&rhs)?;
+    let left = gpu_helpers::gather_tensor(&lhs)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let right = gpu_helpers::gather_tensor(&rhs)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(Value::Tensor(left), Value::Tensor(right))
 }
 
@@ -576,7 +595,7 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
     Some((out, reps_a, reps_b))
 }
 
-fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> Result<Value, String> {
+fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Ok(handle) = provider.scalar_mul(&lhs, scalar) {
@@ -584,11 +603,12 @@ fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> Result<Value, String
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor(&lhs)?;
+    let host_lhs = gpu_helpers::gather_tensor(&lhs)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(Value::Tensor(host_lhs), rhs)
 }
 
-fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> Result<Value, String> {
+fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Ok(handle) = provider.scalar_mul(&rhs, scalar) {
@@ -596,11 +616,12 @@ fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> Result<Value, Strin
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor(&rhs)?;
+    let host_rhs = gpu_helpers::gather_tensor(&rhs)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     times_host(lhs, Value::Tensor(host_rhs))
 }
 
-fn times_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
         (TimesOperand::Real(a), TimesOperand::Real(b)) => times_real_real(&a, &b),
         (TimesOperand::Complex(a), TimesOperand::Complex(b)) => times_complex_complex(&a, &b),
@@ -609,12 +630,12 @@ fn times_host(lhs: Value, rhs: Value) -> Result<Value, String> {
     }
 }
 
-fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("times: {err}"))?;
+fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
     let dtype = real_result_dtype(lhs, rhs);
     if plan.is_empty() {
         let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("times: {e}"))?;
+            .map_err(|e| builtin_error(format!("times: {e}")))?;
         apply_result_dtype(&mut tensor, dtype);
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -623,16 +644,16 @@ fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
         out[out_idx] = lhs.data[idx_lhs] * rhs.data[idx_rhs];
     }
     let mut tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
+        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
     apply_result_dtype(&mut tensor, dtype);
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("times: {err}"))?;
+fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("times: {e}"))?;
+            .map_err(|e| builtin_error(format!("times: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -644,15 +665,15 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Val
         out[out_idx] = (re, im);
     }
     let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
+        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("times: {err}"))?;
+fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("times: {e}"))?;
+            .map_err(|e| builtin_error(format!("times: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -662,7 +683,7 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String
         out[out_idx] = (ar * scalar, ai * scalar);
     }
     let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
+        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -688,11 +709,11 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
     }
 }
 
-fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("times: {err}"))?;
+fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| builtin_error(format!("times: {err}")))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("times: {e}"))?;
+            .map_err(|e| builtin_error(format!("times: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
@@ -702,7 +723,7 @@ fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String
         out[out_idx] = (scalar * br, scalar * bi);
     }
     let tensor =
-        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
+        ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -711,41 +732,41 @@ enum TimesOperand {
     Complex(ComplexTensor),
 }
 
-fn classify_operand(value: Value) -> Result<TimesOperand, String> {
+fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
     match value {
         Value::Tensor(t) => Ok(TimesOperand::Real(t)),
         Value::Num(n) => Ok(TimesOperand::Real(
-            Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("times: {e}"))?,
+            Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::Int(i) => Ok(TimesOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("times: {e}"))?,
+            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::Bool(b) => Ok(TimesOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("times: {e}"))?,
+                .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::LogicalArray(logical) => Ok(TimesOperand::Real(
-            tensor::logical_to_tensor(&logical).map_err(|e| format!("times: {e}"))?,
+            tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::CharArray(chars) => Ok(TimesOperand::Real(char_array_to_tensor(&chars)?)),
         Value::Complex(re, im) => Ok(TimesOperand::Complex(
-            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("times: {e}"))?,
+            ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(TimesOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err("times: internal error converting GPU value".to_string()),
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(builtin_error("times: internal error converting GPU value")),
+        other => Err(builtin_error(format!(
             "times: unsupported operand type {:?}; expected numeric or logical data",
             other
-        )),
+        ))),
     }
 }
 
-fn char_array_to_tensor(chars: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("times: {e}"))
+    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| builtin_error(format!("times: {e}")))
 }
 
-fn extract_scalar_f64(value: &Value) -> Result<Option<f64>, String> {
+fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
@@ -765,7 +786,7 @@ fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.iter().copied().product::<usize>() <= 1
 }
 
-fn gpu_scalar_value(handle: &GpuTensorHandle) -> Result<Option<f64>, String> {
+fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
     if !is_scalar_shape(&handle.shape) {
         return Ok(None);
     }
@@ -887,7 +908,12 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = times_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
-        assert!(err.contains("times"), "unexpected error message: {err}");
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("times"), "unexpected error: {err}");
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1043,7 +1069,12 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = times_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        assert!(err.contains("prototype"), "unexpected error: {err}");
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("prototype"), "unexpected error: {err}");
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

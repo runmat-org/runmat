@@ -11,6 +11,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "sin";
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -183,6 +187,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sin in-place on the device; runtimes gather to host when unary_sin is unavailable.",
 };
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sin",
@@ -208,7 +216,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
-fn sin_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => sin_gpu(handle)?,
@@ -216,50 +224,53 @@ fn sin_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         Value::ComplexTensor(ct) => sin_complex_tensor(ct)?,
         Value::CharArray(ca) => sin_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err((("sin: expected numeric input".to_string())).into())
+            return Err(runtime_error_for("sin: expected numeric input"))
         }
         other => sin_real(other)?,
     };
-    apply_output_template(base, &output).map_err(Into::into)
+    apply_output_template(base, &output)
 }
 
-fn sin_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_sin(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor(&handle).map_err(runtime_error_for)?;
     sin_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sin_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("sin", value)?;
+fn sin_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("sin", value).map_err(runtime_error_for)?;
     sin_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sin_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("sin: {e}"))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| runtime_error_for(format!("sin: {e}")))
 }
 
-fn sin_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sin: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn sin_char_array(ca: CharArray) -> Result<Value, String> {
+fn sin_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| (ch as u32 as f64).sin())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sin: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -279,28 +290,28 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("sin: expected prototype after 'like'".to_string())
+                Err(runtime_error_for("sin: expected prototype after 'like'"))
             } else {
-                Err("sin: unrecognised argument for sin".to_string())
+                Err(runtime_error_for("sin: unrecognised argument for sin"))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("sin: unsupported option; only 'like' is accepted".to_string())
+                Err(runtime_error_for("sin: unsupported option; only 'like' is accepted"))
             }
         }
-        _ => Err("sin: too many input arguments".to_string()),
+        _ => Err(runtime_error_for("sin: too many input arguments")),
     }
 }
 
-fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Value, String> {
+fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -310,20 +321,19 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Valu
             | Value::Int(_)
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value),
-            Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err("sin: complex prototypes for 'like' are not supported yet".to_string())
-            }
-            _ => Err(
-                "sin: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
-                    .to_string(),
-            ),
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
+                "sin: complex prototypes for 'like' are not supported yet",
+            )),
+            _ => Err(runtime_error_for(
+                "sin: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            )),
         },
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "sin: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        runtime_error_for("sin: GPU output requested via 'like' but no acceleration provider is active")
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -332,33 +342,36 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("sin: {e}"))?;
+            let handle = provider
+                .upload(&view)
+                .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("sin: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(runtime_error_for)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("sin: GPU prototypes for 'like' only support real numeric outputs".to_string())
-        }
-        other => Err(format!(
-            "sin: unsupported result type for GPU output via 'like' ({other:?})"
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
+            "sin: GPU prototypes for 'like' only support real numeric outputs",
         )),
+        other => Err(runtime_error_for(format!(
+            "sin: unsupported result type for GPU output via 'like' ({other:?})"
+        ))),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("sin: {e}"))
+            gpu_helpers::gather_value(&proxy).map_err(|e| runtime_error_for(format!("sin: {e}")))
         }
         other => Ok(other),
     }
@@ -371,6 +384,13 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
+
+    fn error_message(err: RuntimeControlFlow) -> String {
+        match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -462,7 +482,8 @@ pub(crate) mod tests {
     fn sin_like_missing_prototype_errors() {
         let err =
             sin_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
-        assert!(err.contains("prototype"));
+        let message = error_message(err);
+        assert!(message.contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -473,7 +494,8 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
         )
         .expect_err("expected error");
-        assert!(err.contains("complex prototypes"));
+        let message = error_message(err);
+        assert!(message.contains("complex prototypes"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -539,7 +561,8 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
         .expect_err("expected error");
-        assert!(err.contains("too many input arguments"));
+        let message = error_message(err);
+        assert!(message.contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

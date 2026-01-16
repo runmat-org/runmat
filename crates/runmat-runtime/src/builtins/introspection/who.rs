@@ -10,8 +10,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::io::mat::load::read_mat_file;
-use crate::{gather_if_needed, make_cell};
+use crate::builtins::io::mat::load::read_mat_file_for_builtin;
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -203,17 +203,13 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(
-            gather_if_needed(&arg)?,
-        );
+        gathered.push(gather_if_needed(&arg).map_err(who_flow)?);
     }
     let request = parse_request(&gathered)?;
 
     let mut entries = match &request.source {
         WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
-        WhoSource::File(path) => {
-            read_mat_file(path).map_err(|err| err.replacen("load:", "who:", 1))?
-        }
+        WhoSource::File(path) => read_mat_file_for_builtin(path, "who")?,
     };
 
     if matches!(request.source, WhoSource::File(_)) {
@@ -246,7 +242,9 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         cells.push(Value::String(name));
     }
     let rows = cells.len();
-    make_cell(cells, rows, 1).map_err(Into::into)
+    make_cell(cells, rows, 1).map_err(|err| {
+        build_runtime_error(err).with_builtin("who").build().into()
+    })
 }
 
 #[derive(Debug)]
@@ -269,7 +267,27 @@ enum NameSelector {
     Wildcard(Pattern),
 }
 
-fn parse_request(values: &[Value]) -> Result<WhoRequest, String> {
+fn who_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("who").build().into()
+}
+
+fn who_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let identifier = err.identifier().map(|id| id.to_string());
+            let mut builder = build_runtime_error(err.message().to_string())
+                .with_builtin("who")
+                .with_source(err);
+            if let Some(identifier) = identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
+fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
     let mut idx = 0usize;
     let mut path_value: Option<Value> = None;
     let mut names: Vec<String> = Vec::new();
@@ -282,10 +300,10 @@ fn parse_request(values: &[Value]) -> Result<WhoRequest, String> {
                 "-file" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err("who: '-file' requires a filename".to_string());
+                        return Err(who_error("who: '-file' requires a filename"));
                     }
                     if path_value.is_some() {
-                        return Err("who: '-file' may only be specified once".to_string());
+                        return Err(who_error("who: '-file' may only be specified once"));
                     }
                     path_value = Some(values[idx].clone());
                     idx += 1;
@@ -294,7 +312,7 @@ fn parse_request(values: &[Value]) -> Result<WhoRequest, String> {
                 "-regexp" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err("who: '-regexp' requires at least one pattern".to_string());
+                        return Err(who_error("who: '-regexp' requires at least one pattern"));
                     }
                     while idx < values.len() {
                         if option_token(&values[idx])?.is_some() {
@@ -302,13 +320,19 @@ fn parse_request(values: &[Value]) -> Result<WhoRequest, String> {
                         }
                         let candidates = extract_name_list(&values[idx])?;
                         if candidates.is_empty() {
-                            return Err(
-                                "who: '-regexp' requires non-empty pattern strings".to_string()
-                            );
+                            return Err(who_error(
+                                "who: '-regexp' requires non-empty pattern strings",
+                            ));
                         }
                         for pattern in candidates {
                             let regex = Regex::new(&pattern).map_err(|err| {
-                                format!("who: invalid regular expression '{pattern}': {err}")
+                                build_runtime_error(format!(
+                                    "who: invalid regular expression '{pattern}': {err}"
+                                ))
+                                .with_builtin("who")
+                                .with_source(err)
+                                .build()
+                                .into()
                             })?;
                             regex_patterns.push(regex);
                         }
@@ -317,7 +341,7 @@ fn parse_request(values: &[Value]) -> Result<WhoRequest, String> {
                     continue;
                 }
                 other => {
-                    return Err(format!("who: unsupported option '{other}'"));
+                    return Err(who_error(format!("who: unsupported option '{other}'")));
                 }
             }
         }
@@ -370,12 +394,17 @@ fn matches_filters(name: &str, selectors: &[NameSelector], regex_patterns: &[Reg
     regex_patterns.iter().any(|regex| regex.is_match(name))
 }
 
-fn build_selectors(names: &[String]) -> Result<Vec<NameSelector>, String> {
+fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
     let mut selectors = Vec::with_capacity(names.len());
     for name in names {
         if contains_wildcards(name) {
-            let pattern = Pattern::new(name)
-                .map_err(|err| format!("who: invalid pattern '{name}': {err}"))?;
+            let pattern = Pattern::new(name).map_err(|err| {
+                build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
+                    .with_builtin("who")
+                    .with_source(err)
+                    .build()
+                    .into()
+            })?;
             selectors.push(NameSelector::Wildcard(pattern));
         } else {
             selectors.push(NameSelector::Exact(name.clone()));
@@ -388,9 +417,10 @@ fn contains_wildcards(text: &str) -> bool {
     text.chars().any(|ch| matches!(ch, '*' | '?' | '['))
 }
 
-fn parse_file_path(value: &Value) -> Result<PathBuf, String> {
-    let text = value_to_string_scalar(value)
-        .ok_or_else(|| "who: filename must be a character vector or string scalar".to_string())?;
+fn parse_file_path(value: &Value) -> BuiltinResult<PathBuf> {
+    let text = value_to_string_scalar(value).ok_or_else(|| {
+        who_error("who: filename must be a character vector or string scalar")
+    })?;
     let mut path = PathBuf::from(text);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -398,7 +428,7 @@ fn parse_file_path(value: &Value) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn option_token(value: &Value) -> Result<Option<String>, String> {
+fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     if let Some(token) = value_to_string_scalar(value) {
         if token.starts_with('-') {
             return Ok(Some(token.to_ascii_lowercase()));
@@ -407,7 +437,7 @@ fn option_token(value: &Value) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
+fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
@@ -420,29 +450,24 @@ fn extract_name_list(value: &Value) -> Result<Vec<String>, String> {
                     names.push(text);
                     continue;
                 }
-                let gathered =
-                    gather_if_needed(inner)
-                        .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
+                let gathered = gather_if_needed(inner).map_err(who_flow)?;
                 if let Some(text) = value_to_string_scalar(&gathered) {
                     names.push(text);
                 } else {
-                    return Err(
-                        "who: selection cells must contain string or character scalars".to_string(),
-                    );
+                    return Err(who_error(
+                        "who: selection cells must contain string or character scalars",
+                    ));
                 }
             }
             Ok(names)
         }
         Value::GpuTensor(_) => {
-            let gathered =
-                gather_if_needed(value)
-                    .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
+            let gathered = gather_if_needed(value).map_err(who_flow)?;
             extract_name_list(&gathered)
         }
-        _ => Err(
-            "who: selections must be character vectors, string scalars, string arrays, or cell arrays of those types"
-                .to_string(),
-        ),
+        _ => Err(who_error(
+            "who: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
+        )),
     }
 }
 
@@ -501,6 +526,15 @@ pub(crate) mod tests {
             Value::StringArray(sa) => sa.data,
             Value::CharArray(ca) => char_array_rows_as_strings(&ca),
             other => panic!("expected cell array result, got {other:?}"),
+        }
+    }
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => {
+                panic!("expected error flow, got suspend")
+            }
         }
     }
 
@@ -667,9 +701,10 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         shared_set_workspace(&[], &[]);
         let err = who_builtin(vec![Value::Num(7.0)]).expect_err("who should error");
+        let message = error_message(err);
         assert!(
-            err.contains("who: selections must"),
-            "unexpected error: {err}"
+            message.contains("who: selections must"),
+            "unexpected error: {message}"
         );
     }
 
@@ -679,9 +714,10 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         shared_set_workspace(&[], &[]);
         let err = who_builtin(vec![Value::from("-bogus")]).expect_err("who should error");
+        let message = error_message(err);
         assert!(
-            err.contains("unsupported option"),
-            "unexpected error: {err}"
+            message.contains("unsupported option"),
+            "unexpected error: {message}"
         );
     }
 
@@ -691,7 +727,11 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         shared_set_workspace(&[], &[]);
         let err = who_builtin(vec![Value::from("-file")]).expect_err("who should error");
-        assert!(err.contains("'-file' requires a filename"), "error: {err}");
+        let message = error_message(err);
+        assert!(
+            message.contains("'-file' requires a filename"),
+            "error: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -700,9 +740,10 @@ pub(crate) mod tests {
         ensure_shared_resolver();
         shared_set_workspace(&[], &[]);
         let err = who_builtin(vec![Value::from("-regexp")]).expect_err("who should error");
+        let message = error_message(err);
         assert!(
-            err.contains("'-regexp' requires at least one pattern"),
-            "error: {err}"
+            message.contains("'-regexp' requires at least one pattern"),
+            "error: {message}"
         );
     }
 
@@ -713,7 +754,11 @@ pub(crate) mod tests {
         shared_set_workspace(&[], &[]);
         let err = who_builtin(vec![Value::from("-regexp"), Value::from("[")])
             .expect_err("who should error");
-        assert!(err.contains("invalid regular expression"), "error: {err}");
+        let message = error_message(err);
+        assert!(
+            message.contains("invalid regular expression"),
+            "error: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -209,6 +210,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Explicit data movement; not fused with surrounding elementwise graphs.",
 };
 
+const BUILTIN_NAME: &str = "ifftshift";
+
+fn ifftshift_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "ifftshift",
     category = "math/fft",
@@ -219,27 +226,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err((("ifftshift: too many input arguments".to_string())).into());
+        return Err(ifftshift_error("ifftshift: too many input arguments"));
     }
     let dims_arg = rest.first();
 
     match value {
         Value::Tensor(tensor) => {
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
+            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = compute_shift_dims(&ct.shape, dims_arg, "ifftshift")?;
+            let dims = compute_shift_dims(&ct.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
-            let dims = compute_shift_dims(&array.shape, dims_arg, "ifftshift")?;
+            let dims = compute_shift_dims(&array.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_logical(array, &dims).map(Value::LogicalArray)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("ifftshift: {e}"))?;
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
+                .map_err(|e| ifftshift_error(format!("ifftshift: {e}")))?;
+            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.data.len() == 1 {
                     let (r, i) = result.data[0];
@@ -250,16 +257,17 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             })?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for("ifftshift", value)?;
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, "ifftshift")?;
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+                .map_err(|e| ifftshift_error(e))?;
+            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = compute_shift_dims(&handle.shape, dims_arg, "ifftshift")?;
+            let dims = compute_shift_dims(&handle.shape, dims_arg, BUILTIN_NAME)?;
             Ok(ifftshift_gpu(handle, &dims)?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err((("ifftshift: expected numeric or logical input".to_string())).into())
+            Err(ifftshift_error("ifftshift: expected numeric or logical input"))
         }
         Value::Struct(_)
         | Value::Object(_)
@@ -268,47 +276,47 @@ fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err((("ifftshift: unsupported input type".to_string())).into()),
+        | Value::MException(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
     }
 }
 
-fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> Result<Tensor, String> {
+fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape).map_err(|e| format!("ifftshift: {e}"));
+        return Tensor::new(data, shape)
+            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
     }
-    let rotated = apply_shift(&data, &plan.ext_shape, &plan.positive)
-        .map_err(|e| format!("ifftshift: {e}"))?;
-    Tensor::new(rotated, shape).map_err(|e| format!("ifftshift: {e}"))
+    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
+    Tensor::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
 }
 
 fn ifftshift_complex_tensor(
     tensor: ComplexTensor,
     dims: &[usize],
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape).map_err(|e| format!("ifftshift: {e}"));
+        return ComplexTensor::new(data, shape)
+            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
     }
-    let rotated = apply_shift(&data, &plan.ext_shape, &plan.positive)
-        .map_err(|e| format!("ifftshift: {e}"))?;
-    ComplexTensor::new(rotated, shape).map_err(|e| format!("ifftshift: {e}"))
+    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
+    ComplexTensor::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
 }
 
-fn ifftshift_logical(array: LogicalArray, dims: &[usize]) -> Result<LogicalArray, String> {
+fn ifftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<LogicalArray> {
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::new(data, shape).map_err(|e| format!("ifftshift: {e}"));
+        return LogicalArray::new(data, shape)
+            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
     }
-    let rotated = apply_shift(&data, &plan.ext_shape, &plan.positive)
-        .map_err(|e| format!("ifftshift: {e}"))?;
-    LogicalArray::new(rotated, shape).map_err(|e| format!("ifftshift: {e}"))
+    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
+    LogicalArray::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
 }
 
-fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value, String> {
+fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
     let plan = build_shift_plan(&handle.shape, dims, ShiftKind::Ifft);
     if plan.is_noop() {
         return Ok(Value::GpuTensor(handle));
@@ -340,7 +348,7 @@ fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value, Strin
     ifftshift_gpu_fallback(handle, dims)
 }
 
-fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value, String> {
+fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
     let host_tensor = gpu_helpers::gather_tensor(&handle)?;
     let shifted = ifftshift_tensor(host_tensor, dims)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -351,7 +359,7 @@ fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Result<Val
         return provider
             .upload(&view)
             .map(Value::GpuTensor)
-            .map_err(|e| format!("ifftshift: {e}"));
+            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
     }
     Ok(tensor::tensor_into_value(shifted))
 }
@@ -362,6 +370,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => {
+                panic!("unexpected suspension in ifftshift tests")
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -396,7 +413,13 @@ pub(crate) mod tests {
     fn ifftshift_inverts_fftshift() {
         let tensor = Tensor::new((0..7).map(|v| v as f64).collect(), vec![7, 1]).unwrap();
         let fft_plan = build_shift_plan(&tensor.shape, &[0], ShiftKind::Fft);
-        let fft_data = apply_shift(&tensor.data, &fft_plan.ext_shape, &fft_plan.positive).unwrap();
+        let fft_data = apply_shift(
+            "ifftshift",
+            &tensor.data,
+            &fft_plan.ext_shape,
+            &fft_plan.positive,
+        )
+        .expect("apply_shift");
         let fft_tensor = Tensor::new(fft_data, tensor.shape.clone()).unwrap();
 
         let restored =
@@ -465,8 +488,10 @@ pub(crate) mod tests {
     #[test]
     fn ifftshift_dimension_zero_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = ifftshift_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
-            .unwrap_err();
+        let err = error_message(
+            ifftshift_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
+                .unwrap_err(),
+        );
         assert!(
             err.contains("dimension indices must be >= 1"),
             "unexpected error: {err}"
@@ -492,8 +517,9 @@ pub(crate) mod tests {
     #[test]
     fn ifftshift_rejects_non_numeric_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err =
-            ifftshift_builtin(Value::Tensor(tensor), vec![Value::from("invalid")]).unwrap_err();
+        let err = error_message(
+            ifftshift_builtin(Value::Tensor(tensor), vec![Value::from("invalid")]).unwrap_err(),
+        );
         assert!(
             err.contains("dimension indices must be numeric"),
             "unexpected error: {err}"

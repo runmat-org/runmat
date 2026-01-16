@@ -7,14 +7,23 @@ use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 
+const BUILTIN_NAME: &str = "histcounts";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
 
 #[cfg_attr(
     feature = "doc_export",
@@ -223,11 +232,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(data, &rest).map(|eval| eval.into_counts_value()).map_err(Into::into)
+    evaluate(data, &rest).map(|eval| eval.into_counts_value())
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.
-pub fn evaluate(data: Value, rest: &[Value]) -> Result<HistcountsEvaluation, String> {
+pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistcountsEvaluation> {
     let options = parse_options(rest)?;
     match data {
         Value::GpuTensor(handle) => histcounts_gpu(handle, &options),
@@ -238,7 +247,7 @@ pub fn evaluate(data: Value, rest: &[Value]) -> Result<HistcountsEvaluation, Str
 fn histcounts_gpu(
     handle: GpuTensorHandle,
     options: &HistcountsOptions,
-) -> Result<HistcountsEvaluation, String> {
+) -> BuiltinResult<HistcountsEvaluation> {
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     histcounts_from_tensor(tensor, options)
 }
@@ -246,15 +255,15 @@ fn histcounts_gpu(
 fn histcounts_host(
     value: Value,
     options: &HistcountsOptions,
-) -> Result<HistcountsEvaluation, String> {
-    let tensor = tensor::value_into_tensor_for("histcounts", value)?;
+) -> BuiltinResult<HistcountsEvaluation> {
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
     histcounts_from_tensor(tensor, options)
 }
 
 fn histcounts_from_tensor(
     tensor: Tensor,
     options: &HistcountsOptions,
-) -> Result<HistcountsEvaluation, String> {
+) -> BuiltinResult<HistcountsEvaluation> {
     let mut values = Vec::new();
     let mut min_val: Option<f64> = None;
     let mut max_val: Option<f64> = None;
@@ -320,10 +329,10 @@ fn histcounts_from_tensor(
     }
 
     let normalised = apply_normalization(&counts, &edges, options.normalization);
-    let counts_tensor =
-        Tensor::new(normalised, vec![1, counts.len()]).map_err(|e| format!("histcounts: {e}"))?;
-    let edges_tensor =
-        Tensor::new(edges.clone(), vec![1, edges.len()]).map_err(|e| format!("histcounts: {e}"))?;
+    let counts_tensor = Tensor::new(normalised, vec![1, counts.len()])
+        .map_err(|e| builtin_error(format!("histcounts: {e}")))?;
+    let edges_tensor = Tensor::new(edges.clone(), vec![1, edges.len()])
+        .map_err(|e| builtin_error(format!("histcounts: {e}")))?;
 
     Ok(HistcountsEvaluation::new(counts_tensor, edges_tensor))
 }
@@ -334,7 +343,7 @@ fn compute_edges(
     max_val: Option<f64>,
     original_range_zero: bool,
     options: &HistcountsOptions,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     if let Some(edges) = &options.explicit_edges {
         validate_edges(edges)?;
         return Ok(edges.clone());
@@ -359,26 +368,30 @@ fn compute_edges_standard(
     max_val: Option<f64>,
     original_range_zero: bool,
     options: &HistcountsOptions,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     let (mut lower, mut upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
 
     if !lower.is_finite() || !upper.is_finite() {
-        return Err(
-            "histcounts: data range must be finite; specify BinLimits or BinEdges".to_string(),
-        );
+        return Err(builtin_error(
+            "histcounts: data range must be finite; specify BinLimits or BinEdges",
+        ));
     }
 
     if upper < lower {
-        return Err("histcounts: bin limits must be increasing".to_string());
+        return Err(builtin_error("histcounts: bin limits must be increasing"));
     }
 
     if options.bin_limits.is_some() && approx_equal(lower, upper) {
-        return Err("histcounts: BinLimits must specify a non-zero width".to_string());
+        return Err(builtin_error(
+            "histcounts: BinLimits must specify a non-zero width",
+        ));
     }
 
     if let Some(width) = options.bin_width {
         if !width.is_finite() || width <= 0.0 {
-            return Err("histcounts: BinWidth must be a positive finite scalar".to_string());
+            return Err(builtin_error(
+                "histcounts: BinWidth must be a positive finite scalar",
+            ));
         }
 
         if original_range_zero && options.bin_limits.is_none() {
@@ -410,7 +423,9 @@ fn compute_edges_standard(
 
     let mut num_bins = options.num_bins.unwrap_or(DEFAULT_BIN_COUNT);
     if num_bins == 0 {
-        return Err("histcounts: NumBins must be a positive integer".to_string());
+        return Err(builtin_error(
+            "histcounts: NumBins must be a positive integer",
+        ));
     }
 
     if original_range_zero {
@@ -446,7 +461,7 @@ fn compute_edges_with_method(
     original_range_zero: bool,
     method: BinMethod,
     options: &HistcountsOptions,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     if values.is_empty() {
         return compute_edges_standard(min_val, max_val, original_range_zero, options);
     }
@@ -459,12 +474,16 @@ fn compute_edges_with_method(
 
     let (lower, upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
     if !lower.is_finite() || !upper.is_finite() {
-        return Err("histcounts: data range must be finite for BinMethod".to_string());
+        return Err(builtin_error(
+            "histcounts: data range must be finite for BinMethod",
+        ));
     }
 
     if approx_equal(lower, upper) {
         if options.bin_limits.is_some() {
-            return Err("histcounts: BinLimits must specify a non-zero width".to_string());
+            return Err(builtin_error(
+                "histcounts: BinLimits must specify a non-zero width",
+            ));
         }
         return compute_edges_standard(min_val, max_val, true, options);
     }
@@ -523,11 +542,13 @@ fn compute_integer_edges(
     min_val: Option<f64>,
     max_val: Option<f64>,
     options: &HistcountsOptions,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     let (mut lower, mut upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
 
     if !lower.is_finite() || !upper.is_finite() {
-        return Err("histcounts: BinLimits must be finite for 'integers' BinMethod".to_string());
+        return Err(builtin_error(
+            "histcounts: BinLimits must be finite for 'integers' BinMethod",
+        ));
     }
 
     if approx_equal(lower, upper) {
@@ -726,16 +747,22 @@ fn apply_normalization(counts: &[f64], edges: &[f64], mode: HistogramNormalizati
     }
 }
 
-fn validate_edges(edges: &[f64]) -> Result<(), String> {
+fn validate_edges(edges: &[f64]) -> BuiltinResult<()> {
     if edges.len() < 2 {
-        return Err("histcounts: bin edges must contain at least two elements".to_string());
+        return Err(builtin_error(
+            "histcounts: bin edges must contain at least two elements",
+        ));
     }
     for pair in edges.windows(2) {
         if pair[0].is_nan() || pair[1].is_nan() {
-            return Err("histcounts: bin edges must be finite numbers".to_string());
+            return Err(builtin_error(
+                "histcounts: bin edges must be finite numbers",
+            ));
         }
         if pair[1] <= pair[0] {
-            return Err("histcounts: bin edges must be strictly increasing".to_string());
+            return Err(builtin_error(
+                "histcounts: bin edges must be strictly increasing",
+            ));
         }
     }
     Ok(())
@@ -771,34 +798,36 @@ struct HistcountsOptions {
 }
 
 impl HistcountsOptions {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> BuiltinResult<()> {
         if self.explicit_edges.is_some()
             && (self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some())
         {
-            return Err(
-                "histcounts: BinEdges cannot be combined with NumBins, BinWidth, or BinLimits"
-                    .to_string(),
-            );
+            return Err(builtin_error(
+                "histcounts: BinEdges cannot be combined with NumBins, BinWidth, or BinLimits",
+            ));
         }
         if self.bin_method.is_some()
             && (self.explicit_edges.is_some()
                 || self.bin_width.is_some()
                 || self.num_bins.is_some())
         {
-            return Err(
-                "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth"
-                    .to_string(),
-            );
+            return Err(builtin_error(
+                "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
+            ));
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
-            return Err("histcounts: specify only one of NumBins or BinWidth".to_string());
+            return Err(builtin_error(
+                "histcounts: specify only one of NumBins or BinWidth",
+            ));
         }
         if let Some((lo, hi)) = self.bin_limits {
             if !lo.is_finite() || !hi.is_finite() {
-                return Err("histcounts: BinLimits must be finite".to_string());
+                return Err(builtin_error("histcounts: BinLimits must be finite"));
             }
             if hi < lo {
-                return Err("histcounts: BinLimits must be increasing".to_string());
+                return Err(builtin_error(
+                    "histcounts: BinLimits must be increasing",
+                ));
             }
         }
         Ok(())
@@ -848,7 +877,7 @@ impl HistcountsEvaluation {
     }
 }
 
-fn parse_options(args: &[Value]) -> Result<HistcountsOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> {
     let mut options = HistcountsOptions::default();
     let mut index = 0;
 
@@ -867,10 +896,12 @@ fn parse_options(args: &[Value]) -> Result<HistcountsOptions, String> {
 
     while index < args.len() {
         let key = tensor::value_to_string(&args[index])
-            .ok_or_else(|| "histcounts: expected name/value pair arguments".to_string())?;
+            .ok_or_else(|| builtin_error("histcounts: expected name/value pair arguments"))?;
         index += 1;
         if index >= args.len() {
-            return Err(format!("histcounts: missing value for option '{key}'"));
+            return Err(builtin_error(format!(
+                "histcounts: missing value for option '{key}'"
+            )));
         }
         let lowered = key.trim().to_ascii_lowercase();
         let value = &args[index];
@@ -893,32 +924,37 @@ fn parse_options(args: &[Value]) -> Result<HistcountsOptions, String> {
             "binlimits" => {
                 let limits = numeric_vector(value, "histcounts", "BinLimits")?;
                 if limits.len() != 2 {
-                    return Err(
-                        "histcounts: BinLimits must contain exactly two elements".to_string()
-                    );
+                    return Err(builtin_error(
+                        "histcounts: BinLimits must contain exactly two elements",
+                    ));
                 }
                 let lo = limits[0];
                 let hi = limits[1];
                 if hi < lo {
-                    return Err("histcounts: BinLimits must be increasing".to_string());
+                    return Err(builtin_error(
+                        "histcounts: BinLimits must be increasing",
+                    ));
                 }
                 if !lo.is_finite() || !hi.is_finite() {
-                    return Err("histcounts: BinLimits must be finite".to_string());
+                    return Err(builtin_error("histcounts: BinLimits must be finite"));
                 }
                 options.bin_limits = Some((lo, hi));
             }
             "normalization" => {
-                let text = tensor::value_to_string(value)
-                    .ok_or_else(|| "histcounts: Normalization must be a string".to_string())?;
+                let text = tensor::value_to_string(value).ok_or_else(|| {
+                    builtin_error("histcounts: Normalization must be a string")
+                })?;
                 options.normalization = parse_normalization(&text)?;
             }
             "binmethod" => {
                 let text = tensor::value_to_string(value)
-                    .ok_or_else(|| "histcounts: BinMethod must be a string".to_string())?;
+                    .ok_or_else(|| builtin_error("histcounts: BinMethod must be a string"))?;
                 options.bin_method = Some(parse_bin_method(&text)?);
             }
             other => {
-                return Err(format!("histcounts: unrecognised option '{other}'"));
+                return Err(builtin_error(format!(
+                    "histcounts: unrecognised option '{other}'"
+                )));
             }
         }
     }
@@ -933,7 +969,7 @@ enum BinArgument {
     Edges(Vec<f64>),
 }
 
-fn classify_bin_argument(value: &Value) -> Result<BinArgument, String> {
+fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let n = positive_usize(value, "histcounts", "NumBins")?;
@@ -943,11 +979,13 @@ fn classify_bin_argument(value: &Value) -> Result<BinArgument, String> {
             if tensor.data.len() == 1 {
                 let scalar_value = tensor.data[0];
                 if !scalar_value.is_finite() || scalar_value <= 0.0 {
-                    return Err("histcounts: NumBins must be a positive finite scalar".to_string());
+                    return Err(builtin_error(
+                        "histcounts: NumBins must be a positive finite scalar",
+                    ));
                 }
                 let rounded = scalar_value.round();
                 if (scalar_value - rounded).abs() > f64::EPSILON {
-                    return Err("histcounts: NumBins must be an integer".to_string());
+                    return Err(builtin_error("histcounts: NumBins must be an integer"));
                 }
                 Ok(BinArgument::NumBins(rounded as usize))
             } else {
@@ -956,28 +994,30 @@ fn classify_bin_argument(value: &Value) -> Result<BinArgument, String> {
             }
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
             if tensor.data.len() == 1 {
                 let n = tensor.data[0];
                 if n <= 0.0 || !n.is_finite() {
-                    return Err("histcounts: NumBins must be a positive finite scalar".to_string());
+                    return Err(builtin_error(
+                        "histcounts: NumBins must be a positive finite scalar",
+                    ));
                 }
                 let rounded = n.round();
                 if (n - rounded).abs() > f64::EPSILON {
-                    return Err("histcounts: NumBins must be an integer".to_string());
+                    return Err(builtin_error("histcounts: NumBins must be an integer"));
                 }
                 Ok(BinArgument::NumBins(rounded as usize))
             } else {
                 Ok(BinArgument::Edges(tensor.data))
             }
         }
-        Value::GpuTensor(_) => {
-            Err("histcounts: bin specification cannot be a gpuArray".to_string())
-        }
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(builtin_error(
+            "histcounts: bin specification cannot be a gpuArray",
+        )),
+        other => Err(builtin_error(format!(
             "histcounts: unsupported bin specification {:?}",
             other
-        )),
+        ))),
     }
 }
 
@@ -993,54 +1033,68 @@ fn is_option_key(value: &Value) -> bool {
     }
 }
 
-fn numeric_vector(value: &Value, name: &str, option: &str) -> Result<Vec<f64>, String> {
-    let tensor =
-        tensor::value_to_tensor(value).map_err(|_| format!("{name}: {option} must be numeric"))?;
+fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
+    let tensor = tensor::value_to_tensor(value).map_err(|_| {
+        builtin_error(format!("{name}: {option} must be numeric"))
+    })?;
     Ok(tensor.data)
 }
 
-fn positive_usize(value: &Value, name: &str, option: &str) -> Result<usize, String> {
+fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
     let scalar = scalar_value(value, name, option)?;
     if scalar <= 0.0 || !scalar.is_finite() {
-        return Err(format!("{name}: {option} must be a positive finite scalar"));
+        return Err(builtin_error(format!(
+            "{name}: {option} must be a positive finite scalar"
+        )));
     }
     let rounded = scalar.round();
     if (scalar - rounded).abs() > f64::EPSILON {
-        return Err(format!("{name}: {option} must be an integer"));
+        return Err(builtin_error(format!(
+            "{name}: {option} must be an integer"
+        )));
     }
     Ok(rounded as usize)
 }
 
-fn positive_scalar(value: &Value, name: &str, option: &str) -> Result<f64, String> {
+fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
     let scalar = scalar_value(value, name, option)?;
     if !scalar.is_finite() || scalar <= 0.0 {
-        return Err(format!("{name}: {option} must be a positive finite scalar"));
+        return Err(builtin_error(format!(
+            "{name}: {option} must be a positive finite scalar"
+        )));
     }
     Ok(scalar)
 }
 
-fn scalar_value(value: &Value, name: &str, option: &str) -> Result<f64, String> {
+fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(format!("{name}: {option} must be a scalar"));
+                return Err(builtin_error(format!(
+                    "{name}: {option} must be a scalar"
+                )));
             }
             Ok(tensor.data[0])
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
-                return Err(format!("{name}: {option} must be a scalar"));
+                return Err(builtin_error(format!(
+                    "{name}: {option} must be a scalar"
+                )));
             }
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        other => Err(format!("{name}: {option} must be numeric, got {:?}", other)),
+        other => Err(builtin_error(format!(
+            "{name}: {option} must be numeric, got {:?}",
+            other
+        ))),
     }
 }
 
-fn parse_bin_method(text: &str) -> Result<BinMethod, String> {
+fn parse_bin_method(text: &str) -> BuiltinResult<BinMethod> {
     match text.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(BinMethod::Auto),
         "scott" => Ok(BinMethod::Scott),
@@ -1048,13 +1102,13 @@ fn parse_bin_method(text: &str) -> Result<BinMethod, String> {
         "sturges" => Ok(BinMethod::Sturges),
         "sqrt" => Ok(BinMethod::Sqrt),
         "integers" => Ok(BinMethod::Integers),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "histcounts: unrecognised BinMethod value '{other}'"
-        )),
+        ))),
     }
 }
 
-fn parse_normalization(text: &str) -> Result<HistogramNormalization, String> {
+fn parse_normalization(text: &str) -> BuiltinResult<HistogramNormalization> {
     match text.trim().to_ascii_lowercase().as_str() {
         "count" => Ok(HistogramNormalization::Count),
         "probability" => Ok(HistogramNormalization::Probability),
@@ -1062,9 +1116,9 @@ fn parse_normalization(text: &str) -> Result<HistogramNormalization, String> {
         "pdf" | "probabilitydensity" => Ok(HistogramNormalization::Pdf),
         "cumcount" => Ok(HistogramNormalization::CumCount),
         "cdf" => Ok(HistogramNormalization::Cdf),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "histcounts: unrecognised Normalization value '{other}'"
-        )),
+        ))),
     }
 }
 

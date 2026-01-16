@@ -7,6 +7,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -211,6 +212,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Scalar metadata predicate that remains outside fusion graphs.",
 };
 
+const BUILTIN_NAME: &str = "isreal";
+const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
+
 #[runtime_builtin(
     name = "isreal",
     category = "logical/tests",
@@ -219,14 +223,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
-fn isreal_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (isreal_gpu(handle)).map_err(Into::into),
-        other => (isreal_host(other)).map_err(Into::into),
+        Value::GpuTensor(handle) => isreal_gpu(handle),
+        other => isreal_host(other),
     }
 }
 
-fn isreal_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_isreal(&handle) {
             return Ok(Value::Bool(flag));
@@ -234,11 +238,12 @@ fn isreal_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     }
 
     let gpu_value = Value::GpuTensor(handle);
-    let gathered = gpu_helpers::gather_value(&gpu_value)?;
+    let gathered = gpu_helpers::gather_value(&gpu_value)
+        .map_err(|err| internal_error(format!("isreal: {err}")))?;
     isreal_host(gathered)
 }
 
-fn isreal_host(value: Value) -> Result<Value, String> {
+fn isreal_host(value: Value) -> BuiltinResult<Value> {
     let flag = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(_) => true,
@@ -258,10 +263,20 @@ fn isreal_host(value: Value) -> Result<Value, String> {
         Value::ClassRef(_) => false,
         Value::MException(_) => false,
         Value::GpuTensor(_) => {
-            return Err("isreal: internal error, GPU value reached host path".to_string());
+            return Err(internal_error(
+                "isreal: internal error, GPU value reached host path",
+            ));
         }
     };
     Ok(Value::Bool(flag))
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
 }
 
 #[cfg(test)]

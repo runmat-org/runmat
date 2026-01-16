@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -233,6 +234,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Rotations only reorder data; fusion planner treats rot90 as a residency-preserving boundary.",
 };
 
+fn rot90_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("rot90").build().into()
+}
+
 #[runtime_builtin(
     name = "rot90",
     category = "array/shape",
@@ -243,27 +248,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err((("rot90: too many input arguments".to_string())).into());
+        return Err(rot90_error("rot90: too many input arguments"));
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
-        Value::Tensor(tensor) => (rot90_tensor(tensor, steps).map(tensor::tensor_into_value)).map_err(Into::into),
-        Value::LogicalArray(logical) => (rot90_logical(logical, steps).map(Value::LogicalArray)).map_err(Into::into),
-        Value::ComplexTensor(ct) => (rot90_complex_tensor(ct, steps).map(Value::ComplexTensor)).map_err(Into::into),
+        Value::Tensor(tensor) => Ok(rot90_tensor(tensor, steps)
+            .map(tensor::tensor_into_value)?),
+        Value::LogicalArray(logical) => Ok(rot90_logical(logical, steps)
+            .map(Value::LogicalArray)?),
+        Value::ComplexTensor(ct) => Ok(rot90_complex_tensor(ct, steps)
+            .map(Value::ComplexTensor)?),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("rot90: {e}"))?;
+                .map_err(|e| rot90_error(format!("rot90: {e}")))?;
             Ok(rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)?)
         }
-        Value::StringArray(strings) => (rot90_string_array(strings, steps).map(Value::StringArray)).map_err(Into::into),
-        Value::CharArray(chars) => (rot90_char_array(chars, steps).map(Value::CharArray)).map_err(Into::into),
+        Value::StringArray(strings) => Ok(rot90_string_array(strings, steps)
+            .map(Value::StringArray)?),
+        Value::CharArray(chars) => Ok(rot90_char_array(chars, steps).map(Value::CharArray)?),
         Value::String(s) => Ok(Value::String(s)),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
-            let tensor = tensor::value_into_tensor_for("rot90", v)?;
+            let tensor = tensor::value_into_tensor_for("rot90", v)
+                .map_err(|e| rot90_error(e))?;
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => (rot90_gpu(handle, steps)).map_err(Into::into),
-        Value::Cell(_) => Err((("rot90: cell arrays are not yet supported".to_string())).into()),
+        Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps)?),
+        Value::Cell(_) => Err(rot90_error("rot90: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -271,11 +281,11 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err((("rot90: unsupported input type".to_string())).into()),
+        | Value::MException(_) => Err(rot90_error("rot90: unsupported input type")),
     }
 }
 
-fn parse_rotation_steps(arg: Option<&Value>) -> Result<usize, String> {
+fn parse_rotation_steps(arg: Option<&Value>) -> crate::BuiltinResult<usize> {
     let raw = match arg {
         None => 1,
         Some(value) => parse_rotation_value(value)?,
@@ -284,7 +294,7 @@ fn parse_rotation_steps(arg: Option<&Value>) -> Result<usize, String> {
     Ok(modulo)
 }
 
-fn parse_rotation_value(value: &Value) -> Result<i64, String> {
+fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
     if let Some(direction) = parse_direction(value)? {
         return Ok(direction);
     }
@@ -294,24 +304,25 @@ fn parse_rotation_value(value: &Value) -> Result<i64, String> {
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         Value::Tensor(t) => parse_tensor_rotation(t),
         Value::LogicalArray(array) => parse_logical_rotation(array),
-        Value::StringArray(sa) if sa.data.len() != 1 => {
-            Err("rot90: rotation direction must be a scalar string".to_string())
-        }
+        Value::StringArray(sa) if sa.data.len() != 1 => Err(rot90_error(
+            "rot90: rotation direction must be a scalar string",
+        )),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => {
-            Err("rot90: unknown rotation direction string".to_string())
+            Err(rot90_error("rot90: unknown rotation direction string"))
         }
-        Value::GpuTensor(_) => Err(
-            "rot90: rotation count must be specified on the host (numeric or direction string)"
-                .to_string(),
-        ),
+        Value::GpuTensor(_) => Err(rot90_error(
+            "rot90: rotation count must be specified on the host (numeric or direction string)",
+        )),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("rot90: K must be an integer".to_string())
+            Err(rot90_error("rot90: K must be an integer"))
         }
-        _ => Err("rot90: rotation count must be numeric or a direction string".to_string()),
+        _ => Err(rot90_error(
+            "rot90: rotation count must be numeric or a direction string",
+        )),
     }
 }
 
-fn parse_direction(value: &Value) -> Result<Option<i64>, String> {
+fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
     let text = match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
@@ -324,7 +335,9 @@ fn parse_direction(value: &Value) -> Result<Option<i64>, String> {
             "clockwise" | "cw" => -1,
             "counterclockwise" | "anticlockwise" | "ccw" | "acw" => 1,
             other => {
-                return Err(format!("rot90: unknown rotation direction '{other}'"));
+                return Err(rot90_error(format!(
+                    "rot90: unknown rotation direction '{other}'"
+                )));
             }
         };
         return Ok(Some(turns));
@@ -332,64 +345,70 @@ fn parse_direction(value: &Value) -> Result<Option<i64>, String> {
     Ok(None)
 }
 
-fn parse_numeric_rotation(value: f64) -> Result<i64, String> {
+fn parse_numeric_rotation(value: f64) -> crate::BuiltinResult<i64> {
     if !value.is_finite() {
-        return Err("rot90: K must be finite".to_string());
+        return Err(rot90_error("rot90: K must be finite"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("rot90: K must be an integer".to_string());
+        return Err(rot90_error("rot90: K must be an integer"));
     }
     Ok(rounded as i64)
 }
 
-fn parse_tensor_rotation(tensor: &Tensor) -> Result<i64, String> {
+fn parse_tensor_rotation(tensor: &Tensor) -> crate::BuiltinResult<i64> {
     if tensor.data.len() != 1 {
-        return Err("rot90: K must be a scalar integer".to_string());
+        return Err(rot90_error("rot90: K must be a scalar integer"));
     }
     parse_numeric_rotation(tensor.data[0])
 }
 
-fn parse_logical_rotation(array: &LogicalArray) -> Result<i64, String> {
+fn parse_logical_rotation(array: &LogicalArray) -> crate::BuiltinResult<i64> {
     if array.data.len() != 1 {
-        return Err("rot90: K must be a scalar integer".to_string());
+        return Err(rot90_error("rot90: K must be a scalar integer"));
     }
     Ok(if array.data[0] != 0 { 1 } else { 0 })
 }
 
-fn rot90_tensor(tensor: Tensor, steps: usize) -> Result<Tensor, String> {
+fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    Tensor::new(data, shape).map_err(|e| format!("rot90: {e}"))
+    Tensor::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_complex_tensor(tensor: ComplexTensor, steps: usize) -> Result<ComplexTensor, String> {
+fn rot90_complex_tensor(
+    tensor: ComplexTensor,
+    steps: usize,
+) -> crate::BuiltinResult<ComplexTensor> {
     if steps == 0 {
         return Ok(tensor);
     }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    ComplexTensor::new(data, shape).map_err(|e| format!("rot90: {e}"))
+    ComplexTensor::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_logical(array: LogicalArray, steps: usize) -> Result<LogicalArray, String> {
+fn rot90_logical(array: LogicalArray, steps: usize) -> crate::BuiltinResult<LogicalArray> {
     if steps == 0 {
         return Ok(array);
     }
     let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    LogicalArray::new(data, shape).map_err(|e| format!("rot90: {e}"))
+    LogicalArray::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_string_array(array: StringArray, steps: usize) -> Result<StringArray, String> {
+fn rot90_string_array(
+    array: StringArray,
+    steps: usize,
+) -> crate::BuiltinResult<StringArray> {
     if steps == 0 {
         return Ok(array);
     }
     let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    StringArray::new(data, shape).map_err(|e| format!("rot90: {e}"))
+    StringArray::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_char_array(array: CharArray, steps: usize) -> Result<CharArray, String> {
+fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<CharArray> {
     if steps == 0 {
         return Ok(array);
     }
@@ -402,7 +421,8 @@ fn rot90_char_array(array: CharArray, steps: usize) -> Result<CharArray, String>
     }
     let mut out = vec!['\0'; out_rows * out_cols];
     if rows == 0 || cols == 0 {
-        return CharArray::new(out, out_rows, out_cols).map_err(|e| format!("rot90: {e}"));
+        return CharArray::new(out, out_rows, out_cols)
+            .map_err(|e| rot90_error(format!("rot90: {e}")));
     }
     for row in 0..rows {
         for col in 0..cols {
@@ -417,10 +437,11 @@ fn rot90_char_array(array: CharArray, steps: usize) -> Result<CharArray, String>
             out[dst_idx] = array.data[src_idx];
         }
     }
-    CharArray::new(out, out_rows, out_cols).map_err(|e| format!("rot90: {e}"))
+    CharArray::new(out, out_rows, out_cols)
+        .map_err(|e| rot90_error(format!("rot90: {e}")))
 }
 
-fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> Result<Value, String> {
+fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {
     if steps == 0 {
         return Ok(Value::GpuTensor(handle));
     }
@@ -447,7 +468,7 @@ fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> Result<Value, String> {
         provider
             .upload(&view)
             .map(Value::GpuTensor)
-            .map_err(|e| format!("rot90: {e}"))
+            .map_err(|e| rot90_error(format!("rot90: {e}")))
     } else {
         Ok(tensor::tensor_into_value(rotated))
     }
@@ -496,7 +517,7 @@ fn rot90_generic<T: Clone>(
     data: &[T],
     shape: &[usize],
     steps: usize,
-) -> Result<(Vec<T>, Vec<usize>), String> {
+) -> crate::BuiltinResult<(Vec<T>, Vec<usize>)> {
     let ext_shape = if shape.is_empty() {
         vec![1, 1]
     } else if shape.len() == 1 {
@@ -506,7 +527,9 @@ fn rot90_generic<T: Clone>(
     };
     let total: usize = ext_shape.iter().product();
     if total != data.len() {
-        return Err("rot90: data length does not match shape product".to_string());
+        return Err(rot90_error(
+            "rot90: data length does not match shape product",
+        ));
     }
     let rows = ext_shape[0];
     let cols = ext_shape[1];
@@ -830,7 +853,7 @@ pub(crate) mod tests {
     fn rot90_non_integer_error() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = rot90_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)]).unwrap_err();
-        assert!(err.contains("K must be an integer"));
+        assert!(err.to_string().contains("K must be an integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

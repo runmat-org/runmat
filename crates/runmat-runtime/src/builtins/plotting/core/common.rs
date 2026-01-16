@@ -2,6 +2,11 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
 
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::BuiltinResult;
+
+use super::plotting_error;
+
 type NumericTriplet = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Default error message when no plotting backend is available.
@@ -13,12 +18,17 @@ pub fn numeric_vector(tensor: Tensor) -> Vec<f64> {
     tensor.data
 }
 
-pub fn numeric_pair(x: Tensor, y: Tensor, name: &str) -> Result<(Vec<f64>, Vec<f64>), String> {
+pub fn numeric_pair(
+    x: Tensor,
+    y: Tensor,
+    name: &'static str,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
     let x_vec = numeric_vector(x);
     let y_vec = numeric_vector(y);
     if x_vec.len() != y_vec.len() {
-        return Err(format!(
-            "{name}: X and Y inputs must have the same number of elements"
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have the same number of elements"),
         ));
     }
     Ok((x_vec, y_vec))
@@ -28,13 +38,14 @@ pub fn numeric_triplet(
     x: Tensor,
     y: Tensor,
     z: Tensor,
-    name: &str,
-) -> Result<NumericTriplet, String> {
+    name: &'static str,
+) -> BuiltinResult<NumericTriplet> {
     let (x_vec, y_vec) = numeric_pair(x, y, name)?;
     let z_vec = numeric_vector(z);
     if z_vec.len() != x_vec.len() {
-        return Err(format!(
-            "{name}: X, Y, and Z inputs must have the same number of elements"
+        return Err(plotting_error(
+            name,
+            format!("{name}: X, Y, and Z inputs must have the same number of elements"),
         ));
     }
     Ok((x_vec, y_vec, z_vec))
@@ -64,11 +75,12 @@ pub enum SurfaceDataInput {
 }
 
 impl SurfaceDataInput {
-    pub fn from_value(value: Value, context: &str) -> Result<Self, String> {
+    pub fn from_value(value: Value, context: &'static str) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("{context}: {e}"))?;
+                let tensor = Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(context, format!("{context}: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -81,33 +93,42 @@ impl SurfaceDataInput {
         }
     }
 
-    pub fn into_tensor(self, context: &str) -> Result<Tensor, String> {
+    pub fn into_tensor(self, context: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, context),
         }
     }
 
-    pub fn grid_shape(&self, context: &str) -> Result<(usize, usize), String> {
+    pub fn grid_shape(&self, context: &'static str) -> BuiltinResult<(usize, usize)> {
         match self {
             Self::Host(tensor) => {
                 if tensor.rows == 0 || tensor.cols == 0 {
-                    Err(format!("{context}: Z must contain at least a 2-D grid"))
+                    Err(plotting_error(
+                        context,
+                        format!("{context}: Z must contain at least a 2-D grid"),
+                    ))
                 } else {
                     Ok((tensor.rows, tensor.cols))
                 }
             }
             Self::Gpu(handle) => {
                 if handle.shape.len() < 2 {
-                    return Err(format!(
-                        "{context}: gpuArray inputs must be 2-D (got shape {:?})",
-                        handle.shape
+                    return Err(plotting_error(
+                        context,
+                        format!(
+                            "{context}: gpuArray inputs must be 2-D (got shape {:?})",
+                            handle.shape
+                        ),
                     ));
                 }
                 let rows = handle.shape[0];
                 let cols = handle.shape[1];
                 if rows == 0 || cols == 0 {
-                    Err(format!("{context}: Z must contain at least a 2-D grid"))
+                    Err(plotting_error(
+                        context,
+                        format!("{context}: Z must contain at least a 2-D grid"),
+                    ))
                 } else {
                     Ok((rows, cols))
                 }
@@ -116,23 +137,32 @@ impl SurfaceDataInput {
     }
 }
 
-pub fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &str) -> Result<Tensor, String> {
+pub fn gather_tensor_from_gpu(
+    handle: GpuTensorHandle,
+    context: &'static str,
+) -> BuiltinResult<Tensor> {
     let value = Value::GpuTensor(handle);
-    let gathered = crate::gather_if_needed(&value)?;
-    Tensor::try_from(&gathered).map_err(|e| format!("{context}: {e}"))
+    let gathered = crate::gather_if_needed(&value)
+        .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
+    Tensor::try_from(&gathered)
+        .map_err(|e| plotting_error(context, format!("{context}: {e}")))
 }
 
 pub fn tensor_to_surface_grid(
     z: Tensor,
     x_len: usize,
     y_len: usize,
-) -> Result<Vec<Vec<f64>>, String> {
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec<f64>>> {
     if z.data.len() != x_len * y_len {
-        return Err(format!(
-            "Surface data must contain exactly {} values ({}×{})",
-            x_len * y_len,
-            x_len,
-            y_len
+        return Err(plotting_error(
+            context,
+            format!(
+                "{context}: surface data must contain exactly {} values ({}×{})",
+                x_len * y_len,
+                x_len,
+                y_len
+            ),
         ));
     }
     let mut grid = vec![vec![0.0; y_len]; x_len];

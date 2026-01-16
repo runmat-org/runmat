@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -202,6 +202,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "IO builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "addpath";
+
+fn addpath_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InsertPosition {
     Begin,
@@ -225,7 +249,7 @@ struct AddPathSpec {
 )]
 fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(((ERROR_TOO_FEW_ARGS.to_string())).into());
+        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
     }
 
     let gathered = gather_arguments(&args)?;
@@ -235,15 +259,15 @@ fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(char_array_value(&previous))
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("addpath: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
 
-fn parse_arguments(args: &[Value]) -> Result<AddPathSpec, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
     let mut position = InsertPosition::Begin;
     let mut position_set = false;
     let mut frozen = false;
@@ -254,7 +278,7 @@ fn parse_arguments(args: &[Value]) -> Result<AddPathSpec, String> {
     }
 
     if directories.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
     }
 
     let mut resolved = Vec::new();
@@ -266,14 +290,14 @@ fn parse_arguments(args: &[Value]) -> Result<AddPathSpec, String> {
         match parse_option(trimmed) {
             Some(AddPathOption::Begin) => {
                 if position_set {
-                    return Err(ERROR_POSITION_REPEATED.to_string());
+                    return Err(addpath_error(ERROR_POSITION_REPEATED));
                 }
                 position = InsertPosition::Begin;
                 position_set = true;
             }
             Some(AddPathOption::End) => {
                 if position_set {
-                    return Err(ERROR_POSITION_REPEATED.to_string());
+                    return Err(addpath_error(ERROR_POSITION_REPEATED));
                 }
                 position = InsertPosition::End;
                 position_set = true;
@@ -290,7 +314,7 @@ fn parse_arguments(args: &[Value]) -> Result<AddPathSpec, String> {
     }
 
     if resolved.is_empty() {
-        return Err(ERROR_TOO_FEW_ARGS.to_string());
+        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
     }
 
     Ok(AddPathSpec {
@@ -316,7 +340,7 @@ fn parse_option(text: &str) -> Option<AddPathOption> {
     }
 }
 
-fn apply_addpath(spec: AddPathSpec) -> Result<(), String> {
+fn apply_addpath(spec: AddPathSpec) -> BuiltinResult<()> {
     let mut existing = current_path_segments();
     let mut seen = HashSet::new();
     let mut additions = Vec::new();
@@ -358,7 +382,7 @@ fn apply_addpath(spec: AddPathSpec) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_strings(value: &Value, output: &mut Vec<String>) -> Result<(), String> {
+fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
         Value::String(text) => {
             output.push(text.clone());
@@ -391,13 +415,13 @@ fn collect_strings(value: &Value, output: &mut Vec<String>) -> Result<(), String
         Value::Cell(cell) => {
             for ptr in &cell.data {
                 let inner = (*ptr).clone();
-                let gathered = gather_if_needed(&inner).map_err(|err| format!("addpath: {err}"))?;
+                let gathered = gather_if_needed(&inner).map_err(map_control_flow)?;
                 collect_strings(&gathered, output)?;
             }
             Ok(())
         }
-        Value::GpuTensor(_) => Err(ERROR_ARG_TYPE.to_string()),
-        _ => Err(ERROR_ARG_TYPE.to_string()),
+        Value::GpuTensor(_) => Err(addpath_error(ERROR_ARG_TYPE)),
+        _ => Err(addpath_error(ERROR_ARG_TYPE)),
     }
 }
 
@@ -409,31 +433,33 @@ fn split_path_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn normalize_directory(raw: &str) -> Result<String, String> {
+fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(addpath_error(ERROR_ARG_TYPE));
     }
 
     if trimmed.eq_ignore_ascii_case("pathdef") || trimmed.eq_ignore_ascii_case("pathdef.m") {
-        return Err("addpath: loading pathdef.m is not implemented yet".to_string());
+        return Err(addpath_error(
+            "addpath: loading pathdef.m is not implemented yet",
+        ));
     }
 
-    let expanded = expand_user_path(trimmed, "addpath")?;
+    let expanded = expand_user_path(trimmed, "addpath").map_err(addpath_error)?;
     let path = Path::new(&expanded);
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         env::current_dir()
-            .map_err(|_| "addpath: unable to resolve current directory".to_string())?
+            .map_err(|_| addpath_error("addpath: unable to resolve current directory"))?
             .join(path)
     };
     let normalized = normalize_pathbuf(&joined);
 
-    let metadata =
-        vfs::metadata(&normalized).map_err(|_| format!("addpath: folder '{trimmed}' not found"))?;
+    let metadata = vfs::metadata(&normalized)
+        .map_err(|_| addpath_error(format!("addpath: folder '{trimmed}' not found")))?;
     if !metadata.is_dir() {
-        return Err(format!("addpath: '{trimmed}' is not a folder"));
+        return Err(addpath_error(format!("addpath: '{trimmed}' is not a folder")));
     }
 
     Ok(path_to_string(&normalized))
@@ -465,27 +491,27 @@ fn normalize_pathbuf(path: &Path) -> PathBuf {
     }
 }
 
-fn tensor_to_string(tensor: &Tensor) -> Result<String, String> {
+fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(addpath_error(ERROR_ARG_TYPE));
     }
     if tensor.rows() > 1 {
-        return Err(ERROR_ARG_TYPE.to_string());
+        return Err(addpath_error(ERROR_ARG_TYPE));
     }
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(addpath_error(ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(addpath_error(ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(ERROR_ARG_TYPE.to_string());
+            return Err(addpath_error(ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| ERROR_ARG_TYPE.to_string())?;
+        let ch = char::from_u32(int_code as u32).ok_or_else(|| addpath_error(ERROR_ARG_TYPE))?;
         text.push(ch);
     }
     Ok(text)
@@ -522,6 +548,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
     use crate::builtins::common::test_support;
     use std::convert::TryFrom;
@@ -550,6 +577,13 @@ pub(crate) mod tests {
     fn canonical(dir: &Path) -> String {
         let normalized = normalize_pathbuf(dir);
         path_to_string(&normalized)
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in addpath tests"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -700,10 +734,11 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let missing = Value::String("this/folder/does/not/exist".into());
-        let err = addpath_builtin(vec![missing]).expect_err("expected error");
+        let err = unwrap_error(addpath_builtin(vec![missing]).expect_err("expected error"));
         assert!(
-            err.contains("folder") && err.contains("not found"),
-            "unexpected error message: {err}"
+            err.message().contains("folder") && err.message().contains("not found"),
+            "unexpected error message: {}",
+            err.message()
         );
     }
 
@@ -765,8 +800,8 @@ pub(crate) mod tests {
             Value::String("-begin".into()),
             Value::String("-end".into()),
         ];
-        let err = addpath_builtin(args).expect_err("expected error");
-        assert!(err.contains("position option"));
+        let err = unwrap_error(addpath_builtin(args).expect_err("expected error"));
+        assert!(err.message().contains("position option"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

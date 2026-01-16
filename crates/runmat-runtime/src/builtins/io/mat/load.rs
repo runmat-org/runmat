@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -222,12 +222,30 @@ struct LoadRequest {
     regex_patterns: Vec<Regex>,
 }
 
-pub fn evaluate(args: &[Value]) -> Result<LoadEval, String> {
+const BUILTIN_NAME: &str = "load";
+
+fn load_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn load_error_with_source(
+    message: impl Into<String>,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+        .into()
+}
+
+pub fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
-        host_args.push(
-            gather_if_needed(arg).map_err(|e: crate::RuntimeControlFlow| e.to_string())?,
-        );
+        host_args.push(gather_if_needed(arg)?);
     }
 
     let invocation = parse_invocation(&host_args)?;
@@ -246,8 +264,12 @@ pub fn evaluate(args: &[Value]) -> Result<LoadEval, String> {
 
     let mut regex_patterns = Vec::with_capacity(invocation.regex_tokens.len());
     for pattern in invocation.regex_tokens {
-        let regex = Regex::new(&pattern)
-            .map_err(|err| format!("load: invalid regular expression '{pattern}': {err}"))?;
+        let regex = Regex::new(&pattern).map_err(|err| {
+            load_error_with_source(
+                format!("load: invalid regular expression '{pattern}': {err}"),
+                err,
+            )
+        })?;
         regex_patterns.push(regex);
     }
 
@@ -271,7 +293,7 @@ struct ParsedInvocation {
     regex_tokens: Vec<String>,
 }
 
-fn parse_invocation(values: &[Value]) -> Result<ParsedInvocation, String> {
+fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
     let mut path_value = None;
     let mut path_was_default = false;
     let mut variables = Vec::new();
@@ -287,7 +309,7 @@ fn parse_invocation(values: &[Value]) -> Result<ParsedInvocation, String> {
                 "-regexp" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err("load: '-regexp' requires at least one pattern".to_string());
+                        return Err(load_error("load: '-regexp' requires at least one pattern"));
                     }
                     while idx < values.len() {
                         if option_token(&values[idx])?.is_some() {
@@ -295,9 +317,9 @@ fn parse_invocation(values: &[Value]) -> Result<ParsedInvocation, String> {
                         }
                         let names = extract_names(&values[idx])?;
                         if names.is_empty() {
-                            return Err(
-                                "load: '-regexp' requires non-empty pattern strings".to_string()
-                            );
+                            return Err(load_error(
+                                "load: '-regexp' requires non-empty pattern strings",
+                            ));
                         }
                         regex_tokens.extend(names);
                         idx += 1;
@@ -305,7 +327,7 @@ fn parse_invocation(values: &[Value]) -> Result<ParsedInvocation, String> {
                     continue;
                 }
                 other => {
-                    return Err(format!("load: unsupported option '{other}'"));
+                    return Err(load_error(format!("load: unsupported option '{other}'")));
                 }
             }
         } else {
@@ -332,9 +354,10 @@ fn parse_invocation(values: &[Value]) -> Result<ParsedInvocation, String> {
     })
 }
 
-fn normalise_path(value: &Value) -> Result<PathBuf, String> {
-    let raw = value_to_string_scalar(value)
-        .ok_or_else(|| "load: filename must be a character vector or string scalar".to_string())?;
+fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
+    let raw = value_to_string_scalar(value).ok_or_else(|| {
+        load_error("load: filename must be a character vector or string scalar")
+    })?;
     let mut path = PathBuf::from(raw);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -345,7 +368,7 @@ fn normalise_path(value: &Value) -> Result<PathBuf, String> {
 fn select_variables(
     entries: &[(String, Value)],
     request: &LoadRequest,
-) -> Result<Vec<(String, Value)>, String> {
+) -> BuiltinResult<Vec<(String, Value)>> {
     if request.variables.is_empty() && request.regex_patterns.is_empty() {
         return Ok(entries.to_vec());
     }
@@ -360,7 +383,7 @@ fn select_variables(
     for name in &request.variables {
         let value = by_name
             .get(name.as_str())
-            .ok_or_else(|| format!("load: variable '{name}' was not found in the file"))?;
+            .ok_or_else(|| load_error(format!("load: variable '{name}' was not found in the file")))?;
         insert_or_replace(&mut selected, name, (*value).clone());
     }
 
@@ -377,12 +400,12 @@ fn select_variables(
             }
         }
         if matched == 0 && request.variables.is_empty() {
-            return Err("load: no variables matched '-regexp' patterns".to_string());
+            return Err(load_error("load: no variables matched '-regexp' patterns"));
         }
     }
 
     if selected.is_empty() {
-        return Err("load: no variables selected".to_string());
+        return Err(load_error("load: no variables selected"));
     }
 
     Ok(selected)
@@ -396,17 +419,42 @@ fn insert_or_replace(selected: &mut Vec<(String, Value)>, name: &str, value: Val
     }
 }
 
-pub(crate) fn read_mat_file(path: &Path) -> Result<Vec<(String, Value)>, String> {
-    let file = File::open(path)
-        .map_err(|err| format!("load: failed to open '{}': {err}", path.display()))?;
+pub(crate) fn read_mat_file_for_builtin(
+    path: &Path,
+    builtin: &str,
+) -> crate::BuiltinResult<Vec<(String, Value)>> {
+    match read_mat_file(path) {
+        Ok(entries) => Ok(entries),
+        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending)),
+        Err(RuntimeControlFlow::Error(err)) => {
+            let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
+            let mut builder = build_runtime_error(message).with_builtin(builtin);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            Err(builder.with_source(err).build().into())
+        }
+    }
+}
+
+pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
+    let file = File::open(path).map_err(|err| {
+        load_error_with_source(
+            format!("load: failed to open '{}': {err}", path.display()),
+            err,
+        )
+    })?;
     let mut reader = BufReader::new(file);
 
     let mut header = [0u8; MAT_HEADER_LEN];
-    reader
-        .read_exact(&mut header)
-        .map_err(|err| format!("load: failed to read MAT-file header: {err}"))?;
+    reader.read_exact(&mut header).map_err(|err| {
+        load_error_with_source(
+            format!("load: failed to read MAT-file header: {err}"),
+            err,
+        )
+    })?;
     if header[126] != b'I' || header[127] != b'M' {
-        return Err("load: file is not a MATLAB Level-5 MAT-file".to_string());
+        return Err(load_error("load: file is not a MATLAB Level-5 MAT-file"));
     }
 
     let mut variables = Vec::new();
@@ -426,18 +474,18 @@ struct ParsedMatrix {
     array: MatArray,
 }
 
-fn parse_matrix(buffer: &[u8]) -> Result<ParsedMatrix, String> {
+fn parse_matrix(buffer: &[u8]) -> BuiltinResult<ParsedMatrix> {
     let mut cursor = Cursor::new(buffer);
 
     let flags = read_tagged(&mut cursor, false)?
-        .ok_or_else(|| "load: matrix element missing array flags".to_string())?;
+        .ok_or_else(|| load_error("load: matrix element missing array flags"))?;
     if flags.data_type != MI_UINT32 || flags.data.len() < 8 {
-        return Err("load: invalid array flags block".to_string());
+        return Err(load_error("load: invalid array flags block"));
     }
     let flags0 = u32::from_le_bytes(flags.data[0..4].try_into().unwrap());
     let class_code = flags0 & 0xFF;
     let mut class = MatClass::from_class_code(class_code)
-        .ok_or_else(|| "load: unsupported MATLAB class".to_string())?;
+        .ok_or_else(|| load_error("load: unsupported MATLAB class"))?;
     let is_logical = (flags0 & FLAG_LOGICAL) != 0;
     let has_imag = (flags0 & FLAG_COMPLEX) != 0;
     if matches!(class, MatClass::Double) && is_logical {
@@ -445,18 +493,18 @@ fn parse_matrix(buffer: &[u8]) -> Result<ParsedMatrix, String> {
     }
 
     let dims_elem = read_tagged(&mut cursor, false)?
-        .ok_or_else(|| "load: matrix element missing dimensions".to_string())?;
+        .ok_or_else(|| load_error("load: matrix element missing dimensions"))?;
     if dims_elem.data_type != MI_INT32 {
-        return Err("load: dimension block must use MI_INT32".to_string());
+        return Err(load_error("load: dimension block must use MI_INT32"));
     }
     if dims_elem.data.is_empty() || dims_elem.data.len() % 4 != 0 {
-        return Err("load: malformed dimension block".to_string());
+        return Err(load_error("load: malformed dimension block"));
     }
     let mut dims = Vec::with_capacity(dims_elem.data.len() / 4);
     for chunk in dims_elem.data.chunks_exact(4) {
         let value = i32::from_le_bytes(chunk.try_into().unwrap());
         if value < 0 {
-            return Err("load: negative dimensions are not supported".to_string());
+            return Err(load_error("load: negative dimensions are not supported"));
         }
         dims.push(value as usize);
     }
@@ -466,7 +514,7 @@ fn parse_matrix(buffer: &[u8]) -> Result<ParsedMatrix, String> {
     }
 
     let name_elem = read_tagged(&mut cursor, false)?
-        .ok_or_else(|| "load: matrix element missing name".to_string())?;
+        .ok_or_else(|| load_error("load: matrix element missing name"))?;
     let name = match name_elem.data_type {
         MI_INT8 | MI_UINT8 => bytes_to_string(&name_elem.data),
         MI_UINT16 => {
@@ -483,7 +531,7 @@ fn parse_matrix(buffer: &[u8]) -> Result<ParsedMatrix, String> {
             bytes.into_iter().collect()
         }
         _ => {
-            return Err("load: unsupported array name encoding".to_string());
+            return Err(load_error("load: unsupported array name encoding"));
         }
     };
 
@@ -502,11 +550,11 @@ fn parse_double_array(
     cursor: &mut Cursor<&[u8]>,
     dims: Vec<usize>,
     has_imag: bool,
-) -> Result<MatArray, String> {
+) -> BuiltinResult<MatArray> {
     let real_elem = read_tagged(cursor, false)?
-        .ok_or_else(|| "load: numeric array missing real component".to_string())?;
+        .ok_or_else(|| load_error("load: numeric array missing real component"))?;
     if real_elem.data_type != MI_DOUBLE || real_elem.data.len() % 8 != 0 {
-        return Err("load: numeric data must be stored as MI_DOUBLE".to_string());
+        return Err(load_error("load: numeric data must be stored as MI_DOUBLE"));
     }
     let mut real = Vec::with_capacity(real_elem.data.len() / 8);
     for chunk in real_elem.data.chunks_exact(8) {
@@ -515,9 +563,9 @@ fn parse_double_array(
 
     let imag = if has_imag {
         let imag_elem = read_tagged(cursor, false)?
-            .ok_or_else(|| "load: numeric array missing imaginary component".to_string())?;
+            .ok_or_else(|| load_error("load: numeric array missing imaginary component"))?;
         if imag_elem.data_type != MI_DOUBLE || imag_elem.data.len() % 8 != 0 {
-            return Err("load: imaginary component must be MI_DOUBLE".to_string());
+            return Err(load_error("load: imaginary component must be MI_DOUBLE"));
         }
         let mut imag = Vec::with_capacity(imag_elem.data.len() / 8);
         for chunk in imag_elem.data.chunks_exact(8) {
@@ -535,11 +583,11 @@ fn parse_double_array(
     })
 }
 
-fn parse_logical_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray, String> {
+fn parse_logical_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
     let elem = read_tagged(cursor, false)?
-        .ok_or_else(|| "load: logical array missing data block".to_string())?;
+        .ok_or_else(|| load_error("load: logical array missing data block"))?;
     if elem.data_type != MI_UINT8 {
-        return Err("load: logical arrays must be stored as MI_UINT8".to_string());
+        return Err(load_error("load: logical arrays must be stored as MI_UINT8"));
     }
     Ok(MatArray {
         class: MatClass::Logical,
@@ -548,14 +596,14 @@ fn parse_logical_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<M
     })
 }
 
-fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray, String> {
+fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
     let elem = read_tagged(cursor, false)?
-        .ok_or_else(|| "load: character array missing data block".to_string())?;
+        .ok_or_else(|| load_error("load: character array missing data block"))?;
     if elem.data_type != MI_UINT16 {
-        return Err("load: character data must be stored as MI_UINT16".to_string());
+        return Err(load_error("load: character data must be stored as MI_UINT16"));
     }
     if elem.data.len() % 2 != 0 {
-        return Err("load: malformed character data".to_string());
+        return Err(load_error("load: malformed character data"));
     }
     let mut data = Vec::with_capacity(elem.data.len() / 2);
     for chunk in elem.data.chunks_exact(2) {
@@ -568,7 +616,7 @@ fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatA
     })
 }
 
-fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray, String> {
+fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
     let total: usize = dims
         .iter()
         .copied()
@@ -576,9 +624,9 @@ fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatA
     let mut elements = Vec::with_capacity(total);
     for _ in 0..total {
         let elem = read_tagged(cursor, false)?
-            .ok_or_else(|| "load: cell element missing matrix payload".to_string())?;
+            .ok_or_else(|| load_error("load: cell element missing matrix payload"))?;
         if elem.data_type != MI_MATRIX {
-            return Err("load: cell elements must be matrices".to_string());
+            return Err(load_error("load: cell elements must be matrices"));
         }
         let parsed = parse_matrix(&elem.data)?;
         elements.push(parsed.array);
@@ -590,27 +638,29 @@ fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatA
     })
 }
 
-fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray, String> {
+fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
     if dims.len() != 2 || dims[0] != 1 || dims[1] != 1 {
-        return Err("load: struct arrays are not supported yet".to_string());
+        return Err(load_error("load: struct arrays are not supported yet"));
     }
     let len_elem = read_tagged(cursor, false)?
-        .ok_or_else(|| "load: struct missing maximum field length specifier".to_string())?;
+        .ok_or_else(|| load_error("load: struct missing maximum field length specifier"))?;
     if len_elem.data_type != MI_INT32 || len_elem.data.len() != 4 {
-        return Err("load: struct field length must be MI_INT32".to_string());
+        return Err(load_error("load: struct field length must be MI_INT32"));
     }
     let max_len = i32::from_le_bytes(len_elem.data[..4].try_into().unwrap());
     if max_len <= 0 {
-        return Err("load: struct field length must be positive".to_string());
+        return Err(load_error("load: struct field length must be positive"));
     }
 
     let names_elem = read_tagged(cursor, false)?
-        .ok_or_else(|| "load: struct missing field name table".to_string())?;
+        .ok_or_else(|| load_error("load: struct missing field name table"))?;
     if names_elem.data_type != MI_INT8 && names_elem.data_type != MI_UINT8 {
-        return Err("load: struct field names must be stored as MI_INT8/MI_UINT8".to_string());
+        return Err(load_error(
+            "load: struct field names must be stored as MI_INT8/MI_UINT8",
+        ));
     }
     if names_elem.data.len() % (max_len as usize) != 0 {
-        return Err("load: malformed struct field name table".to_string());
+        return Err(load_error("load: malformed struct field name table"));
     }
     let field_count = names_elem.data.len() / (max_len as usize);
     let mut field_names = Vec::with_capacity(field_count);
@@ -624,9 +674,9 @@ fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray
     let mut field_values = Vec::with_capacity(field_count);
     for _ in 0..field_count {
         let elem = read_tagged(cursor, false)?
-            .ok_or_else(|| "load: struct field missing matrix payload".to_string())?;
+            .ok_or_else(|| load_error("load: struct field missing matrix payload"))?;
         if elem.data_type != MI_MATRIX {
-            return Err("load: struct fields must be matrices".to_string());
+            return Err(load_error("load: struct fields must be matrices"));
         }
         let parsed = parse_matrix(&elem.data)?;
         field_values.push(parsed.array);
@@ -642,13 +692,15 @@ fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> Result<MatArray
     })
 }
 
-fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
+fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
     match array.data {
         MatData::Double { real, imag } => {
             let len = real.len();
             if let Some(imag) = imag {
                 if imag.len() != len {
-                    return Err("load: complex data has mismatched real/imag parts".to_string());
+                    return Err(load_error(
+                        "load: complex data has mismatched real/imag parts",
+                    ));
                 }
                 if len == 1 {
                     Ok(Value::Complex(real[0], imag[0]))
@@ -658,14 +710,14 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
                         pairs.push((real[i], imag[i]));
                     }
                     let tensor = ComplexTensor::new(pairs, array.dims.clone())
-                        .map_err(|e| format!("load: {e}"))?;
+                        .map_err(|e| load_error(format!("load: {e}")))?;
                     Ok(Value::ComplexTensor(tensor))
                 }
             } else if len == 1 {
                 Ok(Value::Num(real[0]))
             } else {
-                let tensor =
-                    Tensor::new(real, array.dims.clone()).map_err(|e| format!("load: {e}"))?;
+                let tensor = Tensor::new(real, array.dims.clone())
+                    .map_err(|e| load_error(format!("load: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
         }
@@ -682,7 +734,7 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
                 Ok(Value::Bool(data.first().copied().unwrap_or(0) != 0))
             } else {
                 let logical = LogicalArray::new(data, array.dims.clone())
-                    .map_err(|e| format!("load: {e}"))?;
+                    .map_err(|e| load_error(format!("load: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
         }
@@ -694,26 +746,26 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
                 let ch = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
                 chars.push(ch);
             }
-            let char_array = CharArray::new(chars, rows, cols).map_err(|e| format!("load: {e}"))?;
+            let char_array = CharArray::new(chars, rows, cols)
+                .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }
         MatData::Cell { elements } => {
             if let Some(strings) = cell_elements_to_strings(&elements) {
                 let string_array = StringArray::new(strings, array.dims.clone())
-                    .map_err(|e| format!("load: {e}"))?;
+                    .map_err(|e| load_error(format!("load: {e}")))?;
                 return Ok(Value::StringArray(string_array));
             }
             if array.dims.len() != 2 {
-                return Err(
-                    "load: cell arrays with more than two dimensions are not supported yet"
-                        .to_string(),
-                );
+                return Err(load_error(
+                    "load: cell arrays with more than two dimensions are not supported yet",
+                ));
             }
             let rows = array.dims[0];
             let cols = array.dims[1];
             let expected = rows.saturating_mul(cols);
             if elements.len() != expected {
-                return Err("load: cell array element count mismatch".to_string());
+                return Err(load_error("load: cell array element count mismatch"));
             }
             let mut converted = Vec::with_capacity(elements.len());
             for elem in elements {
@@ -728,13 +780,14 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
                 }
             }
             make_cell(row_major, rows, cols)
+                .map_err(|err| load_error(format!("load: {err}")))
         }
         MatData::Struct {
             field_names,
             field_values,
         } => {
             if field_names.len() != field_values.len() {
-                return Err("load: struct field metadata is inconsistent".to_string());
+                return Err(load_error("load: struct field metadata is inconsistent"));
             }
             let mut st = StructValue::new();
             for (name, value) in field_names.into_iter().zip(field_values.into_iter()) {
@@ -775,7 +828,7 @@ fn utf16_codes_to_string(data: &[u16]) -> String {
     chars.into_iter().collect()
 }
 
-fn option_token(value: &Value) -> Result<Option<String>, String> {
+fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     if let Some(token) = value_to_string_scalar(value) {
         if token.starts_with('-') {
             return Ok(Some(token.to_ascii_lowercase()));
@@ -784,7 +837,7 @@ fn option_token(value: &Value) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-fn extract_names(value: &Value) -> Result<Vec<String>, String> {
+fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
@@ -794,17 +847,16 @@ fn extract_names(value: &Value) -> Result<Vec<String>, String> {
             for handle in &ca.data {
                 let inner = unsafe { &*handle.as_raw() };
                 let text = value_to_string_scalar(inner).ok_or_else(|| {
-                    "load: cell arrays used for variable selection must contain string scalars"
-                        .to_string()
+                    load_error(
+                        "load: cell arrays used for variable selection must contain string scalars",
+                    )
                 })?;
                 names.push(text);
             }
             Ok(names)
         }
         other => {
-            let gathered =
-                gather_if_needed(other)
-                    .map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
+            let gathered = gather_if_needed(other)?;
             extract_names(&gathered)
         }
     }
@@ -847,7 +899,7 @@ struct TaggedData {
     data: Vec<u8>,
 }
 
-fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> Result<Option<TaggedData>, String> {
+fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option<TaggedData>> {
     let mut type_bytes = [0u8; 4];
     match reader.read_exact(&mut type_bytes) {
         Ok(()) => {}
@@ -855,7 +907,10 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> Result<Option<Tagged
             if allow_eof && err.kind() == std::io::ErrorKind::UnexpectedEof {
                 return Ok(None);
             }
-            return Err(format!("load: failed to read MAT element header: {err}"));
+            return Err(load_error_with_source(
+                format!("load: failed to read MAT element header: {err}"),
+                err,
+            ));
         }
     }
 
@@ -864,28 +919,40 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> Result<Option<Tagged
         let data_type = type_field & 0x0000FFFF;
         let num_bytes = ((type_field & 0xFFFF0000) >> 16) as usize;
         let mut inline = [0u8; 4];
-        reader
-            .read_exact(&mut inline)
-            .map_err(|err| format!("load: failed to read compact MAT element: {err}"))?;
+        reader.read_exact(&mut inline).map_err(|err| {
+            load_error_with_source(
+                format!("load: failed to read compact MAT element: {err}"),
+                err,
+            )
+        })?;
         let mut data = inline[..num_bytes.min(4)].to_vec();
         data.truncate(num_bytes.min(4));
         Ok(Some(TaggedData { data_type, data }))
     } else {
         let mut len_bytes = [0u8; 4];
-        reader
-            .read_exact(&mut len_bytes)
-            .map_err(|err| format!("load: failed to read MAT element length: {err}"))?;
+        reader.read_exact(&mut len_bytes).map_err(|err| {
+            load_error_with_source(
+                format!("load: failed to read MAT element length: {err}"),
+                err,
+            )
+        })?;
         let length = u32::from_le_bytes(len_bytes) as usize;
         let mut data = vec![0u8; length];
-        reader
-            .read_exact(&mut data)
-            .map_err(|err| format!("load: failed to read MAT element body: {err}"))?;
+        reader.read_exact(&mut data).map_err(|err| {
+            load_error_with_source(
+                format!("load: failed to read MAT element body: {err}"),
+                err,
+            )
+        })?;
         let padding = (8 - (length % 8)) % 8;
         if padding != 0 {
             let mut pad = vec![0u8; padding];
-            reader
-                .read_exact(&mut pad)
-                .map_err(|err| format!("load: failed to read MAT padding: {err}"))?;
+            reader.read_exact(&mut pad).map_err(|err| {
+                load_error_with_source(
+                    format!("load: failed to read MAT padding: {err}"),
+                    err,
+                )
+            })?;
         }
         Ok(Some(TaggedData {
             data_type: type_field,
@@ -933,6 +1000,22 @@ pub(crate) mod tests {
                 map.insert((*name).to_string(), value.clone());
             }
         });
+    }
+
+    fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
+        match result {
+            Err(crate::RuntimeControlFlow::Error(err)) => {
+                assert!(
+                    err.message().contains(snippet),
+                    "expected error to contain '{snippet}', got '{}'",
+                    err.message()
+                );
+            }
+            Err(crate::RuntimeControlFlow::Suspend(_)) => {
+                panic!("unexpected suspension while expecting error")
+            }
+            Ok(_) => panic!("expected error containing '{snippet}'"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1021,12 +1104,13 @@ pub(crate) mod tests {
         let save_arg = Value::from(path.to_string_lossy().to_string());
         crate::call_builtin("save", std::slice::from_ref(&save_arg)).unwrap();
 
-        let err = evaluate(&[
-            Value::from(path.to_string_lossy().to_string()),
-            Value::from("missing"),
-        ])
-        .expect_err("expect missing variable error");
-        assert!(err.contains("variable 'missing' was not found"));
+        assert_error_contains(
+            evaluate(&[
+                Value::from(path.to_string_lossy().to_string()),
+                Value::from("missing"),
+            ]),
+            "variable 'missing' was not found",
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

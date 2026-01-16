@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -223,6 +224,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Requires provider min/max reductions plus elem_sub; omitnan and multi-axis reductions gather to host when hooks are absent.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("range").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
@@ -245,8 +250,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (range_gpu(handle, dim_selection, nan_mode)).map_err(Into::into),
-        other => (range_host(other, dim_selection, nan_mode)).map_err(Into::into),
+        Value::GpuTensor(handle) => range_gpu(handle, dim_selection, nan_mode),
+        other => range_host(other, dim_selection, nan_mode),
     }
 }
 
@@ -271,7 +276,7 @@ struct ResolvedDims {
     dims_out_of_bounds: Vec<usize>,
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(DimSelection, NanMode), String> {
+fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMode)> {
     let mut selection = DimSelection::Auto;
     let mut nan_mode = NanMode::Include;
     let mut selection_set = false;
@@ -284,9 +289,9 @@ fn parse_arguments(args: &[Value]) -> Result<(DimSelection, NanMode), String> {
 
         if is_all_flag(arg)? {
             if selection_set && !matches!(selection, DimSelection::Auto) {
-                return Err(
-                    "range: 'all' cannot be combined with an explicit dimension".to_string()
-                );
+                return Err(builtin_error(
+                    "range: 'all' cannot be combined with an explicit dimension",
+                ));
             }
             selection = DimSelection::All;
             selection_set = true;
@@ -294,7 +299,7 @@ fn parse_arguments(args: &[Value]) -> Result<(DimSelection, NanMode), String> {
         }
 
         if selection_set && !matches!(selection, DimSelection::Auto) {
-            return Err("range: too many dimension arguments".to_string());
+            return Err(builtin_error("range: too many dimension arguments"));
         }
 
         selection = parse_dim_spec(arg)?;
@@ -304,7 +309,7 @@ fn parse_arguments(args: &[Value]) -> Result<(DimSelection, NanMode), String> {
     Ok((selection, nan_mode))
 }
 
-fn parse_nan_flag(value: &Value) -> Result<Option<NanMode>, String> {
+fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
     let text = match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
@@ -322,7 +327,7 @@ fn parse_nan_flag(value: &Value) -> Result<Option<NanMode>, String> {
     }
 }
 
-fn is_all_flag(value: &Value) -> Result<bool, String> {
+fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
     let text = match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
@@ -334,61 +339,64 @@ fn is_all_flag(value: &Value) -> Result<bool, String> {
         .unwrap_or(false))
 }
 
-fn parse_dim_spec(value: &Value) -> Result<DimSelection, String> {
+fn parse_dim_spec(value: &Value) -> crate::BuiltinResult<DimSelection> {
     match value {
         Value::Int(i) => {
             let dim = i.to_i64();
             if dim < 1 {
-                return Err("range: dimension must be >= 1".to_string());
+                return Err(builtin_error("range: dimension must be >= 1"));
             }
             Ok(DimSelection::Dim(dim as usize))
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("range: dimension must be finite".to_string());
+                return Err(builtin_error("range: dimension must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("range: dimension must be an integer".to_string());
+                return Err(builtin_error("range: dimension must be an integer"));
             }
             if rounded < 1.0 {
-                return Err("range: dimension must be >= 1".to_string());
+                return Err(builtin_error("range: dimension must be >= 1"));
             }
             Ok(DimSelection::Dim(rounded as usize))
         }
         Value::Tensor(t) => parse_dim_tensor(t),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor =
+                tensor::logical_to_tensor(logical).map_err(|e| builtin_error(format!("range: {e}")))?;
             parse_dim_tensor(&tensor)
         }
-        Value::GpuTensor(_) => Err(
-            "range: dimension arguments must reside on the host (numeric or string)".to_string(),
-        ),
-        other => Err(format!(
+        Value::GpuTensor(_) => Err(builtin_error(
+            "range: dimension arguments must reside on the host (numeric or string)",
+        )),
+        other => Err(builtin_error(format!(
             "range: unsupported dimension argument type {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn parse_dim_tensor(tensor: &Tensor) -> Result<DimSelection, String> {
+fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
     if tensor.data.is_empty() {
         return Ok(DimSelection::Auto);
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err("range: dimension vector must be a row or column vector".to_string());
+        return Err(builtin_error(
+            "range: dimension vector must be a row or column vector",
+        ));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
         if !value.is_finite() {
-            return Err("range: dimensions must be finite".to_string());
+            return Err(builtin_error("range: dimensions must be finite"));
         }
         let rounded = value.round();
         if (rounded - value).abs() > f64::EPSILON {
-            return Err("range: dimensions must contain integers".to_string());
+            return Err(builtin_error("range: dimensions must contain integers"));
         }
         if rounded < 1.0 {
-            return Err("range: dimension indices must be >= 1".to_string());
+            return Err(builtin_error("range: dimension indices must be >= 1"));
         }
         dims.push(rounded as usize);
     }
@@ -404,8 +412,9 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn range_host(value: Value, selection: DimSelection, nan_mode: NanMode) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("range", value)?;
+fn range_host(value: Value, selection: DimSelection, nan_mode: NanMode) -> crate::BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("range", value)
+        .map_err(|e| builtin_error(format!("range: {e}")))?;
     let resolved = resolve_dims(&tensor.shape, &selection)?;
     let result = compute_range_tensor(&tensor, &resolved, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
@@ -415,7 +424,7 @@ fn range_gpu(
     handle: GpuTensorHandle,
     selection: DimSelection,
     nan_mode: NanMode,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if matches!(nan_mode, NanMode::Omit) {
         return range_gpu_fallback(&handle, selection, nan_mode);
     }
@@ -573,12 +582,12 @@ fn range_gpu_fallback(
     handle: &GpuTensorHandle,
     selection: DimSelection,
     nan_mode: NanMode,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor(handle)?;
     range_host(Value::Tensor(tensor), selection, nan_mode)
 }
 
-fn resolve_dims(shape: &[usize], selection: &DimSelection) -> Result<ResolvedDims, String> {
+fn resolve_dims(shape: &[usize], selection: &DimSelection) -> crate::BuiltinResult<ResolvedDims> {
     let dims_1_based: Vec<usize> = match selection {
         DimSelection::Auto => vec![default_dimension_from_shape(shape)],
         DimSelection::Dim(d) => vec![*d],
@@ -602,7 +611,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> Result<ResolvedDim
 
     for dim1 in dims_1_based {
         if dim1 == 0 {
-            return Err("range: dimension indices must be >= 1".to_string());
+            return Err(builtin_error("range: dimension indices must be >= 1"));
         }
         if !seen.insert(dim1) {
             continue;
@@ -628,7 +637,7 @@ fn compute_range_tensor(
     tensor: &Tensor,
     dims: &ResolvedDims,
     nan_mode: NanMode,
-) -> Result<Tensor, String> {
+) -> crate::BuiltinResult<Tensor> {
     let mut shape = tensor.shape.clone();
     if shape.is_empty() {
         shape = vec![tensor.rows, tensor.cols];
@@ -644,7 +653,7 @@ fn compute_range_tensor(
                 output.push(0.0);
             }
         }
-        return Tensor::new(output, output_shape).map_err(|e| format!("range: {e}"));
+        return Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")));
     }
 
     let mut output_shape = shape.clone();
@@ -656,7 +665,7 @@ fn compute_range_tensor(
 
     let out_len = tensor::element_count(&output_shape);
     if out_len == 0 {
-        return Tensor::new(vec![], output_shape).map_err(|e| format!("range: {e}"));
+        return Tensor::new(vec![], output_shape).map_err(|e| builtin_error(format!("range: {e}")));
     }
 
     let mut mins = vec![f64::INFINITY; out_len];
@@ -711,7 +720,7 @@ fn compute_range_tensor(
         }
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("range: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")))
 }
 
 fn linear_to_multi(index: usize, shape: &[usize], out: &mut [usize]) {

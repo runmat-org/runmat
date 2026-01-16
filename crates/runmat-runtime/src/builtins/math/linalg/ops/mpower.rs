@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -17,6 +18,8 @@ use crate::builtins::common::tensor;
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+const NAME: &str = "mpower";
+
 pub const DOC_MD: &str = r#"---
 title: "mpower"
 category: "math/linalg/ops"
@@ -183,6 +186,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses repeated provider matmul calls via binary exponentiation; falls back to the host implementation when matmul or identity creation is unavailable.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::mpower")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mpower",
@@ -202,18 +231,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
-fn mpower_builtin(base: Value, exponent: Value) -> crate::BuiltinResult<Value> {
-    mpower_eval(&base, &exponent).map_err(Into::into)
+fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
+    mpower_eval(&base, &exponent)
 }
 
-pub(crate) fn mpower_eval(base: &Value, exponent: &Value) -> Result<Value, String> {
+pub(crate) fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
     if let Some(result) = try_gpu_mpower(base, exponent)? {
         return Ok(result);
     }
 
-    let base_host = crate::dispatcher::gather_if_needed(base)?;
-    let exponent_host = crate::dispatcher::gather_if_needed(exponent)?;
-    let result = crate::elementwise::power(&base_host, &exponent_host)?;
+    let base_host = crate::dispatcher::gather_if_needed(base).map_err(map_control_flow)?;
+    let exponent_host = crate::dispatcher::gather_if_needed(exponent).map_err(map_control_flow)?;
+    let result = crate::elementwise::power(&base_host, &exponent_host).map_err(builtin_error)?;
 
     if matches!(base, Value::GpuTensor(_)) {
         if let Value::Tensor(tensor) = result {
@@ -233,7 +262,7 @@ pub(crate) fn mpower_eval(base: &Value, exponent: &Value) -> Result<Value, Strin
     Ok(result)
 }
 
-fn try_gpu_mpower(base: &Value, exponent: &Value) -> Result<Option<Value>, String> {
+fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<Value>> {
     // Only attempt a GPU path when the base already resides on the GPU.
     let handle = match base {
         Value::GpuTensor(handle) => handle,
@@ -251,7 +280,7 @@ fn try_gpu_mpower(base: &Value, exponent: &Value) -> Result<Option<Value>, Strin
     };
 
     if exponent_value < 0 {
-        return Err("Negative matrix powers not supported yet".to_string());
+        return Err(builtin_error("Negative matrix powers not supported yet"));
     }
     let shape = handle.shape.clone();
     if shape.len() != 2 {
@@ -260,10 +289,10 @@ fn try_gpu_mpower(base: &Value, exponent: &Value) -> Result<Option<Value>, Strin
     let rows = shape[0];
     let cols = shape[1];
     if rows != cols {
-        return Err(format!(
+        return Err(builtin_error(format!(
             "Matrix must be square for matrix power: {}x{}",
             rows, cols
-        ));
+        )));
     }
 
     if exponent_value == 0 {
@@ -285,7 +314,7 @@ fn gpu_identity_like(
     provider: &'static dyn AccelProvider,
     prototype: &GpuTensorHandle,
     size: usize,
-) -> Result<Option<GpuTensorHandle>, String> {
+) -> BuiltinResult<Option<GpuTensorHandle>> {
     match provider.eye_like(prototype) {
         Ok(handle) => Ok(Some(handle)),
         Err(_) => {
@@ -306,7 +335,7 @@ fn gpu_binary_exponentiation(
     provider: &'static dyn AccelProvider,
     base: &GpuTensorHandle,
     exponent: u32,
-) -> Result<Option<Value>, String> {
+) -> BuiltinResult<Option<Value>> {
     let mut exp = exponent;
     let mut base_state = HandleState::borrowed(base);
     let mut result_state: Option<HandleState> = None;
@@ -374,24 +403,24 @@ fn gpu_binary_exponentiation(
     Ok(Some(Value::GpuTensor(result_state.handle)))
 }
 
-fn parse_integer_exponent(value: &Value) -> Result<Option<i32>, String> {
+fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
                 return Err(
-                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)".to_string(),
+                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
                 );
             }
             Ok(Some(raw as i32))
         }
         Value::Num(n) => {
             if !n.is_finite() || n.fract() != 0.0 {
-                return Err("Matrix power requires integer exponent".to_string());
+                return Err(builtin_error("Matrix power requires integer exponent"));
             }
             if *n > i32::MAX as f64 || *n < i32::MIN as f64 {
                 return Err(
-                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)".to_string(),
+                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
                 );
             }
             Ok(Some(*n as i32))
@@ -399,11 +428,11 @@ fn parse_integer_exponent(value: &Value) -> Result<Option<i32>, String> {
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             let scalar = t.data[0];
             if scalar.fract() != 0.0 || !scalar.is_finite() {
-                return Err("Matrix power requires integer exponent".to_string());
+                return Err(builtin_error("Matrix power requires integer exponent"));
             }
             if scalar > i32::MAX as f64 || scalar < i32::MIN as f64 {
                 return Err(
-                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)".to_string(),
+                    builtin_error("mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)"),
                 );
             }
             Ok(Some(scalar as i32))
@@ -431,7 +460,15 @@ impl HandleState {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -476,9 +513,11 @@ pub(crate) mod tests {
     #[test]
     fn non_integer_exponent_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = mpower_builtin(Value::Tensor(matrix), Value::Num(1.5)).unwrap_err();
+        let err = unwrap_error(
+            mpower_builtin(Value::Tensor(matrix), Value::Num(1.5)).unwrap_err(),
+        );
         assert!(
-            err.contains("Matrix power requires integer exponent"),
+            err.message().contains("Matrix power requires integer exponent"),
             "{err}"
         );
     }
@@ -487,9 +526,12 @@ pub(crate) mod tests {
     #[test]
     fn negative_exponent_errors() {
         let matrix = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let err = mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(-1))).unwrap_err();
+        let err = unwrap_error(
+            mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(-1))).unwrap_err(),
+        );
         assert!(
-            err.contains("Negative matrix powers not supported yet"),
+            err.message()
+                .contains("Negative matrix powers not supported yet"),
             "{err}"
         );
     }
@@ -498,9 +540,12 @@ pub(crate) mod tests {
     #[test]
     fn non_square_matrix_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let err = mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(2))).unwrap_err();
+        let err = unwrap_error(
+            mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(2))).unwrap_err(),
+        );
         assert!(
-            err.contains("Matrix must be square for matrix power"),
+            err.message()
+                .contains("Matrix must be square for matrix power"),
             "{err}"
         );
     }

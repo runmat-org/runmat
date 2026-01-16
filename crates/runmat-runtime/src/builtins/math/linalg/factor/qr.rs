@@ -5,12 +5,15 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
+
+const BUILTIN_NAME: &str = "qr";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -155,6 +158,25 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
+fn qr_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn with_qr_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Error(mut error) => {
+            if error.context.builtin.is_none() {
+                error.context = error.context.with_builtin(BUILTIN_NAME);
+            }
+            RuntimeControlFlow::Error(error)
+        }
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "qr",
@@ -246,14 +268,14 @@ struct QrOptions {
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
-pub fn evaluate(value: Value, args: &[Value]) -> Result<QrEval, String> {
+pub fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, &options)? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_qr_context)?;
             let prefer_gpu = runmat_accelerate_api::provider().is_some();
             evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu)
         }
@@ -261,7 +283,7 @@ pub fn evaluate(value: Value, args: &[Value]) -> Result<QrEval, String> {
     }
 }
 
-fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<QrEval>, String> {
+fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> BuiltinResult<Option<QrEval>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -318,15 +340,15 @@ fn evaluate_host_value(
     value: Value,
     options: QrOptions,
     prefer_gpu: bool,
-) -> Result<QrEval, String> {
+) -> BuiltinResult<QrEval> {
     let matrix = extract_matrix(value)?;
     let components = qr_factor(matrix)?;
     assemble_eval(components, options, prefer_gpu)
 }
 
-fn parse_options(args: &[Value]) -> Result<QrOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     if args.len() > 2 {
-        return Err("qr: too many option arguments".to_string());
+        return Err(qr_error("qr: too many option arguments"));
     }
     let mut opts = QrOptions::default();
     for arg in args {
@@ -348,11 +370,11 @@ fn parse_options(args: &[Value]) -> Result<QrOptions, String> {
                 opts.pivot = PivotMode::Matrix;
                 continue;
             }
-            return Err(format!("qr: unknown option '{text}'"));
+            return Err(qr_error(format!("qr: unknown option '{text}'")));
         }
-        return Err(
-            "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')".to_string(),
-        );
+        return Err(qr_error(
+            "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')",
+        ));
     }
     Ok(opts)
 }
@@ -388,15 +410,14 @@ fn is_zero_scalar(value: &Value) -> bool {
     }
 }
 
-fn extract_matrix(value: Value) -> Result<ColMajorMatrix, String> {
+fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
     match value {
-        Value::Tensor(t) => ColMajorMatrix::from_tensor(&t).map_err(|e| format!("qr: {e}")),
-        Value::ComplexTensor(ct) => {
-            ColMajorMatrix::from_complex_tensor(&ct).map_err(|e| format!("qr: {e}"))
-        }
+        Value::Tensor(t) => ColMajorMatrix::from_tensor(&t),
+        Value::ComplexTensor(ct) => ColMajorMatrix::from_complex_tensor(&ct),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            ColMajorMatrix::from_tensor(&tensor).map_err(|e| format!("qr: {e}"))
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| qr_error(format!("qr: {err}")))?;
+            ColMajorMatrix::from_tensor(&tensor)
         }
         Value::Num(n) => Ok(ColMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
         Value::Int(i) => Ok(ColMajorMatrix::from_scalar(Complex64::new(i.to_f64(), 0.0))),
@@ -405,13 +426,13 @@ fn extract_matrix(value: Value) -> Result<ColMajorMatrix, String> {
             0.0,
         ))),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            ColMajorMatrix::from_tensor(&tensor).map_err(|e| format!("qr: {e}"))
+            let tensor = gpu_helpers::gather_tensor(&handle).map_err(with_qr_context)?;
+            ColMajorMatrix::from_tensor(&tensor)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("qr: expected a numeric matrix".to_string())
+            Err(qr_error("qr: expected a numeric matrix"))
         }
-        other => Err(format!("qr: unsupported input type {other:?}")),
+        other => Err(qr_error(format!("qr: unsupported input type {other:?}"))),
     }
 }
 
@@ -419,7 +440,7 @@ fn assemble_eval(
     components: QrComponents,
     options: QrOptions,
     prefer_gpu: bool,
-) -> Result<QrEval, String> {
+) -> BuiltinResult<QrEval> {
     let rows = components.reflectors.rows;
     let cols = components.reflectors.cols;
     let mut q_full = build_q(&components.reflectors, &components.taus);
@@ -467,12 +488,13 @@ fn assemble_eval(
     })
 }
 
-fn pivot_vector_to_value(pivot: &[usize]) -> Result<Value, String> {
+fn pivot_vector_to_value(pivot: &[usize]) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(pivot.len());
     for &idx in pivot {
         data.push((idx + 1) as f64);
     }
-    let tensor = Tensor::new(data, vec![pivot.len(), 1]).map_err(|e| format!("qr: {e}"))?;
+    let tensor = Tensor::new(data, vec![pivot.len(), 1])
+        .map_err(|e| qr_error(format!("qr: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -490,7 +512,7 @@ fn matrix_to_value(
     matrix: &ColMajorMatrix,
     label: &str,
     prefer_gpu: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let value = matrix.to_value(label)?;
     Ok(maybe_upload_value(value, prefer_gpu))
 }
@@ -522,7 +544,7 @@ struct QrComponents {
     permutation: Vec<usize>,
 }
 
-fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
+fn qr_factor(mut matrix: ColMajorMatrix) -> BuiltinResult<QrComponents> {
     let rows = matrix.rows;
     let cols = matrix.cols;
     let min_dim = rows.min(cols);
@@ -741,9 +763,9 @@ impl ColMajorMatrix {
         }
     }
 
-    fn from_tensor(tensor: &Tensor) -> Result<Self, String> {
+    fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("input must be 2-D".to_string());
+            return Err(qr_error("qr: input must be 2-D"));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -757,9 +779,9 @@ impl ColMajorMatrix {
         Ok(Self { rows, cols, data })
     }
 
-    fn from_complex_tensor(tensor: &ComplexTensor) -> Result<Self, String> {
+    fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err("input must be 2-D".to_string());
+            return Err(qr_error("qr: input must be 2-D"));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -772,6 +794,31 @@ impl ColMajorMatrix {
             }
         }
         Ok(Self { rows, cols, data })
+    }
+
+    fn to_value(&self, label: &str) -> BuiltinResult<Value> {
+        if self.data.iter().all(|z| z.im.abs() <= EPS_CLEAN) {
+            let mut real_data = Vec::with_capacity(self.rows * self.cols);
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    real_data.push(self.get(row, col).re);
+                }
+            }
+            let tensor = Tensor::new(real_data, vec![self.rows, self.cols])
+                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+            Ok(Value::Tensor(tensor))
+        } else {
+            let mut complex_data = Vec::with_capacity(self.rows * self.cols);
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    let val = self.get(row, col);
+                    complex_data.push((val.re, val.im));
+                }
+            }
+            let tensor = ComplexTensor::new(complex_data, vec![self.rows, self.cols])
+                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+            Ok(Value::ComplexTensor(tensor))
+        }
     }
 
     fn get(&self, row: usize, col: usize) -> Complex64 {
@@ -798,31 +845,6 @@ impl ColMajorMatrix {
         let offset = start_row + col * self.rows;
         let len = self.rows.saturating_sub(start_row);
         &mut self.data[offset..offset.saturating_add(len)]
-    }
-
-    fn to_value(&self, label: &str) -> Result<Value, String> {
-        if self.data.iter().all(|z| z.im.abs() <= EPS_CLEAN) {
-            let mut real_data = Vec::with_capacity(self.rows * self.cols);
-            for col in 0..self.cols {
-                for row in 0..self.rows {
-                    real_data.push(self.get(row, col).re);
-                }
-            }
-            let tensor = Tensor::new(real_data, vec![self.rows, self.cols])
-                .map_err(|e| format!("{label}: {e}"))?;
-            Ok(Value::Tensor(tensor))
-        } else {
-            let mut complex_data = Vec::with_capacity(self.rows * self.cols);
-            for col in 0..self.cols {
-                for row in 0..self.rows {
-                    let val = self.get(row, col);
-                    complex_data.push((val.re, val.im));
-                }
-            }
-            let tensor = ComplexTensor::new(complex_data, vec![self.rows, self.cols])
-                .map_err(|e| format!("{label}: {e}"))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
     }
 
     fn take_columns(&self, count: usize) -> ColMajorMatrix {

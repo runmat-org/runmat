@@ -4,6 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -220,6 +221,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that executes outside of fusion pipelines.",
 };
 
+const BUILTIN_NAME: &str = "islogical";
+const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
+
 #[runtime_builtin(
     name = "islogical",
     category = "logical/tests",
@@ -228,14 +232,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::islogical"
 )]
-fn islogical_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (islogical_gpu(handle)).map_err(Into::into),
-        other => (islogical_host(other)).map_err(Into::into),
+        Value::GpuTensor(handle) => islogical_gpu(handle),
+        other => islogical_host(other),
     }
 }
 
-fn islogical_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {
             return Ok(Value::Bool(flag));
@@ -247,18 +251,27 @@ fn islogical_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     }
 
     let gpu_value = Value::GpuTensor(handle.clone());
-    let gathered = gpu_helpers::gather_value(&gpu_value)?;
+    let gathered = gpu_helpers::gather_value(&gpu_value)
+        .map_err(|err| internal_error(format!("islogical: {err}")))?;
     islogical_host(gathered)
 }
 
-fn islogical_host(value: Value) -> Result<Value, String> {
+fn islogical_host(value: Value) -> BuiltinResult<Value> {
     let flag = matches!(value, Value::Bool(_) | Value::LogicalArray(_));
     match value {
-        Value::GpuTensor(_) => {
-            Err("islogical: internal error, GPU value reached host path".to_string())
-        }
+        Value::GpuTensor(_) => Err(internal_error(
+            "islogical: internal error, GPU value reached host path",
+        )),
         _ => Ok(Value::Bool(flag)),
     }
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
 }
 
 #[cfg(test)]

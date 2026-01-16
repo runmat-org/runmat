@@ -8,7 +8,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
+};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -215,6 +217,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Partitioning into cells terminates fusion; blocks are produced on the host.",
 };
 
+const IDENT_INVALID_INPUT: &str = "MATLAB:mat2cell:InvalidInput";
+const IDENT_INVALID_PARTITION: &str = "MATLAB:mat2cell:InvalidPartition";
+const IDENT_SIZE_LIMIT: &str = "MATLAB:mat2cell:SizeExceeded";
+
+fn mat2cell_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("mat2cell")
+        .build()
+        .into()
+}
+
+fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("mat2cell")
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "mat2cell",
     category = "cells/core",
@@ -224,19 +245,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err((("mat2cell: expected at least one size vector".to_string())).into());
+        return Err(mat2cell_error_with_identifier(
+            "mat2cell: expected at least one size vector",
+            IDENT_INVALID_INPUT,
+        ));
     }
 
-    let host_value = gather_if_needed(&value).map_err(|e| format!("mat2cell: {e}"))?;
+    let host_value = gather_if_needed(&value)?;
     let mut size_args = Vec::with_capacity(rest.len());
     for arg in rest {
-        let gathered = gather_if_needed(&arg).map_err(|e| format!("mat2cell: {e}"))?;
+        let gathered = gather_if_needed(&arg)?;
         size_args.push(gathered);
     }
 
     let input = Mat2CellInput::try_new(host_value)?;
     let partitions = parse_partitions(input.normalized_dims(), &size_args)?;
-    split_into_cells(&input, partitions).map_err(Into::into)
+    split_into_cells(&input, partitions)
 }
 
 #[derive(Debug)]
@@ -255,7 +279,7 @@ struct Mat2CellInput {
 }
 
 impl Mat2CellInput {
-    fn try_new(value: Value) -> Result<Self, String> {
+    fn try_new(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => {
                 let base_shape = adapt_numeric_shape(&t.shape);
@@ -286,7 +310,7 @@ impl Mat2CellInput {
             }
             Value::String(s) => {
                 let array =
-                    StringArray::new(vec![s], vec![1, 1]).map_err(|e| format!("mat2cell: {e}"))?;
+                    StringArray::new(vec![s], vec![1, 1]).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                 let base_shape = vec![1, 1];
                 let normalized_dims = normalize_dims(&base_shape);
                 Ok(Self {
@@ -319,26 +343,29 @@ impl Mat2CellInput {
             }
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| format!("mat2cell: {e}"))?;
+                    .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                 Self::try_new(Value::ComplexTensor(tensor))
             }
             Value::Num(n) => {
-                let tensor =
-                    tensor::value_into_tensor_for("mat2cell", Value::Num(n))?;
+                let tensor = tensor::value_into_tensor_for("mat2cell", Value::Num(n))
+                    .map_err(mat2cell_error)?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
             Value::Int(i) => {
-                let tensor =
-                    tensor::value_into_tensor_for("mat2cell", Value::Int(i.clone()))?;
+                let tensor = tensor::value_into_tensor_for("mat2cell", Value::Int(i.clone()))
+                    .map_err(mat2cell_error)?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
             Value::Bool(b) => {
-                let tensor =
-                    tensor::value_into_tensor_for("mat2cell", Value::Bool(b))?;
+                let tensor = tensor::value_into_tensor_for("mat2cell", Value::Bool(b))
+                    .map_err(mat2cell_error)?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
-            other => Err(format!(
-                "mat2cell: unsupported input type {other:?}; expected numeric, logical, string, or char arrays"
+            other => Err(mat2cell_error_with_identifier(
+                format!(
+                    "mat2cell: unsupported input type {other:?}; expected numeric, logical, string, or char arrays"
+                ),
+                IDENT_INVALID_INPUT,
             )),
         }
     }
@@ -347,12 +374,12 @@ impl Mat2CellInput {
         &self.normalized_dims
     }
 
-    fn extract(&self, start: &[usize], sizes: &[usize]) -> Result<Value, String> {
+    fn extract(&self, start: &[usize], sizes: &[usize]) -> BuiltinResult<Value> {
         match &self.kind {
             Mat2CellKind::Tensor(t) => {
                 let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
-                let tensor = Tensor::new(data, shape).map_err(|e| format!("mat2cell: {e}"))?;
+                let tensor = Tensor::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
@@ -363,7 +390,7 @@ impl Mat2CellInput {
                     Ok(Value::Complex(re, im))
                 } else {
                     let tensor =
-                        ComplexTensor::new(data, shape).map_err(|e| format!("mat2cell: {e}"))?;
+                        ComplexTensor::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::ComplexTensor(tensor))
                 }
             }
@@ -374,7 +401,7 @@ impl Mat2CellInput {
                 } else {
                     let shape = adjust_output_shape(sizes);
                     let logical =
-                        LogicalArray::new(data, shape).map_err(|e| format!("mat2cell: {e}"))?;
+                        LogicalArray::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::LogicalArray(logical))
                 }
             }
@@ -385,7 +412,7 @@ impl Mat2CellInput {
                 } else {
                     let shape = adjust_output_shape(sizes);
                     let strings =
-                        StringArray::new(data, shape).map_err(|e| format!("mat2cell: {e}"))?;
+                        StringArray::new(data, shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
                     Ok(Value::StringArray(strings))
                 }
             }
@@ -394,7 +421,7 @@ impl Mat2CellInput {
     }
 }
 
-fn parse_partitions(dims: &[usize], size_args: &[Value]) -> Result<Vec<Vec<usize>>, String> {
+fn parse_partitions(dims: &[usize], size_args: &[Value]) -> BuiltinResult<Vec<Vec<usize>>> {
     let mut dim_sizes = dims.to_vec();
     let target = dim_sizes.len().max(size_args.len());
     if dim_sizes.len() < target {
@@ -412,7 +439,7 @@ fn parse_partitions(dims: &[usize], size_args: &[Value]) -> Result<Vec<Vec<usize
     Ok(partitions)
 }
 
-fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Result<Value, String> {
+fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> BuiltinResult<Value> {
     let mut per_dim_counts: Vec<usize> = partitions.iter().map(|p| p.len()).collect();
     if per_dim_counts.is_empty() {
         per_dim_counts = vec![1, 1];
@@ -422,7 +449,7 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Resul
 
     if total_cells == 0 || partitions.iter().any(|p| p.is_empty()) {
         return make_cell_with_shape(Vec::new(), normalized_shape)
-            .map_err(|e| format!("mat2cell: {e}"));
+            .map_err(|e| mat2cell_error(format!("mat2cell: {e}")));
     }
 
     let offsets: Vec<Vec<usize>> = partitions.iter().map(|part| prefix_sums(part)).collect();
@@ -456,18 +483,21 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Resul
         }
     }
 
-    make_cell_with_shape(cells, normalized_shape).map_err(|e| format!("mat2cell: {e}"))
+    make_cell_with_shape(cells, normalized_shape).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))
 }
 
 fn parse_partition_vector(
     value: &Value,
     dim_size: usize,
     dim_index: usize,
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     let numbers = extract_numeric_vector(value).ok_or_else(|| {
-        format!(
-            "mat2cell: size arguments must be numeric for dimension {}",
-            dim_index
+        mat2cell_error_with_identifier(
+            format!(
+                "mat2cell: size arguments must be numeric for dimension {}",
+                dim_index
+            ),
+            IDENT_INVALID_PARTITION,
         )
     })?;
 
@@ -475,9 +505,12 @@ fn parse_partition_vector(
         if dim_size == 0 {
             return Ok(Vec::new());
         }
-        return Err(format!(
-            "mat2cell: partition sizes for dimension {} must sum to {}",
-            dim_index, dim_size
+        return Err(mat2cell_error_with_identifier(
+            format!(
+                "mat2cell: partition sizes for dimension {} must sum to {}",
+                dim_index, dim_size
+            ),
+            IDENT_INVALID_PARTITION,
         ));
     }
 
@@ -485,38 +518,53 @@ fn parse_partition_vector(
     let mut parts = Vec::with_capacity(numbers.len());
     for (idx, n) in numbers.iter().enumerate() {
         if !n.is_finite() {
-            return Err(format!(
-                "mat2cell: size entries must be finite (dimension {}, index {})",
-                dim_index,
-                idx + 1
+            return Err(mat2cell_error_with_identifier(
+                format!(
+                    "mat2cell: size entries must be finite (dimension {}, index {})",
+                    dim_index,
+                    idx + 1
+                ),
+                IDENT_INVALID_PARTITION,
             ));
         }
         let rounded = n.round();
         if (rounded - n).abs() > f64::EPSILON {
-            return Err(format!(
-                "mat2cell: size entries must be integers (dimension {}, index {})",
-                dim_index,
-                idx + 1
+            return Err(mat2cell_error_with_identifier(
+                format!(
+                    "mat2cell: size entries must be integers (dimension {}, index {})",
+                    dim_index,
+                    idx + 1
+                ),
+                IDENT_INVALID_PARTITION,
             ));
         }
         if rounded < 0.0 {
-            return Err(format!(
-                "mat2cell: size entries must be non-negative (dimension {}, index {})",
-                dim_index,
-                idx + 1
+            return Err(mat2cell_error_with_identifier(
+                format!(
+                    "mat2cell: size entries must be non-negative (dimension {}, index {})",
+                    dim_index,
+                    idx + 1
+                ),
+                IDENT_INVALID_PARTITION,
             ));
         }
         let value = rounded as usize;
-        total = total
-            .checked_add(value)
-            .ok_or_else(|| "mat2cell: partition sum exceeds platform limits".to_string())?;
+        total = total.checked_add(value).ok_or_else(|| {
+            mat2cell_error_with_identifier(
+                "mat2cell: partition sum exceeds platform limits",
+                IDENT_SIZE_LIMIT,
+            )
+        })?;
         parts.push(value);
     }
 
     if total != dim_size {
-        return Err(format!(
-            "mat2cell: partition sizes for dimension {} must sum to {} (got {})",
-            dim_index, dim_size, total
+        return Err(mat2cell_error_with_identifier(
+            format!(
+                "mat2cell: partition sizes for dimension {} must sum to {} (got {})",
+                dim_index, dim_size, total
+            ),
+            IDENT_INVALID_PARTITION,
         ));
     }
     Ok(parts)
@@ -568,16 +616,16 @@ fn copy_block<T: Clone>(
     shape: &[usize],
     start: &[usize],
     sizes: &[usize],
-) -> Result<Vec<T>, String> {
+) -> BuiltinResult<Vec<T>> {
     let rank = sizes.len();
     let extended_shape = extend_shape(shape, rank);
     let strides = column_major_strides(&extended_shape);
 
     for dim in 0..rank {
         if start[dim] + sizes[dim] > extended_shape[dim] {
-            return Err(format!(
-                "mat2cell: partition exceeds dimension {} bounds",
-                dim + 1
+            return Err(mat2cell_error_with_identifier(
+                format!("mat2cell: partition exceeds dimension {} bounds", dim + 1),
+                IDENT_INVALID_PARTITION,
             ));
         }
     }
@@ -596,7 +644,12 @@ fn copy_block<T: Clone>(
         }
         result.push(
             data.get(linear)
-                .ok_or_else(|| "mat2cell: internal indexing error".to_string())?
+                .ok_or_else(|| {
+                    mat2cell_error_with_identifier(
+                        "mat2cell: internal indexing error",
+                        IDENT_INVALID_PARTITION,
+                    )
+                })?
                 .clone(),
         );
 
@@ -616,15 +669,15 @@ fn copy_block<T: Clone>(
     Ok(result)
 }
 
-fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Result<Value, String> {
+fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> BuiltinResult<Value> {
     if sizes.len() > 2 {
         for (dim, &count) in sizes.iter().enumerate().skip(2) {
             let offset = start.get(dim).copied().unwrap_or(0);
             if count != 1 || offset != 0 {
-                return Err(
-                    "mat2cell: character arrays cannot be partitioned along higher dimensions"
-                        .to_string(),
-                );
+                return Err(mat2cell_error_with_identifier(
+                    "mat2cell: character arrays cannot be partitioned along higher dimensions",
+                    IDENT_INVALID_PARTITION,
+                ));
             }
         }
     }
@@ -634,12 +687,15 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Resu
     let col_count = sizes.get(1).copied().unwrap_or(1);
 
     if row_start + row_count > array.rows || col_start + col_count > array.cols {
-        return Err("mat2cell: partition exceeds character array bounds".to_string());
+        return Err(mat2cell_error_with_identifier(
+            "mat2cell: partition exceeds character array bounds",
+            IDENT_INVALID_PARTITION,
+        ));
     }
 
     if row_count == 0 || col_count == 0 {
         let slice = CharArray::new(Vec::new(), row_count, col_count)
-            .map_err(|e| format!("mat2cell: {e}"))?;
+            .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
         return Ok(Value::CharArray(slice));
     }
 
@@ -650,7 +706,8 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Resu
             data.push(array.data[idx]);
         }
     }
-    let slice = CharArray::new(data, row_count, col_count).map_err(|e| format!("mat2cell: {e}"))?;
+    let slice = CharArray::new(data, row_count, col_count)
+        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
     Ok(Value::CharArray(slice))
 }
 
@@ -923,7 +980,8 @@ pub(crate) mod tests {
             Value::Tensor(tensor),
             vec![row_vector(&[1.0]), row_vector(&[3.0])],
         )
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert!(
             err.contains("partition sizes"),
             "unexpected error message: {err}"
@@ -934,8 +992,9 @@ pub(crate) mod tests {
     #[test]
     fn negative_partition_entry_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
-        let err =
-            mat2cell_builtin(Value::Tensor(tensor), vec![row_vector(&[-1.0, 5.0])]).unwrap_err();
+        let err = mat2cell_builtin(Value::Tensor(tensor), vec![row_vector(&[-1.0, 5.0])])
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("non-negative"),
             "unexpected error message: {err}"
@@ -947,7 +1006,8 @@ pub(crate) mod tests {
     fn non_integer_partition_entry_errors() {
         let tensor = Tensor::new((1..=4).map(|v| v as f64).collect(), vec![4, 1]).unwrap();
         let err = mat2cell_builtin(Value::Tensor(tensor), vec![row_vector(&[1.5, 0.5, 2.0])])
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("integers"), "unexpected error message: {err}");
     }
 

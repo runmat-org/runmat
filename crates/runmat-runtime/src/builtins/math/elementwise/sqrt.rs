@@ -9,12 +9,13 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 
 const ZERO_EPS: f64 = 1e-12;
 
@@ -231,6 +232,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL sqrt calls; providers may replace them with fused elementwise kernels.",
 };
 
+const BUILTIN_NAME: &str = "sqrt";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "sqrt",
     category = "math/elementwise",
@@ -239,18 +246,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
-fn sqrt_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (sqrt_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => sqrt_gpu(handle),
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
-        Value::ComplexTensor(ct) => (sqrt_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (sqrt_char_array(ca)).map_err(Into::into),
-        Value::String(_) | Value::StringArray(_) => Err((("sqrt: expected numeric input".to_string())).into()),
-        other => (sqrt_real(other)).map_err(Into::into),
+        Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
+        Value::CharArray(ca) => sqrt_char_array(ca),
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error("sqrt: expected numeric input")),
+        other => sqrt_real(other),
     }
 }
 
-fn sqrt_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
@@ -259,42 +266,48 @@ fn sqrt_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return sqrt_tensor_real(tensor);
             }
-            Err(_) => {
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending));
+            }
+            Err(RuntimeControlFlow::Error(_)) => {
                 // Fall through to host fallback.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor(&handle)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     sqrt_tensor_real(tensor)
 }
 
 fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     let min_handle = provider
         .reduce_min(handle)
-        .map_err(|e| format!("sqrt: reduce_min failed: {e}"))?;
+        .map_err(|e| builtin_error(format!("sqrt: reduce_min failed: {e}")))?;
     let download = provider
         .download(&min_handle)
-        .map_err(|e| format!("sqrt: reduce_min download failed: {e}"));
+        .map_err(|e| builtin_error(format!("sqrt: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
     let host = download?;
     if host.data.iter().any(|&v| v.is_nan()) {
-        return Err("sqrt: reduce_min result contained NaN".to_string());
+        return Err(builtin_error("sqrt: reduce_min result contained NaN"));
     }
     Ok(host.data.iter().any(|&v| v < 0.0))
 }
 
-fn sqrt_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("sqrt", value)?;
+fn sqrt_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("sqrt", value)
+        .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
     sqrt_tensor_real(tensor)
 }
 
-fn sqrt_tensor_real(tensor: Tensor) -> Result<Value, String> {
+fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     let len = tensor.data.len();
     let mut requires_complex = false;
     for &v in &tensor.data {
@@ -310,7 +323,8 @@ fn sqrt_tensor_real(tensor: Tensor) -> Result<Value, String> {
             let root = zero_small(v.sqrt());
             data.push(root);
         }
-        let tensor = Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("sqrt: {e}"))?;
+        let tensor = Tensor::new(data, tensor.shape.clone())
+            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(len);
@@ -331,8 +345,8 @@ fn sqrt_tensor_real(tensor: Tensor) -> Result<Value, String> {
                 Ok(Value::Complex(re, im))
             }
         } else {
-            let tensor =
-                ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("sqrt: {e}"))?;
+            let tensor = ComplexTensor::new(data, tensor.shape.clone())
+                .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     }
@@ -345,7 +359,7 @@ fn sqrt_complex_value(re: f64, im: f64) -> Value {
     Value::Complex(real_part, imag_part)
 }
 
-fn sqrt_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn sqrt_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ct.data.len());
     for &(re, im) in &ct.data {
         let (mut real_part, mut imag_part) = sqrt_complex_parts(re, im);
@@ -357,19 +371,20 @@ fn sqrt_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         let (re, im) = data[0];
         Ok(Value::Complex(re, im))
     } else {
-        let tensor =
-            ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("sqrt: {e}"))?;
+        let tensor = ComplexTensor::new(data, ct.shape.clone())
+            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn sqrt_char_array(ca: CharArray) -> Result<Value, String> {
+fn sqrt_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
     for &ch in &ca.data {
         let code = ch as u32 as f64;
         data.push(zero_small(code.sqrt()));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sqrt: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -497,10 +512,15 @@ pub(crate) mod tests {
     #[test]
     fn sqrt_string_input_errors() {
         let err = sqrt_builtin(Value::from("hello")).unwrap_err();
-        assert!(
-            err.contains("sqrt: expected numeric input"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains("sqrt: expected numeric input"),
+                    "unexpected error message: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

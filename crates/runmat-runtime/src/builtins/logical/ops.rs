@@ -5,6 +5,7 @@ use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::{
     gpu_helpers,
     spec::{
@@ -219,6 +220,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion support will arrive alongside a dedicated WGSL template; today the builtin executes outside fusion plans.",
 };
 
+const BUILTIN_NAME: &str = "logical";
+
+fn logical_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "logical",
     category = "logical",
@@ -229,12 +239,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err((("logical: too many input arguments".to_string())).into());
+        return Err(logical_error("logical: too many input arguments"));
     }
-    (convert_value_to_logical(value)).map_err(Into::into)
+    convert_value_to_logical(value)
 }
 
-fn convert_value_to_logical(value: Value) -> Result<Value, String> {
+fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
         Value::Num(n) => Ok(Value::Bool(n != 0.0)),
@@ -257,22 +267,22 @@ fn convert_value_to_logical(value: Value) -> Result<Value, String> {
     }
 }
 
-fn logical_from_tensor(tensor: Tensor) -> Result<Value, String> {
+fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_host(buffer)
 }
 
-fn logical_from_complex_tensor(tensor: ComplexTensor) -> Result<Value, String> {
+fn logical_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let buffer = LogicalBuffer::from_complex_tensor(&tensor);
     logical_buffer_to_host(buffer)
 }
 
-fn logical_from_char_array(chars: CharArray) -> Result<Value, String> {
+fn logical_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let buffer = LogicalBuffer::from_char_array(&chars);
     logical_buffer_to_host(buffer)
 }
 
-fn logical_from_string_array(strings: StringArray) -> Result<Value, String> {
+fn logical_from_string_array(strings: StringArray) -> BuiltinResult<Value> {
     let bits: Vec<u8> = strings
         .data
         .iter()
@@ -282,7 +292,7 @@ fn logical_from_string_array(strings: StringArray) -> Result<Value, String> {
     logical_buffer_to_host(LogicalBuffer { bits, shape })
 }
 
-fn logical_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_is_logical(&handle) {
         return Ok(Value::GpuTensor(handle));
     }
@@ -310,26 +320,27 @@ fn logical_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor(&handle)
+        .map_err(|err| logical_error(format!("{BUILTIN_NAME}: {err}")))?;
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_gpu(buffer, provider)
 }
 
-fn logical_buffer_to_host(buffer: LogicalBuffer) -> Result<Value, String> {
+fn logical_buffer_to_host(buffer: LogicalBuffer) -> BuiltinResult<Value> {
     let LogicalBuffer { bits, shape } = buffer;
     if tensor::element_count(&shape) == 1 && bits.len() == 1 {
         Ok(Value::Bool(bits[0] != 0))
     } else {
         LogicalArray::new(bits, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("logical: {e}"))
+            .map_err(|e| logical_error(format!("logical: {e}")))
     }
 }
 
 fn logical_buffer_to_gpu(
     buffer: LogicalBuffer,
     provider: Option<&'static dyn AccelProvider>,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if let Some(p) = provider {
         let floats: Vec<f64> = buffer
             .bits
@@ -366,11 +377,11 @@ fn complex_is_zero(re: f64, im: f64) -> bool {
     re == 0.0 && im == 0.0
 }
 
-fn conversion_error(type_name: &str) -> String {
-    format!(
+fn conversion_error(type_name: &str) -> RuntimeControlFlow {
+    logical_error(format!(
         "logical: conversion to logical from {} is not possible",
         type_name
-    )
+    ))
 }
 
 #[derive(Clone)]
@@ -433,8 +444,25 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, IntValue, MException, ObjectInstance, StructValue};
+
+    fn assert_error_message(err: RuntimeControlFlow, expected: &str) {
+        match err {
+            RuntimeControlFlow::Error(err) => assert_eq!(err.message(), expected),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
+
+    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -500,9 +528,9 @@ pub(crate) mod tests {
     #[test]
     fn logical_string_error() {
         let err = logical_builtin(Value::String("runmat".to_string()), Vec::new()).unwrap_err();
-        assert_eq!(
+        assert_error_message(
             err,
-            "logical: conversion to logical from string is not possible"
+            "logical: conversion to logical from string is not possible",
         );
     }
 
@@ -512,7 +540,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.insert("field", Value::Num(1.0));
         let err = logical_builtin(Value::Struct(st), Vec::new()).unwrap_err();
-        assert!(err.contains("struct"), "unexpected error message: {err}");
+        assert_error_contains(err, "struct");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -520,9 +548,9 @@ pub(crate) mod tests {
     fn logical_cell_error() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell creation");
         let err = logical_builtin(Value::Cell(cell), Vec::new()).unwrap_err();
-        assert_eq!(
+        assert_error_message(
             err,
-            "logical: conversion to logical from cell is not possible"
+            "logical: conversion to logical from cell is not possible",
         );
     }
 
@@ -530,9 +558,9 @@ pub(crate) mod tests {
     #[test]
     fn logical_function_handle_error() {
         let err = logical_builtin(Value::FunctionHandle("foo".into()), Vec::new()).unwrap_err();
-        assert_eq!(
+        assert_error_message(
             err,
-            "logical: conversion to logical from function_handle is not possible"
+            "logical: conversion to logical from function_handle is not possible",
         );
     }
 
@@ -541,10 +569,7 @@ pub(crate) mod tests {
     fn logical_object_error() {
         let obj = ObjectInstance::new("DemoClass".to_string());
         let err = logical_builtin(Value::Object(obj), Vec::new()).unwrap_err();
-        assert!(
-            err.contains("DemoClass"),
-            "expected class name in error, got {err}"
-        );
+        assert_error_contains(err, "DemoClass");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -552,9 +577,9 @@ pub(crate) mod tests {
     fn logical_mexception_error() {
         let mex = MException::new("id:logical".into(), "message".into());
         let err = logical_builtin(Value::MException(mex), Vec::new()).unwrap_err();
-        assert_eq!(
+        assert_error_message(
             err,
-            "logical: conversion to logical from MException is not possible"
+            "logical: conversion to logical from MException is not possible",
         );
     }
 

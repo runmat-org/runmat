@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
@@ -207,6 +207,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side effects materialise immediately; metadata is registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "copyfile";
+
+fn copyfile_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "copyfile",
     category = "io/repl_fs",
@@ -222,16 +246,16 @@ fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 /// Evaluate `copyfile` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<CopyfileResult, String> {
+pub fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
     let gathered = gather_arguments(args)?;
     match gathered.len() {
-        0 | 1 => Err("copyfile: not enough input arguments".to_string()),
+        0 | 1 => Err(copyfile_error("copyfile: not enough input arguments")),
         2 => copy_operation(&gathered[0], &gathered[1], false),
         3 => {
             let force = parse_force_flag(&gathered[2])?;
             copy_operation(&gathered[0], &gathered[1], force)
         }
-        _ => Err("copyfile: too many input arguments".to_string()),
+        _ => Err(copyfile_error("copyfile: too many input arguments")),
     }
 }
 
@@ -360,7 +384,7 @@ fn copy_operation(
     source: &Value,
     destination: &Value,
     force: bool,
-) -> Result<CopyfileResult, String> {
+) -> BuiltinResult<CopyfileResult> {
     let source_raw = extract_path(source, ERR_SOURCE_ARG)?;
     if source_raw.is_empty() {
         return Ok(CopyfileResult::empty_source());
@@ -371,8 +395,9 @@ fn copy_operation(
         return Ok(CopyfileResult::empty_destination());
     }
 
-    let source_expanded = expand_user_path(&source_raw, "copyfile")?;
-    let destination_expanded = expand_user_path(&destination_raw, "copyfile")?;
+    let source_expanded = expand_user_path(&source_raw, "copyfile").map_err(copyfile_error)?;
+    let destination_expanded =
+        expand_user_path(&destination_raw, "copyfile").map_err(copyfile_error)?;
 
     if contains_wildcards(&source_expanded) {
         Ok(copy_with_pattern(
@@ -735,40 +760,40 @@ fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     }
 }
 
-fn parse_force_flag(value: &Value) -> Result<bool, String> {
+fn parse_force_flag(value: &Value) -> BuiltinResult<bool> {
     let text = extract_path(value, ERR_FLAG_ARG)?;
     if text.eq_ignore_ascii_case("f") {
         Ok(true)
     } else {
-        Err(ERR_FLAG_ARG.to_string())
+        Err(copyfile_error(ERR_FLAG_ARG))
     }
 }
 
-fn extract_path(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_path(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(error_message.to_string())
+                Err(copyfile_error(error_message))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(copyfile_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(copyfile_error(error_message)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("copyfile: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -785,8 +810,16 @@ fn path_to_display(path: &Path) -> String {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use std::fs::{self, File};
     use tempfile::tempdir;
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in copyfile tests"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1038,9 +1071,11 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
-            .expect_err("expected error");
-        assert_eq!(err, ERR_FLAG_ARG);
+        let err = unwrap_error(
+            evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
+                .expect_err("expected error"),
+        );
+        assert_eq!(err.message(), ERR_FLAG_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

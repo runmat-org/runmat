@@ -11,8 +11,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const EPS: f64 = 1.0e-12;
+const BUILTIN_NAME: &str = "polyval";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -234,6 +236,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider-level Horner kernels for real coefficients/inputs; falls back to host evaluation (with upload) for complex or prediction-interval paths.",
 };
 
+fn polyval_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyval",
@@ -265,7 +274,7 @@ pub fn evaluate(
     points: Value,
     rest: &[Value],
     want_delta: bool,
-) -> Result<PolyvalEval, String> {
+) -> BuiltinResult<PolyvalEval> {
     let options = parse_option_values(rest)?;
 
     let coeff_clone = coefficients.clone();
@@ -299,10 +308,9 @@ pub fn evaluate(
     };
 
     if want_delta && stats.is_none() {
-        return Err(
-            "polyval: S input (structure returned by polyfit) is required for delta output"
-                .to_string(),
-        );
+        return Err(polyval_error(
+            "polyval: S input (structure returned by polyfit) is required for delta output",
+        ));
     }
 
     if inputs.data.is_empty() {
@@ -352,7 +360,7 @@ fn try_gpu_polyval(
     inputs: &NumericArray,
     mu: Option<Mu>,
     prefer_gpu_output: bool,
-) -> Result<Option<Value>, String> {
+) -> BuiltinResult<Option<Value>> {
     if !coeff_real || !inputs.all_real {
         return Ok(None);
     }
@@ -426,7 +434,8 @@ fn try_gpu_polyval(
     };
     let _ = provider.free(&result_handle);
 
-    let tensor = Tensor::new(host.data, host.shape).map_err(|e| format!("polyval: {e}"))?;
+    let tensor =
+        Tensor::new(host.data, host.shape).map_err(|e| polyval_error(format!("polyval: {e}")))?;
     Ok(Some(tensor::tensor_into_value(tensor)))
 }
 
@@ -448,10 +457,10 @@ impl PolyvalEval {
     }
 
     /// Optional prediction interval (`delta`).
-    pub fn delta(&self) -> Result<Value, String> {
+    pub fn delta(&self) -> BuiltinResult<Value> {
         self.delta
             .clone()
-            .ok_or_else(|| "polyval: delta output not computed".to_string())
+            .ok_or_else(|| polyval_error("polyval: delta output not computed"))
     }
 
     /// Consume into the main value.
@@ -460,10 +469,10 @@ impl PolyvalEval {
     }
 
     /// Consume into `(value, delta)` pair.
-    pub fn into_pair(self) -> Result<(Value, Value), String> {
+    pub fn into_pair(self) -> BuiltinResult<(Value, Value)> {
         match self.delta {
             Some(delta) => Ok((self.value, delta)),
-            None => Err("polyval: delta output not computed".to_string()),
+            None => Err(polyval_error("polyval: delta output not computed")),
         }
     }
 }
@@ -475,12 +484,12 @@ struct Mu {
 }
 
 impl Mu {
-    fn new(mean: f64, scale: f64) -> Result<Self, String> {
+    fn new(mean: f64, scale: f64) -> BuiltinResult<Self> {
         if !mean.is_finite() || !scale.is_finite() {
-            return Err("polyval: mu values must be finite".to_string());
+            return Err(polyval_error("polyval: mu values must be finite"));
         }
         if scale.abs() <= EPS {
-            return Err("polyval: mu(2) must be non-zero".to_string());
+            return Err(polyval_error("polyval: mu(2) must be non-zero"));
         }
         Ok(Self { mean, scale })
     }
@@ -529,11 +538,11 @@ struct ParsedOptions {
     mu: Option<Value>,
 }
 
-fn parse_option_values(rest: &[Value]) -> Result<ParsedOptions, String> {
+fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     match rest.len() {
         0 => Ok(ParsedOptions { s: None, mu: None }),
         1 => Ok(ParsedOptions {
-            s: if is_empty_value(&rest[0]) {
+            s: if is_empty_value(&rest[0])? {
                 None
             } else {
                 Some(rest[0].clone())
@@ -541,18 +550,18 @@ fn parse_option_values(rest: &[Value]) -> Result<ParsedOptions, String> {
             mu: None,
         }),
         2 => Ok(ParsedOptions {
-            s: if is_empty_value(&rest[0]) {
+            s: if is_empty_value(&rest[0])? {
                 None
             } else {
                 Some(rest[0].clone())
             },
             mu: Some(rest[1].clone()),
         }),
-        _ => Err("polyval: too many input arguments".to_string()),
+        _ => Err(polyval_error("polyval: too many input arguments")),
     }
 }
 
-fn convert_coefficients(value: Value) -> Result<(Vec<Complex64>, bool), String> {
+fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
@@ -593,13 +602,13 @@ fn convert_coefficients(value: Value) -> Result<(Vec<Complex64>, bool), String> 
             true,
         )),
         Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() <= EPS)),
-        other => Err(format!(
+        other => Err(polyval_error(format!(
             "polyval: coefficients must be numeric, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn convert_points(value: Value) -> Result<(NumericArray, bool), String> {
+fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -682,11 +691,11 @@ fn convert_points(value: Value) -> Result<(NumericArray, bool), String> {
             },
             false,
         )),
-        other => Err(format!("polyval: X must be numeric, got {other:?}")),
+        other => Err(polyval_error(format!("polyval: X must be numeric, got {other:?}"))),
     }
 }
 
-fn parse_mu(value: Value) -> Result<Mu, String> {
+fn parse_mu(value: Value) -> BuiltinResult<Mu> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_tensor(&handle)?;
@@ -694,38 +703,42 @@ fn parse_mu(value: Value) -> Result<Mu, String> {
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() < 2 {
-                return Err("polyval: mu must contain at least two elements".to_string());
+                return Err(polyval_error("polyval: mu must contain at least two elements"));
             }
             Mu::new(tensor.data[0], tensor.data[1])
         }
         Value::LogicalArray(array) => {
             if array.data.len() < 2 {
-                return Err("polyval: mu must contain at least two elements".to_string());
+                return Err(polyval_error("polyval: mu must contain at least two elements"));
             }
             let mean = if array.data[0] != 0 { 1.0 } else { 0.0 };
             let scale = if array.data[1] != 0 { 1.0 } else { 0.0 };
             Mu::new(mean, scale)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
-            Err("polyval: mu must be a numeric vector with at least two values".to_string())
+            Err(polyval_error(
+                "polyval: mu must be a numeric vector with at least two values",
+            ))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() < 2 {
-                return Err("polyval: mu must contain at least two elements".to_string());
+                return Err(polyval_error("polyval: mu must contain at least two elements"));
             }
             let (mean_re, mean_im) = tensor.data[0];
             let (scale_re, scale_im) = tensor.data[1];
             if mean_im.abs() > EPS || scale_im.abs() > EPS {
-                return Err("polyval: mu values must be real".to_string());
+                return Err(polyval_error("polyval: mu values must be real"));
             }
             Mu::new(mean_re, scale_re)
         }
-        _ => Err("polyval: mu must be a numeric vector with at least two values".to_string()),
+        _ => Err(polyval_error(
+            "polyval: mu must be a numeric vector with at least two values",
+        )),
     }
 }
 
-fn parse_stats(value: Value, coeff_len: usize) -> Result<Option<PolyfitStats>, String> {
-    if is_empty_value(&value) {
+fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<PolyfitStats>> {
+    if is_empty_value(&value)? {
         return Ok(None);
     }
     let struct_value = match value {
@@ -735,26 +748,26 @@ fn parse_stats(value: Value, coeff_len: usize) -> Result<Option<PolyfitStats>, S
             return parse_stats(gathered, coeff_len);
         }
         other => {
-            return Err(format!(
+            return Err(polyval_error(format!(
                 "polyval: S input must be the structure returned by polyfit, got {other:?}"
-            ))
+            )))
         }
     };
     let r_value = struct_value
         .fields
         .get("R")
         .cloned()
-        .ok_or_else(|| "polyval: S input is missing the field 'R'".to_string())?;
+        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'R'"))?;
     let df_value = struct_value
         .fields
         .get("df")
         .cloned()
-        .ok_or_else(|| "polyval: S input is missing the field 'df'".to_string())?;
+        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'df'"))?;
     let normr_value = struct_value
         .fields
         .get("normr")
         .cloned()
-        .ok_or_else(|| "polyval: S input is missing the field 'normr'".to_string())?;
+        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'normr'"))?;
 
     let (matrix, is_real) = convert_matrix(r_value, coeff_len)?;
     let df = scalar_to_f64(df_value, "polyval: S.df")?;
@@ -768,7 +781,7 @@ fn parse_stats(value: Value, coeff_len: usize) -> Result<Option<PolyfitStats>, S
     }))
 }
 
-fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), String> {
+fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix, bool)> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -779,7 +792,7 @@ fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), Stri
                 data, rows, cols, ..
             } = tensor;
             if rows != coeff_len || cols != coeff_len {
-                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+                return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
             let data = data.into_iter().map(|re| Complex64::new(re, 0.0)).collect();
             Ok((Matrix { rows, cols, data }, true))
@@ -789,7 +802,7 @@ fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), Stri
                 data, rows, cols, ..
             } = tensor;
             if rows != coeff_len || cols != coeff_len {
-                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+                return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
             let imag_small = data.iter().all(|&(_, im)| im.abs() <= EPS);
             let data = data
@@ -803,7 +816,7 @@ fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), Stri
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(0);
             if rows != coeff_len || cols != coeff_len {
-                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+                return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
             let data = data
                 .into_iter()
@@ -812,38 +825,41 @@ fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), Stri
             Ok((Matrix { rows, cols, data }, true))
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Err(
-            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
-                .to_string(),
+            polyval_error(
+                "polyval: S.R must be a square numeric matrix matching the coefficient vector length",
+            ),
         ),
         Value::Struct(_)
         | Value::Cell(_)
         | Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_) => Err(
-            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
-                .to_string(),
+            polyval_error(
+                "polyval: S.R must be a square numeric matrix matching the coefficient vector length",
+            ),
         ),
         _ => Err(
-            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
-                .to_string(),
+            polyval_error(
+                "polyval: S.R must be a square numeric matrix matching the coefficient vector length",
+            ),
         ),
     }
 }
 
-fn scalar_to_f64(value: Value, context: &str) -> Result<f64, String> {
+fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(flag) => Ok(if flag { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(format!("{context} must be a scalar"));
+                return Err(polyval_error(format!("{context} must be a scalar")));
             }
             Ok(tensor.data[0])
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
-                return Err(format!("{context} must be a scalar"));
+                return Err(polyval_error(format!("{context} must be a scalar")));
             }
             Ok(if array.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -852,13 +868,13 @@ fn scalar_to_f64(value: Value, context: &str) -> Result<f64, String> {
             scalar_to_f64(Value::Tensor(tensor), context)
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(format!("{context} must be real-valued"))
+            Err(polyval_error(format!("{context} must be real-valued")))
         }
-        other => Err(format!("{context} must be a scalar, got {other:?}")),
+        other => Err(polyval_error(format!("{context} must be a scalar, got {other:?}"))),
     }
 }
 
-fn apply_mu(values: &mut [Complex64], mu: Mu) -> Result<(), String> {
+fn apply_mu(values: &mut [Complex64], mu: Mu) -> BuiltinResult<()> {
     let mean = Complex64::new(mu.mean, 0.0);
     let scale = Complex64::new(mu.scale, 0.0);
     for v in values.iter_mut() {
@@ -883,7 +899,7 @@ fn compute_prediction_interval(
     coeffs: &[Complex64],
     inputs: &[Complex64],
     stats: &PolyfitStats,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     if !stats.is_effective() {
         return Ok(vec![0.0; inputs.len()]);
     }
@@ -915,10 +931,10 @@ fn vandermonde_row(x: Complex64, len: usize) -> Vec<Complex64> {
     row
 }
 
-fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> Result<Vec<Complex64>, String> {
+fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> BuiltinResult<Vec<Complex64>> {
     let n = row.len();
     if matrix.rows != n || matrix.cols != n {
-        return Err("polyval: size of S.R must match the coefficient vector".to_string());
+        return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
     }
     let mut result = vec![Complex64::new(0.0, 0.0); n];
     for j in (0..n).rev() {
@@ -928,7 +944,7 @@ fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> Result<Vec<Com
         }
         let diag = matrix.get(j, j);
         if diag.norm() <= EPS {
-            return Err("polyval: S.R is singular".to_string());
+            return Err(polyval_error("polyval: S.R is singular"));
         }
         result[j] = acc / diag;
     }
@@ -940,7 +956,7 @@ fn finalize_values(
     shape: &[usize],
     prefer_gpu: bool,
     real_only: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if real_only {
         let real_data: Vec<f64> = data.iter().map(|c| c.re).collect();
         finalize_real(real_data, shape, prefer_gpu)
@@ -950,18 +966,18 @@ fn finalize_values(
     } else {
         let complex_data: Vec<(f64, f64)> = data.iter().map(|c| (c.re, c.im)).collect();
         let tensor = ComplexTensor::new(complex_data, shape.to_vec())
-            .map_err(|e| format!("polyval: failed to build complex tensor: {e}"))?;
+            .map_err(|e| polyval_error(format!("polyval: failed to build complex tensor: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn finalize_delta(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+fn finalize_delta(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
     finalize_real(data, shape, prefer_gpu)
 }
 
-fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.to_vec())
-        .map_err(|e| format!("polyval: failed to build tensor: {e}"))?;
+        .map_err(|e| polyval_error(format!("polyval: failed to build tensor: {e}")))?;
     if prefer_gpu {
         if let Some(provider) = runmat_accelerate_api::provider() {
             let view = HostTensorView {
@@ -976,24 +992,24 @@ fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> Result<Va
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn zeros_like(shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+fn zeros_like(shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
     let len = shape.iter().product();
     finalize_real(vec![0.0; len], shape, prefer_gpu)
 }
 
-fn ensure_vector_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if !is_vector_shape(shape) {
-        Err(format!(
+        Err(polyval_error(format!(
             "{name}: coefficients must be a scalar, row vector, or column vector"
-        ))
+        )))
     } else {
         Ok(())
     }
 }
 
-fn ensure_vector_data_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_data_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if !is_vector_shape(shape) {
-        Err(format!("{name}: inputs must be vectors or scalars"))
+        Err(polyval_error(format!("{name}: inputs must be vectors or scalars")))
     } else {
         Ok(())
     }
@@ -1003,18 +1019,16 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().filter(|&&dim| dim > 1).count() <= 1
 }
 
-fn is_empty_value(value: &Value) -> bool {
+fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::LogicalArray(l) => l.data.is_empty(),
-        Value::Cell(ca) => ca.data.is_empty(),
+        Value::Tensor(t) => Ok(t.data.is_empty()),
+        Value::LogicalArray(l) => Ok(l.data.is_empty()),
+        Value::Cell(ca) => Ok(ca.data.is_empty()),
         Value::GpuTensor(handle) => {
-            match gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())) {
-                Ok(gathered) => is_empty_value(&gathered),
-                Err(_) => false,
-            }
+            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
+            is_empty_value(&gathered)
         }
-        _ => false,
+        _ => Ok(false),
     }
 }
 
@@ -1026,7 +1040,21 @@ fn values_are_real(values: &[Complex64]) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::StructValue;
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => assert!(
+                err.message().contains(needle),
+                "expected error containing '{needle}', got '{}'",
+                err.message()
+            ),
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspension in polyval tests: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1140,7 +1168,7 @@ pub(crate) mod tests {
         let points = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[], true)
             .expect_err("expected error");
-        assert!(err.contains("S input"));
+        assert_error_contains(err, "S input");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1156,7 +1184,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(placeholder), Value::Tensor(mu)],
         )
         .expect_err("expected mu length error");
-        assert!(err.contains("mu must contain at least two elements"));
+        assert_error_contains(err, "mu must contain at least two elements");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1173,7 +1201,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(placeholder), Value::ComplexTensor(complex_mu)],
         )
         .expect_err("expected complex mu error");
-        assert!(err.contains("mu values must be real"));
+        assert_error_contains(err, "mu values must be real");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1187,7 +1215,7 @@ pub(crate) mod tests {
         let stats = Value::Struct(st);
         let err = polyval_builtin(Value::Tensor(coeffs), Value::Tensor(points), vec![stats])
             .expect_err("expected missing R error");
-        assert!(err.contains("missing the field 'R'"));
+        assert_error_contains(err, "missing the field 'R'");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

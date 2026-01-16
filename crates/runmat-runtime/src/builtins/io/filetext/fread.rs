@@ -10,12 +10,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
+const BUILTIN_NAME: &str = "fread";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -243,6 +244,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that reads from the shared file registry; GPU arguments are gathered to the CPU before I/O.",
 };
 
+fn fread_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
+fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(fread_error)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fread",
@@ -309,51 +336,55 @@ impl FreadEval {
     }
 }
 
-pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FreadEval, String> {
+pub fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
     let fid_host = gather_value(fid_value)?;
-    let fid = parse_fid(&fid_host)?;
+    let fid = map_string_result(parse_fid(&fid_host))?;
     if fid < 0 {
-        return Err("fread: file identifier must be non-negative".to_string());
+        return Err(fread_error("fread: file identifier must be non-negative"));
     }
     if fid < 3 {
-        return Err("fread: standard input/output identifiers are not supported yet".to_string());
+        return Err(fread_error(
+            "fread: standard input/output identifiers are not supported yet",
+        ));
     }
 
-    let info =
-        registry::info_for(fid).ok_or_else(|| format!("fread: {INVALID_IDENTIFIER_MESSAGE}"))?;
-    let handle =
-        registry::take_handle(fid).ok_or_else(|| format!("fread: {INVALID_IDENTIFIER_MESSAGE}"))?;
+    let info = registry::info_for(fid)
+        .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
+    let handle = registry::take_handle(fid)
+        .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
     let mut file = handle
         .lock()
-        .map_err(|_| "fread: failed to lock file handle (poisoned mutex)".to_string())?;
+        .map_err(|_| fread_error("fread: failed to lock file handle (poisoned mutex)"))?;
 
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
-        classify_arguments(&arg_refs).map_err(|e| format!("fread: {e}"))?;
+        classify_arguments(&arg_refs)
+            .map_err(|e| fread_error(format!("fread: {e}")))?;
 
     let size_host = size_arg.map(gather_value).transpose()?;
     let precision_host = precision_arg.map(gather_value).transpose()?;
     let skip_host = skip_arg.map(gather_value).transpose()?;
     let machine_host = machine_arg.map(gather_value).transpose()?;
 
-    let size_spec = parse_size(size_host.as_ref())?;
-    let precision = parse_precision(precision_host.as_ref())?;
-    let skip_bytes = parse_skip(skip_host.as_ref())?;
-    let machine_format = parse_machine_format(machine_host.as_ref(), &info.machinefmt)?;
+    let size_spec = map_string_result(parse_size(size_host.as_ref()))?;
+    let precision = map_string_result(parse_precision(precision_host.as_ref()))?;
+    let skip_bytes = map_string_result(parse_skip(skip_host.as_ref()))?;
+    let machine_format =
+        map_string_result(parse_machine_format(machine_host.as_ref(), &info.machinefmt))?;
 
-    let mut eval = read_from_handle(
+    let mut eval = map_string_result(read_from_handle(
         &mut file,
         &size_spec,
         &precision,
         skip_bytes,
         machine_format,
-    )?;
-    eval.apply_like(like_arg, precision)?;
+    ))?;
+    map_string_result(eval.apply_like(like_arg, precision))?;
     Ok(eval)
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fread: {e}"))
+fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed(value).map_err(map_control_flow)
 }
 
 fn parse_fid(value: &Value) -> Result<i32, String> {
@@ -506,14 +537,6 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn extract_scalar_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        _ => None,
-    }
-}
 
 fn is_numeric_like(value: &Value) -> bool {
     matches!(
@@ -1278,11 +1301,19 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
+    use crate::RuntimeControlFlow;
     use runmat_filesystem::{self as fs, File};
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
+
+    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1463,7 +1494,7 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let args = vec![Value::from("like")];
-        let err = evaluate(&Value::Num(fid as f64), &args).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(fid as f64), &args).unwrap_err());
         assert!(err.contains("expected prototype after 'like'"));
 
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
@@ -1492,7 +1523,7 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::CharArray(CharArray::new_row("A")),
         ];
-        let err = evaluate(&Value::Num(fid as f64), &args).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(fid as f64), &args).unwrap_err());
         assert!(err.contains("character prototypes require"));
 
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
@@ -1655,7 +1686,7 @@ pub(crate) mod tests {
     #[test]
     fn fread_invalid_fid_errors() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(9999.0), &Vec::new()).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(9999.0), &Vec::new()).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
     }
 

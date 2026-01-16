@@ -5,6 +5,7 @@ use runmat_macros::runtime_builtin;
 
 use super::state::{current_axes_state, encode_axes_handle, FigureAxesState};
 use super::style::value_as_string;
+use super::plotting_error;
 
 #[runtime_builtin(
     name = "gca",
@@ -31,7 +32,10 @@ pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
     }
 
-    Err((("gca: unsupported arguments (pass no inputs or 'struct')".to_string())).into())
+    Err(plotting_error(
+        "gca",
+        "gca: unsupported arguments (pass no inputs or 'struct')",
+    ))
 }
 
 fn axes_struct_response(state: FigureAxesState) -> Value {

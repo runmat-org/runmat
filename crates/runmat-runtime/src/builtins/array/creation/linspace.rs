@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -196,6 +197,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may generate sequences directly; the runtime uploads host-generated data when hooks are absent.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("linspace").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::linspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linspace",
@@ -218,7 +223,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err((("linspace: expected at most three input arguments".to_string())).into());
+        return Err(builtin_error(
+            "linspace: expected at most three input arguments",
+        ));
     }
 
     let (start_scalar, start_gpu) = parse_scalar("linspace", start)?;
@@ -240,7 +247,7 @@ fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::Built
         );
     }
     let prefer_gpu = residency.prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu).map_err(Into::into)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
 }
 
 #[derive(Clone, Copy)]
@@ -265,11 +272,11 @@ fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)
             let scalar = tensor_scalar(name, &tensor)?;
             Ok((scalar, true))
         }
-        other => parse_scalar_host(name, other).map_err(Into::into),
+        other => parse_scalar_host(name, other),
     }
 }
 
-fn parse_scalar_host(name: &str, value: Value) -> Result<(Scalar, bool), String> {
+fn parse_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
     match value {
         Value::Num(n) => Ok((Scalar::Real(n), false)),
         Value::Int(i) => Ok((Scalar::Real(i.to_f64()), false)),
@@ -278,25 +285,25 @@ fn parse_scalar_host(name: &str, value: Value) -> Result<(Scalar, bool), String>
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_scalar"),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(format!(
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(format!(
             "{name}: endpoints must be numeric scalars; received a string-like value"
-        )),
-        other => Err(format!(
+        ))),
+        other => Err(builtin_error(format!(
             "{name}: endpoints must be numeric scalars; received {other:?}"
-        )),
+        ))),
     }
 }
 
-fn tensor_scalar(name: &str, tensor: &Tensor) -> Result<Scalar, String> {
+fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
     if !tensor::is_scalar_tensor(tensor) {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     Ok(Scalar::Real(tensor.data[0]))
 }
 
-fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> Result<Scalar, String> {
+fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
     if tensor.data.len() != 1 {
-        return Err(format!("{name}: expected scalar input"));
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     let (re, im) = tensor.data[0];
     Ok(Scalar::Complex { re, im })
@@ -307,53 +314,55 @@ fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(handle)?;
             if !tensor::is_scalar_tensor(&tensor) {
-                return Err("linspace: number of points must be a scalar".to_string().into());
+                return Err(builtin_error("linspace: number of points must be a scalar"));
             }
-            Ok(parse_numeric_count(tensor.data[0])?)
+            parse_numeric_count(tensor.data[0])
         }
-        other => parse_count_host(other).map_err(Into::into),
+        other => parse_count_host(other),
     }
 }
 
-fn parse_count_host(value: &Value) -> Result<usize, String> {
+fn parse_count_host(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err("linspace: number of points must be >= 0".to_string());
+                return Err(builtin_error("linspace: number of points must be >= 0"));
             }
             usize::try_from(raw).map_err(|_| {
-                "linspace: number of points is too large for this platform".to_string()
+                builtin_error("linspace: number of points is too large for this platform")
             })
         }
         Value::Num(n) => parse_numeric_count(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if !tensor::is_scalar_tensor(t) {
-                return Err("linspace: number of points must be a scalar".to_string());
+                return Err(builtin_error("linspace: number of points must be a scalar"));
             }
             parse_numeric_count(t.data[0])
         }
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_count"),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "linspace: number of points must be numeric, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_numeric_count(raw: f64) -> Result<usize, String> {
+fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
-        return Err("linspace: number of points must be finite".to_string());
+        return Err(builtin_error("linspace: number of points must be finite"));
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err("linspace: number of points must be an integer".to_string());
+        return Err(builtin_error("linspace: number of points must be an integer"));
     }
     if rounded < 0.0 {
-        return Err("linspace: number of points must be >= 0".to_string());
+        return Err(builtin_error("linspace: number of points must be >= 0"));
     }
     if rounded > usize::MAX as f64 {
-        return Err("linspace: number of points is too large for this platform".to_string());
+        return Err(builtin_error(
+            "linspace: number of points is too large for this platform",
+        ));
     }
     Ok(rounded as usize)
 }
@@ -363,15 +372,15 @@ fn build_sequence(
     stop: Scalar,
     count: usize,
     prefer_gpu: bool,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (stop_re, stop_im) = stop.parts();
     let complex = start_im != 0.0 || stop_im != 0.0;
 
     if complex {
         let data = generate_complex_sequence(start_re, start_im, stop_re, stop_im, count);
-        let tensor =
-            ComplexTensor::new(data, vec![1, count]).map_err(|e| format!("linspace: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![1, count])
+            .map_err(|e| builtin_error(format!("linspace: {e}")))?;
         return Ok(Value::ComplexTensor(tensor));
     }
 
@@ -429,7 +438,8 @@ fn build_sequence(
         }
     }
 
-    let tensor = Tensor::new(data, vec![1, count]).map_err(|e| format!("linspace: {e}"))?;
+    let tensor =
+        Tensor::new(data, vec![1, count]).map_err(|e| builtin_error(format!("linspace: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 

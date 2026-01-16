@@ -12,8 +12,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{tensor, tensor::tensor_into_value};
 use crate::dispatcher;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const EPS: f64 = 1.0e-12;
+const BUILTIN_NAME: &str = "polyder";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -240,6 +242,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs on-device when providers expose polyder hooks; falls back to the host for complex coefficients or unsupported shapes.",
 };
 
+fn polyder_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyder",
@@ -260,13 +269,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     match rest.len() {
-        0 => (derivative_single(first)).map_err(Into::into),
-        1 => (derivative_product(first, rest.into_iter().next().unwrap())).map_err(Into::into),
-        _ => Err((("polyder: too many input arguments".to_string())).into()),
+        0 => derivative_single(first),
+        1 => derivative_product(first, rest.into_iter().next().unwrap()),
+        _ => Err(polyder_error("polyder: too many input arguments")),
     }
 }
 
-fn try_gpu_derivative_single(value: &Value) -> Result<Option<Value>, String> {
+fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
     let Value::GpuTensor(handle) = value else {
         return Ok(None);
     };
@@ -282,7 +291,7 @@ fn try_gpu_derivative_single(value: &Value) -> Result<Option<Value>, String> {
     }
 }
 
-fn try_gpu_derivative_product(first: &Value, second: &Value) -> Result<Option<Value>, String> {
+fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Option<Value>> {
     match (first, second) {
         (Value::GpuTensor(p), Value::GpuTensor(q)) => {
             let Some(provider) = runmat_accelerate_api::provider() else {
@@ -300,7 +309,7 @@ fn try_gpu_derivative_product(first: &Value, second: &Value) -> Result<Option<Va
     }
 }
 
-fn try_gpu_quotient(u: &Value, v: &Value) -> Result<Option<PolyderEval>, String> {
+fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> {
     match (u, v) {
         (Value::GpuTensor(uh), Value::GpuTensor(vh)) => {
             let Some(provider) = runmat_accelerate_api::provider() else {
@@ -322,7 +331,7 @@ fn try_gpu_quotient(u: &Value, v: &Value) -> Result<Option<PolyderEval>, String>
 }
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
-pub fn evaluate_quotient(u: Value, v: Value) -> Result<PolyderEval, String> {
+pub fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
     if let Some(eval) = try_gpu_quotient(&u, &v)? {
         return Ok(eval);
     }
@@ -355,7 +364,7 @@ impl PolyderEval {
     }
 }
 
-pub fn derivative_single(value: Value) -> Result<Value, String> {
+pub fn derivative_single(value: Value) -> BuiltinResult<Value> {
     if let Some(out) = try_gpu_derivative_single(&value)? {
         return Ok(out);
     }
@@ -363,7 +372,7 @@ pub fn derivative_single(value: Value) -> Result<Value, String> {
     differentiate_polynomial(&poly)
 }
 
-pub fn derivative_product(first: Value, second: Value) -> Result<Value, String> {
+pub fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
     if let Some(out) = try_gpu_derivative_product(&first, &second)? {
         return Ok(out);
     }
@@ -372,7 +381,7 @@ pub fn derivative_product(first: Value, second: Value) -> Result<Value, String> 
     product_derivative(&p, &q)
 }
 
-fn quotient_numerator(u: &Polynomial, v: &Polynomial) -> Result<Value, String> {
+fn quotient_numerator(u: &Polynomial, v: &Polynomial) -> BuiltinResult<Value> {
     let du = raw_derivative(&u.coeffs);
     let dv = raw_derivative(&v.coeffs);
     let term1 = poly_convolve(&du, &v.coeffs);
@@ -382,19 +391,19 @@ fn quotient_numerator(u: &Polynomial, v: &Polynomial) -> Result<Value, String> {
     coeffs_to_value(&numerator, u.orientation)
 }
 
-fn quotient_denominator(v: &Polynomial) -> Result<Value, String> {
+fn quotient_denominator(v: &Polynomial) -> BuiltinResult<Value> {
     let mut denominator = poly_convolve(&v.coeffs, &v.coeffs);
     denominator = trim_leading_zeros(&denominator);
     coeffs_to_value(&denominator, v.orientation)
 }
 
-fn differentiate_polynomial(poly: &Polynomial) -> Result<Value, String> {
+fn differentiate_polynomial(poly: &Polynomial) -> BuiltinResult<Value> {
     let mut coeffs = raw_derivative(&poly.coeffs);
     coeffs = trim_leading_zeros(&coeffs);
     coeffs_to_value(&coeffs, poly.orientation)
 }
 
-fn product_derivative(p: &Polynomial, q: &Polynomial) -> Result<Value, String> {
+fn product_derivative(p: &Polynomial, q: &Polynomial) -> BuiltinResult<Value> {
     let dp = raw_derivative(&p.coeffs);
     let dq = raw_derivative(&q.coeffs);
     let term1 = poly_convolve(&dp, &q.coeffs);
@@ -468,22 +477,24 @@ fn trim_leading_zeros(coeffs: &[Complex64]) -> Vec<Complex64> {
     }
 }
 
-fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> Result<Value, String> {
+fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinResult<Value> {
     if coeffs.iter().all(|c| c.im.abs() <= EPS) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = Tensor::new(data, shape).map_err(|e| format!("polyder: {e}"))?;
+        let tensor = Tensor::new(data, shape)
+            .map_err(|e| polyder_error(format!("polyder: {e}")))?;
         Ok(tensor_into_value(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
         let shape = orientation.shape_for_len(data.len());
-        let tensor = ComplexTensor::new(data, shape).map_err(|e| format!("polyder: {e}"))?;
+        let tensor = ComplexTensor::new(data, shape)
+            .map_err(|e| polyder_error(format!("polyder: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     }
 }
 
-fn parse_polynomial(context: &str, label: &str, value: Value) -> Result<Polynomial, String> {
-    let gathered = dispatcher::gather_if_needed(&value).map_err(|e| format!("{context}: {e}"))?;
+fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinResult<Polynomial> {
+    let gathered = dispatcher::gather_if_needed(&value)?;
     let (coeffs, orientation) = match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
@@ -518,7 +529,7 @@ fn parse_polynomial(context: &str, label: &str, value: Value) -> Result<Polynomi
             }
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(polyder_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             let orientation = orientation_from_shape(&tensor.shape);
             if tensor.data.is_empty() {
@@ -542,9 +553,9 @@ fn parse_polynomial(context: &str, label: &str, value: Value) -> Result<Polynomi
         ),
         Value::Complex(re, im) => (vec![Complex64::new(re, im)], Orientation::Scalar),
         other => {
-            return Err(format!(
+            return Err(polyder_error(format!(
                 "{context}: expected {label} to be a numeric vector, got {other:?}"
-            ));
+            )));
         }
     };
 
@@ -554,14 +565,14 @@ fn parse_polynomial(context: &str, label: &str, value: Value) -> Result<Polynomi
     })
 }
 
-fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
     let non_unit = shape.iter().copied().filter(|&dim| dim > 1).count();
     if non_unit <= 1 {
         Ok(())
     } else {
-        Err(format!(
+        Err(polyder_error(format!(
             "{context}: {label} must be a vector of coefficients"
-        ))
+        )))
     }
 }
 
@@ -608,7 +619,21 @@ struct Polynomial {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => assert!(
+                err.message().contains(needle),
+                "expected error containing '{needle}', got '{}'",
+                err.message()
+            ),
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspension in polyder tests: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -731,20 +756,14 @@ pub(crate) mod tests {
     fn rejects_matrix_input() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = derivative_single(Value::Tensor(tensor)).unwrap_err();
-        assert!(
-            err.contains("vector of coefficients"),
-            "unexpected error: {err}"
-        );
+        assert_error_contains(err, "vector of coefficients");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_string_input() {
         let err = derivative_single(Value::String("abc".into())).unwrap_err();
-        assert!(
-            err.contains("numeric vector"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "numeric vector");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -784,10 +803,7 @@ pub(crate) mod tests {
     fn builtin_rejects_too_many_inputs() {
         let err = super::polyder_builtin(Value::Num(1.0), vec![Value::Num(2.0), Value::Num(3.0)])
             .unwrap_err();
-        assert!(
-            err.contains("too many input arguments"),
-            "unexpected error: {err}"
-        );
+        assert_error_contains(err, "too many input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

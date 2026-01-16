@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
 const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
@@ -195,6 +195,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Filesystem side-effects are executed immediately; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "delete";
+
+fn delete_error(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(message_id)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "delete",
     category = "io/repl_fs",
@@ -207,22 +232,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(((runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_INVALID_INPUT,
-            "delete: missing filename input".to_string(),
-        ))).into());
+            "delete: missing filename input",
+        ));
     }
     let gathered = gather_arguments(&args)?;
 
     if gathered.iter().all(is_handle_input) {
-        return (delete_handles(&gathered)).map_err(Into::into);
+        return delete_handles(&gathered);
     }
 
     if gathered.iter().any(contains_handle_input) {
-        return Err(((runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_INVALID_HANDLE,
-            "delete: cannot mix handle and filename inputs".to_string(),
-        ))).into());
+            "delete: cannot mix handle and filename inputs",
+        ));
     }
 
     let mut raw_targets = Vec::new();
@@ -241,13 +266,13 @@ fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::Num(0.0))
 }
 
-fn delete_target(raw: &str) -> Result<(), String> {
+fn delete_target(raw: &str) -> BuiltinResult<()> {
     let expanded = expand_user_path(raw, "delete")
-        .map_err(|msg| runtime_error(MESSAGE_ID_INVALID_INPUT, msg))?;
+        .map_err(|msg| delete_error(MESSAGE_ID_INVALID_INPUT, msg))?;
     if expanded.is_empty() {
-        return Err(runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_EMPTY_FILENAME,
-            "delete: filename cannot be empty".to_string(),
+            "delete: filename cannot be empty",
         ));
     }
 
@@ -258,11 +283,11 @@ fn delete_target(raw: &str) -> Result<(), String> {
     }
 }
 
-fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
+fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
     validate_wildcard_pattern(pattern, display)?;
 
     if let Err(PatternError { msg, .. }) = Pattern::new(pattern) {
-        return Err(runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_INVALID_PATTERN,
             format!("delete: invalid wildcard pattern '{display}' ({msg})"),
         ));
@@ -271,7 +296,7 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
     let paths = match glob::glob(pattern) {
         Ok(iter) => iter,
         Err(PatternError { msg, .. }) => {
-            return Err(runtime_error(
+            return Err(delete_error(
                 MESSAGE_ID_INVALID_PATTERN,
                 format!("delete: invalid wildcard pattern '{display}' ({msg})"),
             ))
@@ -284,7 +309,7 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
             Ok(path) => matches.push(path),
             Err(err) => {
                 let problem_path = path_to_string(err.path());
-                return Err(runtime_error(
+                return Err(delete_error(
                     MESSAGE_ID_OS_ERROR,
                     format!(
                         "delete: unable to delete '{}' ({})",
@@ -297,7 +322,7 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
     }
 
     if matches.is_empty() {
-        return Err(runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_FILE_NOT_FOUND,
             format!(
                 "delete: cannot delete '{}' because it does not exist",
@@ -313,11 +338,11 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
+fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
     match vfs::metadata(path) {
         Ok(meta) => {
             if meta.is_dir() {
-                return Err(runtime_error(
+                return Err(delete_error(
                     MESSAGE_ID_IS_DIRECTORY,
                     format!(
                         "delete: cannot delete '{}' because it is a directory (use rmdir instead)",
@@ -326,7 +351,7 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
                 ));
             }
             vfs::remove_file(path).map_err(|err| {
-                runtime_error(
+                delete_error(
                     MESSAGE_ID_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
                 )
@@ -334,7 +359,7 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
         }
         Err(err) => {
             if err.kind() == io::ErrorKind::NotFound {
-                Err(runtime_error(
+                Err(delete_error(
                     MESSAGE_ID_FILE_NOT_FOUND,
                     format!(
                         "delete: cannot delete '{}' because it does not exist",
@@ -342,7 +367,7 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
                     ),
                 ))
             } else {
-                Err(runtime_error(
+                Err(delete_error(
                     MESSAGE_ID_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
                 ))
@@ -351,9 +376,9 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
     }
 }
 
-fn validate_wildcard_pattern(pattern: &str, display: &str) -> Result<(), String> {
+fn validate_wildcard_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
     if has_unbalanced(pattern, '[', ']') || has_unbalanced(pattern, '{', '}') {
-        return Err(runtime_error(
+        return Err(delete_error(
             MESSAGE_ID_INVALID_PATTERN,
             format!("delete: invalid wildcard pattern '{display}'"),
         ));
@@ -382,28 +407,25 @@ fn has_unbalanced(pattern: &str, open: char, close: char) -> bool {
     depth != 0
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("delete: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
 
-fn collect_targets(value: &Value, targets: &mut Vec<String>) -> Result<(), String> {
+fn collect_targets(value: &Value, targets: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
         Value::String(text) => push_nonempty_target(text, targets),
         Value::CharArray(array) => collect_char_array_targets(array, targets),
         Value::StringArray(array) => collect_string_array_targets(array, targets),
         Value::Cell(cell) => collect_cell_targets(cell, targets),
-        _ => Err(runtime_error(
-            MESSAGE_ID_INVALID_INPUT,
-            ERR_FILENAME_ARG.to_string(),
-        )),
+        _ => Err(delete_error(MESSAGE_ID_INVALID_INPUT, ERR_FILENAME_ARG)),
     }
 }
 
-fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> Result<(), String> {
+fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> BuiltinResult<()> {
     if array.rows == 0 || array.cols == 0 {
         return Ok(());
     }
@@ -414,9 +436,9 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> R
         }
         let trimmed = text.trim_end().to_string();
         if trimmed.is_empty() {
-            return Err(runtime_error(
+            return Err(delete_error(
                 MESSAGE_ID_EMPTY_FILENAME,
-                "delete: filename cannot be empty".to_string(),
+                "delete: filename cannot be empty",
             ));
         }
         targets.push(trimmed);
@@ -427,12 +449,12 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> R
 fn collect_string_array_targets(
     array: &StringArray,
     targets: &mut Vec<String>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     for text in &array.data {
         if text.is_empty() {
-            return Err(runtime_error(
+            return Err(delete_error(
                 MESSAGE_ID_EMPTY_FILENAME,
-                "delete: filename cannot be empty".to_string(),
+                "delete: filename cannot be empty",
             ));
         }
         targets.push(text.clone());
@@ -440,7 +462,7 @@ fn collect_string_array_targets(
     Ok(())
 }
 
-fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> Result<(), String> {
+fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> BuiltinResult<()> {
     for handle in &cell.data {
         let value = unsafe { &*handle.as_raw() };
         collect_targets(value, targets)?;
@@ -448,7 +470,7 @@ fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> Result<(
     Ok(())
 }
 
-fn delete_handles(values: &[Value]) -> Result<Value, String> {
+fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
     let mut mutated_last: Option<Value> = None;
     let mut total = 0usize;
     for value in values {
@@ -461,7 +483,7 @@ fn delete_handles(values: &[Value]) -> Result<Value, String> {
     }
 }
 
-fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> Result<usize, String> {
+fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> BuiltinResult<usize> {
     match value {
         Value::HandleObject(handle) => {
             let mut invalid = handle.clone();
@@ -484,7 +506,7 @@ fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> Resu
             }
             Ok(total)
         }
-        other => Err(runtime_error(
+        other => Err(delete_error(
             MESSAGE_ID_INVALID_HANDLE,
             format!("delete: unsupported handle input {other:?}"),
         )),
@@ -513,11 +535,11 @@ fn contains_handle_input(value: &Value) -> bool {
     }
 }
 
-fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> Result<(), String> {
+fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<()> {
     if text.is_empty() {
-        Err(runtime_error(
+        Err(delete_error(
             MESSAGE_ID_EMPTY_FILENAME,
-            "delete: filename cannot be empty".to_string(),
+            "delete: filename cannot be empty",
         ))
     } else {
         targets.push(text.to_string());
@@ -525,17 +547,21 @@ fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> Result<(), Str
     }
 }
 
-fn runtime_error(message_id: &'static str, message: String) -> String {
-    format!("{message_id}: {message}")
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, Value};
     use std::fs::File;
     use tempfile::tempdir;
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in delete tests"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -675,11 +701,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_empty_string_argument() {
-        let err = delete_builtin(vec![Value::from(String::new())]).expect_err("empty string");
-        assert!(
-            err.starts_with(MESSAGE_ID_EMPTY_FILENAME),
-            "expected empty filename error, got {err}"
-        );
+        let err = unwrap_error(delete_builtin(vec![Value::from(String::new())]).expect_err("empty string"));
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -687,11 +710,10 @@ pub(crate) mod tests {
     fn delete_errors_on_string_array_empty_element() {
         let array =
             StringArray::new(vec![String::new()], vec![1]).expect("single empty string element");
-        let err = delete_builtin(vec![Value::StringArray(array)]).expect_err("empty element");
-        assert!(
-            err.starts_with(MESSAGE_ID_EMPTY_FILENAME),
-            "expected empty filename error, got {err}"
+        let err = unwrap_error(
+            delete_builtin(vec![Value::StringArray(array)]).expect_err("empty element"),
         );
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -699,22 +721,18 @@ pub(crate) mod tests {
     fn delete_errors_on_char_array_blank_row() {
         let data = vec![' '; 4];
         let char_array = CharArray::new(data, 1, 4).expect("char matrix");
-        let err = delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row");
-        assert!(
-            err.starts_with(MESSAGE_ID_EMPTY_FILENAME),
-            "expected empty filename error, got {err}"
+        let err = unwrap_error(
+            delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row"),
         );
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
-        let err = delete_target(pattern).expect_err("invalid pattern should error");
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_PATTERN),
-            "expected invalid pattern error, got {err}"
-        );
+        let err = unwrap_error(delete_target(pattern).expect_err("invalid pattern should error"));
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_PATTERN));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -727,11 +745,8 @@ pub(crate) mod tests {
         let temp = tempdir().expect("temp dir");
         let missing = temp.path().join("missing.txt");
         let missing_str = missing.to_string_lossy().to_string();
-        let err = delete_target(&missing_str).expect_err("error");
-        assert!(
-            err.starts_with(MESSAGE_ID_FILE_NOT_FOUND),
-            "expected file not found identifier, got {err}"
-        );
+        let err = unwrap_error(delete_target(&missing_str).expect_err("error"));
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_FILE_NOT_FOUND));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -745,11 +760,8 @@ pub(crate) mod tests {
         let dir = temp.path().join("dir");
         std::fs::create_dir(&dir).expect("create dir");
         let dir_display = dir.to_string_lossy().to_string();
-        let err = delete_single_path(&dir, &dir_display).expect_err("error");
-        assert!(
-            err.starts_with(MESSAGE_ID_IS_DIRECTORY),
-            "expected directory identifier, got {err}"
-        );
+        let err = unwrap_error(delete_single_path(&dir, &dir_display).expect_err("error"));
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_IS_DIRECTORY));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -777,15 +789,14 @@ pub(crate) mod tests {
     fn delete_rejects_mixed_handle_and_filename() {
         let handle =
             crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
-        let err = delete_builtin(vec![
-            handle,
-            Value::from("mixed-handle-path.txt".to_string()),
-        ])
-        .expect_err("expected mixed error");
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_HANDLE),
-            "expected invalid handle identifier, got {err}"
+        let err = unwrap_error(
+            delete_builtin(vec![
+                handle,
+                Value::from("mixed-handle-path.txt".to_string()),
+            ])
+            .expect_err("expected mixed error"),
         );
+        assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_HANDLE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

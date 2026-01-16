@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -218,6 +219,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits comparison kernels that write 1 when operands differ; providers may override with specialised shaders.",
 };
 
+const BUILTIN_NAME: &str = "ne";
+const IDENT_INVALID_INPUT: &str = "MATLAB:ne:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "MATLAB:ne:SizeMismatch";
+
+fn ne_error(message: impl Into<String>, identifier: &'static str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "ne",
     category = "logical/rel",
@@ -229,13 +242,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_ne_gpu(a, b) {
-            return (result).map_err(Into::into);
+            return result;
         }
     }
-    ne_host(lhs, rhs).map_err(Into::into)
+    ne_host(lhs, rhs)
 }
 
-fn try_ne_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, String>> {
+fn try_ne_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
     match provider.elem_ne(a, b) {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
@@ -246,7 +259,7 @@ fn try_ne_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, 
     }
 }
 
-fn ne_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn ne_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let Some(value) = ne_identity(&lhs, &rhs) {
         return Ok(value);
     }
@@ -282,9 +295,10 @@ fn ne_host(lhs: Value, rhs: Value) -> Result<Value, String> {
         (NeOperand::Numeric(_), NeOperand::String(_))
         | (NeOperand::Complex(_), NeOperand::String(_))
         | (NeOperand::String(_), NeOperand::Numeric(_))
-        | (NeOperand::String(_), NeOperand::Complex(_)) => {
-            Err("ne: mixing numeric and string inputs is not supported".to_string())
-        }
+        | (NeOperand::String(_), NeOperand::Complex(_)) => Err(ne_error(
+            "ne: mixing numeric and string inputs is not supported",
+            IDENT_INVALID_INPUT,
+        )),
     }
 }
 
@@ -326,13 +340,13 @@ fn normalize_char_string(lhs: Value, rhs: Value) -> (Value, Value) {
     }
 }
 
-fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
     if tensor::element_count(&shape) <= 1 && data.len() == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("ne: {e}"))
+            .map_err(|e| ne_error(format!("ne: {e}"), IDENT_INVALID_INPUT))
     }
 }
 
@@ -441,7 +455,7 @@ enum NeOperand {
 }
 
 impl NeOperand {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(NeOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(NeOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -464,16 +478,24 @@ impl NeOperand {
                 Ok(NeOperand::Numeric(NumericBuffer::from_char_array(array)))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|err| ne_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
                 Ok(NeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            unsupported => Err(format!("ne: unsupported input type {unsupported:?}")),
+            unsupported => Err(ne_error(
+                format!("ne: unsupported input type {unsupported:?}"),
+                IDENT_INVALID_INPUT,
+            )),
         }
     }
 }
 
-fn numeric_ne(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("ne", &lhs.shape, &rhs.shape)?;
+fn numeric_ne(
+    lhs: &NumericBuffer,
+    rhs: &NumericBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| ne_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -499,8 +521,12 @@ fn numeric_ne(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<
     Ok((out, shape))
 }
 
-fn complex_ne(lhs: &ComplexBuffer, rhs: &ComplexBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("ne", &lhs.shape, &rhs.shape)?;
+fn complex_ne(
+    lhs: &ComplexBuffer,
+    rhs: &ComplexBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| ne_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -530,8 +556,12 @@ fn complex_ne(lhs: &ComplexBuffer, rhs: &ComplexBuffer) -> Result<(Vec<u8>, Vec<
     Ok((out, shape))
 }
 
-fn string_ne(lhs: &StringBuffer, rhs: &StringBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("ne", &lhs.shape, &rhs.shape)?;
+fn string_ne(
+    lhs: &StringBuffer,
+    rhs: &StringBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| ne_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -568,6 +598,7 @@ fn promote_numeric_to_complex(buffer: &NumericBuffer) -> ComplexBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
@@ -674,7 +705,13 @@ pub(crate) mod tests {
     #[test]
     fn ne_mixed_numeric_string_error() {
         let err = ne_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
-        assert!(err.contains("ne: mixing numeric and string inputs"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("mixing numeric and string inputs"));
+                assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

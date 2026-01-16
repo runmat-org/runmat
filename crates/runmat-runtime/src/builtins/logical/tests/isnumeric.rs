@@ -4,6 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -228,6 +229,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Type check executed outside fusion; planners treat it as a scalar metadata query.",
 };
 
+const BUILTIN_NAME: &str = "isnumeric";
+const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
+
 #[runtime_builtin(
     name = "isnumeric",
     category = "logical/tests",
@@ -236,14 +240,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
-fn isnumeric_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (isnumeric_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => isnumeric_gpu(handle),
         other => Ok(Value::Bool(isnumeric_value(&other))),
     }
 }
 
-fn isnumeric_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(flag) = provider.logical_islogical(&handle) {
             return Ok(Value::Bool(!flag));
@@ -256,16 +260,16 @@ fn isnumeric_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
     // Fall back to gathering only when metadata is unavailable.
     let gpu_value = Value::GpuTensor(handle.clone());
-    if let Ok(gathered) = gpu_helpers::gather_value(&gpu_value) {
-        return isnumeric_host(gathered);
-    }
-
-    Ok(Value::Bool(true))
+    let gathered = gpu_helpers::gather_value(&gpu_value)
+        .map_err(|err| internal_error(format!("isnumeric: {err}")))?;
+    isnumeric_host(gathered)
 }
 
-fn isnumeric_host(value: Value) -> Result<Value, String> {
+fn isnumeric_host(value: Value) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
-        return Err("isnumeric: internal error, GPU value reached host path".to_string());
+        return Err(internal_error(
+            "isnumeric: internal error, GPU value reached host path",
+        ));
     }
     Ok(Value::Bool(isnumeric_value(&value)))
 }
@@ -279,6 +283,14 @@ fn isnumeric_value(value: &Value) -> bool {
             | Value::Tensor(_)
             | Value::ComplexTensor(_)
     )
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
 }
 
 #[cfg(test)]

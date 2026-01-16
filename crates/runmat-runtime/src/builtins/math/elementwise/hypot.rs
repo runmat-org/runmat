@@ -4,12 +4,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
+use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -221,6 +222,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits WGSL hypot(a, b); providers may override via elem_hypot.",
 };
 
+const BUILTIN_NAME: &str = "hypot";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "hypot",
     category = "math/elementwise",
@@ -229,22 +236,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
-fn hypot_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
-        (Value::GpuTensor(a), Value::GpuTensor(b)) => (hypot_gpu_pair(a, b)).map_err(Into::into),
+        (Value::GpuTensor(a), Value::GpuTensor(b)) => hypot_gpu_pair(a, b),
         (Value::GpuTensor(a), other) => {
-            let gathered = gpu_helpers::gather_tensor(&a)?;
+            let gathered = gpu_helpers::gather_tensor(&a)
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             Ok(hypot_host(Value::Tensor(gathered), other)?)
         }
         (other, Value::GpuTensor(b)) => {
-            let gathered = gpu_helpers::gather_tensor(&b)?;
+            let gathered = gpu_helpers::gather_tensor(&b)
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             Ok(hypot_host(other, Value::Tensor(gathered))?)
         }
-        (left, right) => (hypot_host(left, right)).map_err(Into::into),
+        (left, right) => hypot_host(left, right),
     }
 }
 
-fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, String> {
+fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if a.shape == b.shape {
             if let Ok(handle) = provider.elem_hypot(&a, &b) {
@@ -252,50 +261,56 @@ fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, Strin
             }
         }
     }
-    let left = gpu_helpers::gather_tensor(&a)?;
-    let right = gpu_helpers::gather_tensor(&b)?;
+    let left = gpu_helpers::gather_tensor(&a)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let right = gpu_helpers::gather_tensor(&b)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     hypot_host(Value::Tensor(left), Value::Tensor(right))
 }
 
-fn hypot_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn hypot_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     let tensor_a = value_into_hypot_tensor(lhs)?;
     let tensor_b = value_into_hypot_tensor(rhs)?;
     compute_hypot_tensor(&tensor_a, &tensor_b)
 }
 
-fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&a.shape, &b.shape)?;
+fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+        .map_err(|err| builtin_error(format!("hypot: {err}")))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("hypot: {e}"))?;
+            .map_err(|e| builtin_error(format!("hypot: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
         result[out_idx] = a.data[idx_a].hypot(b.data[idx_b]);
     }
-    let tensor =
-        Tensor::new(result, plan.output_shape().to_vec()).map_err(|e| format!("hypot: {e}"))?;
+    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+        .map_err(|e| builtin_error(format!("hypot: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn value_into_hypot_tensor(value: Value) -> Result<Tensor, String> {
+fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-            Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("hypot: {e}"))
+            Tensor::new(data, vec![ca.rows, ca.cols])
+                .map_err(|e| builtin_error(format!("hypot: {e}")))
         }
         Value::Complex(re, im) => Tensor::new(vec![complex_magnitude(re, im)], vec![1, 1])
-            .map_err(|e| format!("hypot: {e}")),
+            .map_err(|e| builtin_error(format!("hypot: {e}"))),
         Value::ComplexTensor(ct) => {
             let data: Vec<f64> = ct.data.iter().map(|(re, im)| re.hypot(*im)).collect();
-            Tensor::new(data, ct.shape.clone()).map_err(|e| format!("hypot: {e}"))
+            Tensor::new(data, ct.shape.clone())
+                .map_err(|e| builtin_error(format!("hypot: {e}")))
         }
         other => {
             if let Value::GpuTensor(_) = other {
-                return Err("hypot: internal error converting GPU tensor".to_string());
+                return Err(builtin_error("hypot: internal error converting GPU tensor"));
             }
             tensor::value_into_tensor_for("hypot", other)
+                .map_err(|e| builtin_error(format!("hypot: {e}")))
         }
     }
 }
@@ -472,7 +487,12 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let err = hypot_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        assert!(err.contains("dimension"), "unexpected error: {err}");
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("dimension"), "unexpected error: {err}");
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

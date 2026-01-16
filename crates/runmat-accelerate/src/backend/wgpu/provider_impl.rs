@@ -24,6 +24,7 @@ use runmat_accelerate_api::{
     UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
+use runmat_runtime::{build_runtime_error, RuntimeControlFlow};
 use runmat_runtime::builtins::image::filters::fspecial::{
     spec_from_request as runtime_fspecial_spec_from_request, FspecialFilterSpec,
 };
@@ -90,6 +91,17 @@ use crate::fusion::{active_fusion, active_group_plan_clone};
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
+
+fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
+    match flow {
+        RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
+        RuntimeControlFlow::Suspend(_) => anyhow::Error::new(
+            build_runtime_error(format!("{context}: unexpected suspension"))
+                .with_builtin(context)
+                .build(),
+        ),
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
@@ -3144,7 +3156,7 @@ impl WgpuProvider {
             Value::Tensor(tensor),
             &args,
         )
-        .map_err(|e| anyhow!("qr: {e}"))?;
+        .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 
         let q_tensor = host_tensor_from_value("qr", eval.q())?;
         let r_tensor = host_tensor_from_value("qr", eval.r())?;
@@ -9440,9 +9452,15 @@ impl WgpuProvider {
             image_entry.shape.clone()
         };
 
-        let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options) {
+        let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options, "imfilter") {
             Ok(plan) => plan,
-            Err(err) => return Err(anyhow!(err)),
+            Err(RuntimeControlFlow::Error(err)) => return Err(anyhow!(err)),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(anyhow!(
+                    "imfilter: unexpected suspension while building plan ({})",
+                    pending.prompt
+                ))
+            }
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
@@ -9813,8 +9831,19 @@ impl WgpuProvider {
         let kernel_tensor = Tensor::new(kernel_host.data.clone(), kernel_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
 
-        let result = runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options)
-            .map_err(|e| anyhow!(e))?;
+        let result = runtime_apply_imfilter_tensor(
+            &image_tensor,
+            &kernel_tensor,
+            options,
+            "imfilter",
+        )
+        .map_err(|err| match err {
+            RuntimeControlFlow::Error(error) => anyhow!(error),
+            RuntimeControlFlow::Suspend(pending) => anyhow!(
+                "imfilter: unexpected suspension while computing fallback ({})",
+                pending.prompt
+            ),
+        })?;
         let data_owned = result.data;
         let shape_owned = result.shape;
         let view = HostTensorView {
@@ -10149,8 +10178,13 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
     }
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
-        let spec =
-            runtime_fspecial_spec_from_request(&request.filter).map_err(|e: String| anyhow!(e))?;
+        let spec = runtime_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
+            RuntimeControlFlow::Error(error) => anyhow!(error),
+            RuntimeControlFlow::Suspend(pending) => anyhow!(
+                "fspecial: unexpected suspension while building request ({})",
+                pending.prompt
+            ),
+        })?;
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
             FspecialFilterSpec::Average { rows, cols } => (
@@ -13624,7 +13658,13 @@ impl AccelProvider for WgpuProvider {
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
         let host_result =
             polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
-                .map_err(|e| anyhow!(e))?;
+                .map_err(|flow| match flow {
+                    RuntimeControlFlow::Error(err) => anyhow!(err),
+                    RuntimeControlFlow::Suspend(pending) => anyhow!(
+                        "polyfit: unexpected suspension while computing host fallback: {}",
+                        pending.prompt
+                    ),
+                })?;
         Ok(ProviderPolyfitResult {
             coefficients: host_result.coefficients,
             r_matrix: host_result.r_matrix,
@@ -14102,13 +14142,26 @@ impl AccelProvider for WgpuProvider {
         let host = self.download(handle)?;
         let HostTensorOwned { data, shape } = host;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
-        let eval =
-            runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
-                tensor, options,
-            )
-            .map_err(|e| anyhow!("unique: {e}"))?;
-        eval.into_numeric_unique_result()
-            .map_err(|e| anyhow!("unique: {e}"))
+        let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+            tensor, options,
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                        anyhow!("unique: unexpected suspend")
+                    }
+                });
+            }
+        };
+        match eval.into_numeric_unique_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("unique: unexpected suspend"),
+            }),
+        }
     }
     fn ismember(
         &self,
@@ -14122,13 +14175,28 @@ impl AccelProvider for WgpuProvider {
             Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
         let tensor_b =
             Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("ismember: {e}"))?;
-        runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
+        let eval = match runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
             tensor_a,
             tensor_b,
             options.rows,
-        )
-        .and_then(|eval| eval.into_numeric_ismember_result())
-        .map_err(|e| anyhow!("ismember: {e}"))
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                        anyhow!("ismember: unexpected suspend")
+                    }
+                });
+            }
+        };
+        match eval.into_numeric_ismember_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("ismember: unexpected suspend"),
+            }),
+        }
     }
 
     fn union(
@@ -14141,13 +14209,24 @@ impl AccelProvider for WgpuProvider {
         let host_b = self.download(b)?;
         let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
         let tensor_b = Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
-        let eval =
-            runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
-                tensor_a, tensor_b, options,
-            )
-            .map_err(|e| anyhow!("union: {e}"))?;
-        eval.into_numeric_union_result()
-            .map_err(|e| anyhow!("union: {e}"))
+        let eval = match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
+            tensor_a, tensor_b, options,
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("union: unexpected suspend"),
+                });
+            }
+        };
+        match eval.into_numeric_union_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("union: unexpected suspend"),
+            }),
+        }
     }
     fn setdiff(
         &self,
@@ -14161,11 +14240,24 @@ impl AccelProvider for WgpuProvider {
             Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
         let tensor_b =
             Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
-        runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
+        let eval = match runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
             tensor_a, tensor_b, options,
-        )
-        .and_then(|eval| eval.into_numeric_setdiff_result())
-        .map_err(|e| anyhow!("setdiff: {e}"))
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+                });
+            }
+        };
+        match eval.into_numeric_setdiff_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+            }),
+        }
     }
 
     fn cat(&self, dim: usize, inputs: &[GpuTensorHandle]) -> Result<GpuTensorHandle> {
@@ -14257,7 +14349,7 @@ impl AccelProvider for WgpuProvider {
             Value::Tensor(tensor),
             &args,
         )
-        .map_err(|e| anyhow!("chol: {e}"))?;
+        .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
         let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
         let factor = self.upload(&HostTensorView {
             data: &factor_tensor.data,
@@ -15472,14 +15564,14 @@ impl AccelProvider for WgpuProvider {
             &[],
             compute_left,
         )
-        .map_err(|e| anyhow!("eig: {e}"))?;
+        .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
 
         let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
         let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
         let right_tensor = host_tensor_from_value("eig", eval.right())?;
 
         let left_value = if compute_left {
-            Some(eval.left().map_err(|e| anyhow!("eig: {e}"))?)
+            Some(eval.left().map_err(|err| runtime_flow_to_anyhow("eig", err))?)
         } else {
             None
         };

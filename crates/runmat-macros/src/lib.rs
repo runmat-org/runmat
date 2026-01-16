@@ -208,7 +208,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             if #is_last_variadic {
                 if args.len() < #param_len - 1 {
                     return Err(crate::RuntimeControlFlow::Error(
-                        crate::runtime_error(format!(
+                        crate::build_runtime_error(format!(
                             "expected at least {} args, got {}",
                             #param_len - 1,
                             args.len()
@@ -218,7 +218,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             } else if args.len() != #param_len {
                 return Err(crate::RuntimeControlFlow::Error(
-                    crate::runtime_error(format!("expected {} args, got {}", #param_len, args.len()))
+                    crate::build_runtime_error(format!("expected {} args, got {}", #param_len, args.len()))
                         .build(),
                 ));
             }

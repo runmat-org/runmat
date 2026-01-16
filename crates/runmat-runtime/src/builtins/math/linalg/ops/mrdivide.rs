@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "mrdivide";
 
@@ -188,6 +189,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `mrdivide` hook; the WGPU provider currently performs the solve on the host and re-uploads the result.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::linalg::ops::mrdivide"
 )]
@@ -209,20 +236,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "mrdivide",
     builtin_path = "crate::builtins::math::linalg::ops::mrdivide"
 )]
-fn mrdivide_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    mrdivide_eval(&lhs, &rhs).map_err(Into::into)
+fn mrdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    mrdivide_eval(&lhs, &rhs)
 }
 
-pub(crate) fn mrdivide_eval(lhs: &Value, rhs: &Value) -> Result<Value, String> {
+pub(crate) fn mrdivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if let Some(result) = try_gpu_mrdivide(lhs, rhs)? {
         return Ok(result);
     }
-    let lhs_host = crate::dispatcher::gather_if_needed(lhs)?;
-    let rhs_host = crate::dispatcher::gather_if_needed(rhs)?;
+
+    let lhs_host = crate::dispatcher::gather_if_needed(lhs).map_err(map_control_flow)?;
+    let rhs_host = crate::dispatcher::gather_if_needed(rhs).map_err(map_control_flow)?;
     mrdivide_cpu(lhs_host, rhs_host)
 }
 
-fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
+fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -258,7 +287,7 @@ fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> Result<Option<Value>, String> {
     Ok(result.map(Value::GpuTensor))
 }
 
-fn mrdivide_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn mrdivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     let lhs_numeric = classify_numeric(lhs)?;
     let rhs_numeric = classify_numeric(rhs)?;
 
@@ -285,7 +314,7 @@ fn mrdivide_cpu(lhs: Value, rhs: Value) -> Result<Value, String> {
 }
 
 /// Host implementation shared with acceleration providers that keep data on the CPU.
-pub fn mrdivide_host_real_for_provider(lhs: &Tensor, rhs: &Tensor) -> Result<Tensor, String> {
+pub fn mrdivide_host_real_for_provider(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     mrdivide_real(lhs, rhs)
 }
 
@@ -294,7 +323,7 @@ enum NumericInput {
     Complex(ComplexTensor),
 }
 
-fn classify_numeric(value: Value) -> Result<NumericInput, String> {
+fn classify_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::ComplexTensor(tensor) => {
             ensure_matrix_shape("mrdivide", &tensor.shape)?;
@@ -302,18 +331,18 @@ fn classify_numeric(value: Value) -> Result<NumericInput, String> {
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+                .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
             Ok(NumericInput::Complex(tensor))
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
     }
 }
 
-fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> Result<Tensor, String> {
+fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     ensure_matrix_shape(NAME, &lhs.shape)?;
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
@@ -329,7 +358,7 @@ fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> Result<Tensor, String> {
         let rows = lhs.rows();
         let cols = rhs.rows();
         let result = Tensor::new(vec![0.0; rows * cols], vec![rows, cols])
-            .map_err(|e| format!("{NAME}: {e}"))?;
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
         return Ok(result);
     }
 
@@ -339,7 +368,7 @@ fn mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> Result<Tensor, String> {
     matrix_real_to_tensor(solution)
 }
 
-fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<ComplexTensor, String> {
+fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
     ensure_matrix_shape(NAME, &lhs.shape)?;
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
@@ -356,7 +385,7 @@ fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<ComplexT
         let rows = lhs.rows;
         let cols = rhs.rows;
         let result = ComplexTensor::new(vec![(0.0, 0.0); rows * cols], vec![rows, cols])
-            .map_err(|e| format!("{NAME}: {e}"))?;
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
         return Ok(result);
     }
 
@@ -376,24 +405,28 @@ fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<ComplexT
     matrix_complex_to_tensor(solution)
 }
 
-fn solve_real_matrix(lhs: &DMatrix<f64>, rhs: &DMatrix<f64>) -> Result<DMatrix<f64>, String> {
+fn solve_real_matrix(lhs: &DMatrix<f64>, rhs: &DMatrix<f64>) -> BuiltinResult<DMatrix<f64>> {
     let rhs_t = rhs.transpose();
     let lhs_t = lhs.transpose();
     let svd = SVD::new(rhs_t.clone(), true, true);
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), rhs_t.nrows(), rhs_t.ncols());
-    let solved = svd.solve(&lhs_t, tol).map_err(|e| format!("{NAME}: {e}"))?;
+    let solved = svd
+        .solve(&lhs_t, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok(solved.transpose())
 }
 
 fn solve_complex_matrix(
     lhs: &DMatrix<Complex64>,
     rhs: &DMatrix<Complex64>,
-) -> Result<DMatrix<Complex64>, String> {
+) -> BuiltinResult<DMatrix<Complex64>> {
     let rhs_t = rhs.transpose();
     let lhs_t = lhs.transpose();
     let svd = SVD::new(rhs_t.clone(), true, true);
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), rhs_t.nrows(), rhs_t.ncols());
-    let solved = svd.solve(&lhs_t, tol).map_err(|e| format!("{NAME}: {e}"))?;
+    let solved = svd
+        .solve(&lhs_t, tol)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok(solved.transpose())
 }
 
@@ -406,37 +439,42 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
     f64::EPSILON * max_dim * max_sv.max(1.0)
 }
 
-fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> Result<Tensor, String> {
+fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols]).map_err(|e| format!("{NAME}: {e}"))
+    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> Result<ComplexTensor, String> {
+fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| format!("{NAME}: {e}"))
+    ComplexTensor::new(data, vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn promote_real_tensor(tensor: &Tensor) -> Result<ComplexTensor, String> {
+fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("{NAME}: {e}"))
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if is_effectively_matrix(shape) {
         Ok(())
     } else {
-        Err(format!("{name}: inputs must be 2-D matrices or vectors"))
+        Err(builtin_error(format!(
+            "{name}: inputs must be 2-D matrices or vectors"
+        )))
     }
 }
 
-fn ensure_column_match(lhs_cols: usize, rhs_cols: usize) -> Result<(), String> {
+fn ensure_column_match(lhs_cols: usize, rhs_cols: usize) -> BuiltinResult<()> {
     if lhs_cols == rhs_cols {
         Ok(())
     } else {
-        Err("Matrix dimensions must agree.".to_string())
+        Err(builtin_error("Matrix dimensions must agree."))
     }
 }
 
@@ -487,7 +525,7 @@ impl PreparedOperand {
 fn prepare_gpu_operand(
     value: &Value,
     provider: &'static dyn AccelProvider,
-) -> Result<Option<PreparedOperand>, String> {
+) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
             if is_scalar_handle(handle) {
@@ -508,7 +546,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
@@ -520,12 +558,14 @@ fn prepare_gpu_operand(
 fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedOperand) {
@@ -539,6 +579,14 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -627,9 +675,9 @@ pub(crate) mod tests {
     fn reports_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = mrdivide_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err();
+        let err = unwrap_error(mrdivide_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err());
         assert!(
-            err.contains("Matrix dimensions must agree"),
+            err.message().contains("Matrix dimensions must agree"),
             "unexpected error message: {err}"
         );
     }

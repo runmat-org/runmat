@@ -8,6 +8,7 @@ const NAME: &str = "std";
 
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -211,6 +212,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer reduce_std_dim/reduce_std implementations; host fallback ensures correctness when they are unavailable.",
 };
 
+
+fn std_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::std")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "std",
@@ -343,13 +349,17 @@ impl IntClass {
         }
     }
 
-    fn to_value(self, scalar: f64) -> Result<Value, String> {
+    fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err("std: cannot represent NaN as an integer output".to_string());
+            return Err(std_error(
+                "std: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err("std: integer output overflowed the target type".to_string());
+            return Err(std_error(
+                "std: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -384,14 +394,14 @@ fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let raw = match value {
         Value::GpuTensor(handle) => std_gpu(handle, &parsed)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err((("std: complex inputs are not supported yet".to_string())).into())
+            return Err(std_error("std: complex inputs are not supported yet"));
         }
         other => std_host(other, &parsed)?,
     };
-    apply_output_template(raw, &parsed.output, &input_meta).map_err(Into::into)
+    apply_output_template(raw, &parsed.output, &input_meta)
 }
 
-fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = StdAxes::Default;
     let mut axes_set = false;
     let mut normalization = StdNormalization::Sample;
@@ -417,9 +427,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(
-                            "std: multiple output class specifications provided".to_string()
-                        );
+                        return Err(std_error(
+                            "std: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Double;
                     output_set = true;
@@ -428,9 +438,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(
-                            "std: multiple output class specifications provided".to_string()
-                        );
+                        return Err(std_error(
+                            "std: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Native;
                     output_set = true;
@@ -439,26 +449,25 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(
-                            "std: cannot combine 'like' with another output class specifier"
-                                .to_string(),
-                        );
+                        return Err(std_error(
+                            "std: cannot combine 'like' with another output class specifier",
+                        ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err("std: expected prototype after 'like'".to_string());
+                        return Err(std_error("std: expected prototype after 'like'"));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err("std: 'like' must be the final argument".to_string());
+                        return Err(std_error("std: 'like' must be the final argument"));
                     }
                     break;
                 }
                 "all" => {
                     if axes_set && !matches!(axes, StdAxes::Default) {
-                        return Err(
-                            "std: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
+                        return Err(std_error(
+                            "std: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                 }
                 _ => {}
@@ -488,9 +497,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                     && axes_set
                     && !matches!(axes, StdAxes::Default)
                 {
-                    return Err(
-                        "std: 'all' cannot be combined with an explicit dimension".to_string()
-                    );
+                    return Err(std_error(
+                        "std: 'all' cannot be combined with an explicit dimension",
+                    ));
                 }
                 axes = selection;
                 axes_set = true;
@@ -499,12 +508,16 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
             }
         } else if let Some(selection) = parse_axes(arg)? {
             if matches!(selection, StdAxes::All) {
-                return Err("std: 'all' cannot be combined with an explicit dimension".to_string());
+                return Err(std_error(
+                    "std: 'all' cannot be combined with an explicit dimension",
+                ));
             }
-            return Err("std: multiple dimension specifications provided".to_string());
+            return Err(std_error(
+                "std: multiple dimension specifications provided",
+            ));
         }
 
-        return Err(format!("std: unrecognised argument {arg:?}"));
+        return Err(std_error(format!("std: unrecognised argument {arg:?}")));
     }
 
     Ok(ParsedArguments {
@@ -515,7 +528,7 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
     })
 }
 
-fn parse_normalization(value: &Value) -> Result<NormParse, String> {
+fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
     match value {
         Value::Tensor(tensor) => {
             if tensor.data.is_empty() {
@@ -547,14 +560,16 @@ fn parse_normalization(value: &Value) -> Result<NormParse, String> {
             _ => Ok(NormParse::NotMatched),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err("std: normalisation flag must reside on the host".to_string()),
+        Value::GpuTensor(_) => Err(std_error(
+            "std: normalisation flag must reside on the host",
+        )),
         _ => Ok(NormParse::NotMatched),
     }
 }
 
-fn parse_normalization_scalar(value: f64) -> Result<NormParse, String> {
+fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     if !value.is_finite() {
-        return Err("std: normalisation flag must be finite".to_string());
+        return Err(std_error("std: normalisation flag must be finite"));
     }
     if (value - 0.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(StdNormalization::Sample));
@@ -565,13 +580,13 @@ fn parse_normalization_scalar(value: f64) -> Result<NormParse, String> {
     Ok(NormParse::NotMatched)
 }
 
-fn parse_axes(value: &Value) -> Result<Option<StdAxes>, String> {
+fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
     if let Some(text) = value_as_str(value) {
         let lowered = text.trim().to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(StdAxes::All)),
             "omitnan" | "includenan" | "double" | "native" | "default" | "like" => Ok(None),
-            "" => Err("std: dimension string must not be empty".to_string()),
+            "" => Err(std_error("std: dimension string must not be empty")),
             _ => Ok(None),
         };
     }
@@ -582,30 +597,34 @@ fn parse_axes(value: &Value) -> Result<Option<StdAxes>, String> {
                 return Ok(Some(StdAxes::Default));
             }
             if t.data.len() == 1 {
-                let dim = tensor::parse_dimension(&Value::Num(t.data[0]), "std")?;
+                let dim = tensor::parse_dimension(&Value::Num(t.data[0]), "std")
+                    .map_err(std_error)?;
                 return Ok(Some(StdAxes::Dim(dim)));
             }
             let dims = parse_dimension_vector(t)?;
             Ok(Some(StdAxes::Vec(dims)))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor = tensor::logical_to_tensor(logical).map_err(std_error)?;
             if tensor.data.is_empty() {
                 return Ok(Some(StdAxes::Default));
             }
             if tensor.data.len() == 1 {
-                let dim = tensor::parse_dimension(&Value::Num(tensor.data[0]), "std")?;
+                let dim = tensor::parse_dimension(&Value::Num(tensor.data[0]), "std")
+                    .map_err(std_error)?;
                 return Ok(Some(StdAxes::Dim(dim)));
             }
             let dims = parse_dimension_vector(&tensor)?;
             Ok(Some(StdAxes::Vec(dims)))
         }
         Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "std")?;
+            let dim = tensor::parse_dimension(value, "std").map_err(std_error)?;
             Ok(Some(StdAxes::Dim(dim)))
         }
-        Value::GpuTensor(_) => Err("std: dimension arguments cannot be GPU tensors".to_string()),
-        Value::Bool(_) => Err("std: dimension must be numeric".to_string()),
+        Value::GpuTensor(_) => Err(std_error(
+            "std: dimension arguments cannot be GPU tensors",
+        )),
+        Value::Bool(_) => Err(std_error("std: dimension must be numeric")),
         _ => Ok(None),
     }
 }
@@ -619,29 +638,31 @@ fn value_as_str(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
+fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &val in &tensor.data {
         if !val.is_finite() {
-            return Err("std: dimension entries must be finite integers".to_string());
+            return Err(std_error(
+                "std: dimension entries must be finite integers",
+            ));
         }
         let rounded = val.round();
         if (rounded - val).abs() > f64::EPSILON {
-            return Err("std: dimension entries must be integers".to_string());
+            return Err(std_error("std: dimension entries must be integers"));
         }
         if rounded < 1.0 {
-            return Err("std: dimension entries must be >= 1".to_string());
+            return Err(std_error("std: dimension entries must be >= 1"));
         }
         dims.push(rounded as usize);
     }
     if dims.is_empty() {
-        return Err("std: dimension vector must not be empty".to_string());
+        return Err(std_error("std: dimension vector must not be empty"));
     }
     Ok(dims)
 }
 
-fn std_host(value: Value, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("std", value)?;
+fn std_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("std", value).map_err(std_error)?;
     let reduced = std_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -651,7 +672,7 @@ fn std_tensor(
     axes: &StdAxes,
     normalization: StdNormalization,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let (dims, had_request) = resolve_axes(&tensor.shape, axes)?;
     if dims.is_empty() {
         if had_request && tensor.data.len() == 1 {
@@ -662,7 +683,7 @@ fn std_tensor(
     std_tensor_reduce(&tensor, &dims, normalization, nan_mode)
 }
 
-fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
+fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     let value = tensor.data.first().copied().unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
@@ -671,7 +692,7 @@ fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, 
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("std: {e}"))
+    Tensor::new(vec![result], vec![1, 1]).map_err(|e| std_error(format!("std: {e}")))
 }
 
 fn std_tensor_reduce(
@@ -679,7 +700,7 @@ fn std_tensor_reduce(
     dims: &[usize],
     normalization: StdNormalization,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let mut dims_sorted = dims.to_vec();
     dims_sorted.sort_unstable();
     dims_sorted.dedup();
@@ -691,7 +712,8 @@ fn std_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape).map_err(|e| format!("std: {e}"));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| std_error(format!("std: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];
@@ -751,10 +773,10 @@ fn std_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("std: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| std_error(format!("std: {e}")))
 }
 
-fn resolve_axes(shape: &[usize], axes: &StdAxes) -> Result<(Vec<usize>, bool), String> {
+fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, bool)> {
     match axes {
         StdAxes::Default => {
             if shape.is_empty() {
@@ -771,7 +793,7 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> Result<(Vec<usize>, bool), S
         }
         StdAxes::Dim(dim) => {
             if *dim == 0 {
-                return Err("std: dimension must be >= 1".to_string());
+                return Err(std_error("std: dimension must be >= 1"));
             }
             let zero = dim - 1;
             if zero < shape.len() {
@@ -787,7 +809,7 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> Result<(Vec<usize>, bool), S
             let mut out = Vec::with_capacity(dims.len());
             for &dim in dims {
                 if dim == 0 {
-                    return Err("std: dimension must be >= 1".to_string());
+                    return Err(std_error("std: dimension must be >= 1"));
                 }
                 let zero = dim - 1;
                 if zero < shape.len() {
@@ -846,7 +868,7 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
     index
 }
 
-fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -925,7 +947,7 @@ fn reduce_std_dim_gpu(
         .ok()
 }
 
-fn std_gpu_fallback(handle: &GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+fn std_gpu_fallback(handle: &GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor(handle)?;
     let reduced = std_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
@@ -946,7 +968,7 @@ fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
@@ -957,7 +979,7 @@ fn apply_output_template(
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String> {
+fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -974,7 +996,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -984,12 +1006,12 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, Str
             }
             Value::Num(n) => {
                 let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
-                    .map_err(|e| format!("{NAME}: {e}"))?;
+                    .map_err(|e| std_error(format!("{NAME}: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| std_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1018,7 +1040,7 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
@@ -1031,21 +1053,26 @@ fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(tensor) => upload_tensor(tensor),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("std: {e}"))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| std_error(format!("std: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(std_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(format!("std: cannot place value {other:?} on the GPU")),
+            other => Err(std_error(format!(
+                "std: cannot place value {other:?} on the GPU"
+            ))),
         },
     }
 }
 
-fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
+fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err("std: no acceleration provider available to honour GPU output".to_string());
+        return Err(std_error(
+            "std: no acceleration provider available to honour GPU output",
+        ));
     };
     let view = HostTensorView {
         data: &tensor.data,
@@ -1053,11 +1080,11 @@ fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| format!("std: failed to upload GPU result: {e}"))?;
+        .map_err(|e| std_error(format!("std: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
+fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
     let analysed = analyse_like_prototype(prototype)?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
@@ -1071,23 +1098,23 @@ fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String>
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
             let data: Vec<(f64, f64)> = tensor.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("std: {e}"))?;
+            let tensor = ComplexTensor::new(data, tensor.shape.clone())
+                .map_err(|e| std_error(format!("std: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(std_error)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(format!(
+        other => Err(std_error(format!(
             "std: cannot convert value {other:?} to a complex result"
-        )),
+        ))),
     }
 }
 
@@ -1101,7 +1128,7 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -1120,7 +1147,8 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered = dispatcher::gather_if_needed(other).map_err(|e| format!("std: {e}"))?;
+            let gathered = dispatcher::gather_if_needed(other)
+                .map_err(|e| std_error(format!("std: {e}")))?;
             analyse_like_prototype(&gathered)
         }
     }
@@ -1288,11 +1316,16 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![0.2, 0.8], vec![1, 2]).unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).unwrap_err();
-        assert!(
-            err.contains("std: dimension entries must be integers")
-                || err.contains("std: dimension vector must not be empty"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains("std: dimension entries must be integers")
+                        || err.message().contains("std: dimension vector must not be empty"),
+                    "unexpected error message: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

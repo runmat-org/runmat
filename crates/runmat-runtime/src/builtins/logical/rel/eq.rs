@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -227,6 +228,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits comparison kernels that write 0 or 1; providers may override with specialised shaders.",
 };
 
+const BUILTIN_NAME: &str = "eq";
+const IDENT_INVALID_INPUT: &str = "MATLAB:eq:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "MATLAB:eq:SizeMismatch";
+
+fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
@@ -238,13 +251,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_eq_gpu(a, b) {
-            return (result).map_err(Into::into);
+            return result;
         }
     }
-    eq_host(lhs, rhs).map_err(Into::into)
+    eq_host(lhs, rhs)
 }
 
-fn try_eq_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, String>> {
+fn try_eq_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
     match provider.elem_eq(a, b) {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
@@ -255,7 +268,7 @@ fn try_eq_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, 
     }
 }
 
-fn eq_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let Some(value) = eq_identity(&lhs, &rhs) {
         return Ok(value);
     }
@@ -291,9 +304,10 @@ fn eq_host(lhs: Value, rhs: Value) -> Result<Value, String> {
         (EqOperand::Numeric(_), EqOperand::String(_))
         | (EqOperand::Complex(_), EqOperand::String(_))
         | (EqOperand::String(_), EqOperand::Numeric(_))
-        | (EqOperand::String(_), EqOperand::Complex(_)) => {
-            Err("eq: mixing numeric and string inputs is not supported".to_string())
-        }
+        | (EqOperand::String(_), EqOperand::Complex(_)) => Err(eq_error(
+            "eq: mixing numeric and string inputs is not supported",
+            IDENT_INVALID_INPUT,
+        )),
     }
 }
 
@@ -335,13 +349,13 @@ fn normalize_char_string(lhs: Value, rhs: Value) -> (Value, Value) {
     }
 }
 
-fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
     if tensor::element_count(&shape) <= 1 && data.len() == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("eq: {e}"))
+            .map_err(|e| eq_error(format!("eq: {e}"), IDENT_INVALID_INPUT))
     }
 }
 
@@ -449,7 +463,7 @@ enum EqOperand {
 }
 
 impl EqOperand {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(EqOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(EqOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -472,16 +486,24 @@ impl EqOperand {
                 Ok(EqOperand::Numeric(NumericBuffer::from_char_array(array)))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|err| eq_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
                 Ok(EqOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            unsupported => Err(format!("eq: unsupported input type {unsupported:?}")),
+            unsupported => Err(eq_error(
+                format!("eq: unsupported input type {unsupported:?}"),
+                IDENT_INVALID_INPUT,
+            )),
         }
     }
 }
 
-fn numeric_eq(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("eq", &lhs.shape, &rhs.shape)?;
+fn numeric_eq(
+    lhs: &NumericBuffer,
+    rhs: &NumericBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -507,8 +529,12 @@ fn numeric_eq(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<
     Ok((out, shape))
 }
 
-fn complex_eq(lhs: &ComplexBuffer, rhs: &ComplexBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("eq", &lhs.shape, &rhs.shape)?;
+fn complex_eq(
+    lhs: &ComplexBuffer,
+    rhs: &ComplexBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -538,8 +564,12 @@ fn complex_eq(lhs: &ComplexBuffer, rhs: &ComplexBuffer) -> Result<(Vec<u8>, Vec<
     Ok((out, shape))
 }
 
-fn string_eq(lhs: &StringBuffer, rhs: &StringBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("eq", &lhs.shape, &rhs.shape)?;
+fn string_eq(
+    lhs: &StringBuffer,
+    rhs: &StringBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -576,6 +606,7 @@ fn promote_numeric_to_complex(buffer: &NumericBuffer) -> ComplexBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
@@ -688,7 +719,13 @@ pub(crate) mod tests {
     #[test]
     fn eq_numeric_and_string_error() {
         let err = eq_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
-        assert!(err.contains("mixing numeric and string inputs"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("mixing numeric and string inputs"));
+                assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

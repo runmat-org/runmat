@@ -10,6 +10,10 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const NAME: &str = "all";
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -199,6 +203,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side AND reductions; runtimes gather to host when hooks are unavailable.",
 };
 
+fn all_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::all")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "all",
@@ -226,16 +234,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::all"
 )]
-fn all_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (spec, nan_mode) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (all_gpu(handle, spec, nan_mode)).map_err(Into::into),
-        other => (all_host(other, spec, nan_mode)).map_err(Into::into),
+        Value::GpuTensor(handle) => all_gpu(handle, spec, nan_mode),
+        other => all_host(other, spec, nan_mode),
     }
 }
 
-fn all_host(value: Value, spec: ReductionSpec, nan_mode: ReductionNaN) -> Result<Value, String> {
-    let truth = TruthTensor::from_value("all", value)?;
+fn all_host(value: Value, spec: ReductionSpec, nan_mode: ReductionNaN) -> BuiltinResult<Value> {
+    let truth = TruthTensor::from_value(value)?;
     let reduced = apply_reduction(truth, spec, nan_mode)?;
     reduced.into_value()
 }
@@ -244,7 +252,7 @@ fn all_gpu(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -267,7 +275,7 @@ fn gpu_fallback(
     handle: GpuTensorHandle,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     all_host(Value::Tensor(tensor), spec, nan_mode)
 }
@@ -277,12 +285,14 @@ fn try_all_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<Option<HostTensorOwned>, String> {
+) -> BuiltinResult<Option<HostTensorOwned>> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
     if let ReductionSpec::All = spec {
         if let Ok(tmp) = provider.reduce_all(handle, omit_nan) {
-            let host = provider.download(&tmp).map_err(|e| e.to_string())?;
+            let host = provider
+                .download(&tmp)
+                .map_err(|e| all_error(format!("all: {e}")))?;
             let _ = provider.free(&tmp);
             return Ok(Some(host));
         }
@@ -296,7 +306,7 @@ fn reduce_dims_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     omit_nan: bool,
-) -> Result<Option<HostTensorOwned>, String> {
+) -> BuiltinResult<Option<HostTensorOwned>> {
     let mut dims = dims_from_spec(spec, &handle.shape);
     if dims.is_empty() {
         return Ok(None);
@@ -328,9 +338,7 @@ fn reduce_dims_gpu(
             }
             return Ok(None);
         }
-        let next = provider
-            .reduce_all_dim(&current, axis, omit_nan)
-            .map_err(|e| e.to_string());
+        let next = provider.reduce_all_dim(&current, axis, omit_nan);
         match next {
             Ok(new_handle) => {
                 if current_owned {
@@ -355,7 +363,9 @@ fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = provider.download(&current).map_err(|e| e.to_string())?;
+    let host = provider
+        .download(&current)
+        .map_err(|e| all_error(format!("all: {e}")))?;
     let _ = provider.free(&current);
     for owned in intermediates {
         let _ = provider.free(&owned);
@@ -363,7 +373,7 @@ fn reduce_dims_gpu(
     Ok(Some(host))
 }
 
-fn logical_from_host(host: HostTensorOwned) -> Result<Value, String> {
+fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
     if host.data.len() == 1 {
         return Ok(Value::Bool(host.data[0] != 0.0));
     }
@@ -383,7 +393,7 @@ fn logical_from_host(host: HostTensorOwned) -> Result<Value, String> {
         .collect();
     LogicalArray::new(logical_data, shape)
         .map(Value::LogicalArray)
-        .map_err(|e| format!("all: {e}"))
+        .map_err(|e| all_error(format!("all: {e}")))
 }
 
 fn dims_from_spec(spec: &ReductionSpec, shape: &[usize]) -> Vec<usize> {
@@ -447,15 +457,17 @@ impl TruthValue {
 }
 
 impl TruthTensor {
-    fn from_value(name: &str, value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => Ok(Self::from_tensor(t)),
             Value::LogicalArray(logical) => Ok(Self::from_logical(logical)),
             Value::Num(n) => Ok(Self::from_tensor(
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?,
+                Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| all_error(format!("{NAME}: {e}")))?,
             )),
             Value::Int(i) => Ok(Self::from_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?,
+                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                    .map_err(|e| all_error(format!("{NAME}: {e}")))?,
             )),
             Value::Bool(b) => Ok(Self {
                 shape: vec![1, 1],
@@ -481,10 +493,10 @@ impl TruthTensor {
                 let tensor = gpu_helpers::gather_tensor(&handle)?;
                 Ok(Self::from_tensor(tensor))
             }
-            other => Err(format!(
-                "{name}: unsupported input type {:?}; expected numeric, logical, complex, or char data",
+            other => Err(all_error(format!(
+                "{NAME}: unsupported input type {:?}; expected numeric, logical, complex, or char data",
                 other
-            )),
+            ))),
         }
     }
 
@@ -558,9 +570,9 @@ impl TruthTensor {
         }
     }
 
-    fn reduce_dim(&self, dim: usize, nan_mode: ReductionNaN) -> Result<Self, String> {
+    fn reduce_dim(&self, dim: usize, nan_mode: ReductionNaN) -> BuiltinResult<Self> {
         if dim == 0 {
-            return Err("all: dimension must be >= 1".to_string());
+            return Err(all_error("all: dimension must be >= 1"));
         }
         if self.shape.is_empty() {
             let truth = self.data.first().copied().unwrap_or(TruthValue {
@@ -644,7 +656,7 @@ impl TruthTensor {
         })
     }
 
-    fn into_value(self) -> Result<Value, String> {
+    fn into_value(self) -> BuiltinResult<Value> {
         if self.data.len() == 1 {
             return Ok(Value::Bool(self.data[0].truthy));
         }
@@ -664,7 +676,7 @@ impl TruthTensor {
             .collect();
         LogicalArray::new(logical_data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("all: {e}"))
+            .map_err(|e| all_error(format!("all: {e}")))
     }
 }
 
@@ -672,7 +684,7 @@ fn apply_reduction(
     tensor: TruthTensor,
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
-) -> Result<TruthTensor, String> {
+) -> BuiltinResult<TruthTensor> {
     match spec {
         ReductionSpec::Default => {
             tensor.reduce_dim(default_dimension_from_shape(&tensor.shape), nan_mode)
@@ -701,46 +713,46 @@ fn apply_reduction(
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(ReductionSpec, ReductionNaN), String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
 
     for arg in args {
         if is_all_token(arg) {
             if !matches!(spec, ReductionSpec::Default) {
-                return Err("all: 'all' cannot be combined with dimension arguments".to_string());
+                return Err(all_error("all: 'all' cannot be combined with dimension arguments"));
             }
             spec = ReductionSpec::All;
             continue;
         }
         if let Some(mode) = parse_nan_mode(arg)? {
             if !matches!(nan_mode, ReductionNaN::Include) {
-                return Err("all: multiple NaN handling options specified".to_string());
+                return Err(all_error("all: multiple NaN handling options specified"));
             }
             nan_mode = mode;
             continue;
         }
         let dims = parse_dimensions(arg)?;
         if dims.is_empty() {
-            return Err("all: dimension vector must contain at least one entry".to_string());
+            return Err(all_error("all: dimension vector must contain at least one entry"));
         }
         if dims.len() == 1 {
             if matches!(spec, ReductionSpec::Default) {
                 spec = ReductionSpec::Dim(dims[0]);
             } else {
-                return Err("all: multiple dimension specifications are not supported".to_string());
+                return Err(all_error("all: multiple dimension specifications are not supported"));
             }
         } else if matches!(spec, ReductionSpec::Default) {
             spec = ReductionSpec::VecDim(dims);
         } else {
-            return Err("all: multiple dimension specifications are not supported".to_string());
+            return Err(all_error("all: multiple dimension specifications are not supported"));
         }
     }
 
     Ok((spec, nan_mode))
 }
 
-fn parse_nan_mode(value: &Value) -> Result<Option<ReductionNaN>, String> {
+fn parse_nan_mode(value: &Value) -> BuiltinResult<Option<ReductionNaN>> {
     let Some(text) = extract_text_token(value) else {
         return Ok(None);
     };
@@ -748,7 +760,7 @@ fn parse_nan_mode(value: &Value) -> Result<Option<ReductionNaN>, String> {
     match lowered.as_str() {
         "omitnan" => Ok(Some(ReductionNaN::Omit)),
         "includenan" => Ok(Some(ReductionNaN::Include)),
-        _ => Err(format!("all: unknown option '{}'", text.trim())),
+        _ => Err(all_error(format!("all: unknown option '{}'", text.trim()))),
     }
 }
 
@@ -758,25 +770,25 @@ fn is_all_token(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_dimensions(value: &Value) -> Result<Vec<usize>, String> {
-    let tensor = tensor::value_to_tensor(value)?;
+fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
+    let tensor = tensor::value_to_tensor(value).map_err(|err| all_error(err))?;
     if tensor.data.is_empty() {
         return Ok(Vec::new());
     }
     let mut dims = Vec::new();
     for raw in tensor.data {
         if !raw.is_finite() {
-            return Err("all: dimension values must be finite".to_string());
+            return Err(all_error("all: dimension values must be finite"));
         }
         let rounded = raw.round();
         if (rounded - raw).abs() > f64::EPSILON {
-            return Err("all: dimension values must be integers".to_string());
+            return Err(all_error("all: dimension values must be integers"));
         }
         if rounded < 1.0 {
-            return Err("all: dimension values must be >= 1".to_string());
+            return Err(all_error("all: dimension values must be >= 1"));
         }
         if rounded > (usize::MAX as f64) {
-            return Err("all: dimension value is too large".to_string());
+            return Err(all_error("all: dimension value is too large"));
         }
         let dim = rounded as usize;
         if !dims.contains(&dim) {
@@ -998,7 +1010,15 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("all"), Value::Int(IntValue::I32(1))];
         let err = all_builtin(Value::Tensor(tensor), args).unwrap_err();
-        assert!(err.contains("dimension"), "unexpected error message: {err}");
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains("dimension"),
+                    "unexpected error message: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

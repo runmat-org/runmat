@@ -3,6 +3,7 @@
 //! Implements element-wise and matrix operations following MATLAB semantics.
 
 use crate::builtins::common::linalg;
+use crate::BuiltinResult;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -53,7 +54,7 @@ pub fn matrix_mul(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 pub fn value_matmul(
     a: &runmat_builtins::Value,
     b: &runmat_builtins::Value,
-) -> Result<runmat_builtins::Value, String> {
+) -> BuiltinResult<runmat_builtins::Value> {
     crate::builtins::math::linalg::ops::mtimes::mtimes_eval(a, b)
 }
 

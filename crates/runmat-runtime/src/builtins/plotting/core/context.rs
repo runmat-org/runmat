@@ -14,7 +14,8 @@ use runmat_accelerate_api::{AccelContextHandle, AccelContextKind, WgpuContextHan
 use runmat_thread_local::runmat_thread_local;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
-use std::fmt;
+
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 /// Process-wide WGPU context exported by the acceleration provider (if any).
 #[cfg(not(target_arch = "wasm32"))]
@@ -55,13 +56,14 @@ pub fn install_wgpu_context(context: &WgpuContextHandle) {
 
 /// Ensure the shared context is populated by calling back into the acceleration
 /// provider. Returns the cached context when available.
-pub fn ensure_context_from_provider() -> Result<WgpuContextHandle, PlotContextError> {
+pub fn ensure_context_from_provider() -> BuiltinResult<WgpuContextHandle> {
     if let Some(ctx) = shared_wgpu_context() {
         return Ok(ctx);
     }
 
-    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting)
-        .ok_or(PlotContextError::Unavailable)?;
+    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting).ok_or_else(
+        || context_error("plotting context unavailable (GPU provider did not export a shared device)"),
+    )?;
     match handle {
         AccelContextHandle::Wgpu(ctx) => {
             install_wgpu_context(&ctx);
@@ -70,23 +72,9 @@ pub fn ensure_context_from_provider() -> Result<WgpuContextHandle, PlotContextEr
     }
 }
 
-#[derive(Debug)]
-pub enum PlotContextError {
-    Unavailable,
+fn context_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).build().into()
 }
-
-impl fmt::Display for PlotContextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PlotContextError::Unavailable => write!(
-                f,
-                "plotting context unavailable (GPU provider did not export a shared device)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PlotContextError {}
 
 fn propagate_to_plot_crate(context: &WgpuContextHandle) {
     #[cfg(feature = "plot-core")]

@@ -1,14 +1,15 @@
 //! MATLAB-compatible `flipud` builtin with GPU-aware semantics for RunMat.
 
 use super::flip::{
-    complex_tensor_into_value, flip_char_array, flip_complex_tensor, flip_gpu, flip_logical_array,
-    flip_string_array, flip_tensor,
+    complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
+    flip_logical_array_with, flip_string_array_with, flip_tensor_with,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_builtins::{CellArray, ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -221,6 +222,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through flipud.",
 };
 
+fn flipud_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("flipud").build().into()
+}
+
 #[runtime_builtin(
     name = "flipud",
     category = "array/shape",
@@ -231,51 +236,43 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => (flip_tensor(tensor, &UD_DIM)
-            .map_err(|e| e.replace("flip", "flipud"))
-            .map(tensor::tensor_into_value)).map_err(Into::into),
-        Value::LogicalArray(array) => (flip_logical_array(array, &UD_DIM)
-            .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::LogicalArray)).map_err(Into::into),
-        Value::ComplexTensor(ct) => (flip_complex_tensor(ct, &UD_DIM)
-            .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::ComplexTensor)).map_err(Into::into),
+        Value::Tensor(tensor) => Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
+            .map(tensor::tensor_into_value)?),
+        Value::LogicalArray(array) => Ok(flip_logical_array_with("flipud", array, &UD_DIM)
+            .map(Value::LogicalArray)?),
+        Value::ComplexTensor(ct) => Ok(flip_complex_tensor_with("flipud", ct, &UD_DIM)
+            .map(Value::ComplexTensor)?),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("flipud: {e}"))?;
-            Ok(flip_complex_tensor(tensor, &UD_DIM)
-                .map_err(|e| e.replace("flip", "flipud"))
+                .map_err(|e| flipud_error(format!("flipud: {e}")))?;
+            Ok(flip_complex_tensor_with("flipud", tensor, &UD_DIM)
                 .map(complex_tensor_into_value)?)
         }
-        Value::StringArray(strings) => (flip_string_array(strings, &UD_DIM)
-            .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::StringArray)).map_err(Into::into),
-        Value::CharArray(chars) => (flip_char_array(chars, &UD_DIM)
-            .map_err(|e| e.replace("flip", "flipud"))
-            .map(Value::CharArray)).map_err(Into::into),
+        Value::StringArray(strings) => Ok(flip_string_array_with("flipud", strings, &UD_DIM)
+            .map(Value::StringArray)?),
+        Value::CharArray(chars) => Ok(flip_char_array_with("flipud", chars, &UD_DIM)
+            .map(Value::CharArray)?),
         Value::String(scalar) => Ok(Value::String(scalar)),
-        Value::Cell(cell) => (flip_cell_array_rows(cell)).map_err(Into::into),
+        Value::Cell(cell) => flip_cell_array_rows(cell),
         Value::Num(n) => {
-            let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))?;
-            Ok(flip_tensor(tensor, &UD_DIM)
-                .map_err(|e| e.replace("flip", "flipud"))
+            let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))
+                .map_err(|e| flipud_error(e))?;
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
                 .map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
-            let tensor = tensor::value_into_tensor_for("flipud", Value::Int(i))?;
-            Ok(flip_tensor(tensor, &UD_DIM)
-                .map_err(|e| e.replace("flip", "flipud"))
+            let tensor = tensor::value_into_tensor_for("flipud", Value::Int(i))
+                .map_err(|e| flipud_error(e))?;
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
                 .map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
-            let tensor = tensor::value_into_tensor_for("flipud", Value::Bool(flag))?;
-            Ok(flip_tensor(tensor, &UD_DIM)
-                .map_err(|e| e.replace("flip", "flipud"))
+            let tensor = tensor::value_into_tensor_for("flipud", Value::Bool(flag))
+                .map_err(|e| flipud_error(e))?;
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
                 .map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => {
-            Ok(flip_gpu(handle, &UD_DIM).map_err(|e| e.replace("flip", "flipud"))?)
-        }
+        Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM)?),
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::Struct(_)
@@ -283,11 +280,11 @@ fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err((("flipud: unsupported input type".to_string())).into()),
+        | Value::MException(_) => Err(flipud_error("flipud: unsupported input type")),
     }
 }
 
-fn flip_cell_array_rows(cell: CellArray) -> Result<Value, String> {
+fn flip_cell_array_rows(cell: CellArray) -> crate::BuiltinResult<Value> {
     if cell.rows <= 1 || cell.data.is_empty() {
         return Ok(Value::Cell(cell));
     }
@@ -303,7 +300,7 @@ fn flip_cell_array_rows(cell: CellArray) -> Result<Value, String> {
     }
     CellArray::new_handles(flipped, rows, cols)
         .map(Value::Cell)
-        .map_err(|e| format!("flipud: {e}"))
+        .map_err(|e| flipud_error(format!("flipud: {e}")))
 }
 
 #[cfg(test)]
@@ -467,7 +464,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("field".into(), Value::Num(1.0));
         let err = flipud_builtin(Value::Struct(st)).expect_err("struct unsupported");
-        assert!(err.contains("unsupported input type"));
+        assert!(err.to_string().contains("unsupported input type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

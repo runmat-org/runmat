@@ -19,6 +19,7 @@ use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::gather_if_needed;
+use runmat_runtime::RuntimeControlFlow;
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -161,8 +162,20 @@ impl AccelProvider for TestProvider {
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
         let spec =
-            test_fspecial_spec_from_request(&request.filter).map_err(|e: String| anyhow!(e))?;
-        let tensor = spec.generate_tensor().map_err(|e| anyhow!(e))?;
+            test_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
+                RuntimeControlFlow::Error(error) => anyhow!(error),
+                RuntimeControlFlow::Suspend(pending) => anyhow!(
+                    "fspecial: unexpected suspend while parsing request ({})",
+                    pending.prompt
+                ),
+            })?;
+        let tensor = spec.generate_tensor().map_err(|err| match err {
+            RuntimeControlFlow::Error(error) => anyhow!(error),
+            RuntimeControlFlow::Suspend(pending) => anyhow!(
+                "fspecial: unexpected suspend while generating tensor ({})",
+                pending.prompt
+            ),
+        })?;
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
 
@@ -485,11 +498,32 @@ impl AccelProvider for TestProvider {
         let (data, shape) = self.pull(handle)?;
         let tensor =
             Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
-        runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+        let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
             tensor, options,
-        )
-        .and_then(|eval| eval.into_numeric_unique_result())
-        .map_err(|e| anyhow!("unique (test provider): {e}"))
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => {
+                        anyhow!("unique (test provider): {err}")
+                    }
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                        anyhow!("unique (test provider): unexpected suspend")
+                    }
+                });
+            }
+        };
+        match eval.into_numeric_unique_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => {
+                    anyhow!("unique (test provider): {err}")
+                }
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                    anyhow!("unique (test provider): unexpected suspend")
+                }
+            }),
+        }
     }
 
     fn corrcoef(

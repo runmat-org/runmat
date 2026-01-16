@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, make_cell};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -213,6 +213,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins do not participate in fusion plans; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "dir";
+
+fn dir_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "dir",
     category = "io/repl_fs",
@@ -228,10 +252,10 @@ fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         0 => list_current_directory()?,
         1 => list_from_single_value(&gathered[0])?,
         2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
-        _ => return Err((("dir: too many input arguments".to_string())).into()),
+        _ => return Err(dir_error("dir: too many input arguments")),
     };
     emit_dir_stdout(&records);
-    records_to_value(records).map_err(Into::into)
+    records_to_value(records)
 }
 
 #[derive(Clone)]
@@ -244,23 +268,23 @@ struct DirRecord {
     datenum: f64,
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("dir: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
 
-fn list_current_directory() -> Result<Vec<DirRecord>, String> {
+fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
     let cwd = env::current_dir()
-        .map_err(|err| format!("dir: unable to determine current directory ({err})"))?;
+        .map_err(|err| dir_error(format!("dir: unable to determine current directory ({err})")))?;
     let mut records = list_directory(&cwd, true)?;
     sort_records(&mut records);
     Ok(records)
 }
 
-fn list_from_single_value(value: &Value) -> Result<Vec<DirRecord>, String> {
+fn list_from_single_value(value: &Value) -> BuiltinResult<Vec<DirRecord>> {
     let text = scalar_text(
         value,
         "dir: name must be a character vector or string scalar",
@@ -271,7 +295,7 @@ fn list_from_single_value(value: &Value) -> Result<Vec<DirRecord>, String> {
 fn list_with_folder_and_pattern(
     folder_value: &Value,
     pattern_value: &Value,
-) -> Result<Vec<DirRecord>, String> {
+) -> BuiltinResult<Vec<DirRecord>> {
     let folder_text = scalar_text(
         folder_value,
         "dir: folder must be a character vector or string scalar",
@@ -281,9 +305,11 @@ fn list_with_folder_and_pattern(
         "dir: pattern must be a character vector or string scalar",
     )?;
 
-    let expanded_folder = expand_user_path(folder_text.trim(), "dir")?;
+    let expanded_folder = expand_user_path(folder_text.trim(), "dir").map_err(dir_error)?;
     if contains_wildcards(&expanded_folder) {
-        return Err("dir: folder input must not contain wildcard characters".to_string());
+        return Err(dir_error(
+            "dir: folder input must not contain wildcard characters",
+        ));
     }
 
     let base_path = PathBuf::from(&expanded_folder);
@@ -308,13 +334,13 @@ fn list_with_folder_and_pattern(
     }
 }
 
-fn list_from_text(text: &str) -> Result<Vec<DirRecord>, String> {
+fn list_from_text(text: &str) -> BuiltinResult<Vec<DirRecord>> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return list_current_directory();
     }
 
-    let expanded = expand_user_path(trimmed, "dir")?;
+    let expanded = expand_user_path(trimmed, "dir").map_err(dir_error)?;
     if contains_wildcards(&expanded) {
         let mut records = list_glob_pattern(&expanded, trimmed)?;
         sort_records(&mut records);
@@ -324,7 +350,7 @@ fn list_from_text(text: &str) -> Result<Vec<DirRecord>, String> {
     }
 }
 
-fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
+fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let path = PathBuf::from(expanded);
     match vfs::metadata(&path) {
         Ok(metadata) => {
@@ -355,15 +381,15 @@ fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
             }
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(format!("dir: unable to access '{original}' ({err})")),
+        Err(err) => Err(dir_error(format!("dir: unable to access '{original}' ({err})"))),
     }
 }
 
-fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
+fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let mut records = Vec::new();
 
-    let matcher =
-        glob(expanded).map_err(|err| format!("dir: invalid pattern '{original}' ({err})"))?;
+    let matcher = glob(expanded)
+        .map_err(|err| dir_error(format!("dir: invalid pattern '{original}' ({err})")))?;
     for item in matcher {
         match item {
             Ok(path) => {
@@ -395,9 +421,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
                 });
             }
             Err(err) => {
-                return Err(format!(
+                return Err(dir_error(format!(
                     "dir: unable to enumerate matches for '{original}' ({err})"
-                ))
+                )))
             }
         }
     }
@@ -405,7 +431,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
     Ok(records)
 }
 
-fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, String> {
+fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRecord>> {
     let folder = absolute_folder_string(dir)?;
     let dir_metadata = vfs::metadata(dir).ok();
     let mut records = Vec::new();
@@ -417,7 +443,7 @@ fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, S
 
     let dir_display = folder.clone();
     let read_dir = vfs::read_dir(dir)
-        .map_err(|err| format!("dir: unable to access '{dir_display}' ({err})"))?;
+        .map_err(|err| dir_error(format!("dir: unable to access '{dir_display}' ({err})")))?;
     for entry in read_dir {
         let name_os: &OsString = entry.file_name();
         let name = name_os.to_string_lossy().into_owned();
@@ -428,16 +454,18 @@ fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, S
         let path = entry.path().to_path_buf();
         let metadata = vfs::metadata(&path)
             .or_else(|_| vfs::symlink_metadata(&path))
-            .map_err(|err| format!("dir: unable to read metadata for '{}' ({err})", name))?;
+            .map_err(|err| {
+                dir_error(format!("dir: unable to read metadata for '{}' ({err})", name))
+            })?;
         records.push(record_from_metadata(&folder, name, &metadata));
     }
 
     Ok(records)
 }
 
-fn records_to_value(records: Vec<DirRecord>) -> Result<Value, String> {
+fn records_to_value(records: Vec<DirRecord>) -> BuiltinResult<Value> {
     if records.is_empty() {
-        return make_cell(Vec::new(), 0, 1);
+        return make_cell(Vec::new(), 0, 1).map_err(dir_error);
     }
     let rows = records.len();
     let mut values = Vec::with_capacity(rows);
@@ -457,7 +485,7 @@ fn records_to_value(records: Vec<DirRecord>) -> Result<Value, String> {
             .insert("datenum".to_string(), Value::Num(record.datenum));
         values.push(Value::Struct(st));
     }
-    make_cell(values, rows, 1)
+    make_cell(values, rows, 1).map_err(dir_error)
 }
 
 fn emit_dir_stdout(records: &[DirRecord]) {
@@ -480,7 +508,7 @@ fn emit_dir_stdout(records: &[DirRecord]) {
     record_console_output(ConsoleStream::Stdout, lines.join("\n"));
 }
 
-fn scalar_text(value: &Value, error: &str) -> Result<String, String> {
+fn scalar_text(value: &Value, error: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
@@ -491,16 +519,16 @@ fn scalar_text(value: &Value, error: &str) -> Result<String, String> {
             }
             Ok(row.trim_end().to_string())
         }
-        _ => Err(error.to_string()),
+        _ => Err(dir_error(error)),
     }
 }
 
-fn absolute_folder_string(path: &Path) -> Result<String, String> {
+fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         env::current_dir()
-            .map_err(|err| format!("dir: unable to determine current directory ({err})"))?
+            .map_err(|err| dir_error(format!("dir: unable to determine current directory ({err})")))?
             .join(path)
     };
     let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
@@ -571,6 +599,7 @@ fn sort_records(records: &mut [DirRecord]) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
     use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
@@ -614,6 +643,13 @@ pub(crate) mod tests {
             } else {
                 env::remove_var("HOME");
             }
+        }
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in dir tests"),
         }
     }
 
@@ -833,8 +869,8 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let err = dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, "dir: name must be a character vector or string scalar");
+        let err = unwrap_error(dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -844,9 +880,10 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
-        let err =
-            dir_builtin(vec![Value::StringArray(array)]).expect_err("expected multi-string error");
-        assert_eq!(err, "dir: name must be a character vector or string scalar");
+        let err = unwrap_error(
+            dir_builtin(vec![Value::StringArray(array)]).expect_err("expected multi-string error"),
+        );
+        assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -873,10 +910,12 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let err = dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
-            .expect_err("expected wildcard folder error");
+        let err = unwrap_error(
+            dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
+                .expect_err("expected wildcard folder error"),
+        );
         assert_eq!(
-            err,
+            err.message(),
             "dir: folder input must not contain wildcard characters"
         );
     }

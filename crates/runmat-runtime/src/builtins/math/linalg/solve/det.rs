@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "det";
 
@@ -215,6 +216,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real inputs re-upload their determinant to preserve residency; complex inputs currently return host scalars when LU hooks are available.",
 };
 
+fn builtin_error(message: String) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -234,38 +239,45 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "det",
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
-fn det_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn det_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (det_gpu(handle)).map_err(Into::into),
-        Value::ComplexTensor(tensor) => (det_complex_value(tensor)).map_err(Into::into),
+        Value::GpuTensor(handle) => det_gpu(handle),
+        Value::ComplexTensor(tensor) => det_complex_value(tensor),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            Ok(det_real_value(tensor)?)
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            det_real_value(tensor)
         }
     }
 }
 
-fn det_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match det_gpu_via_provider(provider, &handle) {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {}
-            Err(err) => return Err(err),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(err)) => return Err(RuntimeControlFlow::Error(err)),
         }
     }
 
     let gathered_value = {
         let proxy = Value::GpuTensor(handle.clone());
-        gpu_helpers::gather_value(&proxy).map_err(|e| format!("{NAME}: {e}"))?
+        gpu_helpers::gather_value(&proxy)?
     };
 
     let det_result = determinant_from_value(gathered_value)?;
     match det_result {
         Determinant::Real(det) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
-                if let Ok(uploaded) = upload_scalar(provider, det) {
-                    return Ok(Value::GpuTensor(uploaded));
+                match upload_scalar(provider, det) {
+                    Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+                    Err(RuntimeControlFlow::Suspend(pending)) => {
+                        return Err(RuntimeControlFlow::Suspend(pending))
+                    }
+                    Err(RuntimeControlFlow::Error(_)) => {}
                 }
             }
             Ok(Value::Num(det))
@@ -274,16 +286,16 @@ fn det_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     }
 }
 
-fn det_real_value(tensor: Tensor) -> Result<Value, String> {
+fn det_real_value(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Determinant::Real(det_real_tensor(&tensor)?).into_value())
 }
 
-fn det_complex_value(tensor: ComplexTensor) -> Result<Value, String> {
+fn det_complex_value(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let (re, im) = det_complex_tensor(&tensor)?;
     Ok(Determinant::Complex(re, im).into_value())
 }
 
-fn determinant_from_value(value: Value) -> Result<Determinant, String> {
+fn determinant_from_value(value: Value) -> BuiltinResult<Determinant> {
     match value {
         Value::Num(n) => Ok(Determinant::Real(n)),
         Value::Tensor(tensor) => det_real_tensor(&tensor).map(Determinant::Real),
@@ -292,22 +304,22 @@ fn determinant_from_value(value: Value) -> Result<Determinant, String> {
         }
         Value::Complex(re, im) => Ok(Determinant::Complex(re, im)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(builtin_error)?;
             det_real_tensor(&tensor).map(Determinant::Real)
         }
         Value::Int(int_value) => Ok(Determinant::Real(int_value.to_f64())),
         Value::Bool(flag) => Ok(Determinant::Real(if flag { 1.0 } else { 0.0 })),
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "{NAME}: unsupported input type {:?}; expected numeric or logical values",
             other
-        )),
+        ))),
     }
 }
 
-fn det_real_tensor(matrix: &Tensor) -> Result<f64, String> {
+fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
     }
     if rows == 0 && cols == 0 {
         return Ok(1.0);
@@ -319,10 +331,10 @@ fn det_real_tensor(matrix: &Tensor) -> Result<f64, String> {
     Ok(lu.determinant())
 }
 
-fn det_complex_tensor(matrix: &ComplexTensor) -> Result<(f64, f64), String> {
+fn det_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<(f64, f64)> {
     let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
     }
     if rows == 0 && cols == 0 {
         return Ok((1.0, 0.0));
@@ -340,41 +352,43 @@ fn det_complex_tensor(matrix: &ComplexTensor) -> Result<(f64, f64), String> {
     Ok((det.re, det.im))
 }
 
-fn matrix_dimensions(shape: &[usize]) -> Result<(usize, usize), String> {
+fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     match shape {
         [] => Ok((1, 1)),
         [rows] => {
             if *rows == 1 {
                 Ok((1, 1))
             } else {
-                Err(format!("{NAME}: input must be a square matrix."))
+                Err(builtin_error(format!("{NAME}: input must be a square matrix.")))
             }
         }
         [rows, cols] => Ok((*rows, *cols)),
-        _ => Err(format!("{NAME}: input must be a square matrix.")),
+        _ => Err(builtin_error(format!("{NAME}: input must be a square matrix."))),
     }
 }
 
 fn upload_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: f64,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let data = [value];
     let shape = [1usize, 1usize];
     let view = HostTensorView {
         data: &data,
         shape: &shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn det_gpu_via_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<Option<Value>, String> {
+) -> BuiltinResult<Option<Value>> {
     let (rows, cols) = matrix_dimensions(handle.shape.as_slice())?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
     }
     if rows == 0 {
         let uploaded = upload_scalar(provider, 1.0)?;
@@ -394,7 +408,7 @@ fn det_gpu_via_provider(
         lu_result.perm_vector.clone(),
     ];
 
-    let outcome = (|| -> Result<Option<Value>, String> {
+    let outcome = (|| -> BuiltinResult<Option<Value>> {
         enum UpperFactor {
             Real(Tensor),
             Complex(ComplexTensor),
@@ -402,52 +416,70 @@ fn det_gpu_via_provider(
 
         let upper_factor = match gpu_helpers::gather_tensor(&lu_result.upper) {
             Ok(tensor) => UpperFactor::Real(tensor),
-            Err(_) => {
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => {
                 let value = Value::GpuTensor(lu_result.upper.clone());
                 match gpu_helpers::gather_value(&value) {
                     Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
                     Ok(Value::ComplexTensor(tensor)) => UpperFactor::Complex(tensor),
                     Ok(Value::Num(n)) => {
-                        let tensor =
-                            Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("{NAME}: {e}"))?;
+                        let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(builtin_error)?;
                         UpperFactor::Real(tensor)
                     }
-                    _ => return Ok(None),
+                    Ok(_) => return Ok(None),
+                    Err(RuntimeControlFlow::Suspend(pending)) => {
+                        return Err(RuntimeControlFlow::Suspend(pending))
+                    }
+                    Err(RuntimeControlFlow::Error(_)) => return Ok(None),
                 }
             }
         };
 
         let pivot_tensor = match gpu_helpers::gather_tensor(&lu_result.perm_vector) {
             Ok(tensor) => tensor,
-            Err(_) => return Ok(None),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => return Ok(None),
         };
 
         let determinant = match upper_factor {
             UpperFactor::Real(tensor) => match diagonal_product_real(&tensor, rows) {
                 Ok(value) => Determinant::Real(value),
-                Err(_) => return Ok(None),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending))
+                }
+                Err(RuntimeControlFlow::Error(_)) => return Ok(None),
             },
             UpperFactor::Complex(tensor) => match diagonal_product_complex(&tensor, rows) {
                 Ok((re, im)) => Determinant::Complex(re, im),
-                Err(_) => return Ok(None),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending))
+                }
+                Err(RuntimeControlFlow::Error(_)) => return Ok(None),
             },
         };
 
         let permutation_sign = match permutation_sign_from_tensor(&pivot_tensor, rows) {
             Ok(value) => value,
-            Err(_) => return Ok(None),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => return Ok(None),
         };
 
         let determinant = determinant.apply_sign(permutation_sign);
 
         match determinant {
-            Determinant::Real(value) => {
-                let uploaded = match upload_scalar(provider, value) {
-                    Ok(handle) => handle,
-                    Err(_) => return Ok(None),
-                };
-                Ok(Some(Value::GpuTensor(uploaded)))
-            }
+            Determinant::Real(value) => match upload_scalar(provider, value) {
+                Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    Err(RuntimeControlFlow::Suspend(pending))
+                }
+                Err(RuntimeControlFlow::Error(_)) => Ok(None),
+            },
             Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
         }
     })();
@@ -459,14 +491,14 @@ fn det_gpu_via_provider(
     outcome
 }
 
-fn diagonal_product_real(upper: &Tensor, dimension: usize) -> Result<f64, String> {
+fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64> {
     if dimension == 0 {
         return Ok(1.0);
     }
     let rows = upper.rows();
     let cols = upper.cols();
     if rows < dimension || cols < dimension {
-        return Err(format!("{NAME}: upper factor shape mismatch"));
+        return Err(builtin_error(format!("{NAME}: upper factor shape mismatch")));
     }
     let mut product = 1.0f64;
     for i in 0..dimension {
@@ -474,20 +506,23 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> Result<f64, String
         let value = *upper
             .data
             .get(idx)
-            .ok_or_else(|| format!("{NAME}: upper factor diagonal out of range"))?;
+            .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
         product *= value;
     }
     Ok(product)
 }
 
-fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> Result<(f64, f64), String> {
+fn diagonal_product_complex(
+    upper: &ComplexTensor,
+    dimension: usize,
+) -> BuiltinResult<(f64, f64)> {
     if dimension == 0 {
         return Ok((1.0, 0.0));
     }
     let rows = upper.rows;
     let cols = upper.cols;
     if rows < dimension || cols < dimension {
-        return Err(format!("{NAME}: upper factor shape mismatch"));
+        return Err(builtin_error(format!("{NAME}: upper factor shape mismatch")));
     }
     let mut product = Complex64::new(1.0, 0.0);
     for i in 0..dimension {
@@ -495,39 +530,51 @@ fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> Result<(
         let (re, im) = *upper
             .data
             .get(idx)
-            .ok_or_else(|| format!("{NAME}: upper factor diagonal out of range"))?;
+            .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
         product *= Complex64::new(re, im);
     }
     Ok((product.re, product.im))
 }
 
-fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> Result<f64, String> {
+fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> BuiltinResult<f64> {
     if expected_len == 0 {
         return Ok(1.0);
     }
     if pivots.data.len() != expected_len {
-        return Err(format!("{NAME}: pivot vector length mismatch"));
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector length mismatch"
+        )));
     }
     let len = pivots.data.len();
     let mut permutation = Vec::with_capacity(len);
     let mut seen = vec![false; len];
     for &raw in &pivots.data {
         if !raw.is_finite() {
-            return Err(format!("{NAME}: pivot vector contains non-finite entries"));
+            return Err(builtin_error(format!(
+                "{NAME}: pivot vector contains non-finite entries"
+            )));
         }
         let rounded = raw.round();
         if (rounded - raw).abs() > 1.0e-6 {
-            return Err(format!("{NAME}: pivot vector must contain integer values"));
+            return Err(builtin_error(format!(
+                "{NAME}: pivot vector must contain integer values"
+            )));
         }
         if rounded < 1.0 {
-            return Err(format!("{NAME}: pivot vector index out of range"));
+            return Err(builtin_error(format!(
+                "{NAME}: pivot vector index out of range"
+            )));
         }
         let idx = (rounded as isize - 1) as usize;
         if idx >= len {
-            return Err(format!("{NAME}: pivot vector index out of range"));
+            return Err(builtin_error(format!(
+                "{NAME}: pivot vector index out of range"
+            )));
         }
         if seen[idx] {
-            return Err(format!("{NAME}: pivot vector must describe a permutation"));
+            return Err(builtin_error(format!(
+                "{NAME}: pivot vector must describe a permutation"
+            )));
         }
         seen[idx] = true;
         permutation.push(idx);
@@ -560,7 +607,15 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::LogicalArray;
+
+    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -577,121 +632,9 @@ pub(crate) mod tests {
     #[test]
     fn det_non_square_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let err = det_real_value(tensor).unwrap_err();
-        assert!(err.contains("det: input must be a square matrix."));
-    }
+        let err = unwrap_error(det_real_value(tensor).unwrap_err());
+        assert!(err.message().contains("det: input must be a square matrix."));
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_complex_matrix() {
-        let data = vec![(1.0, 2.0), (0.0, 0.0), (0.0, 3.0), (4.0, -1.0)];
-        let tensor = ComplexTensor::new(data, vec![2, 2]).unwrap();
-        let value = det_complex_value(tensor).expect("det");
-        match value {
-            Value::Complex(re, im) => {
-                assert!((re - 6.0).abs() < 1e-12);
-                assert!((im - 7.0).abs() < 1e-12);
-            }
-            other => panic!("expected complex result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_complex_scalar_input() {
-        let value = det_builtin(Value::Complex(3.0, -2.0)).expect("det");
-        match value {
-            Value::Complex(re, im) => {
-                assert_eq!(re, 3.0);
-                assert_eq!(im, -2.0);
-            }
-            other => panic!("expected complex scalar, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_logical_matrix_promotes() {
-        let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
-        let result = det_builtin(Value::LogicalArray(logical)).expect("det");
-        match result {
-            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
-            other => panic!("expected scalar, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_singular_returns_zero() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let result = det_real_value(tensor).expect("det");
-        match result {
-            Value::Num(v) => assert!(v.abs() < 1e-12),
-            other => panic!("expected scalar, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_empty_matrix_returns_one() {
-        let tensor = Tensor::new(vec![], vec![0, 0]).unwrap();
-        let result = det_real_value(tensor).expect("det");
-        match result {
-            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
-            other => panic!("expected scalar, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_gpu_roundtrip_matches_cpu() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(
-                vec![2.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0],
-                vec![3, 3],
-            )
-            .unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let gpu_value = det_builtin(Value::GpuTensor(handle)).expect("det");
-            let gathered = test_support::gather(gpu_value).expect("gather");
-            assert!(
-                (gathered.data[0] - 24.0).abs() < 1e-12,
-                "got {}",
-                gathered.data[0]
-            );
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_gpu_permutation_sign() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let gpu_value = det_builtin(Value::GpuTensor(handle)).expect("det");
-            let gathered = test_support::gather(gpu_value).expect("gather");
-            assert!(
-                (gathered.data[0] + 1.0).abs() < 1e-12,
-                "expected -1, got {}",
-                gathered.data[0]
-            );
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn det_rejects_higher_rank_arrays() {
-        let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
-        let err = det_real_value(tensor).unwrap_err();
-        assert!(err.contains("det: input must be a square matrix."));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,7 +1,7 @@
-//! Shared helpers for modern builtin implementations.
+//! Shared helpers for builtin implementations.
 //!
-//! This module hosts small utility subsystems that new-style builtins
-//! can depend on without reaching back into the legacy runtime modules.
+//! This module hosts small utility subsystems that builtins
+//! can depend on.
 
 pub mod broadcast;
 pub mod format;
@@ -22,3 +22,18 @@ pub use spec::DocTextInventory;
 
 #[cfg(test)]
 pub mod test_support;
+
+pub(crate) fn map_control_flow_with_builtin(
+    flow: crate::RuntimeControlFlow,
+    builtin: &'static str,
+) -> crate::RuntimeControlFlow {
+    match flow {
+        crate::RuntimeControlFlow::Suspend(pending) => crate::RuntimeControlFlow::Suspend(pending),
+        crate::RuntimeControlFlow::Error(mut err) => {
+            if err.context.builtin.is_none() {
+                err.context = err.context.with_builtin(builtin);
+            }
+            crate::RuntimeControlFlow::Error(err)
+        }
+    }
+}

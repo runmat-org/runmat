@@ -4,6 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -192,6 +193,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `round` calls; providers can substitute custom kernels.",
 };
 
+const BUILTIN_NAME: &str = "round";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RoundStrategy {
     Integer,
@@ -213,28 +223,28 @@ impl RoundStrategy {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::round"
 )]
-fn round_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let strategy = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (round_gpu(handle, strategy)).map_err(Into::into),
+        Value::GpuTensor(handle) => round_gpu(handle, strategy),
         Value::Complex(re, im) => Ok(Value::Complex(
             round_scalar(re, strategy),
             round_scalar(im, strategy),
         )),
-        Value::ComplexTensor(ct) => (round_complex_tensor(ct, strategy)).map_err(Into::into),
-        Value::CharArray(ca) => (round_char_array(ca, strategy)).map_err(Into::into),
+        Value::ComplexTensor(ct) => round_complex_tensor(ct, strategy),
+        Value::CharArray(ca) => round_char_array(ca, strategy),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
             Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
         Value::String(_) | Value::StringArray(_) => {
-            Err((("round: expected numeric or logical input".to_string())).into())
+            Err(builtin_error("round: expected numeric or logical input"))
         }
-        other => (round_numeric(other, strategy)).map_err(Into::into),
+        other => round_numeric(other, strategy),
     }
 }
 
-fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> Result<Value, String> {
+fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
     if !strategy.requires_host() {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_round(&handle) {
@@ -246,7 +256,7 @@ fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> Result<Value, 
     round_tensor(tensor, strategy).map(tensor::tensor_into_value)
 }
 
-fn round_numeric(value: Value, strategy: RoundStrategy) -> Result<Value, String> {
+fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(round_scalar(n, strategy))),
         Value::Int(i) => Ok(Value::Num(round_scalar(i.to_f64(), strategy))),
@@ -256,35 +266,37 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> Result<Value, String>
         ))),
         Value::Tensor(t) => round_tensor(t, strategy).map(tensor::tensor_into_value),
         other => {
-            let tensor = tensor::value_into_tensor_for("round", other)?;
+            let tensor = tensor::value_into_tensor_for("round", other).map_err(|err| builtin_error(err))?;
             Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
     }
 }
 
-fn round_tensor(mut tensor: Tensor, strategy: RoundStrategy) -> Result<Tensor, String> {
+fn round_tensor(mut tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
     for value in &mut tensor.data {
         *value = round_scalar(*value, strategy);
     }
     Ok(tensor)
 }
 
-fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> Result<Value, String> {
+fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let data = ct
         .data
         .iter()
         .map(|&(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("round: {e}"))?;
+    let tensor = ComplexTensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("round: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> Result<Value, String> {
+fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
     for ch in ca.data {
         data.push(round_scalar(ch as u32 as f64, strategy));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("round: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("round: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -325,7 +337,7 @@ fn round_with_significant(value: f64, digits: i32) -> f64 {
     (value * scale).round() / scale
 }
 
-fn parse_arguments(args: &[Value]) -> Result<RoundStrategy, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {
     match args.len() {
         0 => Ok(RoundStrategy::Integer),
         1 => {
@@ -339,21 +351,20 @@ fn parse_arguments(args: &[Value]) -> Result<RoundStrategy, String> {
                 RoundMode::Decimals => Ok(RoundStrategy::Decimals(digits)),
                 RoundMode::Significant => {
                     if digits <= 0 {
-                        return Err(
-                            "round: N must be a positive integer for 'significant' rounding"
-                                .to_string(),
-                        );
+                        return Err(builtin_error(
+                            "round: N must be a positive integer for 'significant' rounding",
+                        ));
                     }
                     Ok(RoundStrategy::Significant(digits))
                 }
             }
         }
-        _ => Err("round: too many input arguments".to_string()),
+        _ => Err(builtin_error("round: too many input arguments")),
     }
 }
 
-fn parse_digits(value: &Value) -> Result<i32, String> {
-    let err = || "round: N must be an integer scalar".to_string();
+fn parse_digits(value: &Value) -> BuiltinResult<i32> {
+    let err = || builtin_error("round: N must be an integer scalar");
     let raw = match value {
         Value::Int(i) => i.to_i64(),
         Value::Num(n) => {
@@ -373,10 +384,15 @@ fn parse_digits(value: &Value) -> Result<i32, String> {
                 0
             }
         }
-        other => return Err(format!("round: N must be numeric, got {:?}", other)),
+        other => {
+            return Err(builtin_error(format!(
+                "round: N must be numeric, got {:?}",
+                other
+            )))
+        }
     };
     if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-        return Err("round: integer overflow in N".to_string());
+        return Err(builtin_error("round: integer overflow in N"));
     }
     Ok(raw as i32)
 }
@@ -387,15 +403,19 @@ enum RoundMode {
     Significant,
 }
 
-fn parse_mode(value: &Value) -> Result<RoundMode, String> {
+fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
     let Some(text) = tensor::value_to_string(value) else {
-        return Err("round: mode must be a character vector or string scalar".to_string());
+        return Err(builtin_error(
+            "round: mode must be a character vector or string scalar",
+        ));
     };
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "significant" => Ok(RoundMode::Significant),
         "decimal" | "decimals" => Ok(RoundMode::Decimals),
-        other => Err(format!("round: unknown rounding mode '{other}'")),
+        other => Err(builtin_error(format!(
+            "round: unknown rounding mode '{other}'"
+        ))),
     }
 }
 
@@ -403,7 +423,23 @@ fn parse_mode(value: &Value) -> Result<RoundMode, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, Tensor};
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains(needle),
+                    "unexpected error: {}",
+                    err.message()
+                );
+            }
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspend: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -492,7 +528,7 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(2)), Value::from("approx")],
         )
         .unwrap_err();
-        assert!(err.contains("unknown rounding mode"));
+        assert_error_contains(err, "unknown rounding mode");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

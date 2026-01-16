@@ -10,6 +10,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const NAME: &str = "nnz";
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -206,6 +210,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
 
+fn nnz_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "nnz",
@@ -241,32 +249,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
-fn nnz_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let dim = parse_dimension_arg(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (nnz_gpu(handle, dim)).map_err(Into::into),
-        other => (nnz_host_value(other, dim)).map_err(Into::into),
+        Value::GpuTensor(handle) => nnz_gpu(handle, dim),
+        other => nnz_host_value(other, dim),
     }
 }
 
-fn parse_dimension_arg(args: &[Value]) -> Result<Option<usize>, String> {
+fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
     match args.len() {
         0 => Ok(None),
         1 => {
-            let dim = tensor::parse_dimension(&args[0], "nnz")?;
+            let dim = tensor::parse_dimension(&args[0], "nnz").map_err(|err| nnz_error(err))?;
             Ok(Some(dim))
         }
-        _ => Err("nnz: too many input arguments".to_string()),
+        _ => Err(nnz_error("nnz: too many input arguments")),
     }
 }
 
-fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> Result<Value, String> {
+fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider();
     match dim {
         None => {
             if let Some(p) = provider {
                 if let Ok(result) = p.reduce_nnz(&handle) {
-                    let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                    let host = p.download(&result).map_err(|e| nnz_error(format!("nnz: {e}")))?;
                     let _ = p.free(&result);
                     let count = host.data.into_iter().next().unwrap_or(0.0);
                     return Ok(Value::Num(count));
@@ -280,10 +288,10 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> Result<Value, String>
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
                     if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based) {
-                        let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                        let host = p.download(&result).map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         let _ = p.free(&result);
                         let tensor =
-                            Tensor::new(host.data, host.shape).map_err(|e| format!("nnz: {e}"))?;
+                            Tensor::new(host.data, host.shape).map_err(|e| nnz_error(format!("nnz: {e}")))?;
                         return Ok(tensor::tensor_into_value(tensor));
                     }
                 }
@@ -294,7 +302,7 @@ fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> Result<Value, String>
     }
 }
 
-fn nnz_host_value(value: Value, dim: Option<usize>) -> Result<Value, String> {
+fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
     match dim {
         None => {
             let count = count_nonzero_value(&value)?;
@@ -308,7 +316,7 @@ fn nnz_host_value(value: Value, dim: Option<usize>) -> Result<Value, String> {
     }
 }
 
-fn count_nonzero_value(value: &Value) -> Result<usize, String> {
+fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(count_nonzero_tensor(tensor)),
         Value::ComplexTensor(ct) => Ok(count_nonzero_complex_tensor(ct)),
@@ -319,12 +327,12 @@ fn count_nonzero_value(value: &Value) -> Result<usize, String> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
         Value::GpuTensor(_) => {
-            Err("nnz: GPU inputs are handled before host evaluation".to_string())
+            Err(nnz_error("nnz: GPU inputs are handled before host evaluation"))
         }
-        other => Err(format!(
+        other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
-        )),
+        ))),
     }
 }
 
@@ -369,7 +377,7 @@ struct Mask {
     shape: Vec<usize>,
 }
 
-fn mask_from_value(value: &Value) -> Result<Mask, String> {
+fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
             let shape = canonical_shape(&tensor.shape, tensor.data.len());
@@ -425,18 +433,18 @@ fn mask_from_value(value: &Value) -> Result<Mask, String> {
             shape: vec![1, 1],
         }),
         Value::GpuTensor(_) => {
-            Err("nnz: GPU inputs are handled before host evaluation".to_string())
+            Err(nnz_error("nnz: GPU inputs are handled before host evaluation"))
         }
-        other => Err(format!(
+        other => Err(nnz_error(format!(
             "nnz: expected numeric, logical, complex, or char array, got {}",
             describe_value_kind(other)
-        )),
+        ))),
     }
 }
 
-fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
+fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err("nnz: dimension must be >= 1".to_string());
+        return Err(nnz_error("nnz: dimension must be >= 1"));
     }
     if mask.bits.is_empty() {
         let mut out_shape = canonical_shape(&mask.shape, 0);
@@ -445,11 +453,11 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
         }
         let out_len = out_shape.iter().copied().product::<usize>();
         let zeros = vec![0.0; out_len];
-        return Tensor::new(zeros, out_shape).map_err(|e| format!("nnz: {e}"));
+        return Tensor::new(zeros, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")));
     }
     if mask.shape.is_empty() {
         let data = vec![mask.bits[0] as f64];
-        return Tensor::new(data, vec![1, 1]).map_err(|e| format!("nnz: {e}"));
+        return Tensor::new(data, vec![1, 1]).map_err(|e| nnz_error(format!("nnz: {e}")));
     }
     if dim > mask.shape.len() {
         return mask_to_tensor(mask);
@@ -490,13 +498,13 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
             }
         }
     }
-    Tensor::new(output, out_shape).map_err(|e| format!("nnz: {e}"))
+    Tensor::new(output, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")))
 }
 
-fn mask_to_tensor(mask: &Mask) -> Result<Tensor, String> {
+fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
     let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
     Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
-        .map_err(|e| format!("nnz: {e}"))
+        .map_err(|e| nnz_error(format!("nnz: {e}")))
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
@@ -733,11 +741,17 @@ pub(crate) mod tests {
     #[test]
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
-        assert!(
-            err.contains("expected numeric, logical, complex, or char array"),
-            "unexpected error: {err}"
-        );
-        assert!(err.contains("string scalar"), "unexpected error: {err}");
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message()
+                        .contains("expected numeric, logical, complex, or char array"),
+                    "unexpected error: {err}"
+                );
+                assert!(err.message().contains("string scalar"), "unexpected error: {err}");
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

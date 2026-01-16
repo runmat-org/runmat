@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -207,6 +207,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filesystem side-effects terminate fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "mkdir";
+
+fn mkdir_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "mkdir",
     category = "io/repl_fs",
@@ -222,13 +246,13 @@ fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 /// Evaluate `mkdir` once and expose all outputs.
-pub fn evaluate(args: &[Value]) -> Result<MkdirResult, String> {
+pub fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
     let gathered = gather_arguments(args)?;
     match gathered.len() {
-        0 => Err("mkdir: not enough input arguments".to_string()),
+        0 => Err(mkdir_error("mkdir: not enough input arguments")),
         1 => create_from_single(&gathered[0]),
         2 => create_from_parent_child(&gathered[0], &gathered[1]),
-        _ => Err("mkdir: too many input arguments".to_string()),
+        _ => Err(mkdir_error("mkdir: too many input arguments")),
     }
 }
 
@@ -292,7 +316,7 @@ impl MkdirResult {
     }
 }
 
-fn create_from_single(value: &Value) -> Result<MkdirResult, String> {
+fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
     let raw = extract_folder_name(value, ERR_FOLDER_ARG)?;
     if raw.is_empty() {
         return Ok(MkdirResult::failure(
@@ -300,12 +324,12 @@ fn create_from_single(value: &Value) -> Result<MkdirResult, String> {
             MESSAGE_ID_EMPTY_NAME,
         ));
     }
-    let expanded = expand_user_path(&raw, "mkdir")?;
+    let expanded = expand_user_path(&raw, "mkdir").map_err(mkdir_error)?;
     let path = PathBuf::from(expanded);
     Ok(create_directory(&path))
 }
 
-fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult, String> {
+fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<MkdirResult> {
     let parent_raw = extract_folder_name(parent, ERR_PARENT_ARG)?;
     let child_raw = extract_folder_name(child, ERR_FOLDER_ARG)?;
 
@@ -319,9 +343,9 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
     let parent_expanded = if parent_raw.is_empty() {
         None
     } else {
-        Some(expand_user_path(&parent_raw, "mkdir")?)
+        Some(expand_user_path(&parent_raw, "mkdir").map_err(mkdir_error)?)
     };
-    let child_expanded = expand_user_path(&child_raw, "mkdir")?;
+    let child_expanded = expand_user_path(&child_raw, "mkdir").map_err(mkdir_error)?;
     let child_path = PathBuf::from(&child_expanded);
 
     if child_path.is_absolute() {
@@ -380,31 +404,31 @@ fn path_exists(path: &Path) -> bool {
     vfs::metadata(path).is_ok()
 }
 
-fn extract_folder_name(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_folder_name(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(error_message.to_string())
+                Err(mkdir_error(error_message))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(mkdir_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(mkdir_error(error_message)),
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("mkdir: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -417,11 +441,19 @@ fn char_array_value(text: &str) -> Value {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
     use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in mkdir tests"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -485,11 +517,13 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error");
-        assert_eq!(err, ERR_FOLDER_ARG);
+        let err = unwrap_error(mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error"));
+        assert_eq!(err.message(), ERR_FOLDER_ARG);
 
-        let err = evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error");
-        assert_eq!(err, ERR_FOLDER_ARG);
+        let err = unwrap_error(
+            evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error"),
+        );
+        assert_eq!(err.message(), ERR_FOLDER_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

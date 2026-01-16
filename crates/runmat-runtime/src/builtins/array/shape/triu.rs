@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -217,6 +218,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Triangular masking is currently treated as a fusion boundary.",
 };
 
+fn triu_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("triu").build().into()
+}
+
 #[runtime_builtin(
     name = "triu",
     category = "array/shape",
@@ -227,46 +232,48 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err((("triu: too many input arguments".to_string())).into());
+        return Err(triu_error("triu: too many input arguments"));
     }
     let offset = parse_diagonal_offset(&rest)?;
     match value {
-        Value::Tensor(tensor) => (triu_tensor(tensor, offset).map(tensor::tensor_into_value)).map_err(Into::into),
-        Value::LogicalArray(array) => (triu_logical_array(array, offset).map(Value::LogicalArray)).map_err(Into::into),
+        Value::Tensor(tensor) => Ok(triu_tensor(tensor, offset)
+            .map(tensor::tensor_into_value)?),
+        Value::LogicalArray(array) => Ok(triu_logical_array(array, offset)
+            .map(Value::LogicalArray)?),
         Value::ComplexTensor(tensor) => {
             Ok(triu_complex_tensor(tensor, offset).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("triu: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| triu_error(format!("triu: {e}")))?;
             Ok(triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
-        Value::Num(n) => (triu_tensor(
-            tensor::value_into_tensor_for("triu", Value::Num(n))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value)).map_err(Into::into),
-        Value::Int(i) => (triu_tensor(
-            tensor::value_into_tensor_for("triu", Value::Int(i.clone()))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value)).map_err(Into::into),
-        Value::Bool(flag) => (triu_tensor(
-            tensor::value_into_tensor_for("triu", Value::Bool(flag))?,
-            offset,
-        )
-        .map(tensor::tensor_into_value)).map_err(Into::into),
+        Value::Num(n) => {
+            let tensor = tensor::value_into_tensor_for("triu", Value::Num(n))
+                .map_err(|e| triu_error(e))?;
+            Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
+        Value::Int(i) => {
+            let tensor = tensor::value_into_tensor_for("triu", Value::Int(i.clone()))
+                .map_err(|e| triu_error(e))?;
+            Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
+        Value::Bool(flag) => {
+            let tensor = tensor::value_into_tensor_for("triu", Value::Bool(flag))
+                .map_err(|e| triu_error(e))?;
+            Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        }
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| format!("triu: {e}"))?;
+                .map_err(|e| triu_error(format!("triu: {e}")))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::GpuTensor(handle) => (triu_gpu(handle, offset)).map_err(Into::into),
+        Value::GpuTensor(handle) => Ok(triu_gpu(handle, offset)?),
         Value::String(_) | Value::StringArray(_) => {
-            Err((("triu: string arrays are not supported".to_string())).into())
+            Err(triu_error("triu: string arrays are not supported"))
         }
-        Value::Cell(_) => Err((("triu: cell arrays are not supported".to_string())).into()),
+        Value::Cell(_) => Err(triu_error("triu: cell arrays are not supported")),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -274,29 +281,31 @@ fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err((("triu: unsupported input type".to_string())).into()),
+        | Value::MException(_) => Err(triu_error("triu: unsupported input type")),
     }
 }
 
-fn parse_diagonal_offset(args: &[Value]) -> Result<isize, String> {
+fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
-    let gathered =
-        crate::dispatcher::gather_if_needed(&args[0]).map_err(|e| format!("triu: {e}"))?;
+    let gathered = crate::dispatcher::gather_if_needed(&args[0])
+        .map_err(|e| triu_error(format!("triu: {e}")))?;
     scalar_to_isize(&gathered, "triu")
 }
 
-fn scalar_to_isize(value: &Value, name: &str) -> Result<isize, String> {
+fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     match value {
         Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format!("{name}: diagonal offset must be finite"));
+                return Err(triu_error(format!("{name}: diagonal offset must be finite")));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(format!("{name}: diagonal offset must be an integer"));
+                return Err(triu_error(format!(
+                    "{name}: diagonal offset must be an integer"
+                )));
             }
             Ok(rounded as isize)
         }
@@ -304,28 +313,28 @@ fn scalar_to_isize(value: &Value, name: &str) -> Result<isize, String> {
             scalar_to_isize(&Value::Num(t.data[0]), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
-        other => Err(format!(
+        other => Err(triu_error(format!(
             "{name}: diagonal offset must be a scalar numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn triu_tensor(mut tensor: Tensor, offset: isize) -> Result<Tensor, String> {
+fn triu_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
     apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, 0.0)?;
     Ok(tensor)
 }
 
-fn triu_logical_array(mut array: LogicalArray, offset: isize) -> Result<LogicalArray, String> {
+fn triu_logical_array(mut array: LogicalArray, offset: isize) -> crate::BuiltinResult<LogicalArray> {
     apply_triu_inplace(&mut array.data, &array.shape, offset, 0u8)?;
     Ok(array)
 }
 
-fn triu_complex_tensor(mut tensor: ComplexTensor, offset: isize) -> Result<ComplexTensor, String> {
+fn triu_complex_tensor(mut tensor: ComplexTensor, offset: isize) -> crate::BuiltinResult<ComplexTensor> {
     apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
     Ok(tensor)
 }
 
-fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
+fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -349,11 +358,11 @@ fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
         };
         let uploaded = provider
             .upload(&view)
-            .map_err(|e| format!("triu: failed to upload fallback result: {e}"))?;
+            .map_err(|e| triu_error(format!("triu: failed to upload fallback result: {e}")))?;
         Ok(Value::GpuTensor(uploaded))
     } else {
         let tensor = gpu_helpers::gather_tensor(&handle)?;
-        triu_tensor(tensor, offset).map(tensor::tensor_into_value)
+        Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
     }
 }
 
@@ -362,7 +371,7 @@ fn apply_triu_inplace<T>(
     shape: &[usize],
     offset: isize,
     zero: T,
-) -> Result<(), String>
+) -> crate::BuiltinResult<()>
 where
     T: Clone,
 {
@@ -382,9 +391,9 @@ where
     }
     let expected = plane
         .checked_mul(pages)
-        .ok_or_else(|| "triu: dimension product overflow".to_string())?;
+        .ok_or_else(|| triu_error("triu: dimension product overflow"))?;
     if expected != data.len() {
-        return Err("triu: tensor data length mismatch".to_string());
+        return Err(triu_error("triu: tensor data length mismatch"));
     }
 
     let offset_i128 = offset as i128;
@@ -523,7 +532,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = triu_builtin(Value::Tensor(tensor), vec![Value::from("diagonal")]).unwrap_err();
         assert!(
-            err.contains("diagonal offset must be a scalar numeric value"),
+            err.to_string().contains("diagonal offset must be a scalar numeric value"),
             "unexpected error: {err}"
         );
     }
@@ -538,7 +547,7 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(
-            err.contains("too many input arguments"),
+            err.to_string().contains("too many input arguments"),
             "unexpected error: {err}"
         );
     }

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, runtime_error, BuiltinResult, RuntimeControlFlow,
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
     RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
@@ -243,13 +243,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn arrayfun_error(message: impl Into<String>) -> RuntimeError {
-    runtime_error(message)
+    build_runtime_error(message)
         .with_builtin("arrayfun")
         .build()
 }
 
 fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
-    runtime_error(message)
+    build_runtime_error(message)
         .with_builtin("arrayfun")
         .with_source(source)
         .build()
@@ -302,7 +302,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
     }
 
     if rest.is_empty() {
-        return Err(arrayfun_error("arrayfun: expected at least one input array").into());
+        return Err(arrayfun_error("arrayfun: expected at least one input array"));
     }
 
     let inputs_snapshot = rest.clone();
@@ -337,7 +337,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             );
         }
         if matches!(raw, Value::Struct(_)) {
-            return Err(arrayfun_error("arrayfun: struct inputs are not supported").into());
+            return Err(arrayfun_error("arrayfun: struct inputs are not supported"));
         }
 
         let host_value =
@@ -554,11 +554,11 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
         Value::String(s) => parse_bool_string(&s)
-            .ok_or_else(|| arrayfun_error("arrayfun: UniformOutput must be logical true or false").into()),
+            .ok_or_else(|| arrayfun_error("arrayfun: UniformOutput must be logical true or false")),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
             parse_bool_string(&text).ok_or_else(|| {
-                arrayfun_error("arrayfun: UniformOutput must be logical true or false").into()
+                arrayfun_error("arrayfun: UniformOutput must be logical true or false")
             })
         }
         other => Err(arrayfun_error(format!(
@@ -760,7 +760,7 @@ impl Callable {
         if let Some(rest) = trimmed.strip_prefix('@') {
             let name = rest.trim();
             if name.is_empty() {
-                Err(arrayfun_error("arrayfun: empty function handle").into())
+                Err(arrayfun_error("arrayfun: empty function handle"))
             } else {
                 Ok(Callable::Builtin {
                     name: name.to_string(),
@@ -1036,7 +1036,7 @@ impl UniformCollector {
                 let rows = normalized_shape.first().copied().unwrap_or(1);
                 let cols = normalized_shape.get(1).copied().unwrap_or(1);
                 let expected = rows.checked_mul(cols).ok_or_else(|| {
-                    arrayfun_error("arrayfun: character output size exceeds platform limits").into()
+                    arrayfun_error("arrayfun: character output size exceeds platform limits")
                 })?;
 
                 if expected != chars.len() {

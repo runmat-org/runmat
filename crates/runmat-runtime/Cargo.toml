@@ -15,6 +15,7 @@ inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-async = { workspace = true }
+thiserror = { workspace = true }
 runmat-plot = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }

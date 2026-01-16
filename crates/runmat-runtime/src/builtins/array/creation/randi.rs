@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -225,6 +226,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; the runtime falls back to host sampling and upload when unavailable.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("randi").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
@@ -246,7 +251,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandi::parse(args)?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 struct ParsedRandi {
@@ -270,19 +275,23 @@ struct Bounds {
 }
 
 impl Bounds {
-    fn new(lower: i64, upper: i64) -> Result<Self, String> {
+    fn new(lower: i64, upper: i64) -> crate::BuiltinResult<Self> {
         if lower > upper {
-            return Err("randi: lower bound must be <= upper bound".to_string());
+            return Err(builtin_error(
+                "randi: lower bound must be <= upper bound",
+            ));
         }
         let span = (upper as i128)
             .checked_sub(lower as i128)
             .and_then(|delta| delta.checked_add(1))
-            .ok_or_else(|| "randi: range width overflows 64-bit arithmetic".to_string())?;
+            .ok_or_else(|| builtin_error("randi: range width overflows 64-bit arithmetic"))?;
         if span <= 0 {
-            return Err("randi: invalid bounds".to_string());
+            return Err(builtin_error("randi: invalid bounds"));
         }
         if span > (1u64 << 53) as i128 {
-            return Err("randi: range width exceeds RNG precision (2^53)".to_string());
+            return Err(builtin_error(
+                "randi: range width exceeds RNG precision (2^53)",
+            ));
         }
         Ok(Self {
             lower,
@@ -293,9 +302,9 @@ impl Bounds {
 }
 
 impl ParsedRandi {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
-            return Err("randi: requires at least one input argument".to_string());
+            return Err(builtin_error("randi: requires at least one input argument"));
         }
 
         let mut iter = args.into_iter();
@@ -317,8 +326,9 @@ impl ParsedRandi {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err("randi: multiple 'like' specifications are not supported"
-                                .to_string());
+                            return Err(builtin_error(
+                                "randi: multiple 'like' specifications are not supported",
+                            ));
                         }
                         if let Some(spec) = &class_override {
                             let keyword = match spec {
@@ -326,10 +336,12 @@ impl ParsedRandi {
                                 OutputTemplate::Double => "'double'",
                                 OutputTemplate::Like(_) => "another class specifier",
                             };
-                            return Err(format!("randi: cannot combine 'like' with {keyword}"));
+                            return Err(builtin_error(format!(
+                                "randi: cannot combine 'like' with {keyword}"
+                            )));
                         }
                         let Some(proto) = rest.get(idx + 1).cloned() else {
-                            return Err("randi: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("randi: expected prototype after 'like'"));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -340,7 +352,9 @@ impl ParsedRandi {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("randi: cannot combine 'like' with 'double'".to_string());
+                            return Err(builtin_error(
+                                "randi: cannot combine 'like' with 'double'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -348,26 +362,30 @@ impl ParsedRandi {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("randi: cannot combine 'like' with 'logical'".to_string());
+                            return Err(builtin_error(
+                                "randi: cannot combine 'like' with 'logical'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Logical);
                         idx += 1;
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "randi: single precision output is not implemented yet".to_string()
-                        );
+                        return Err(builtin_error(
+                            "randi: single precision output is not implemented yet",
+                        ));
                     }
                     "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int64"
                     | "uint64" => {
-                        return Err(format!(
+                        return Err(builtin_error(format!(
                             "randi: output class '{}' is not implemented yet",
                             keyword
-                        ));
+                        )));
                     }
                     other => {
-                        return Err(format!("randi: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!(
+                            "randi: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
@@ -424,7 +442,7 @@ impl ParsedRandi {
     }
 }
 
-fn build_output(parsed: ParsedRandi) -> Result<Value, String> {
+fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => randi_double(&parsed.bounds, &parsed.shape),
         OutputTemplate::Logical => randi_logical(&parsed.bounds, &parsed.shape),
@@ -432,23 +450,22 @@ fn build_output(parsed: ParsedRandi) -> Result<Value, String> {
     }
 }
 
-fn randi_double(bounds: &Bounds, shape: &[usize]) -> Result<Value, String> {
+fn randi_double(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
     let tensor = integer_tensor(bounds, shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randi_logical(bounds: &Bounds, shape: &[usize]) -> Result<Value, String> {
+fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
     if bounds.lower < 0 || bounds.upper > 1 {
-        return Err(
-            "randi: logical output requires bounds contained within the inclusive range [0, 1]"
-                .to_string(),
-        );
+        return Err(builtin_error(
+            "randi: logical output requires bounds contained within the inclusive range [0, 1]",
+        ));
     }
 
     let len = tensor::element_count(shape);
     let mut data: Vec<u8> = Vec::with_capacity(len);
     if len == 0 {
-        let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| format!("randi: {e}"))?;
+        let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))?;
         return Ok(Value::LogicalArray(logical));
     }
 
@@ -463,11 +480,11 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> Result<Value, String> {
             .collect();
     }
 
-    let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| format!("randi: {e}"))?;
+    let logical = LogicalArray::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))?;
     Ok(Value::LogicalArray(logical))
 }
 
-fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> Result<Value, String> {
+fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape),
         Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
@@ -475,11 +492,11 @@ fn randi_like(proto: &Value, bounds: &Bounds, shape: &[usize]) -> Result<Value, 
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             randi_double(bounds, shape)
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(
-            "randi: complex prototypes are not supported; expected real-valued arrays".to_string(),
-        ),
-        Value::Cell(_) => Err("randi: cell prototypes are not supported".to_string()),
-        other => Err(format!("randi: unsupported prototype {other:?}")),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
+            "randi: complex prototypes are not supported; expected real-valued arrays",
+        )),
+        Value::Cell(_) => Err(builtin_error("randi: cell prototypes are not supported")),
+        other => Err(builtin_error(format!("randi: unsupported prototype {other:?}"))),
     }
 }
 
@@ -487,7 +504,7 @@ fn randi_like_gpu(
     handle: &GpuTensorHandle,
     bounds: &Bounds,
     shape: &[usize],
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let attempt = if handle.shape == shape {
             provider.random_integer_like(handle, bounds.lower, bounds.upper)
@@ -510,17 +527,17 @@ fn randi_like_gpu(
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("randi: {e}"))?;
+        .map_err(|e| builtin_error(format!("randi: {e}")))?;
     randi_like(&gathered, bounds, shape)
 }
 
-fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> Result<Tensor, String> {
+fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
     let len = tensor::element_count(shape);
     let data = generate_integer_data(bounds, len)?;
-    Tensor::new(data, shape.to_vec()).map_err(|e| format!("randi: {e}"))
+    Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))
 }
 
-fn generate_integer_data(bounds: &Bounds, len: usize) -> Result<Vec<f64>, String> {
+fn generate_integer_data(bounds: &Bounds, len: usize) -> crate::BuiltinResult<Vec<f64>> {
     if len == 0 {
         return Ok(Vec::new());
     }
@@ -540,7 +557,7 @@ fn generate_integer_data(bounds: &Bounds, len: usize) -> Result<Vec<f64>, String
         }
         let mut value = lower
             .checked_add(offset as i128)
-            .ok_or_else(|| "randi: integer overflow while sampling".to_string())?;
+            .ok_or_else(|| builtin_error("randi: integer overflow while sampling"))?;
         if value > upper {
             value = upper;
         }
@@ -549,50 +566,56 @@ fn generate_integer_data(bounds: &Bounds, len: usize) -> Result<Vec<f64>, String
     Ok(out)
 }
 
-fn parse_bounds(value: Value) -> Result<Bounds, String> {
+fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
     match value {
         Value::Int(i) => parse_upper_scalar(i.to_i64()),
         Value::Num(n) => parse_upper_num(n),
         Value::Tensor(t) => parse_bounds_tensor(&t),
-        Value::LogicalArray(_) | Value::Bool(_) => {
-            Err("randi: bounds must be numeric scalars or vectors".to_string())
-        }
-        Value::GpuTensor(_) => Err("randi: bounds must be specified on the host".to_string()),
-        Value::String(s) => Err(format!("randi: unexpected option '{s}' in first argument")),
-        Value::StringArray(_) => {
-            Err("randi: unexpected string array in first argument".to_string())
-        }
-        Value::CharArray(_) => Err("randi: string bounds are not supported".to_string()),
+        Value::LogicalArray(_) | Value::Bool(_) => Err(builtin_error(
+            "randi: bounds must be numeric scalars or vectors",
+        )),
+        Value::GpuTensor(_) => Err(builtin_error(
+            "randi: bounds must be specified on the host",
+        )),
+        Value::String(s) => Err(builtin_error(format!(
+            "randi: unexpected option '{s}' in first argument"
+        ))),
+        Value::StringArray(_) => Err(builtin_error(
+            "randi: unexpected string array in first argument",
+        )),
+        Value::CharArray(_) => Err(builtin_error("randi: string bounds are not supported")),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("randi: complex bounds are not supported".to_string())
+            Err(builtin_error("randi: complex bounds are not supported"))
         }
-        other => Err(format!("randi: unsupported bounds argument {other:?}")),
+        other => Err(builtin_error(format!(
+            "randi: unsupported bounds argument {other:?}"
+        ))),
     }
 }
 
-fn parse_upper_scalar(upper: i64) -> Result<Bounds, String> {
+fn parse_upper_scalar(upper: i64) -> crate::BuiltinResult<Bounds> {
     if upper < 1 {
-        return Err("randi: upper bound must be >= 1".to_string());
+        return Err(builtin_error("randi: upper bound must be >= 1"));
     }
     Bounds::new(1, upper)
 }
 
-fn parse_upper_num(n: f64) -> Result<Bounds, String> {
+fn parse_upper_num(n: f64) -> crate::BuiltinResult<Bounds> {
     if !n.is_finite() {
-        return Err("randi: bounds must be finite".to_string());
+        return Err(builtin_error("randi: bounds must be finite"));
     }
     let rounded = n.round();
     if (rounded - n).abs() > f64::EPSILON {
-        return Err("randi: bounds must be integers".to_string());
+        return Err(builtin_error("randi: bounds must be integers"));
     }
     let upper = rounded as i64;
     parse_upper_scalar(upper)
 }
 
-fn parse_bounds_tensor(tensor: &Tensor) -> Result<Bounds, String> {
+fn parse_bounds_tensor(tensor: &Tensor) -> crate::BuiltinResult<Bounds> {
     let len = tensor.data.len();
     if len == 0 {
-        return Err("randi: empty bound vector is not allowed".to_string());
+        return Err(builtin_error("randi: empty bound vector is not allowed"));
     }
     if len == 1 {
         return parse_upper_num(tensor.data[0]);
@@ -602,17 +625,19 @@ fn parse_bounds_tensor(tensor: &Tensor) -> Result<Bounds, String> {
         let upper = parse_integer_component(tensor.data[1])?;
         Bounds::new(lower, upper)
     } else {
-        Err("randi: bound vector must contain exactly two elements".to_string())
+        Err(builtin_error(
+            "randi: bound vector must contain exactly two elements",
+        ))
     }
 }
 
-fn parse_integer_component(value: f64) -> Result<i64, String> {
+fn parse_integer_component(value: f64) -> crate::BuiltinResult<i64> {
     if !value.is_finite() {
-        return Err("randi: bounds must be finite".to_string());
+        return Err(builtin_error("randi: bounds must be finite"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("randi: bounds must be integers".to_string());
+        return Err(builtin_error("randi: bounds must be integers"));
     }
     Ok(rounded as i64)
 }
@@ -633,12 +658,14 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
+fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
     match value {
         Value::Int(i) => {
             let dim = i.to_i64();
             if dim < 0 {
-                return Err("randi: matrix dimensions must be non-negative".to_string());
+                return Err(builtin_error(
+                    "randi: matrix dimensions must be non-negative",
+                ));
             }
             Ok(Some(vec![dim as usize]))
         }
@@ -649,21 +676,23 @@ fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
     }
 }
 
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
+fn parse_numeric_dimension(n: f64) -> crate::BuiltinResult<usize> {
     if !n.is_finite() {
-        return Err("randi: dimensions must be finite".to_string());
+        return Err(builtin_error("randi: dimensions must be finite"));
     }
     if n < 0.0 {
-        return Err("randi: matrix dimensions must be non-negative".to_string());
+        return Err(builtin_error(
+            "randi: matrix dimensions must be non-negative",
+        ));
     }
     let rounded = n.round();
     if (rounded - n).abs() > f64::EPSILON {
-        return Err("randi: dimensions must be integers".to_string());
+        return Err(builtin_error("randi: dimensions must be integers"));
     }
     Ok(rounded as usize)
 }
 
-fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
+fn dims_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Option<Vec<usize>>> {
     let is_row = tensor.rows() == 1;
     let is_col = tensor.cols() == 1;
     let is_scalar = tensor.data.len() == 1;
@@ -680,16 +709,18 @@ fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
     Ok(Some(dims))
 }
 
-fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
+fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(_) => Err("randi: complex prototypes are not supported".to_string()),
+        Value::ComplexTensor(_) => {
+            Err(builtin_error("randi: complex prototypes are not supported"))
+        }
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(h.shape.clone()),
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![1, 1]),
-        other => Err(format!("randi: unsupported prototype {other:?}")),
+        other => Err(builtin_error(format!("randi: unsupported prototype {other:?}"))),
     }
 }
 
@@ -804,7 +835,8 @@ pub(crate) mod tests {
     #[test]
     fn randi_logical_requires_binary_bounds() {
         let err = randi_builtin(vec![Value::Num(3.0), Value::from("logical")]).unwrap_err();
-        assert!(err.contains("logical output requires"));
+        let message = err.to_string();
+        assert!(message.contains("logical output requires"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -833,7 +865,8 @@ pub(crate) mod tests {
     #[test]
     fn randi_like_requires_prototype() {
         let err = randi_builtin(vec![Value::Num(5.0), Value::from("like")]).unwrap_err();
-        assert!(err.contains("expected prototype"));
+        let message = err.to_string();
+        assert!(message.contains("expected prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -848,7 +881,8 @@ pub(crate) mod tests {
             Value::Tensor(proto),
         ];
         let err = randi_builtin(args).unwrap_err();
-        assert!(err.contains("multiple 'like' specifications"));
+        let message = err.to_string();
+        assert!(message.contains("multiple 'like' specifications"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -862,7 +896,8 @@ pub(crate) mod tests {
             Value::Tensor(proto),
         ];
         let err = randi_builtin(args).unwrap_err();
-        assert!(err.contains("cannot combine 'like' with 'logical'"));
+        let message = err.to_string();
+        assert!(message.contains("cannot combine 'like' with 'logical'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -936,7 +971,8 @@ pub(crate) mod tests {
     #[test]
     fn randi_invalid_upper_errors() {
         let err = randi_builtin(vec![Value::Num(0.0)]).unwrap_err();
-        assert!(err.contains("upper bound"));
+        let message = err.to_string();
+        assert!(message.contains("upper bound"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

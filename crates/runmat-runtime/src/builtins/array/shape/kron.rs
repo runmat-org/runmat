@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -209,6 +210,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
 };
 
+fn kron_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("kron").build().into()
+}
+
 #[derive(Clone)]
 enum KronNumericResult {
     Real(Tensor),
@@ -231,18 +236,21 @@ enum KronInput {
 )]
 fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err((("kron: too many input arguments".to_string())).into());
+        return Err(kron_error("kron: too many input arguments"));
     }
 
     match (a, b) {
-        (Value::GpuTensor(left), Value::GpuTensor(right)) => (kron_gpu_gpu(left, right)).map_err(Into::into),
-        (Value::GpuTensor(left), right) => (kron_gpu_mixed_left(left, right)).map_err(Into::into),
-        (left, Value::GpuTensor(right)) => (kron_gpu_mixed_right(left, right)).map_err(Into::into),
-        (left, right) => (kron_host(left, right)).map_err(Into::into),
+        (Value::GpuTensor(left), Value::GpuTensor(right)) => Ok(kron_gpu_gpu(left, right)?),
+        (Value::GpuTensor(left), right) => Ok(kron_gpu_mixed_left(left, right)?),
+        (left, Value::GpuTensor(right)) => Ok(kron_gpu_mixed_right(left, right)?),
+        (left, right) => Ok(kron_host(left, right)?),
     }
 }
 
-fn kron_gpu_gpu(left: GpuTensorHandle, right: GpuTensorHandle) -> Result<Value, String> {
+fn kron_gpu_gpu(
+    left: GpuTensorHandle,
+    right: GpuTensorHandle,
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(handle) = provider.kron(&left, &right) {
             return Ok(Value::GpuTensor(handle));
@@ -261,7 +269,7 @@ fn kron_gpu_gpu(left: GpuTensorHandle, right: GpuTensorHandle) -> Result<Value, 
     finalize_numeric(numeric, true)
 }
 
-fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> Result<Value, String> {
+fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tensor_right) = tensor::value_into_tensor_for("kron", right.clone()) {
             let view = HostTensorView {
@@ -291,7 +299,10 @@ fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> Result<Value, Str
     finalize_numeric(numeric, true)
 }
 
-fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> Result<Value, String> {
+fn kron_gpu_mixed_right(
+    left: Value,
+    right: GpuTensorHandle,
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(tensor_left) = tensor::value_into_tensor_for("kron", left.clone()) {
             let view = HostTensorView {
@@ -321,18 +332,21 @@ fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> Result<Value, St
     finalize_numeric(numeric, true)
 }
 
-fn kron_host(left: Value, right: Value) -> Result<Value, String> {
+fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
     let numeric = compute_numeric(left, right)?;
     finalize_numeric(numeric, false)
 }
 
-fn compute_numeric(left: Value, right: Value) -> Result<KronNumericResult, String> {
+fn compute_numeric(left: Value, right: Value) -> crate::BuiltinResult<KronNumericResult> {
     let left_input = value_into_kron_input(left)?;
     let right_input = value_into_kron_input(right)?;
     compute_numeric_inputs(left_input, right_input)
 }
 
-fn compute_numeric_inputs(left: KronInput, right: KronInput) -> Result<KronNumericResult, String> {
+fn compute_numeric_inputs(
+    left: KronInput,
+    right: KronInput,
+) -> crate::BuiltinResult<KronNumericResult> {
     match (left, right) {
         (KronInput::Real(a), KronInput::Real(b)) => {
             let tensor = kron_tensor(&a, &b)?;
@@ -355,7 +369,10 @@ fn compute_numeric_inputs(left: KronInput, right: KronInput) -> Result<KronNumer
     }
 }
 
-fn finalize_numeric(numeric: KronNumericResult, prefer_gpu: bool) -> Result<Value, String> {
+fn finalize_numeric(
+    numeric: KronNumericResult,
+    prefer_gpu: bool,
+) -> crate::BuiltinResult<Value> {
     match numeric {
         KronNumericResult::Real(tensor) => {
             if prefer_gpu {
@@ -375,44 +392,44 @@ fn finalize_numeric(numeric: KronNumericResult, prefer_gpu: bool) -> Result<Valu
     }
 }
 
-fn value_into_kron_input(value: Value) -> Result<KronInput, String> {
+fn value_into_kron_input(value: Value) -> crate::BuiltinResult<KronInput> {
     match value {
         Value::Tensor(tensor) => Ok(KronInput::Real(tensor)),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map(KronInput::Real)
-            .map_err(|e| format!("kron: {e}")),
+            .map_err(|e| kron_error(format!("kron: {e}"))),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             tensor::value_into_tensor_for("kron", value)
                 .map(KronInput::Real)
-                .map_err(|e| e.to_string())
+                .map_err(|e| kron_error(e))
         }
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map(KronInput::Complex)
-            .map_err(|e| format!("kron: {e}")),
+            .map_err(|e| kron_error(format!("kron: {e}"))),
         Value::ComplexTensor(tensor) => Ok(KronInput::Complex(tensor)),
         Value::CharArray(chars) => char_array_to_tensor(&chars).map(KronInput::Real),
-        other => Err(format!(
+        other => Err(kron_error(format!(
             "kron: unsupported input type {:?}; expected numeric, logical, or complex values",
             other
-        )),
+        ))),
     }
 }
 
-fn char_array_to_tensor(chars: &CharArray) -> Result<Tensor, String> {
+fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("kron: {e}"))
+    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| kron_error(format!("kron: {e}")))
 }
 
-fn tensor_to_complex(tensor: &Tensor) -> Result<ComplexTensor, String> {
+fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("kron: {e}"))
+    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| kron_error(format!("kron: {e}")))
 }
 
-fn kron_tensor(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
     let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
-        return Tensor::new(Vec::new(), shape_out).map_err(|e| format!("kron: {e}"));
+        return Tensor::new(Vec::new(), shape_out).map_err(|e| kron_error(format!("kron: {e}")));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -429,14 +446,17 @@ fn kron_tensor(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         }
     }
 
-    Tensor::new(data, shape_out).map_err(|e| format!("kron: {e}"))
+    Tensor::new(data, shape_out).map_err(|e| kron_error(format!("kron: {e}")))
 }
 
-fn kron_complex_tensor(a: &ComplexTensor, b: &ComplexTensor) -> Result<ComplexTensor, String> {
+fn kron_complex_tensor(
+    a: &ComplexTensor,
+    b: &ComplexTensor,
+) -> crate::BuiltinResult<ComplexTensor> {
     let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
-        return ComplexTensor::new(Vec::new(), shape_out).map_err(|e| format!("kron: {e}"));
+        return ComplexTensor::new(Vec::new(), shape_out).map_err(|e| kron_error(format!("kron: {e}")));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -455,10 +475,13 @@ fn kron_complex_tensor(a: &ComplexTensor, b: &ComplexTensor) -> Result<ComplexTe
         }
     }
 
-    ComplexTensor::new(data, shape_out).map_err(|e| format!("kron: {e}"))
+    ComplexTensor::new(data, shape_out).map_err(|e| kron_error(format!("kron: {e}")))
 }
 
-fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<AlignedShapes, String> {
+fn aligned_shapes(
+    shape_a: &[usize],
+    shape_b: &[usize],
+) -> crate::BuiltinResult<AlignedShapes> {
     let rank = shape_a.len().max(shape_b.len()).max(1);
     let mut padded_a = vec![1usize; rank];
     let mut padded_b = vec![1usize; rank];
@@ -475,7 +498,7 @@ fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<AlignedShapes,
         output.push(
             padded_a[i]
                 .checked_mul(padded_b[i])
-                .ok_or_else(|| "kron: requested output exceeds maximum size".to_string())?,
+                .ok_or_else(|| kron_error("kron: requested output exceeds maximum size"))?,
         );
     }
 
@@ -508,7 +531,7 @@ fn combine_indices(
     coords_b: &[usize],
     shape_b: &[usize],
     strides_out: &[usize],
-) -> Result<usize, String> {
+) -> crate::BuiltinResult<usize> {
     let mut index = 0usize;
     for (dim, stride) in strides_out.iter().enumerate() {
         let scaled = coords_a
@@ -516,22 +539,22 @@ fn combine_indices(
             .copied()
             .unwrap_or(0)
             .checked_mul(shape_b.get(dim).copied().unwrap_or(1))
-            .ok_or_else(|| "kron: index overflow".to_string())?;
+            .ok_or_else(|| kron_error("kron: index overflow"))?;
         let coord = scaled
             .checked_add(coords_b.get(dim).copied().unwrap_or(0))
-            .ok_or_else(|| "kron: index overflow".to_string())?;
+            .ok_or_else(|| kron_error("kron: index overflow"))?;
         index = index
             .checked_add(
                 coord
                     .checked_mul(*stride)
-                    .ok_or_else(|| "kron: index overflow".to_string())?,
+                    .ok_or_else(|| kron_error("kron: index overflow"))?,
             )
-            .ok_or_else(|| "kron: index overflow".to_string())?;
+            .ok_or_else(|| kron_error("kron: index overflow"))?;
     }
     Ok(index)
 }
 
-fn checked_total(shape: &[usize], context: &str) -> Result<usize, String> {
+fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> {
     let mut total = 1usize;
     for &dim in shape {
         if dim == 0 {
@@ -539,7 +562,7 @@ fn checked_total(shape: &[usize], context: &str) -> Result<usize, String> {
         }
         total = total
             .checked_mul(dim)
-            .ok_or_else(|| format!("{context}: requested output exceeds maximum size"))?;
+            .ok_or_else(|| kron_error(format!("{context}: requested output exceeds maximum size")))?;
     }
     Ok(total)
 }
@@ -656,7 +679,7 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(
-            err.to_ascii_lowercase().contains("too many"),
+            err.to_string().to_ascii_lowercase().contains("too many"),
             "unexpected error: {err}"
         );
     }

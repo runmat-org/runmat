@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -195,6 +196,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner treats this builtin as a host scalar.",
 };
 
+fn numel_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("numel").build().into()
+}
+
 #[runtime_builtin(
     name = "numel",
     category = "array/introspection",
@@ -220,59 +225,63 @@ fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     Ok(Value::Num(product as f64))
 }
 
-fn parse_dimension_args(args: &[Value]) -> Result<Vec<usize>, String> {
+fn parse_dimension_args(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
     let mut dims = Vec::new();
     for arg in args {
         match arg {
             Value::Int(_) | Value::Num(_) => {
-                dims.push(tensor::parse_dimension(arg, "numel")?);
+                dims.push(tensor::parse_dimension(arg, "numel").map_err(|e| numel_error(e))?);
             }
             Value::Tensor(t) => {
                 ensure_dim_vector(t)?;
                 if t.data.is_empty() {
-                    return Err(
-                        "numel: dimension vector must contain at least one element".to_string()
-                    );
+                    return Err(numel_error(
+                        "numel: dimension vector must contain at least one element",
+                    ));
                 }
                 let parsed = t
                     .data
                     .iter()
                     .map(|&raw| parse_dim_scalar(raw))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<crate::BuiltinResult<Vec<_>>>()?;
                 dims.extend(parsed);
             }
             _ => {
-                return Err(
-                    "numel: dimension arguments must be numeric scalars or vectors".to_string(),
-                );
+                return Err(numel_error(
+                    "numel: dimension arguments must be numeric scalars or vectors",
+                ));
             }
         }
     }
     if dims.is_empty() {
-        return Err("numel: dimension list must contain at least one element".to_string());
+        return Err(numel_error(
+            "numel: dimension list must contain at least one element",
+        ));
     }
     Ok(dims)
 }
 
-fn ensure_dim_vector(t: &Tensor) -> Result<(), String> {
+fn ensure_dim_vector(t: &Tensor) -> crate::BuiltinResult<()> {
     let non_unit = t.shape.iter().filter(|&&dim| dim > 1).count();
     if non_unit <= 1 {
         Ok(())
     } else {
-        Err("numel: dimension vector must be a vector of positive integers".to_string())
+        Err(numel_error(
+            "numel: dimension vector must be a vector of positive integers",
+        ))
     }
 }
 
-fn parse_dim_scalar(raw: f64) -> Result<usize, String> {
+fn parse_dim_scalar(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
-        return Err("numel: dimension must be finite".to_string());
+        return Err(numel_error("numel: dimension must be finite"));
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err("numel: dimension must be an integer".to_string());
+        return Err(numel_error("numel: dimension must be an integer"));
     }
     if rounded < 1.0 {
-        return Err("numel: dimension must be >= 1".to_string());
+        return Err(numel_error("numel: dimension must be >= 1"));
     }
     Ok(rounded as usize)
 }
@@ -365,7 +374,7 @@ pub(crate) mod tests {
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::from(0.0)])
             .expect_err("expected dimension error");
         assert!(
-            err.contains("dimension must be >= 1"),
+            err.to_string().contains("dimension must be >= 1"),
             "unexpected error message: {err}"
         );
     }
@@ -378,7 +387,7 @@ pub(crate) mod tests {
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
             .expect_err("expected vector shape error");
         assert!(
-            err.contains("dimension vector must be a vector"),
+            err.to_string().contains("dimension vector must be a vector"),
             "unexpected error message: {err}"
         );
     }
@@ -390,7 +399,7 @@ pub(crate) mod tests {
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")])
             .expect_err("expected numeric argument error");
         assert!(
-            err.contains("dimension arguments must be numeric"),
+            err.to_string().contains("dimension arguments must be numeric"),
             "unexpected error message: {err}"
         );
     }

@@ -3,6 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -210,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::not"
 )]
-fn not_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn not_builtin(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(ref handle) = value {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(device_out) = provider.logical_not(handle) {
@@ -218,10 +219,10 @@ fn not_builtin(value: Value) -> crate::BuiltinResult<Value> {
             }
         }
     }
-    not_host(value).map_err(Into::into)
+    not_host(value)
 }
 
-fn not_host(value: Value) -> Result<Value, String> {
+fn not_host(value: Value) -> BuiltinResult<Value> {
     let buffer = logical_buffer_from("not", value)?;
     let LogicalBuffer { data, shape } = buffer;
     let total = tensor::element_count(&shape);
@@ -235,13 +236,17 @@ fn not_host(value: Value) -> Result<Value, String> {
     logical_value("not", mapped, shape)
 }
 
-fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(fn_name).build().into()
+}
+
+fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if data.len() == 1 && tensor::element_count(&shape) == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{fn_name}: {e}"))
+            .map_err(|e| builtin_error(fn_name, format!("{fn_name}: {e}")))
     }
 }
 
@@ -250,7 +255,7 @@ struct LogicalBuffer {
     shape: Vec<usize>,
 }
 
-fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String> {
+fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
@@ -276,17 +281,21 @@ fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor(&handle)
+                .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
             tensor_to_logical_buffer(tensor)
         }
-        other => Err(format!(
-            "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
-            other
+        other => Err(builtin_error(
+            name,
+            format!(
+                "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
+                other
+            ),
         )),
     }
 }
 
-fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
+fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
     let Tensor { data, shape, .. } = tensor;
     let mapped = data
         .into_iter()
@@ -298,7 +307,7 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
     })
 }
 
-fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuffer, String> {
+fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
     let ComplexTensor { data, shape, .. } = tensor;
     let mapped = data
         .into_iter()
@@ -310,7 +319,7 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuff
     })
 }
 
-fn char_array_to_logical_buffer(array: CharArray) -> Result<LogicalBuffer, String> {
+fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
     let CharArray { data, rows, cols } = array;
     let mapped = data
         .into_iter()
@@ -346,7 +355,17 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::tensor;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
+
+    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
@@ -492,10 +511,7 @@ pub(crate) mod tests {
     #[test]
     fn not_rejects_string_input() {
         let err = not_builtin(Value::String("abc".into())).unwrap_err();
-        assert!(
-            err.contains("unsupported input type"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "unsupported input type");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -192,6 +193,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner bypasses this builtin.",
 };
 
+fn size_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("size").build().into()
+}
+
 #[runtime_builtin(
     name = "size",
     category = "array/introspection",
@@ -216,13 +221,13 @@ fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 dimensions_to_value(&extents)
             }
         },
-        _ => Err((("size: too many input arguments".to_string())).into()),
+        _ => Err(size_error("size: too many input arguments")),
     }
 }
 
 fn dimensions_to_value(dimensions: &[usize]) -> crate::BuiltinResult<Value> {
-    let tensor =
-        dims_to_row_tensor(dimensions).map_err(|e| format!("size: failed to build output: {e}"))?;
+    let tensor = dims_to_row_tensor(dimensions)
+        .map_err(|e| size_error(format!("size: failed to build output: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -231,47 +236,53 @@ enum DimSelection {
     Multiple(Vec<usize>),
 }
 
-fn parse_dim_selection(arg: &Value) -> Result<DimSelection, String> {
+fn parse_dim_selection(arg: &Value) -> crate::BuiltinResult<DimSelection> {
     match arg {
         Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(arg, "size")?;
+            let dim = tensor::parse_dimension(arg, "size").map_err(|e| size_error(e))?;
             Ok(DimSelection::Single(dim))
         }
         Value::Tensor(t) => {
             ensure_dim_vector(t)?;
             if t.data.is_empty() {
-                return Err("size: dimension vector must contain at least one element".to_string());
+                return Err(size_error(
+                    "size: dimension vector must contain at least one element",
+                ));
             }
             let dims = t
                 .data
                 .iter()
                 .map(|&raw| parse_dim_scalar(raw))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<crate::BuiltinResult<Vec<_>>>()?;
             Ok(DimSelection::Multiple(dims))
         }
-        _ => Err("size: dimension argument must be a numeric scalar or vector".to_string()),
+        _ => Err(size_error(
+            "size: dimension argument must be a numeric scalar or vector",
+        )),
     }
 }
 
-fn ensure_dim_vector(t: &Tensor) -> Result<(), String> {
+fn ensure_dim_vector(t: &Tensor) -> crate::BuiltinResult<()> {
     let non_unit_dims = t.shape.iter().filter(|&&dim| dim > 1).count();
     if non_unit_dims <= 1 {
         Ok(())
     } else {
-        Err("size: dimension vector must be a vector of positive integers".to_string())
+        Err(size_error(
+            "size: dimension vector must be a vector of positive integers",
+        ))
     }
 }
 
-fn parse_dim_scalar(raw: f64) -> Result<usize, String> {
+fn parse_dim_scalar(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
-        return Err("size: dimension must be finite".to_string());
+        return Err(size_error("size: dimension must be finite"));
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err("size: dimension must be an integer".to_string());
+        return Err(size_error("size: dimension must be an integer"));
     }
     if rounded < 1.0 {
-        return Err("size: dimension must be >= 1".to_string());
+        return Err(size_error("size: dimension must be >= 1"));
     }
     Ok(rounded as usize)
 }
@@ -395,7 +406,7 @@ pub(crate) mod tests {
     fn size_rejects_non_numeric_dimension() {
         let err = size_builtin(Value::Num(1.0), vec![Value::from("dim")]).unwrap_err();
         assert!(
-            err.contains("dimension argument"),
+            err.to_string().contains("dimension argument"),
             "unexpected error: {err}"
         );
     }
@@ -418,7 +429,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![1.0, 2.5], vec![1, 2]).unwrap();
         let err = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
             .expect_err("non-int dim");
-        assert!(err.contains("dimension must be an integer"));
+        assert!(err.to_string().contains("dimension must be an integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -428,7 +439,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
             .expect_err("matrix dims");
-        assert!(err.contains("dimension vector must be a vector"));
+        assert!(err.to_string().contains("dimension vector must be a vector"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -438,7 +449,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![], vec![1, 0]).unwrap();
         let err =
             size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect_err("empty dims");
-        assert!(err.contains("must contain at least one element"));
+        assert!(err.to_string().contains("must contain at least one element"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -11,10 +11,13 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
+
+use crate::{BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -24,6 +27,8 @@ use std::sync::Arc;
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+const BUILTIN_NAME: &str = "mesh";
+
 pub const DOC_MD: &str = r#"---
 title: "mesh"
 category: "plotting"
@@ -118,14 +123,14 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
         axis_equal: false,
         ..Default::default()
     };
-    (render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let x_axis_vec = x_axis.take().expect("mesh data consumed once");
         let y_axis_vec = y_axis.take().expect("mesh data consumed once");
         let z_arg = z_input.take().expect("mesh data consumed once");
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
             let style = Arc::clone(&style);
-            match build_surface_gpu_plot(&x_axis_vec, &y_axis_vec, z_gpu) {
+            match build_surface_gpu_plot(BUILTIN_NAME, &x_axis_vec, &y_axis_vec, z_gpu) {
                 Ok(surface_gpu) => {
                     let mut surface = surface_gpu
                         .with_colormap(ColorMap::Turbo)
@@ -135,7 +140,10 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(err) => {
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending));
+                }
+                Err(RuntimeControlFlow::Error(err)) => {
                     warn!("mesh GPU path unavailable: {err}");
                 }
             }
@@ -151,20 +159,21 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
         style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
-    })).map_err(Into::into)
+    })?;
+    Ok(rendered)
 }
 
 pub(crate) fn build_mesh_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
     z_grid: Vec<Vec<f64>>,
-) -> Result<SurfacePlot, String> {
+) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err("mesh: axis vectors must be non-empty".to_string());
+        return Err(plotting_error("mesh", "mesh: axis vectors must be non-empty"));
     }
 
     let surface = SurfacePlot::new(x_axis, y_axis, z_grid)
-        .map_err(|err| format!("mesh: {err}"))?
+        .map_err(|err| plotting_error("mesh", format!("mesh: {err}")))?
         .with_colormap(ColorMap::Turbo)
         .with_wireframe(true)
         .with_shading(ShadingMode::Faceted);

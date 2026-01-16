@@ -4,30 +4,35 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::state::{new_figure_handle, select_figure, FigureHandle};
+use super::plotting_error;
+use crate::build_runtime_error;
 
-fn parse_handle(value: &Value) -> Result<Option<FigureHandle>, String> {
+fn parse_handle(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
     match value {
         Value::Num(v) => {
             if !v.is_finite() {
-                return Err("figure: handle must be finite".to_string());
+                return Err(plotting_error("figure", "figure: handle must be finite"));
             }
             let id = (*v).round() as i64;
             if id <= 0 {
-                return Err("figure: handle must be positive".to_string());
+                return Err(plotting_error("figure", "figure: handle must be positive"));
             }
             Ok(Some(FigureHandle::from(id as u32)))
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err("figure: handle tensor must contain a single element".to_string());
+                return Err(plotting_error(
+                "figure",
+                "figure: handle tensor must contain a single element",
+            ));
             }
             let val = tensor.data[0];
             if !val.is_finite() {
-                return Err("figure: handle must be finite".to_string());
+                return Err(plotting_error("figure", "figure: handle must be finite"));
             }
             let id = val.round() as i64;
             if id <= 0 {
-                return Err("figure: handle must be positive".to_string());
+                return Err(plotting_error("figure", "figure: handle must be positive"));
             }
             Ok(Some(FigureHandle::from(id as u32)))
         }
@@ -36,18 +41,22 @@ fn parse_handle(value: &Value) -> Result<Option<FigureHandle>, String> {
             parse_string_handle(text.trim())
         }
         Value::String(s) => parse_string_handle(s.trim()),
-        _ => Err("figure: unsupported handle type".to_string()),
+        _ => Err(plotting_error("figure", "figure: unsupported handle type")),
     }
 }
 
-fn parse_string_handle(text: &str) -> Result<Option<FigureHandle>, String> {
+fn parse_string_handle(text: &str) -> crate::BuiltinResult<Option<FigureHandle>> {
     if text.eq_ignore_ascii_case("next") {
         Ok(None)
     } else {
-        text.parse::<u32>()
-            .map(FigureHandle::from)
-            .map(Some)
-            .map_err(|_| "figure: invalid handle string".to_string())
+        let id = text.parse::<u32>().map_err(|err| {
+            build_runtime_error("figure: invalid handle string")
+                .with_builtin("figure")
+                .with_source(err)
+                .build()
+                .into()
+        })?;
+        Ok(Some(FigureHandle::from(id)))
     }
 }
 

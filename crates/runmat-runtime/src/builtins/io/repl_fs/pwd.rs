@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -183,6 +184,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata registered for introspection completeness.",
 };
 
+const BUILTIN_NAME: &str = "pwd";
+
+fn pwd_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "pwd",
     category = "io/repl_fs",
@@ -194,10 +204,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err((("pwd: too many input arguments".to_string())).into());
+        return Err(pwd_error("pwd: too many input arguments"));
     }
-    let current = env::current_dir()
-        .map_err(|err| format!("pwd: unable to determine current directory ({err})"))?;
+    let current =
+        env::current_dir().map_err(|err| pwd_error(format!("pwd: unable to determine current directory ({err})")))?;
     emit_path_stdout(&current);
     Ok(path_to_value(&current))
 }
@@ -215,6 +225,7 @@ fn emit_path_stdout(path: &Path) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::CharArray;
     use std::convert::TryFrom;
     use std::path::PathBuf;
@@ -234,6 +245,13 @@ pub(crate) mod tests {
     impl Drop for DirGuard {
         fn drop(&mut self) {
             let _ = env::set_current_dir(&self.original);
+        }
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in pwd tests"),
         }
     }
 
@@ -300,8 +318,8 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let _guard = DirGuard::new();
 
-        let err = pwd_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, "pwd: too many input arguments");
+        let err = unwrap_error(pwd_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        assert_eq!(err.message(), "pwd: too many input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

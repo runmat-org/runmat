@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -218,6 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; marked as a sink so fusion skips GPU residency.",
 };
 
+const BUILTIN_NAME: &str = "strrep";
 const ARGUMENT_TYPE_ERROR: &str =
     "strrep: first argument must be a string array, character array, or cell array of character vectors";
 const PATTERN_TYPE_ERROR: &str = "strrep: old and new must be string scalars or character vectors";
@@ -231,6 +233,17 @@ enum PatternKind {
     Char,
 }
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "strrep",
     category = "strings/transform",
@@ -239,36 +252,36 @@ enum PatternKind {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
-fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> crate::BuiltinResult<Value> {
-    let gathered_str = gather_if_needed(&str_value).map_err(|e| format!("strrep: {e}"))?;
-    let gathered_old = gather_if_needed(&old_value).map_err(|e| format!("strrep: {e}"))?;
-    let gathered_new = gather_if_needed(&new_value).map_err(|e| format!("strrep: {e}"))?;
+fn strrep_builtin(str_value: Value, old_value: Value, new_value: Value) -> BuiltinResult<Value> {
+    let gathered_str = gather_if_needed(&str_value).map_err(map_flow)?;
+    let gathered_old = gather_if_needed(&old_value).map_err(map_flow)?;
+    let gathered_new = gather_if_needed(&new_value).map_err(map_flow)?;
 
     let (old_text, old_kind) = parse_pattern(gathered_old)?;
     let (new_text, new_kind) = parse_pattern(gathered_new)?;
     if old_kind != new_kind {
-        return Err(((PATTERN_MISMATCH_ERROR.to_string())).into());
+        return Err(runtime_error_for(PATTERN_MISMATCH_ERROR));
     }
 
     match gathered_str {
         Value::String(text) => Ok(Value::String(strrep_string_value(
             text, &old_text, &new_text,
         ))),
-        Value::StringArray(array) => (strrep_string_array(array, &old_text, &new_text)).map_err(Into::into),
-        Value::CharArray(array) => (strrep_char_array(array, &old_text, &new_text)).map_err(Into::into),
-        Value::Cell(cell) => (strrep_cell_array(cell, &old_text, &new_text)).map_err(Into::into),
-        _ => Err(((ARGUMENT_TYPE_ERROR.to_string())).into()),
+        Value::StringArray(array) => strrep_string_array(array, &old_text, &new_text),
+        Value::CharArray(array) => strrep_char_array(array, &old_text, &new_text),
+        Value::Cell(cell) => strrep_cell_array(cell, &old_text, &new_text),
+        _ => Err(runtime_error_for(ARGUMENT_TYPE_ERROR)),
     }
 }
 
-fn parse_pattern(value: Value) -> Result<(String, PatternKind), String> {
+fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
     match value {
         Value::String(text) => Ok((text, PatternKind::String)),
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok((array.data[0].clone(), PatternKind::String))
             } else {
-                Err(PATTERN_TYPE_ERROR.to_string())
+                Err(runtime_error_for(PATTERN_TYPE_ERROR))
             }
         }
         Value::CharArray(array) => {
@@ -280,10 +293,10 @@ fn parse_pattern(value: Value) -> Result<(String, PatternKind), String> {
                 };
                 Ok((text, PatternKind::Char))
             } else {
-                Err(PATTERN_TYPE_ERROR.to_string())
+                Err(runtime_error_for(PATTERN_TYPE_ERROR))
             }
         }
-        _ => Err(PATTERN_TYPE_ERROR.to_string()),
+        _ => Err(runtime_error_for(PATTERN_TYPE_ERROR)),
     }
 }
 
@@ -295,17 +308,18 @@ fn strrep_string_value(text: String, old: &str, new: &str) -> String {
     }
 }
 
-fn strrep_string_array(array: StringArray, old: &str, new: &str) -> Result<Value, String> {
+fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let replaced = data
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt = StringArray::new(replaced, shape).map_err(|e| format!("strrep: {e}"))?;
+    let rebuilt =
+        StringArray::new(replaced, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(rebuilt))
 }
 
-fn strrep_char_array(array: CharArray, old: &str, new: &str) -> Result<Value, String> {
+fn strrep_char_array(array: CharArray, old: &str, new: &str) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 || cols == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -331,24 +345,25 @@ fn strrep_char_array(array: CharArray, old: &str, new: &str) -> Result<Value, St
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("strrep: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> Result<Value, String> {
+fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> BuiltinResult<Value> {
     let CellArray { data, shape, .. } = cell;
     let mut replaced = Vec::with_capacity(data.len());
     for ptr in &data {
         replaced.push(strrep_cell_element(ptr, old, new)?);
     }
-    make_cell_with_shape(replaced, shape).map_err(|e| format!("strrep: {e}"))
+    make_cell_with_shape(replaced, shape)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strrep_cell_element(value: &Value, old: &str, new: &str) -> Result<Value, String> {
+fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::String(strrep_string_value(text.clone(), old, new))),
         Value::StringArray(array) => strrep_string_array(array.clone(), old, new),
         Value::CharArray(array) => strrep_char_array(array.clone(), old, new),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
     }
 }
 

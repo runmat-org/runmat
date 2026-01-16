@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_filesystem::File;
 
 #[cfg_attr(
@@ -236,6 +236,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "File I/O is never fused; metadata recorded for completeness.",
 };
 
+const BUILTIN_NAME: &str = "fwrite";
+
+fn fwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
+fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(fwrite_error)
+}
+
 #[runtime_builtin(
     name = "fwrite",
     category = "io/filetext",
@@ -271,54 +299,56 @@ pub fn evaluate(
     fid_value: &Value,
     data_value: &Value,
     rest: &[Value],
-) -> Result<FwriteEval, String> {
+) -> BuiltinResult<FwriteEval> {
     let fid_host = gather_value(fid_value)?;
-    let fid = parse_fid(&fid_host)?;
+    let fid = map_string_result(parse_fid(&fid_host))?;
     if fid < 0 {
-        return Err("fwrite: file identifier must be non-negative".to_string());
+        return Err(fwrite_error("fwrite: file identifier must be non-negative"));
     }
     if fid < 3 {
-        return Err("fwrite: standard input/output identifiers are not supported yet".to_string());
+        return Err(fwrite_error(
+            "fwrite: standard input/output identifiers are not supported yet",
+        ));
     }
 
     let info = registry::info_for(fid).ok_or_else(|| {
-        "fwrite: Invalid file identifier. Use fopen to generate a valid file ID.".to_string()
+        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
     })?;
     let handle = registry::take_handle(fid).ok_or_else(|| {
-        "fwrite: Invalid file identifier. Use fopen to generate a valid file ID.".to_string()
+        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
     })?;
 
     let mut file = handle
         .lock()
-        .map_err(|_| "fwrite: failed to lock file handle (poisoned mutex)".to_string())?;
+        .map_err(|_| fwrite_error("fwrite: failed to lock file handle (poisoned mutex)"))?;
 
     let data_host = gather_value(data_value)?;
     let rest_host = gather_args(rest)?;
-    let (precision_arg, skip_arg, machine_arg) = classify_arguments(&rest_host)?;
+    let (precision_arg, skip_arg, machine_arg) = map_string_result(classify_arguments(&rest_host))?;
 
-    let precision_spec = parse_precision(precision_arg)?;
-    let skip_bytes = parse_skip(skip_arg)?;
-    let machine_format = parse_machine_format(machine_arg, &info.machinefmt)?;
+    let precision_spec = map_string_result(parse_precision(precision_arg))?;
+    let skip_bytes = map_string_result(parse_skip(skip_arg))?;
+    let machine_format = map_string_result(parse_machine_format(machine_arg, &info.machinefmt))?;
 
-    let elements = flatten_elements(&data_host)?;
-    let count = write_elements(
+    let elements = map_string_result(flatten_elements(&data_host))?;
+    let count = map_string_result(write_elements(
         &mut file,
         &elements,
         precision_spec,
         skip_bytes,
         machine_format,
-    )?;
+    ))?;
     Ok(FwriteEval::new(count))
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fwrite: {e}"))
+fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed(value).map_err(map_control_flow)
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(|e| format!("fwrite: {e}"))?);
+        gathered.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(gathered)
 }
@@ -832,6 +862,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
+    use crate::RuntimeControlFlow;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider;
     #[cfg(feature = "wgpu")]
@@ -843,6 +874,13 @@ pub(crate) mod tests {
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
+
+    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1009,7 +1047,9 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let args = vec![Value::from("bogus-class")];
-        let err = evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err();
+        let err = unwrap_error_message(
+            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err(),
+        );
         assert!(err.contains("unsupported precision"));
         let _ = fclose::evaluate(&[Value::Num(fid as f64)]);
         fs::remove_file(path).unwrap();
@@ -1029,7 +1069,9 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![10.0], vec![1, 1]).unwrap();
         let args = vec![Value::from("uint8"), Value::Num(-1.0)];
-        let err = evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err();
+        let err = unwrap_error_message(
+            evaluate(&Value::Num(fid as f64), &Value::Tensor(tensor), &args).unwrap_err(),
+        );
         assert!(err.contains("skip value must be non-negative"));
         let _ = fclose::evaluate(&[Value::Num(fid as f64)]);
         fs::remove_file(path).unwrap();
@@ -1091,7 +1133,9 @@ pub(crate) mod tests {
     #[test]
     fn fwrite_invalid_identifier_errors() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(-1.0), &Value::Num(1.0), &Vec::new()).unwrap_err();
+        let err = unwrap_error_message(
+            evaluate(&Value::Num(-1.0), &Value::Num(1.0), &Vec::new()).unwrap_err(),
+        );
         assert!(err.contains("file identifier must be non-negative"));
     }
 

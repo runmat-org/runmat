@@ -10,6 +10,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "atan2";
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -197,6 +201,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement elem_atan2 to keep the computation on device; the runtime gathers operands to the host when the hook is unavailable or broadcasting is required.",
 };
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "atan2",
@@ -223,22 +231,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "binary",
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
-fn atan2_builtin(y: Value, x: Value) -> crate::BuiltinResult<Value> {
+fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
     match (y, x) {
-        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => (atan2_gpu_pair(yh, xh)).map_err(Into::into),
+        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh),
         (Value::GpuTensor(yh), other) => {
-            let gathered = gpu_helpers::gather_tensor(&yh)?;
-            atan2_host(Value::Tensor(gathered), other).map_err(Into::into)
+            let gathered = gpu_helpers::gather_tensor(&yh).map_err(runtime_error_for)?;
+            atan2_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(xh)) => {
-            let gathered = gpu_helpers::gather_tensor(&xh)?;
-            atan2_host(other, Value::Tensor(gathered)).map_err(Into::into)
+            let gathered = gpu_helpers::gather_tensor(&xh).map_err(runtime_error_for)?;
+            atan2_host(other, Value::Tensor(gathered))
         }
-        (lhs, rhs) => (atan2_host(lhs, rhs)).map_err(Into::into),
+        (lhs, rhs) => atan2_host(lhs, rhs),
     }
 }
 
-fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> Result<Value, String> {
+fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value> {
     if y.device_id == x.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&y) {
             if y.shape == x.shape {
@@ -248,44 +256,47 @@ fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> Result<Value, Strin
             }
         }
     }
-    let host_y = gpu_helpers::gather_tensor(&y)?;
-    let host_x = gpu_helpers::gather_tensor(&x)?;
+    let host_y = gpu_helpers::gather_tensor(&y).map_err(runtime_error_for)?;
+    let host_x = gpu_helpers::gather_tensor(&x).map_err(runtime_error_for)?;
     atan2_host(Value::Tensor(host_y), Value::Tensor(host_x))
 }
 
-fn atan2_host(y: Value, x: Value) -> Result<Value, String> {
+fn atan2_host(y: Value, x: Value) -> BuiltinResult<Value> {
     let tensor_y = value_into_atan2_tensor(y)?;
     let tensor_x = value_into_atan2_tensor(x)?;
     compute_atan2_tensor(&tensor_y, &tensor_x)
 }
 
-fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> Result<Value, String> {
-    let plan = BroadcastPlan::new(&y.shape, &x.shape)?;
+fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
+    let plan = BroadcastPlan::new(&y.shape, &x.shape).map_err(runtime_error_for)?;
     if plan.is_empty() {
         let empty = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| format!("atan2: {e}"))?;
+            .map_err(|e| runtime_error_for(format!("atan2: {e}")))?;
         return Ok(tensor::tensor_into_value(empty));
     }
     let mut out = vec![0.0f64; plan.len()];
     for (out_index, idx_y, idx_x) in plan.iter() {
         out[out_index] = y.data[idx_y].atan2(x.data[idx_x]);
     }
-    let tensor =
-        Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("atan2: {e}"))?;
+    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+        .map_err(|e| runtime_error_for(format!("atan2: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn value_into_atan2_tensor(value: Value) -> Result<Tensor, String> {
+fn value_into_atan2_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-            Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| format!("atan2: {e}"))
+            Tensor::new(data, vec![chars.rows, chars.cols])
+                .map_err(|e| runtime_error_for(format!("atan2: {e}")))
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("atan2: complex inputs are not supported".to_string())
+            Err(runtime_error_for("atan2: complex inputs are not supported"))
         }
-        Value::GpuTensor(_) => Err("atan2: internal error converting GPU tensor".to_string()),
-        other => tensor::value_into_tensor_for("atan2", other),
+        Value::GpuTensor(_) => Err(runtime_error_for(
+            "atan2: internal error converting GPU tensor",
+        )),
+        other => tensor::value_into_tensor_for("atan2", other).map_err(runtime_error_for),
     }
 }
 
@@ -297,6 +308,13 @@ pub(crate) mod tests {
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
+
+    fn error_message(err: RuntimeControlFlow) -> String {
+        match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -456,7 +474,8 @@ pub(crate) mod tests {
     #[test]
     fn atan2_complex_input_errors() {
         let err = atan2_builtin(Value::Complex(1.0, 1.0), Value::Num(1.0)).unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("complex"));
+        let message = error_message(err);
+        assert!(message.to_ascii_lowercase().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -465,9 +484,10 @@ pub(crate) mod tests {
         let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let x = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
         let err = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).unwrap_err();
+        let message = error_message(err);
         assert!(
-            err.to_ascii_lowercase().contains("dimension"),
-            "unexpected error: {err}"
+            message.to_ascii_lowercase().contains("dimension"),
+            "unexpected error: {message}"
         );
     }
 

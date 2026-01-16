@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -194,6 +194,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
 };
 
+fn read_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(message_id)
+        .with_builtin("read")
+        .build()
+}
+
+fn read_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    read_error(message_id, message).into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "read",
@@ -219,16 +230,16 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(((runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_INVALID_CLIENT,
                 "read: expected tcpclient struct as first argument",
-            ))).into())
+            ))
         }
     };
 
     let client_id = extract_client_id(client_struct)?;
     let handle = client_handle(client_id).ok_or_else(|| {
-        runtime_error(
+        read_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "read: tcpclient handle is no longer valid",
         )
@@ -237,15 +248,15 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     let (stream, timeout, byte_order, connected) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(((runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_NOT_CONNECTED,
                 "read: tcpclient is disconnected",
-            ))).into());
+            ));
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
         let stream = guard.stream.try_clone().map_err(|err| {
-            runtime_error(MESSAGE_ID_INTERNAL, format!("read: clone failed ({err})"))
+            read_flow(MESSAGE_ID_INTERNAL, format!("read: clone failed ({err})"))
         })?;
         (stream, timeout, byte_order, guard.connected)
     };
@@ -253,10 +264,10 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     // Ensure cloned descriptor uses the configured timeout.
     if connected {
         if let Err(err) = configure_stream(&stream, timeout) {
-            return Err(((runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_INTERNAL,
                 format!("read: unable to configure socket timeout ({err})"),
-            ))).into());
+            ));
         }
     }
 
@@ -272,17 +283,17 @@ fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
 
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes.is_empty() && count > 0 {
-            return Err(((runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
-            ))).into());
+            ));
         }
         let expected = count.saturating_mul(element_size);
         if read_result.bytes.len() != expected {
-            return Err(((runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
-            ))).into());
+            ));
         }
     }
 
@@ -350,18 +361,18 @@ fn perform_read(
     stream: &mut TcpStream,
     mode: &ReadMode,
     element_size: usize,
-) -> Result<ReadOutcome, String> {
+) -> BuiltinResult<ReadOutcome> {
     match read_from_stream(stream, mode, element_size) {
         Ok(outcome) => Ok(outcome),
-        Err(ReadError::Timeout) => Err(runtime_error(
+        Err(ReadError::Timeout) => Err(read_flow(
             MESSAGE_ID_TIMEOUT,
             "read: timed out waiting for data",
         )),
-        Err(ReadError::ConnectionClosed) => Err(runtime_error(
+        Err(ReadError::ConnectionClosed) => Err(read_flow(
             MESSAGE_ID_CONNECTION_CLOSED,
             "read: connection closed before the requested data was received",
         )),
-        Err(ReadError::Io(err)) => Err(runtime_error(
+        Err(ReadError::Io(err)) => Err(read_flow(
             MESSAGE_ID_INTERNAL,
             format!("read: socket error ({err})"),
         )),
@@ -464,7 +475,7 @@ fn is_timeout(err: &io::Error) -> bool {
     )
 }
 
-fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Result<Value, String> {
+fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
     match datatype {
         DataType::Char => Ok(char_row(bytes)),
         DataType::String => Ok(Value::String(bytes.iter().map(|&b| b as char).collect())),
@@ -480,8 +491,9 @@ fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Result<
         | DataType::Double => {
             let values = numeric_from_bytes(bytes, datatype, order)?;
             let cols = values.len();
-            let tensor =
-                Tensor::new(values, vec![1, cols]).map_err(|err| format!("read: {err}"))?;
+            let tensor = Tensor::new(values, vec![1, cols]).map_err(|err| {
+                read_flow(MESSAGE_ID_INTERNAL, format!("read: {err}"))
+            })?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -498,13 +510,13 @@ fn numeric_from_bytes(
     bytes: &[u8],
     datatype: DataType,
     order: ByteOrder,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     let size = datatype.element_size();
     if size == 0 {
         return Ok(Vec::new());
     }
     if !bytes.len().is_multiple_of(size) {
-        return Err(runtime_error(
+        return Err(read_flow(
             MESSAGE_ID_INTERNAL,
             "read: received byte count does not align with datatype size",
         ));
@@ -585,7 +597,7 @@ fn f64_from(bytes: &[u8], order: ByteOrder) -> f64 {
     }
 }
 
-fn parse_arguments(rest: Vec<Value>) -> Result<ReadOptions, String> {
+fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {
             mode: ReadMode::Available,
@@ -609,39 +621,39 @@ fn parse_arguments(rest: Vec<Value>) -> Result<ReadOptions, String> {
                 datatype,
             })
         }
-        _ => Err(runtime_error(
+        _ => Err(read_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "read: invalid argument list",
         )),
     }
 }
 
-fn parse_count(value: &Value) -> Result<usize, String> {
+fn parse_count(value: &Value) -> BuiltinResult<usize> {
     let numeric = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
-            return Err(runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_INVALID_COUNT,
                 "read: count must be a numeric scalar",
             ))
         }
     };
     if numeric.is_nan() || numeric.is_sign_negative() {
-        return Err(runtime_error(
+        return Err(read_flow(
             MESSAGE_ID_INVALID_COUNT,
             "read: count must be a non-negative finite value",
         ));
     }
     if numeric.is_infinite() {
-        return Err(runtime_error(
+        return Err(read_flow(
             MESSAGE_ID_INVALID_COUNT,
             "read: count must be finite",
         ));
     }
     if numeric > usize::MAX as f64 {
-        return Err(runtime_error(
+        return Err(read_flow(
             MESSAGE_ID_INVALID_COUNT,
             "read: count exceeds the maximum supported size",
         ));
@@ -649,13 +661,13 @@ fn parse_count(value: &Value) -> Result<usize, String> {
     Ok(numeric.trunc() as usize)
 }
 
-fn parse_datatype(value: &Value) -> Result<DataType, String> {
+fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
     let text = match value {
         Value::String(s) => s.clone(),
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         _ => {
-            return Err(runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_INVALID_DATATYPE,
                 "read: datatype must be a string scalar",
             ))
@@ -676,7 +688,7 @@ fn parse_datatype(value: &Value) -> Result<DataType, String> {
         "char" => DataType::Char,
         "string" => DataType::String,
         _ => {
-            return Err(runtime_error(
+            return Err(read_flow(
                 MESSAGE_ID_INVALID_DATATYPE,
                 format!("read: unsupported datatype '{text}'"),
             ))
@@ -685,9 +697,9 @@ fn parse_datatype(value: &Value) -> Result<DataType, String> {
     Ok(dtype)
 }
 
-fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
+fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
     let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
-        runtime_error(
+        read_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "read: tcpclient struct is missing internal handle",
         )
@@ -695,7 +707,7 @@ fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
     match id_value {
         Value::Int(IntValue::U64(id)) => Ok(*id),
         Value::Int(iv) => Ok(iv.to_i64() as u64),
-        _ => Err(runtime_error(
+        _ => Err(read_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "read: tcpclient struct has invalid handle field",
         )),
@@ -712,10 +724,6 @@ fn parse_byte_order(text: &str) -> ByteOrder {
     } else {
         ByteOrder::Little
     }
-}
-
-fn runtime_error(message_id: &'static str, message: impl Into<String>) -> String {
-    format!("{message_id}: {}", message.into())
 }
 
 struct NonBlockingGuard {
@@ -774,6 +782,15 @@ pub(crate) mod tests {
                 other => panic!("unexpected id field {other:?}"),
             },
             other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert_eq!(err.identifier(), Some(expected));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 
@@ -847,7 +864,7 @@ pub(crate) mod tests {
         let client = make_client(stream, 0.1);
 
         let err = read_builtin(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
-        assert!(err.starts_with(MESSAGE_ID_TIMEOUT));
+        assert_error_identifier(err, MESSAGE_ID_TIMEOUT);
 
         remove_client_for_test(client_id(&client));
     }

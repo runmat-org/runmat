@@ -3,6 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -224,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::bit::or"
 )]
-fn or_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+fn or_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.logical_or(a, b) {
@@ -232,13 +233,14 @@ fn or_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             }
         }
     }
-    or_host(lhs, rhs).map_err(Into::into)
+    or_host(lhs, rhs)
 }
 
-fn or_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn or_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     let left = logical_buffer_from("or", lhs)?;
     let right = logical_buffer_from("or", rhs)?;
-    let shape = broadcast_shapes("or", &left.shape, &right.shape)?;
+    let shape = broadcast_shapes("or", &left.shape, &right.shape)
+        .map_err(|err| builtin_error("or", err))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return logical_value("or", Vec::new(), shape);
@@ -267,13 +269,17 @@ fn or_host(lhs: Value, rhs: Value) -> Result<Value, String> {
     logical_value("or", data, shape)
 }
 
-fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(fn_name).build().into()
+}
+
+fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if data.len() == 1 && tensor::element_count(&shape) == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{fn_name}: {e}"))
+            .map_err(|e| builtin_error(fn_name, format!("{fn_name}: {e}")))
     }
 }
 
@@ -282,7 +288,7 @@ struct LogicalBuffer {
     shape: Vec<usize>,
 }
 
-fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String> {
+fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalBuffer> {
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
@@ -308,17 +314,21 @@ fn logical_buffer_from(name: &str, value: Value) -> Result<LogicalBuffer, String
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let tensor = gpu_helpers::gather_tensor(&handle)
+                .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
             tensor_to_logical_buffer(tensor)
         }
-        other => Err(format!(
-            "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
-            other
+        other => Err(builtin_error(
+            name,
+            format!(
+                "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
+                other
+            ),
         )),
     }
 }
 
-fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
+fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
     let Tensor { data, shape, .. } = tensor;
     let mapped = data.into_iter().map(logical_from_f64).collect();
     Ok(LogicalBuffer {
@@ -327,7 +337,7 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> Result<LogicalBuffer, String> {
     })
 }
 
-fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuffer, String> {
+fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
     let ComplexTensor { data, shape, .. } = tensor;
     let mapped = data
         .into_iter()
@@ -339,7 +349,7 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> Result<LogicalBuff
     })
 }
 
-fn char_array_to_logical_buffer(array: CharArray) -> Result<LogicalBuffer, String> {
+fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
     let CharArray { data, rows, cols } = array;
     let mapped = data
         .into_iter()
@@ -373,7 +383,17 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
+
+    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
@@ -459,17 +479,14 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
         let err = or_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        assert!(err.contains("size mismatch"), "unexpected error: {err}");
+        assert_error_contains(err, "size mismatch");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn or_rejects_unsupported_types() {
         let err = or_builtin(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
-        assert!(
-            err.contains("unsupported input type"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "unsupported input type");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

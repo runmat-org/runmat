@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -209,6 +210,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Delegates to provider random_uniform hooks; falls back to host sampling + upload when hooks are unavailable.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("rand").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::rand")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rand",
@@ -230,7 +235,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRand::parse(rest)?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 struct ParsedRand {
@@ -246,7 +251,7 @@ enum RandTemplate {
 }
 
 impl ParsedRand {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -260,7 +265,7 @@ impl ParsedRand {
                 match keyword.as_str() {
                     "like" => {
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("rand: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("rand: expected prototype after 'like'"));
                         };
                         template = Some(RandTemplate::Like(proto.clone()));
                         shape_source = Some(shape_from_value(&proto, "rand")?);
@@ -278,7 +283,7 @@ impl ParsedRand {
                         continue;
                     }
                     other => {
-                        return Err(format!("rand: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!("rand: unrecognised option '{other}'")));
                     }
                 }
             }
@@ -323,7 +328,7 @@ impl ParsedRand {
     }
 }
 
-fn build_output(parsed: ParsedRand) -> Result<Value, String> {
+fn build_output(parsed: ParsedRand) -> crate::BuiltinResult<Value> {
     match parsed.template {
         RandTemplate::Double => rand_double(&parsed.shape),
         RandTemplate::Single => rand_single(&parsed.shape),
@@ -331,17 +336,17 @@ fn build_output(parsed: ParsedRand) -> Result<Value, String> {
     }
 }
 
-fn rand_double(shape: &[usize]) -> Result<Value, String> {
+fn rand_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(value) = try_gpu_uniform(shape, NumericDType::F64)? {
         return Ok(value);
     }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform(len, "rand")?;
-    let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
+    let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+fn rand_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::GpuTensor(handle) => rand_like_gpu(handle, shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => rand_complex(shape),
@@ -353,29 +358,29 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             rand_double(shape)
         }
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
-        other => Err(format!("rand: unsupported prototype {other:?}")),
+        other => Err(builtin_error(format!("rand: unsupported prototype {other:?}"))),
     }
 }
 
-fn rand_single(shape: &[usize]) -> Result<Value, String> {
+fn rand_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(value) = try_gpu_uniform(shape, NumericDType::F32)? {
         return Ok(value);
     }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform_single(len, "rand")?;
     let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
-        .map_err(|e| format!("rand: {e}"))?;
+        .map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn rand_complex(shape: &[usize]) -> Result<Value, String> {
+fn rand_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
     let data = random::generate_complex(len, "rand")?;
-    let tensor = ComplexTensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
+    let tensor = ComplexTensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
@@ -396,7 +401,8 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
 
         let len = tensor::element_count(shape);
         let data = random::generate_uniform(len, "rand")?;
-        let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
+
+        let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("rand: {e}")))?;
         let view = HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
@@ -412,12 +418,12 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("rand: {e}"))?;
+        .map_err(|e| builtin_error(format!("rand: {e}")))?;
     log_rand_fallback(shape, NumericDType::F32, "gather-fallback");
     rand_like(&gathered, shape)
 }
 
-fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> Result<Option<Value>, String> {
+fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         log_rand_fallback(shape, dtype, "no-provider");
         return Ok(None);

@@ -9,4 +9,5 @@ pub mod fopen;
 pub mod fprintf;
 pub mod fread;
 pub mod fwrite;
+pub(crate) mod helpers;
 pub(crate) mod registry;

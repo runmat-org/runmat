@@ -25,7 +25,7 @@ pub type BuiltinResult<T> = Result<T, RuntimeControlFlow>;
 
 pub type RuntimeControlFlow = runmat_async::RuntimeControlFlow<RuntimeError>;
 
-pub use runtime_error::{runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
+pub use runtime_error::{build_runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;

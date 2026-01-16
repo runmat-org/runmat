@@ -16,10 +16,13 @@ use crate::builtins::common::spec::{
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::gpu_helpers::axis_bounds;
 use super::perf::compute_surface_lod;
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use std::convert::TryFrom;
 use std::sync::Arc;
+
+use crate::{BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -29,6 +32,8 @@ use std::sync::Arc;
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+const BUILTIN_NAME: &str = "surf";
+
 pub const DOC_MD: &str = r#"---
 title: "surf"
 category: "plotting"
@@ -111,8 +116,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::surf"
 )]
 pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let x_tensor = Tensor::try_from(&x).map_err(|e| format!("surf: {e}"))?;
-    let y_tensor = Tensor::try_from(&y).map_err(|e| format!("surf: {e}"))?;
+    let x_tensor = Tensor::try_from(&x)
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
+    let y_tensor = Tensor::try_from(&y)
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("surf: {e}")))?;
     let x_axis = numeric_vector(x_tensor);
     let y_axis = numeric_vector(y_tensor);
     let mut x_axis = Some(x_axis);
@@ -137,20 +144,23 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::Bu
         axis_equal: false,
         ..Default::default()
     };
-    (render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let x_axis_vec = x_axis.take().expect("surf: X axis consumed once");
         let y_axis_vec = y_axis.take().expect("surf: Y axis consumed once");
         let z_arg = z_input.take().expect("surf: Z consumed once");
 
         if let Some(z_gpu) = z_arg.gpu_handle() {
             let style = Arc::clone(&style);
-            match build_surface_gpu_plot(&x_axis_vec, &y_axis_vec, z_gpu) {
+            match build_surface_gpu_plot(BUILTIN_NAME, &x_axis_vec, &y_axis_vec, z_gpu) {
                 Ok(mut surface) => {
                     style.apply_to_plot(&mut surface);
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(err) => {
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending));
+                }
+                Err(RuntimeControlFlow::Error(err)) => {
                     warn!("surf GPU path unavailable: {err}");
                 }
             }
@@ -166,53 +176,63 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::Bu
         style.apply_to_plot(&mut surface);
         figure.add_surface_plot_on_axes(surface, axes);
         Ok(())
-    })).map_err(Into::into)
+    })?;
+    Ok(rendered)
 }
 
 pub(crate) fn build_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
     z_grid: Vec<Vec<f64>>,
-) -> Result<SurfacePlot, String> {
+) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err("surf: axis vectors must be non-empty".to_string());
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "surf: axis vectors must be non-empty",
+        ));
     }
 
     let surface = SurfacePlot::new(x_axis, y_axis, z_grid)
-        .map_err(|err| format!("surf: {err}"))?
+        .map_err(|err| plotting_error(BUILTIN_NAME, format!("surf: {err}")))?
         .with_colormap(ColorMap::Parula)
         .with_shading(ShadingMode::Smooth);
     Ok(surface)
 }
 
 pub(crate) fn build_surface_gpu_plot(
+    name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
-) -> Result<SurfacePlot, String> {
+) -> BuiltinResult<SurfacePlot> {
     if x_axis.is_empty() || y_axis.is_empty() {
-        return Err("surf: axis vectors must be non-empty".to_string());
+        return Err(plotting_error(name, format!("{name}: axis vectors must be non-empty")));
     }
 
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "surf: plotting GPU context unavailable".to_string())?;
+    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
+        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
+    })?;
 
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| "surf: unable to export GPU Z data".to_string())?;
+    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z).ok_or_else(|| {
+        plotting_error(name, format!("{name}: unable to export GPU Z data"))
+    })?;
 
     let expected_len = x_axis
         .len()
         .checked_mul(y_axis.len())
-        .ok_or_else(|| "surf: grid dimensions overflowed".to_string())?;
+        .ok_or_else(|| plotting_error(name, format!("{name}: grid dimensions overflowed")))?;
     if z_ref.len as usize != expected_len {
-        return Err(format!(
-            "surf: Z must contain exactly {} elements ({}×{})",
-            expected_len,
-            x_axis.len(),
-            y_axis.len()
+        return Err(plotting_error(
+            name,
+            format!(
+                "{name}: Z must contain exactly {} elements ({}×{})",
+                expected_len,
+                x_axis.len(),
+                y_axis.len()
+            ),
         ));
     }
-    let (min_z, max_z) = axis_bounds(z, "surf")?;
+    let (min_z, max_z) = axis_bounds(z, name)?;
     let min_x = x_axis
         .iter()
         .fold(f32::INFINITY, |acc, &val| acc.min(val as f32));
@@ -262,7 +282,7 @@ pub(crate) fn build_surface_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("surf: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = lod.vertex_count();
     let mut surface = SurfacePlot::from_gpu_buffer(

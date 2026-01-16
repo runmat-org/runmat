@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
 const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
@@ -213,6 +213,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Environment updates terminate fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "setenv";
+
+fn setenv_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "setenv",
     category = "io/repl_fs",
@@ -228,12 +252,12 @@ fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 /// Evaluate `setenv` once and expose both outputs.
-pub fn evaluate(args: &[Value]) -> Result<SetenvResult, String> {
+pub fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
     let gathered = gather_arguments(args)?;
     match gathered.len() {
-        0 | 1 => Err(ERR_TOO_FEW_INPUTS.to_string()),
+        0 | 1 => Err(setenv_error(ERR_TOO_FEW_INPUTS)),
         2 => apply(&gathered[0], &gathered[1]),
-        _ => Err(ERR_TOO_MANY_INPUTS.to_string()),
+        _ => Err(setenv_error(ERR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -277,7 +301,7 @@ impl SetenvResult {
     }
 }
 
-fn apply(name_value: &Value, value_value: &Value) -> Result<SetenvResult, String> {
+fn apply(name_value: &Value, value_value: &Value) -> BuiltinResult<SetenvResult> {
     let name = extract_scalar_text(name_value, ERR_NAME_TYPE)?;
     let value = extract_scalar_text(value_value, ERR_VALUE_TYPE)?;
 
@@ -319,20 +343,20 @@ fn update_environment(name: &str, value: &str) -> SetenvResult {
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("setenv: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
 
-fn extract_scalar_text(value: &Value, error_message: &str) -> Result<String, String> {
+fn extract_scalar_text(value: &Value, error_message: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows != 1 {
-                return Err(error_message.to_string());
+                return Err(setenv_error(error_message));
             }
             Ok(char_row_to_string(array))
         }
@@ -340,10 +364,10 @@ fn extract_scalar_text(value: &Value, error_message: &str) -> Result<String, Str
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(error_message.to_string())
+                Err(setenv_error(error_message))
             }
         }
-        _ => Err(error_message.to_string()),
+        _ => Err(setenv_error(error_message)),
     }
 }
 
@@ -379,10 +403,18 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, Value};
 
     fn unique_name(suffix: &str) -> String {
         format!("RUNMAT_TEST_SETENV_{}", suffix)
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in setenv tests"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -481,21 +513,25 @@ pub(crate) mod tests {
     #[test]
     fn setenv_errors_when_name_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err =
-            setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())]).unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        let err = unwrap_error(
+            setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())])
+                .unwrap_err(),
+        );
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setenv_errors_when_value_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = setenv_builtin(vec![
-            Value::String("RUNMAT_INVALID_VALUE".to_string()),
-            Value::Num(1.0),
-        ])
-        .unwrap_err();
-        assert_eq!(err, ERR_VALUE_TYPE);
+        let err = unwrap_error(
+            setenv_builtin(vec![
+                Value::String("RUNMAT_INVALID_VALUE".to_string()),
+                Value::Num(1.0),
+            ])
+            .unwrap_err(),
+        );
+        assert_eq!(err.message(), ERR_VALUE_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -527,12 +563,14 @@ pub(crate) mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let array =
             StringArray::new(vec!["A".to_string(), "B".to_string()], vec![2]).expect("array");
-        let err = setenv_builtin(vec![
-            Value::StringArray(array),
-            Value::String("value".to_string()),
-        ])
-        .unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        let err = unwrap_error(
+            setenv_builtin(vec![
+                Value::StringArray(array),
+                Value::String("value".to_string()),
+            ])
+            .unwrap_err(),
+        );
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -540,12 +578,14 @@ pub(crate) mod tests {
     fn setenv_errors_for_char_array_with_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let array = CharArray::new(vec!['R', 'M'], 2, 1).expect("two-row char array");
-        let err = setenv_builtin(vec![
-            Value::CharArray(array),
-            Value::String("value".to_string()),
-        ])
-        .unwrap_err();
-        assert_eq!(err, ERR_NAME_TYPE);
+        let err = unwrap_error(
+            setenv_builtin(vec![
+                Value::CharArray(array),
+                Value::String("value".to_string()),
+            ])
+            .unwrap_err(),
+        );
+        assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

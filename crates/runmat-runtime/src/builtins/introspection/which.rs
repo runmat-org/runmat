@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{dispatcher::gather_if_needed, make_cell};
+use crate::{dispatcher::gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
@@ -180,6 +180,30 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
+fn which_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("which").build().into()
+}
+
+fn which_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let identifier = err.identifier().map(|id| id.to_string());
+            let mut builder = build_runtime_error(err.message().to_string())
+                .with_builtin("which")
+                .with_source(err);
+            if let Some(identifier) = identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
+fn which_path<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(which_error)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "which",
@@ -201,34 +225,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(((ERROR_NOT_ENOUGH_ARGS.to_string())).into());
+        return Err(which_error(ERROR_NOT_ENOUGH_ARGS));
     }
 
     let mut name: Option<String> = None;
     let mut options = WhichOptions::default();
 
     for arg in args {
-        let gathered = gather_if_needed(&arg).map_err(|e| format!("which: {e}"))?;
+        let gathered = gather_if_needed(&arg).map_err(which_flow)?;
         let text = value_to_string_scalar(&gathered).ok_or_else(|| {
             if name.is_none() {
-                ERROR_NAME_ARG.to_string()
+                which_error(ERROR_NAME_ARG)
             } else {
-                ERROR_OPTION_ARG.to_string()
+                which_error(ERROR_OPTION_ARG)
             }
         })?;
 
         if looks_like_option(&text) {
-            options
-                .apply(&text)
-                .map_err(|msg| format!("which: {msg}"))?;
+            options.apply(&text)?;
         } else if name.is_none() {
             name = Some(text);
         } else {
-            return Err(((ERROR_TOO_MANY_ARGS.to_string())).into());
+            return Err(which_error(ERROR_TOO_MANY_ARGS));
         }
     }
 
-    let name = name.ok_or_else(|| ERROR_NOT_ENOUGH_ARGS.to_string())?;
+    let name = name.ok_or_else(|| which_error(ERROR_NOT_ENOUGH_ARGS))?;
     let matches = search_matches(&name, &options)?;
     if matches.is_empty() {
         return Ok(Value::CharArray(CharArray::new_row(&format!(
@@ -241,7 +263,9 @@ fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         for entry in &matches {
             cell_values.push(Value::CharArray(CharArray::new_row(entry)));
         }
-        return (make_cell(cell_values, matches.len(), 1).map_err(|e| format!("which: {e}"))).map_err(Into::into);
+        return make_cell(cell_values, matches.len(), 1).map_err(|err| {
+            build_runtime_error(err).with_builtin("which").build().into()
+        });
     }
 
     Ok(Value::CharArray(CharArray::new_row(
@@ -258,7 +282,7 @@ struct WhichOptions {
 }
 
 impl WhichOptions {
-    fn apply(&mut self, option: &str) -> Result<(), String> {
+    fn apply(&mut self, option: &str) -> BuiltinResult<()> {
         let lowered = option.trim().to_ascii_lowercase();
         match lowered.as_str() {
             "-all" => {
@@ -274,7 +298,10 @@ impl WhichOptions {
                     conflicts.push("-file");
                 }
                 if !conflicts.is_empty() {
-                    return Err(conflict_message("-builtin", &conflicts));
+                    return Err(which_error(format!(
+                        "which: {}",
+                        conflict_message("-builtin", &conflicts)
+                    )));
                 }
                 self.builtin_only = true;
                 Ok(())
@@ -288,7 +315,10 @@ impl WhichOptions {
                     conflicts.push("-file");
                 }
                 if !conflicts.is_empty() {
-                    return Err(conflict_message("-var", &conflicts));
+                    return Err(which_error(format!(
+                        "which: {}",
+                        conflict_message("-var", &conflicts)
+                    )));
                 }
                 self.var_only = true;
                 Ok(())
@@ -302,12 +332,15 @@ impl WhichOptions {
                     conflicts.push("-var");
                 }
                 if !conflicts.is_empty() {
-                    return Err(conflict_message("-file", &conflicts));
+                    return Err(which_error(format!(
+                        "which: {}",
+                        conflict_message("-file", &conflicts)
+                    )));
                 }
                 self.file_only = true;
                 Ok(())
             }
-            other => Err(format!("unrecognized option '{other}'")),
+            other => Err(which_error(format!("which: unrecognized option '{other}'"))),
         }
     }
 }
@@ -327,7 +360,7 @@ fn conflict_message(option: &str, conflicts: &[&str]) -> String {
     format!("conflicting option '{option}'; cannot combine with {joined}")
 }
 
-fn search_matches(name: &str, options: &WhichOptions) -> Result<Vec<String>, String> {
+fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
     if options.var_only {
         return Ok(variable_match(name).into_iter().collect());
     }
@@ -382,7 +415,7 @@ fn search_matches(name: &str, options: &WhichOptions) -> Result<Vec<String>, Str
     Ok(results)
 }
 
-fn search_file_like_matches(name: &str, gather_all: bool) -> Result<Vec<String>, String> {
+fn search_file_like_matches(name: &str, gather_all: bool) -> BuiltinResult<Vec<String>> {
     let mut seen = HashSet::new();
     let mut results = Vec::new();
 
@@ -420,18 +453,23 @@ fn builtin_matches(name: &str) -> Vec<String> {
         .collect()
 }
 
-fn class_matches(name: &str) -> Result<Vec<String>, String> {
+fn class_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
 
-    for folder in class_folder_candidates(name, "which")? {
+    for folder in which_path(class_folder_candidates(name, "which"))? {
         if folder.is_dir() {
             let text = format!("class folder: {}", canonical_path(&folder));
             push_unique(&mut results, &mut seen, text);
         }
     }
 
-    for file in class_file_paths(name, CLASS_M_FILE_EXTENSIONS, "classdef", "which")? {
+    for file in which_path(class_file_paths(
+        name,
+        CLASS_M_FILE_EXTENSIONS,
+        "classdef",
+        "which",
+    ))? {
         let text = format!("classdef file: {}", canonical_path(&file));
         push_unique(&mut results, &mut seen, text);
     }
@@ -439,10 +477,14 @@ fn class_matches(name: &str) -> Result<Vec<String>, String> {
     Ok(results)
 }
 
-fn file_matches(name: &str) -> Result<Vec<String>, String> {
+fn file_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
-    for file in find_all_files_with_extensions(name, GENERAL_FILE_EXTENSIONS, "which")? {
+    for file in which_path(find_all_files_with_extensions(
+        name,
+        GENERAL_FILE_EXTENSIONS,
+        "which",
+    ))? {
         if vfs::metadata(&file)
             .map(|meta| meta.is_file())
             .unwrap_or(false)
@@ -453,10 +495,10 @@ fn file_matches(name: &str) -> Result<Vec<String>, String> {
     Ok(results)
 }
 
-fn directory_matches(name: &str) -> Result<Vec<String>, String> {
+fn directory_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
-    for dir in directory_candidates(name, "which")? {
+    for dir in which_path(directory_candidates(name, "which"))? {
         if vfs::metadata(&dir)
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
@@ -536,6 +578,15 @@ pub(crate) mod tests {
                 map.insert((*name).to_string(), value.clone());
             }
         });
+    }
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => {
+                panic!("expected error flow, got suspend")
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -658,9 +709,10 @@ pub(crate) mod tests {
             Value::from("sin"),
         ])
         .unwrap_err();
+        let message = error_message(err);
         assert!(
-            err.contains("conflicting option '-builtin'"),
-            "unexpected error: {err}"
+            message.contains("conflicting option '-builtin'"),
+            "unexpected error: {message}"
         );
     }
 
@@ -671,9 +723,10 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![Value::from("-nope"), Value::from("sin")]).unwrap_err();
+        let message = error_message(err);
         assert!(
-            err.contains("unrecognized option '-nope'"),
-            "unexpected error: {err}"
+            message.contains("unrecognized option '-nope'"),
+            "unexpected error: {message}"
         );
     }
 
@@ -684,7 +737,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![]).unwrap_err();
-        assert_eq!(err, ERROR_NOT_ENOUGH_ARGS);
+        let message = error_message(err);
+        assert_eq!(message, ERROR_NOT_ENOUGH_ARGS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -694,7 +748,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![Value::Num(4.0)]).unwrap_err();
-        assert_eq!(err, ERROR_NAME_ARG);
+        let message = error_message(err);
+        assert_eq!(message, ERROR_NAME_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -709,7 +764,8 @@ pub(crate) mod tests {
             Value::from("tan"),
         ])
         .unwrap_err();
-        assert_eq!(err, ERROR_TOO_MANY_ARGS);
+        let message = error_message(err);
+        assert_eq!(message, ERROR_TOO_MANY_ARGS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

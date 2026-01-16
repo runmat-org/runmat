@@ -4542,13 +4542,32 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
+                                    suspend_pending!({}, pending);
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(err)
+                        }
                     };
                     match out_count {
                         0 => continue,
                         1 => {
                             if !eval.is_positive_definite() {
-                                vm_bail!("Matrix must be positive definite.".to_string());
+                                vm_bail!(
+                                    runmat_runtime::build_runtime_error(
+                                        "Matrix must be positive definite.",
+                                    )
+                                    .with_builtin("chol")
+                                    .build()
+                                );
                             }
                             stack.push(eval.factor());
                             continue;
@@ -4573,7 +4592,20 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
+                                    suspend_pending!({}, pending);
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(err)
+                        }
                     };
                     match out_count {
                         0 => continue,
@@ -4640,7 +4672,20 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
+                                    suspend_pending!({}, pending);
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(err)
+                        }
                     };
                     match out_count {
                         0 => {
@@ -4680,7 +4725,20 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
+                                    suspend_pending!({}, pending);
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(err)
+                        }
                     };
                     match out_count {
                         0 => continue,
@@ -4716,7 +4774,20 @@ fn run_interpreter(
                         require_left,
                     ) {
                         Ok(v) => v,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
+                                    suspend_pending!({}, pending);
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(err)
+                        }
                     };
                     match out_count {
                         0 => continue,
@@ -4734,7 +4805,19 @@ fn run_interpreter(
                             stack.push(eval.diagonal());
                             let left = match eval.left() {
                                 Ok(value) => value,
-                                Err(err) => vm_bail!(err),
+                                Err(err) => {
+                                    if is_suspend_flow(&err) {
+                                        if let runmat_runtime::RuntimeControlFlow::Suspend(pending) =
+                                            err
+                                        {
+                                            suspend_pending!({}, pending);
+                                        }
+                                    }
+                                    let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
+                                        unreachable!("suspend handled above");
+                                    };
+                                    vm_bail!(err)
+                                }
                             };
                             stack.push(left);
                             continue;
@@ -4968,7 +5051,23 @@ fn run_interpreter(
                         &args[3..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                match err {
+                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                        suspend_pending!({}, pending);
+                                    }
+                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(e)
+                        }
                     };
                     if out_count == 0 {
                         continue;
@@ -4993,7 +5092,23 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                match err {
+                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                        suspend_pending!({}, pending);
+                                    }
+                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(e)
+                        }
                     };
                     if out_count == 0 {
                         continue;
@@ -5063,7 +5178,23 @@ fn run_interpreter(
                             &args[1..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err.to_string()),
+                            Err(err) => {
+                                if is_suspend_flow(&err) {
+                                    for arg in args.iter().rev() {
+                                        stack.push(arg.clone());
+                                    }
+                                    match err {
+                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                            suspend_pending!({}, pending);
+                                        }
+                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                    }
+                                }
+                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                    unreachable!("suspend handled above");
+                                };
+                                vm_bail!(e)
+                            }
                         };
                     if out_count == 0 {
                         continue;
@@ -5088,7 +5219,23 @@ fn run_interpreter(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err.to_string()),
+                            Err(err) => {
+                                if is_suspend_flow(&err) {
+                                    for arg in args.iter().rev() {
+                                        stack.push(arg.clone());
+                                    }
+                                    match err {
+                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                            suspend_pending!({}, pending);
+                                        }
+                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                    }
+                                }
+                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                    unreachable!("suspend handled above");
+                                };
+                                vm_bail!(e)
+                            }
                         };
                     if out_count == 0 {
                         continue;
@@ -5115,7 +5262,23 @@ fn run_interpreter(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err.to_string()),
+                            Err(err) => {
+                                if is_suspend_flow(&err) {
+                                    for arg in args.iter().rev() {
+                                        stack.push(arg.clone());
+                                    }
+                                    match err {
+                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                            suspend_pending!({}, pending);
+                                        }
+                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                    }
+                                }
+                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                    unreachable!("suspend handled above");
+                                };
+                                vm_bail!(e)
+                            }
                         };
                     if out_count == 0 {
                         continue;
@@ -5148,7 +5311,23 @@ fn run_interpreter(
                         &args[2..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err.to_string()),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                match err {
+                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                        suspend_pending!({}, pending);
+                                    }
+                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(e)
+                        }
                     };
                     if out_count == 0 {
                         continue;
@@ -5274,7 +5453,23 @@ fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err.to_string()),
+                        Err(err) => {
+                            if is_suspend_flow(&err) {
+                                for arg in args.iter().rev() {
+                                    stack.push(arg.clone());
+                                }
+                                match err {
+                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
+                                        suspend_pending!({}, pending);
+                                    }
+                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
+                                }
+                            }
+                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
+                                unreachable!("suspend handled above");
+                            };
+                            vm_bail!(e)
+                        }
                     };
                     if out_count == 0 {
                         continue;
@@ -10389,7 +10584,14 @@ fn stochastic_evolution_dispatch(
     };
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
-    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)?;
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32).map_err(
+        |flow| match flow {
+            runmat_runtime::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                "stochastic_evolution: unexpected suspension".to_string()
+            }
+        },
+    )?;
     Ok(Value::Tensor(tensor_value))
 }
 

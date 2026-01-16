@@ -10,6 +10,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "tanh";
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -206,6 +210,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute tanh directly on the device; runtimes gather to the host when unary_tanh is unavailable.",
 };
 
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tanh",
@@ -232,57 +240,62 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
-fn tanh_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (tanh_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => tanh_gpu(handle),
         Value::Complex(re, im) => {
             let (real, imag) = tanh_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
         }
-        Value::ComplexTensor(ct) => (tanh_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (tanh_char_array(ca)).map_err(Into::into),
-        Value::String(_) | Value::StringArray(_) => Err((("tanh: expected numeric input".to_string())).into()),
-        other => (tanh_real(other)).map_err(Into::into),
+        Value::ComplexTensor(ct) => tanh_complex_tensor(ct),
+        Value::CharArray(ca) => tanh_char_array(ca),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(runtime_error_for("tanh: expected numeric input"))
+        }
+        other => tanh_real(other),
     }
 }
 
-fn tanh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_tanh(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor(&handle).map_err(runtime_error_for)?;
     tanh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn tanh_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("tanh", value)?;
+fn tanh_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("tanh", value).map_err(runtime_error_for)?;
     tanh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn tanh_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.tanh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("tanh: {e}"))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| runtime_error_for(format!("tanh: {e}")))
 }
 
-fn tanh_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| tanh_complex_parts(re, im))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("tanh: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| runtime_error_for(format!("tanh: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn tanh_char_array(ca: CharArray) -> Result<Value, String> {
+fn tanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| (ch as u32 as f64).tanh())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("tanh: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| runtime_error_for(format!("tanh: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 

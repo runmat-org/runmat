@@ -4,12 +4,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -214,6 +215,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion kernels treat conj as an identity for real tensors; complex tensors fall back to the CPU path until native complex fusion is available.",
 };
 
+const BUILTIN_NAME: &str = "conj";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "conj",
     category = "math/elementwise",
@@ -222,45 +229,47 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::conj"
 )]
-fn conj_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn conj_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (conj_gpu(handle)).map_err(Into::into),
-        Value::Complex(re, im) => (conj_complex_scalar(re, im)).map_err(Into::into),
-        Value::ComplexTensor(ct) => (conj_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (conj_char_array(ca)).map_err(Into::into),
-        Value::String(_) | Value::StringArray(_) => Err((("conj: expected numeric input".to_string())).into()),
+        Value::GpuTensor(handle) => conj_gpu(handle),
+        Value::Complex(re, im) => conj_complex_scalar(re, im),
+        Value::ComplexTensor(ct) => conj_complex_tensor(ct),
+        Value::CharArray(ca) => conj_char_array(ca),
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error("conj: expected numeric input")),
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
-        | Value::Bool(_)) => (conj_real(x)).map_err(Into::into),
-        other => Err(((format!(
+        | Value::Bool(_)) => conj_real(x),
+        other => Err(builtin_error(format!(
             "conj: unsupported input type {:?}; expected numeric, logical, or char data",
             other
-        ))).into()),
+        ))),
     }
 }
 
-fn conj_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn conj_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_conj(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    conj_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor(&handle)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(conj_tensor(tensor)?))
 }
 
-fn conj_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("conj", value)?;
-    conj_tensor(tensor).map(tensor::tensor_into_value)
+fn conj_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("conj", value)
+        .map_err(|e| builtin_error(format!("conj: {e}")))?;
+    Ok(tensor::tensor_into_value(conj_tensor(tensor)?))
 }
 
-fn conj_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn conj_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     Ok(tensor)
 }
 
-fn conj_complex_scalar(re: f64, im: f64) -> Result<Value, String> {
+fn conj_complex_scalar(re: f64, im: f64) -> BuiltinResult<Value> {
     let imag = -im;
     if imag == 0.0 && !imag.is_nan() {
         Ok(Value::Num(re))
@@ -269,7 +278,7 @@ fn conj_complex_scalar(re: f64, im: f64) -> Result<Value, String> {
     }
 }
 
-fn conj_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let ComplexTensor {
         data: ct_data,
         shape,
@@ -287,21 +296,24 @@ fn conj_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
     }
     if all_real {
         let real: Vec<f64> = data.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(real, shape.clone()).map_err(|e| format!("conj: {e}"))?;
+        let tensor = Tensor::new(real, shape.clone())
+            .map_err(|e| builtin_error(format!("conj: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
-        let tensor = ComplexTensor::new(data, shape).map_err(|e| format!("conj: {e}"))?;
+        let tensor = ComplexTensor::new(data, shape)
+            .map_err(|e| builtin_error(format!("conj: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn conj_char_array(ca: CharArray) -> Result<Value, String> {
+fn conj_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| ch as u32 as f64)
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("conj: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("conj: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -418,10 +430,12 @@ pub(crate) mod tests {
     #[test]
     fn conj_errors_on_string_input() {
         let err = conj_builtin(Value::from("hello")).unwrap_err();
-        assert!(
-            err.contains("expected numeric input"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("expected numeric input"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

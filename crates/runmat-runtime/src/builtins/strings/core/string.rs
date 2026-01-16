@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeControlFlow};
 use crate::builtins::common::tensor;
 use crate::gather_if_needed;
 
@@ -373,10 +374,28 @@ struct ArgumentData {
     shape: Vec<usize>,
 }
 
+fn string_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("string").build().into()
+}
+
+fn remap_string_flow<F>(flow: RuntimeControlFlow, message: F) -> RuntimeControlFlow
+where
+    F: FnOnce(&crate::RuntimeError) -> String,
+{
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
+            .with_builtin("string")
+            .with_source(err)
+            .build()
+            .into(),
+    }
+}
+
 pub(crate) fn format_from_spec(
     format_value: Value,
     args: Vec<Value>,
-) -> Result<StringArray, String> {
+) -> crate::BuiltinResult<StringArray> {
     let spec = extract_format_spec(format_value)?;
     let mut arguments = Vec::with_capacity(args.len());
     for arg in args {
@@ -395,23 +414,22 @@ pub(crate) fn format_from_spec(
         } else {
             target_shape
         };
-        return StringArray::new(Vec::new(), shape).map_err(|e| format!("string: {e}"));
+        return StringArray::new(Vec::new(), shape)
+            .map_err(|e| string_flow(format!("string: {e}")));
     }
 
     let spec_len = spec.specs.len();
     if spec_len == 0 {
-        return Err(
-            "string: formatSpec must contain at least one element when formatting with data"
-                .to_string(),
-        );
+        return Err(string_flow(
+            "string: formatSpec must contain at least one element when formatting with data",
+        ));
     }
 
     for arg in &arguments {
         if target_len > 0 && arg.values.is_empty() {
-            return Err(
-                "string: format data arguments must be scalars or match formatSpec size"
-                    .to_string(),
-            );
+            return Err(string_flow(
+                "string: format data arguments must be scalars or match formatSpec size",
+            ));
         }
     }
 
@@ -426,14 +444,17 @@ pub(crate) fn format_from_spec(
                     0 => continue,
                     1 => arg.values[0].clone(),
                     len if len == target_len => arg.values[idx].clone(),
-                    _ => return Err(
-                        "string: format data arguments must be scalars or match formatSpec size"
-                            .to_string(),
-                    ),
+                    _ => {
+                        return Err(string_flow(
+                            "string: format data arguments must be scalars or match formatSpec size",
+                        ))
+                    }
                 };
             per_call.push(value);
         }
-        let formatted = format_variadic(spec_str, &per_call).map_err(|e| format!("string: {e}"))?;
+        let formatted = format_variadic(spec_str, &per_call).map_err(|flow| {
+            remap_string_flow(flow, |err| format!("string: {}", err.message()))
+        })?;
         output.push(formatted);
     }
 
@@ -449,7 +470,8 @@ pub(crate) fn format_from_spec(
         target_shape = vec![target_len, 1];
     }
 
-    StringArray::new(output, target_shape).map_err(|e| format!("string: {e}"))
+    StringArray::new(output, target_shape)
+        .map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn resolve_target_shape(
@@ -482,10 +504,7 @@ fn resolve_target_shape(
             continue;
         }
         if len != target_len {
-            return Err(
-                "string: format data arguments must be scalars or match formatSpec size"
-                    .to_string(),
-            );
+            return Err("string: format data arguments must be scalars or match formatSpec size".to_string());
         }
         if target_shape.is_empty() && len > 1 {
             target_shape = arg.shape.clone();

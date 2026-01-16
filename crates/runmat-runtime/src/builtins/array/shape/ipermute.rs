@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeControlFlow};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -212,6 +213,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
 
+fn ipermute_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("ipermute").build().into()
+}
+
 #[runtime_builtin(
     name = "ipermute",
     category = "array/shape",
@@ -221,66 +226,58 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
-    let order_vec = parse_order_argument(order).map_err(map_perm_error)?;
+    let order_vec = parse_order_argument("ipermute", order)?;
     let inverse = inverse_permutation(&order_vec);
 
     match value {
         Value::Tensor(t) => {
-            validate_rank(&order_vec, t.shape.len())
-                .map_err(map_perm_error)?;
-            Ok(permute_tensor(t, &inverse)
-                .map_err(map_perm_error)
+            validate_rank("ipermute", &order_vec, t.shape.len())?;
+            Ok(permute_tensor("ipermute", t, &inverse)
                 .map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(la) => {
-            validate_rank(&order_vec, la.shape.len())
-                .map_err(map_perm_error)?;
-            Ok(permute_logical_array(la, &inverse)
-                .map_err(map_perm_error)
+            validate_rank("ipermute", &order_vec, la.shape.len())?;
+            Ok(permute_logical_array("ipermute", la, &inverse)
                 .map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            validate_rank(&order_vec, ct.shape.len())
-                .map_err(map_perm_error)?;
-            Ok(permute_complex_tensor(ct, &inverse)
-                .map_err(map_perm_error)
+            validate_rank("ipermute", &order_vec, ct.shape.len())?;
+            Ok(permute_complex_tensor("ipermute", ct, &inverse)
                 .map(Value::ComplexTensor)?)
         }
         Value::StringArray(sa) => {
-            validate_rank(&order_vec, sa.shape.len())
-                .map_err(map_perm_error)?;
-            Ok(permute_string_array(sa, &inverse)
-                .map_err(map_perm_error)
+            validate_rank("ipermute", &order_vec, sa.shape.len())?;
+            Ok(permute_string_array("ipermute", sa, &inverse)
                 .map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
-            validate_rank(&order_vec, 2).map_err(map_perm_error)?;
-            Ok(permute_char_array(ca, &inverse)
-                .map_err(map_perm_error)
+            validate_rank("ipermute", &order_vec, 2)?;
+            Ok(permute_char_array("ipermute", ca, &inverse)
                 .map(Value::CharArray)?)
         }
         Value::GpuTensor(handle) => {
-            validate_rank(&order_vec, handle.shape.len())
-                .map_err(map_perm_error)?;
+            validate_rank("ipermute", &order_vec, handle.shape.len())?;
             Ok(ipermute_gpu(handle, &inverse)?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for("ipermute", value)?;
-            validate_rank(&order_vec, tensor.shape.len())
-                .map_err(map_perm_error)?;
-            Ok(permute_tensor(tensor, &inverse)
-                .map_err(map_perm_error)
+            let tensor = tensor::value_into_tensor_for("ipermute", value)
+                .map_err(|e| ipermute_error(e))?;
+            validate_rank("ipermute", &order_vec, tensor.shape.len())?;
+            Ok(permute_tensor("ipermute", tensor, &inverse)
                 .map(tensor::tensor_into_value)?)
         }
-        other => Err(((format!(
+        other => Err(ipermute_error(format!(
             "ipermute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",
             other
-        ))).into()),
+        ))),
     }
 }
 
-fn ipermute_gpu(handle: GpuTensorHandle, inverse_order: &[usize]) -> Result<Value, String> {
-    permute_gpu(handle, inverse_order).map_err(map_perm_error)
+fn ipermute_gpu(
+    handle: GpuTensorHandle,
+    inverse_order: &[usize],
+) -> crate::BuiltinResult<Value> {
+    permute_gpu("ipermute", handle, inverse_order)
 }
 
 fn inverse_permutation(order: &[usize]) -> Vec<usize> {
@@ -292,17 +289,6 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
         inverse[place] = pos + 1;
     }
     inverse
-}
-
-fn map_perm_error(err: String) -> String {
-    if let Some(rest) = err.strip_prefix("permute: ") {
-        format!("ipermute: {rest}")
-    } else if err.starts_with("permute:") {
-        // handle "permute:" without trailing space
-        format!("ipermute{}", &err["permute".len()..])
-    } else {
-        format!("ipermute: {err}")
-    }
 }
 
 #[cfg(test)]
@@ -324,9 +310,10 @@ pub(crate) mod tests {
     fn ipermute_inverts_permute() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
         let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
         let original_tensor = make_tensor(&data, &[2, 3, 4]);
-        let permuted_tensor = permute_tensor(original_tensor.clone(), &order_vec).expect("permute");
+        let permuted_tensor =
+            permute_tensor("ipermute", original_tensor.clone(), &order_vec).expect("permute");
         let permuted = tensor::tensor_into_value(permuted_tensor);
         let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute");
         match (Value::Tensor(original_tensor), restored) {
@@ -347,7 +334,7 @@ pub(crate) mod tests {
             Value::Tensor(order),
         )
         .expect_err("should fail");
-        assert!(err.contains("duplicate"), "unexpected error: {err}");
+        assert!(err.to_string().contains("duplicate"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -360,7 +347,7 @@ pub(crate) mod tests {
         )
         .expect_err("should fail");
         assert!(
-            err.contains("row or column vector"),
+            err.to_string().contains("row or column vector"),
             "unexpected error: {err}"
         );
     }
@@ -370,8 +357,8 @@ pub(crate) mod tests {
     fn ipermute_char_array_roundtrip() {
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
-        let permuted = permute_char_array(chars.clone(), &order_vec).expect("permute chars");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_char_array("ipermute", chars.clone(), &order_vec).expect("permute chars");
         let restored = ipermute_builtin(Value::CharArray(permuted), Value::Tensor(order))
             .expect("ipermute chars");
         match restored {
@@ -396,8 +383,8 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let order_vec =
-                parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
-            let permuted = permute_gpu(handle, &order_vec).expect("permute gpu");
+                parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+            let permuted = permute_gpu("ipermute", handle, &order_vec).expect("permute gpu");
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
             assert_eq!(gathered.shape, host.shape);
@@ -419,8 +406,8 @@ pub(crate) mod tests {
     fn ipermute_logical_array_roundtrip() {
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
-        let permuted = permute_logical_array(logical.clone(), &order_vec).expect("permute logical");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_logical_array("ipermute", logical.clone(), &order_vec).expect("permute logical");
         let restored = ipermute_builtin(Value::LogicalArray(permuted), Value::Tensor(order))
             .expect("ipermute logical");
         match restored {
@@ -450,9 +437,9 @@ pub(crate) mod tests {
 
         let host = make_tensor(&(0..24).map(|n| n as f64).collect::<Vec<_>>(), &[2, 3, 4]);
         let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
 
-        let permuted_tensor = permute_tensor(host.clone(), &order_vec).expect("permute host");
+        let permuted_tensor = permute_tensor("ipermute", host.clone(), &order_vec).expect("permute host");
         let permuted = tensor::tensor_into_value(permuted_tensor);
         let cpu = ipermute_builtin(permuted, Value::Tensor(order.clone())).expect("cpu ipermute");
 
@@ -461,7 +448,7 @@ pub(crate) mod tests {
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let permuted_gpu = permute_gpu(handle, &order_vec).expect("permute gpu");
+        let permuted_gpu = permute_gpu("ipermute", handle, &order_vec).expect("permute gpu");
         let gpu = ipermute_builtin(permuted_gpu, Value::Tensor(order)).expect("gpu ipermute");
         let gathered = test_support::gather(gpu).expect("gather");
 
@@ -485,9 +472,9 @@ pub(crate) mod tests {
         ];
         let strings = StringArray::new(data.clone(), vec![2, 2]).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
         let permuted =
-            permute_string_array(strings.clone(), &order_vec).expect("permute string array");
+            permute_string_array("ipermute", strings.clone(), &order_vec).expect("permute string array");
         let restored =
             ipermute_builtin(Value::StringArray(permuted), Value::Tensor(order)).expect("ipermute");
         match restored {
@@ -504,8 +491,8 @@ pub(crate) mod tests {
     fn ipermute_extends_missing_dimensions() {
         let row = make_tensor(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1, 5]);
         let order = make_tensor(&[2.0, 1.0, 3.0], &[1, 3]);
-        let order_vec = parse_order_argument(Value::Tensor(order.clone())).expect("parse order");
-        let permuted = permute_tensor(row.clone(), &order_vec).expect("permute");
+        let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_tensor("ipermute", row.clone(), &order_vec).expect("permute");
         let restored = ipermute_builtin(tensor::tensor_into_value(permuted), Value::Tensor(order))
             .expect("ipermute");
         match restored {
@@ -527,7 +514,7 @@ pub(crate) mod tests {
         let order = make_tensor(&[1.0], &[1, 1]);
         let err = ipermute_builtin(Value::Tensor(matrix), Value::Tensor(order)).unwrap_err();
         assert!(
-            err.contains("order length"),
+            err.to_string().contains("order length"),
             "expected rank error, got {err}"
         );
     }

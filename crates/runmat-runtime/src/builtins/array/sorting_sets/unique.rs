@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -312,6 +313,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`unique` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
+fn unique_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("unique").build()
+}
+
 #[runtime_builtin(
     name = "unique",
     category = "array/sorting_sets",
@@ -322,11 +327,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
 fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(value, &rest).map(|eval| eval.into_values_value()).map_err(Into::into)
+    Ok(evaluate(value, &rest)?.into_values_value())
 }
 
 /// Evaluate `unique` once and expose all outputs to the caller.
-pub fn evaluate(value: Value, rest: &[Value]) -> Result<UniqueEvaluation, String> {
+pub fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
     let opts = parse_options(rest)?;
     match value {
         Value::GpuTensor(handle) => unique_gpu(handle, &opts),
@@ -334,7 +339,7 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<UniqueEvaluation, String
     }
 }
 
-fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
+fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
     let mut opts = UniqueOptions {
         rows: false,
         order: UniqueOrder::Sorted,
@@ -345,13 +350,13 @@ fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
 
     for arg in rest {
         let text = tensor::value_to_string(arg)
-            .ok_or_else(|| "unique: expected string option arguments".to_string())?;
+            .ok_or_else(|| unique_error("unique: expected string option arguments"))?;
         let lowered = text.trim().to_ascii_lowercase();
         match lowered.as_str() {
             "sorted" => {
                 if let Some(prev) = seen_order {
                     if prev != UniqueOrder::Sorted {
-                        return Err("unique: cannot combine 'sorted' with 'stable'".to_string());
+                        return Err(unique_error("unique: cannot combine 'sorted' with 'stable'"));
                     }
                 }
                 seen_order = Some(UniqueOrder::Sorted);
@@ -360,7 +365,7 @@ fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
             "stable" => {
                 if let Some(prev) = seen_order {
                     if prev != UniqueOrder::Stable {
-                        return Err("unique: cannot combine 'sorted' with 'stable'".to_string());
+                        return Err(unique_error("unique: cannot combine 'sorted' with 'stable'"));
                     }
                 }
                 seen_order = Some(UniqueOrder::Stable);
@@ -372,7 +377,7 @@ fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
             "first" => {
                 if let Some(prev) = seen_occurrence {
                     if prev != UniqueOccurrence::First {
-                        return Err("unique: cannot combine 'first' with 'last'".to_string());
+                        return Err(unique_error("unique: cannot combine 'first' with 'last'"));
                     }
                 }
                 seen_occurrence = Some(UniqueOccurrence::First);
@@ -381,17 +386,17 @@ fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
             "last" => {
                 if let Some(prev) = seen_occurrence {
                     if prev != UniqueOccurrence::Last {
-                        return Err("unique: cannot combine 'first' with 'last'".to_string());
+                        return Err(unique_error("unique: cannot combine 'first' with 'last'"));
                     }
                 }
                 seen_occurrence = Some(UniqueOccurrence::Last);
                 opts.occurrence = UniqueOccurrence::Last;
             }
             "legacy" | "r2012a" => {
-                return Err("unique: the 'legacy' behaviour is not supported".to_string());
+                return Err(unique_error("unique: the 'legacy' behaviour is not supported"));
             }
             other => {
-                return Err(format!("unique: unrecognised option '{other}'"));
+                return Err(unique_error(format!("unique: unrecognised option '{other}'")).into());
             }
         }
     }
@@ -399,7 +404,7 @@ fn parse_options(rest: &[Value]) -> Result<UniqueOptions, String> {
     Ok(opts)
 }
 
-fn unique_gpu(handle: GpuTensorHandle, opts: &UniqueOptions) -> Result<UniqueEvaluation, String> {
+fn unique_gpu(handle: GpuTensorHandle, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(result) = provider.unique(&handle, opts) {
             return UniqueEvaluation::from_unique_result(result);
@@ -409,50 +414,52 @@ fn unique_gpu(handle: GpuTensorHandle, opts: &UniqueOptions) -> Result<UniqueEva
     unique_numeric_from_tensor(tensor, opts)
 }
 
-fn unique_host(value: Value, opts: &UniqueOptions) -> Result<UniqueEvaluation, String> {
+fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
     match value {
         Value::Tensor(tensor) => unique_numeric_from_tensor(tensor, opts),
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("unique: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
             unique_numeric_from_tensor(tensor, opts)
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| format!("unique: {e}"))?;
+                .map_err(|e| unique_error(format!("unique: {e}")).into())?;
             unique_numeric_from_tensor(tensor, opts)
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("unique: {e}"))?;
+                .map_err(|e| unique_error(format!("unique: {e}")).into())?;
             unique_numeric_from_tensor(tensor, opts)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| unique_error(e))?;
             unique_numeric_from_tensor(tensor, opts)
         }
         Value::ComplexTensor(tensor) => unique_complex_from_tensor(tensor, opts),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("unique: {e}"))?;
+                .map_err(|e| unique_error(format!("unique: {e}")).into())?;
             unique_complex_from_tensor(tensor, opts)
         }
         Value::CharArray(array) => unique_char_array(array, opts),
         Value::StringArray(array) => unique_string_array(array, opts),
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1]).map_err(|e| format!("unique: {e}"))?;
+            let array = StringArray::new(vec![s], vec![1, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
             unique_string_array(array, opts)
         }
-        other => Err(format!(
+        other => Err(unique_error(format!(
             "unique: unsupported input type {:?}; expected numeric, logical, char, string, or complex values",
             other
-        )),
+        ))
+        .into()),
     }
 }
 
 pub fn unique_numeric_from_tensor(
     tensor: Tensor,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
         unique_numeric_rows(tensor, opts)
     } else {
@@ -463,12 +470,12 @@ pub fn unique_numeric_from_tensor(
 fn unique_numeric_elements(
     tensor: Tensor,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     let len = tensor.data.len();
     if len == 0 {
-        let values = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+        let values = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(
             tensor::tensor_into_value(values),
             ia,
@@ -529,9 +536,9 @@ fn unique_numeric_elements(
     }
 
     let value_tensor =
-        Tensor::new(values, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(values, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -540,17 +547,17 @@ fn unique_numeric_elements(
     ))
 }
 
-fn unique_numeric_rows(tensor: Tensor, opts: &UniqueOptions) -> Result<UniqueEvaluation, String> {
+fn unique_numeric_rows(tensor: Tensor, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
     if tensor.shape.len() != 2 {
-        return Err("unique: 'rows' option requires a 2-D matrix input".to_string());
+        return Err(unique_error("unique: 'rows' option requires a 2-D matrix input"));
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
 
     if rows == 0 || cols == 0 {
-        let values = Tensor::new(Vec::new(), vec![0, cols]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+        let values = Tensor::new(Vec::new(), vec![0, cols]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(
             tensor::tensor_into_value(values),
             ia,
@@ -624,10 +631,10 @@ fn unique_numeric_rows(tensor: Tensor, opts: &UniqueOptions) -> Result<UniqueEva
     }
 
     let value_tensor =
-        Tensor::new(values, vec![unique_rows_count, cols]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(values, vec![unique_rows_count, cols]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
     let ia_tensor =
-        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -639,7 +646,7 @@ fn unique_numeric_rows(tensor: Tensor, opts: &UniqueOptions) -> Result<UniqueEva
 fn unique_complex_from_tensor(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
         unique_complex_rows(tensor, opts)
     } else {
@@ -650,13 +657,13 @@ fn unique_complex_from_tensor(
 fn unique_complex_elements(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     let len = tensor.data.len();
     if len == 0 {
         let values =
-            ComplexTensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+            ComplexTensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(
             complex_tensor_into_value(values),
             ia,
@@ -717,9 +724,9 @@ fn unique_complex_elements(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| format!("unique: {e}"))?;
+        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -731,18 +738,18 @@ fn unique_complex_elements(
 fn unique_complex_rows(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if tensor.shape.len() != 2 {
-        return Err("unique: 'rows' option requires a 2-D matrix input".to_string());
+        return Err(unique_error("unique: 'rows' option requires a 2-D matrix input"));
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
 
     if rows == 0 || cols == 0 {
         let values =
-            ComplexTensor::new(Vec::new(), vec![rows, cols]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+            ComplexTensor::new(Vec::new(), vec![rows, cols]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(
             complex_tensor_into_value(values),
             ia,
@@ -818,10 +825,10 @@ fn unique_complex_rows(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![unique_rows_count, cols])
-        .map_err(|e| format!("unique: {e}"))?;
+        .map_err(|e| unique_error(format!("unique: {e}")).into())?;
     let ia_tensor =
-        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -830,7 +837,7 @@ fn unique_complex_rows(
     ))
 }
 
-fn unique_char_array(array: CharArray, opts: &UniqueOptions) -> Result<UniqueEvaluation, String> {
+fn unique_char_array(array: CharArray, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
         unique_char_rows(array, opts)
     } else {
@@ -841,14 +848,14 @@ fn unique_char_array(array: CharArray, opts: &UniqueOptions) -> Result<UniqueEva
 fn unique_char_elements(
     array: CharArray,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     let rows = array.rows;
     let cols = array.cols;
     let total = rows * cols;
     if total == 0 {
-        let values = CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+        let values = CharArray::new(Vec::new(), 0, 0).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(Value::CharArray(values), ia, ic));
     }
 
@@ -909,9 +916,9 @@ fn unique_char_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = CharArray::new(values, order.len(), 1).map_err(|e| format!("unique: {e}"))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![total, 1]).map_err(|e| format!("unique: {e}"))?;
+    let value_array = CharArray::new(values, order.len(), 1).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![total, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         Value::CharArray(value_array),
@@ -920,13 +927,13 @@ fn unique_char_elements(
     ))
 }
 
-fn unique_char_rows(array: CharArray, opts: &UniqueOptions) -> Result<UniqueEvaluation, String> {
+fn unique_char_rows(array: CharArray, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
     let rows = array.rows;
     let cols = array.cols;
     if rows == 0 {
-        let values = CharArray::new(Vec::new(), 0, cols).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+        let values = CharArray::new(Vec::new(), 0, cols).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(Value::CharArray(values), ia, ic));
     }
 
@@ -996,10 +1003,10 @@ fn unique_char_rows(array: CharArray, opts: &UniqueOptions) -> Result<UniqueEval
     }
 
     let value_array =
-        CharArray::new(values, unique_rows_count, cols).map_err(|e| format!("unique: {e}"))?;
+        CharArray::new(values, unique_rows_count, cols).map_err(|e| unique_error(format!("unique: {e}")).into())?;
     let ia_tensor =
-        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         Value::CharArray(value_array),
@@ -1011,7 +1018,7 @@ fn unique_char_rows(array: CharArray, opts: &UniqueOptions) -> Result<UniqueEval
 fn unique_string_array(
     array: StringArray,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
         unique_string_rows(array, opts)
     } else {
@@ -1022,13 +1029,13 @@ fn unique_string_array(
 fn unique_string_elements(
     array: StringArray,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     let len = array.data.len();
     if len == 0 {
         let values =
-            StringArray::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+            StringArray::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(Value::StringArray(values), ia, ic));
     }
 
@@ -1084,9 +1091,9 @@ fn unique_string_elements(
     }
 
     let value_array =
-        StringArray::new(values, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| format!("unique: {e}"))?;
+        StringArray::new(values, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![len, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         Value::StringArray(value_array),
@@ -1098,18 +1105,18 @@ fn unique_string_elements(
 fn unique_string_rows(
     array: StringArray,
     opts: &UniqueOptions,
-) -> Result<UniqueEvaluation, String> {
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if array.shape.len() != 2 {
-        return Err("unique: 'rows' option requires a 2-D matrix input".to_string());
+        return Err(unique_error("unique: 'rows' option requires a 2-D matrix input"));
     }
     let rows = array.shape[0];
     let cols = array.shape[1];
 
     if rows == 0 {
         let values =
-            StringArray::new(Vec::new(), vec![0, cols]).map_err(|e| format!("unique: {e}"))?;
-        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
-        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| format!("unique: {e}"))?;
+            StringArray::new(Vec::new(), vec![0, cols]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic = Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         return Ok(UniqueEvaluation::new(Value::StringArray(values), ia, ic));
     }
 
@@ -1179,10 +1186,10 @@ fn unique_string_rows(
     }
 
     let value_array = StringArray::new(values, vec![unique_rows_count, cols])
-        .map_err(|e| format!("unique: {e}"))?;
+        .map_err(|e| unique_error(format!("unique: {e}")).into())?;
     let ia_tensor =
-        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| format!("unique: {e}"))?;
-    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| format!("unique: {e}"))?;
+        Tensor::new(ia, vec![unique_rows_count, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+    let ic_tensor = Tensor::new(ic, vec![rows, 1]).map_err(|e| unique_error(format!("unique: {e}")).into())?;
 
     Ok(UniqueEvaluation::new(
         Value::StringArray(value_array),
@@ -1399,12 +1406,12 @@ impl UniqueEvaluation {
         (self.values, ia, ic)
     }
 
-    pub fn from_unique_result(result: UniqueResult) -> Result<Self, String> {
+    pub fn from_unique_result(result: UniqueResult) -> crate::BuiltinResult<Self> {
         let UniqueResult { values, ia, ic } = result;
         let values_tensor =
-            Tensor::new(values.data, values.shape).map_err(|e| format!("unique: {e}"))?;
-        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| format!("unique: {e}"))?;
-        let ic_tensor = Tensor::new(ic.data, ic.shape).map_err(|e| format!("unique: {e}"))?;
+            Tensor::new(values.data, values.shape).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| unique_error(format!("unique: {e}")).into())?;
+        let ic_tensor = Tensor::new(ic.data, ic.shape).map_err(|e| unique_error(format!("unique: {e}")).into())?;
         Ok(UniqueEvaluation::new(
             tensor::tensor_into_value(values_tensor),
             ia_tensor,
@@ -1412,9 +1419,10 @@ impl UniqueEvaluation {
         ))
     }
 
-    pub fn into_numeric_unique_result(self) -> Result<UniqueResult, String> {
+    pub fn into_numeric_unique_result(self) -> crate::BuiltinResult<UniqueResult> {
         let UniqueEvaluation { values, ia, ic } = self;
-        let values_tensor = tensor::value_into_tensor_for("unique", values)?;
+        let values_tensor = tensor::value_into_tensor_for("unique", values)
+            .map_err(|e| unique_error(e))?;
         Ok(UniqueResult {
             values: HostTensorOwned {
                 data: values_tensor.data,
@@ -1445,6 +1453,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1801,7 +1816,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
-        let err = evaluate(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err();
+        let err = error_message(evaluate(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err());
         assert!(err.contains("legacy"));
     }
 
@@ -1809,11 +1824,13 @@ pub(crate) mod tests {
     #[test]
     fn unique_conflicting_order_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(tensor),
-            &[Value::from("stable"), Value::from("sorted")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            evaluate(
+                Value::Tensor(tensor),
+                &[Value::from("stable"), Value::from("sorted")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("stable"));
     }
 
@@ -1821,11 +1838,13 @@ pub(crate) mod tests {
     #[test]
     fn unique_conflicting_occurrence_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(tensor),
-            &[Value::from("first"), Value::from("last")],
-        )
-        .unwrap_err();
+        let err = error_message(
+            evaluate(
+                Value::Tensor(tensor),
+                &[Value::from("first"), Value::from("last")],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("first"));
     }
 
@@ -1833,7 +1852,7 @@ pub(crate) mod tests {
     #[test]
     fn unique_rows_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
-        let err = evaluate(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err();
+        let err = error_message(evaluate(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err());
         assert!(err.contains("2-D matrix"));
     }
 

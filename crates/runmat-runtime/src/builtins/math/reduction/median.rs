@@ -6,6 +6,10 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const NAME: &str = "median";
+
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -213,6 +217,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute medians entirely on device; runtimes fall back to host when hooks are missing or omitnan is requested.",
 };
 
+fn median_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "median",
@@ -249,12 +257,12 @@ struct ParsedArguments {
 fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (median_gpu(handle, &parsed)).map_err(Into::into),
-        other => (median_host(other, &parsed)).map_err(Into::into),
+        Value::GpuTensor(handle) => median_gpu(handle, &parsed),
+        other => median_host(other, &parsed),
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -277,10 +285,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(
-                            "median: 'all' cannot be combined with an explicit dimension"
-                                .to_string(),
-                        );
+                        return Err(median_error(
+                            "median: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     axes = MedianAxes::All;
                     axes_set = true;
@@ -288,13 +295,19 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                     continue;
                 }
                 "" => {
-                    return Err("median: keyword arguments must not be empty strings".to_string());
+                    return Err(median_error(
+                        "median: keyword arguments must not be empty strings",
+                    ));
                 }
                 _ => {
                     if let Some(original) = value_as_str(arg) {
-                        return Err(format!("median: unrecognised argument '{original}'"));
+                        return Err(median_error(format!(
+                            "median: unrecognised argument '{original}'"
+                        )));
                     } else {
-                        return Err(format!("median: unrecognised argument {arg:?}"));
+                        return Err(median_error(format!(
+                            "median: unrecognised argument {arg:?}"
+                        )));
                     }
                 }
             }
@@ -304,10 +317,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
             if let Some(selection) = parse_axes(arg)? {
                 if matches!(selection, MedianAxes::All) {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(
-                            "median: 'all' cannot be combined with an explicit dimension"
-                                .to_string(),
-                        );
+                        return Err(median_error(
+                            "median: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     axes = MedianAxes::All;
                 } else {
@@ -318,22 +330,26 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 continue;
             }
         } else if parse_axes(arg)?.is_some() {
-            return Err("median: multiple dimension specifications provided".to_string());
+            return Err(median_error(
+                "median: multiple dimension specifications provided",
+            ));
         }
 
-        return Err(format!("median: unrecognised argument {arg:?}"));
+        return Err(median_error(format!(
+            "median: unrecognised argument {arg:?}"
+        )));
     }
 
     Ok(ParsedArguments { axes, nan_mode })
 }
 
-fn median_host(value: Value, args: &ParsedArguments) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("median", value)?;
+fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("median", value).map_err(median_error)?;
     let reduced = median_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
     if args.nan_mode == ReductionNaN::Include {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes) {
@@ -412,7 +428,7 @@ fn median_tensor(
     tensor: Tensor,
     axes: MedianAxes,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     match axes {
         MedianAxes::Default => {
             let dim = default_dimension(&tensor);
@@ -448,17 +464,19 @@ fn median_tensor(
     }
 }
 
-fn parse_axes(value: &Value) -> Result<Option<MedianAxes>, String> {
+fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
     if let Some(text) = value_as_str(value) {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err("median: dimension string must not be empty".to_string());
+            return Err(median_error("median: dimension string must not be empty"));
         }
         let lowered = trimmed.to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(MedianAxes::All)),
             "omitnan" | "includenan" => Ok(None),
-            _ => Err(format!("median: unrecognised argument '{trimmed}'")),
+            _ => Err(median_error(format!(
+                "median: unrecognised argument '{trimmed}'"
+            ))),
         };
     }
 
@@ -469,7 +487,7 @@ fn parse_axes(value: &Value) -> Result<Option<MedianAxes>, String> {
             }
             if t.data.len() == 1 {
                 let scalar = Value::Num(t.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "median")?;
+                let dim = tensor::parse_dimension(&scalar, "median").map_err(median_error)?;
                 return Ok(Some(MedianAxes::Dim(dim)));
             }
             let dims = parse_dimension_vector(t)?;
@@ -480,13 +498,13 @@ fn parse_axes(value: &Value) -> Result<Option<MedianAxes>, String> {
             }
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor = tensor::logical_to_tensor(logical).map_err(median_error)?;
             if tensor.data.is_empty() {
                 return Ok(Some(MedianAxes::Default));
             }
             if tensor.data.len() == 1 {
                 let scalar = Value::Num(tensor.data[0]);
-                let dim = tensor::parse_dimension(&scalar, "median")?;
+                let dim = tensor::parse_dimension(&scalar, "median").map_err(median_error)?;
                 return Ok(Some(MedianAxes::Dim(dim)));
             }
             let dims = parse_dimension_vector(&tensor)?;
@@ -497,27 +515,31 @@ fn parse_axes(value: &Value) -> Result<Option<MedianAxes>, String> {
             }
         }
         Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(value, "median")?;
+            let dim = tensor::parse_dimension(value, "median").map_err(median_error)?;
             Ok(Some(MedianAxes::Dim(dim)))
         }
-        Value::GpuTensor(_) => Err("median: dimension arguments cannot be GPU tensors".to_string()),
-        Value::Bool(_) => Err("median: dimension must be numeric".to_string()),
+        Value::GpuTensor(_) => Err(median_error(
+            "median: dimension arguments cannot be GPU tensors",
+        )),
+        Value::Bool(_) => Err(median_error("median: dimension must be numeric")),
         _ => Ok(None),
     }
 }
 
-fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
+fn parse_dimension_vector(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &entry in &tensor.data {
         if !entry.is_finite() {
-            return Err("median: dimension entries must be finite integers".to_string());
+            return Err(median_error(
+                "median: dimension entries must be finite integers",
+            ));
         }
         let rounded = entry.round();
         if (rounded - entry).abs() > f64::EPSILON {
-            return Err("median: dimension entries must be integers".to_string());
+            return Err(median_error("median: dimension entries must be integers"));
         }
         if rounded < 1.0 {
-            return Err("median: dimension entries must be >= 1".to_string());
+            return Err(median_error("median: dimension entries must be >= 1"));
         }
         dims.push(rounded as usize);
     }
@@ -537,14 +559,15 @@ fn reduce_tensor_median_dim(
     tensor: &Tensor,
     dim: usize,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err("median: dimension must be >= 1".to_string());
+        return Err(median_error("median: dimension must be >= 1"));
     }
 
     if tensor.shape.is_empty() {
         let value = tensor.data.first().copied().unwrap_or(f64::NAN);
-        return Tensor::new(vec![value], vec![1, 1]).map_err(|e| format!("median: {e}"));
+        return Tensor::new(vec![value], vec![1, 1])
+            .map_err(|e| median_error(format!("median: {e}")));
     }
 
     if dim > tensor.shape.len() {
@@ -559,12 +582,13 @@ fn reduce_tensor_median_dim(
 
     if reduce_len == 0 || tensor.data.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
-        return Tensor::new(fill, output_shape).map_err(|e| format!("median: {e}"));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| median_error(format!("median: {e}")));
     }
 
     if reduce_len == 1 {
         return Tensor::new(tensor.data.clone(), tensor.shape.clone())
-            .map_err(|e| format!("median: {e}"));
+            .map_err(|e| median_error(format!("median: {e}")));
     }
 
     let stride_before = dim_product(&tensor.shape[..dim_index]);
@@ -613,7 +637,7 @@ fn reduce_tensor_median_dim(
         }
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("median: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| median_error(format!("median: {e}")))
 }
 
 pub fn compute_median_inplace(values: &mut [f64]) -> f64 {
@@ -806,10 +830,15 @@ pub(crate) mod tests {
     #[test]
     fn median_rejects_unknown_keyword() {
         let err = median_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
-        assert!(
-            err.contains("unrecognised argument"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains("unrecognised argument"),
+                    "unexpected error message: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

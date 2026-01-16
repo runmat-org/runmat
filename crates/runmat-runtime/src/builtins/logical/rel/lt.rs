@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -233,6 +234,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion emits comparison kernels that write 1 when the left operand is less than the right.",
 };
 
+const BUILTIN_NAME: &str = "lt";
+const IDENT_INVALID_INPUT: &str = "MATLAB:lt:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "MATLAB:lt:SizeMismatch";
+const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:lt:ComplexNotSupported";
+
+fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "lt",
     category = "logical/rel",
@@ -244,13 +258,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_lt_gpu(a, b) {
-            return (result).map_err(Into::into);
+            return result;
         }
     }
-    lt_host(lhs, rhs).map_err(Into::into)
+    lt_host(lhs, rhs)
 }
 
-fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, String>> {
+fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<crate::BuiltinResult<Value>> {
     let provider = runmat_accelerate_api::provider()?;
     match provider.elem_lt(a, b) {
         Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
@@ -261,7 +275,7 @@ fn try_lt_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, 
     }
 }
 
-fn lt_host(lhs: Value, rhs: Value) -> Result<Value, String> {
+fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     let left = LtOperand::from_value(lhs)?;
@@ -277,9 +291,10 @@ fn lt_host(lhs: Value, rhs: Value) -> Result<Value, String> {
             logical_result(data, shape)
         }
         (LtOperand::Numeric(_), LtOperand::String(_))
-        | (LtOperand::String(_), LtOperand::Numeric(_)) => {
-            Err("lt: mixing numeric and string inputs is not supported".to_string())
-        }
+        | (LtOperand::String(_), LtOperand::Numeric(_)) => Err(lt_error(
+            "lt: mixing numeric and string inputs is not supported",
+            IDENT_INVALID_INPUT,
+        )),
     }
 }
 
@@ -305,13 +320,13 @@ fn normalize_char_string(lhs: Value, rhs: Value) -> (Value, Value) {
     }
 }
 
-fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
     if tensor::element_count(&shape) <= 1 && data.len() == 1 {
         Ok(Value::Bool(data[0] != 0))
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("lt: {e}"))
+            .map_err(|e| lt_error(format!("lt: {e}"), IDENT_INVALID_INPUT))
     }
 }
 
@@ -321,7 +336,7 @@ enum LtOperand {
 }
 
 impl LtOperand {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Num(n) => Ok(LtOperand::Numeric(NumericBuffer::scalar(n))),
             Value::Bool(flag) => Ok(LtOperand::Numeric(NumericBuffer::scalar(if flag {
@@ -340,19 +355,28 @@ impl LtOperand {
             Value::String(s) => Ok(LtOperand::String(StringBuffer::scalar(s))),
             Value::StringArray(sa) => Ok(LtOperand::String(StringBuffer::from_array(sa))),
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|err| lt_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT))?;
                 Ok(LtOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err("lt: complex inputs are not supported".to_string())
-            }
-            unsupported => Err(format!("lt: unsupported input type {unsupported:?}")),
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(lt_error(
+                "lt: complex inputs are not supported",
+                IDENT_COMPLEX_UNSUPPORTED,
+            )),
+            unsupported => Err(lt_error(
+                format!("lt: unsupported input type {unsupported:?}"),
+                IDENT_INVALID_INPUT,
+            )),
         }
     }
 }
 
-fn numeric_lt(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("lt", &lhs.shape, &rhs.shape)?;
+fn numeric_lt(
+    lhs: &NumericBuffer,
+    rhs: &NumericBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| lt_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -378,8 +402,12 @@ fn numeric_lt(lhs: &NumericBuffer, rhs: &NumericBuffer) -> Result<(Vec<u8>, Vec<
     Ok((out, shape))
 }
 
-fn string_lt(lhs: &StringBuffer, rhs: &StringBuffer) -> Result<(Vec<u8>, Vec<usize>), String> {
-    let shape = broadcast_shapes("lt", &lhs.shape, &rhs.shape)?;
+fn string_lt(
+    lhs: &StringBuffer,
+    rhs: &StringBuffer,
+) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
+    let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
+        .map_err(|err| lt_error(err, IDENT_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -486,6 +514,7 @@ impl StringBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -551,20 +580,26 @@ pub(crate) mod tests {
     fn lt_string_numeric_error() {
         let err =
             lt_builtin(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
-        assert!(
-            err.contains("mixing numeric and string"),
-            "unexpected message: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("mixing numeric and string"));
+                assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lt_complex_error() {
         let err = lt_builtin(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("lt");
-        assert!(
-            err.contains("complex"),
-            "expected complex error message, got {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("complex"));
+                assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

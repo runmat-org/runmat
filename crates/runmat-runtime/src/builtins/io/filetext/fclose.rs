@@ -4,18 +4,19 @@
 //! identifiers, or all open files. The implementation integrates with the
 //! shared file registry managed by `fopen` and always executes on the host.
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string}, registry};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
+const BUILTIN_NAME: &str = "fclose";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -211,6 +212,28 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
+fn fclose_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fclose",
@@ -275,20 +298,21 @@ impl FcloseEval {
     }
 }
 
-pub fn evaluate(args: &[Value]) -> Result<FcloseEval, String> {
+pub fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
     let gathered = gather_args(args)?;
     match gathered.len() {
         0 => Ok(close_all()),
         1 => handle_single_argument(&gathered[0]),
-        _ => Err("fclose: too many input arguments".to_string()),
+        _ => Err(fclose_error("fclose: too many input arguments")),
     }
 }
 
-fn handle_single_argument(value: &Value) -> Result<FcloseEval, String> {
+fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
         return Ok(close_all());
     }
-    let fids = collect_file_ids(value).map_err(|err| format!("fclose: {err}"))?;
+    let fids = collect_file_ids(value)
+        .map_err(|err| fclose_error(format!("fclose: {err}")))?;
     Ok(close_fids(&fids))
 }
 
@@ -333,7 +357,7 @@ fn close_fids(fids: &[i32]) -> FcloseEval {
     }
 }
 
-fn collect_file_ids(value: &Value) -> Result<Vec<i32>, String> {
+fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![parse_scalar_fid(value)?]),
         Value::Tensor(t) => {
@@ -360,45 +384,45 @@ fn collect_file_ids(value: &Value) -> Result<Vec<i32>, String> {
             Ok(ids)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("file identifier must be numeric or 'all'".to_string())
+            Err(fclose_error("file identifier must be numeric or 'all'"))
         }
-        _ => Err("file identifier must be numeric or 'all'".to_string()),
+        _ => Err(fclose_error("file identifier must be numeric or 'all'")),
     }
 }
 
-fn parse_scalar_fid(value: &Value) -> Result<i32, String> {
+fn parse_scalar_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::Int(i) => {
             let v = i.to_i64();
             if v < i32::MIN as i64 || v > i32::MAX as i64 {
-                return Err("file identifier is out of range".to_string());
+                return Err(fclose_error("file identifier is out of range"));
             }
             Ok(v as i32)
         }
         Value::Num(n) => parse_fid_from_f64(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        _ => Err("file identifier must be numeric or 'all'".to_string()),
+        _ => Err(fclose_error("file identifier must be numeric or 'all'")),
     }
 }
 
-fn parse_fid_from_f64(value: f64) -> Result<i32, String> {
+fn parse_fid_from_f64(value: f64) -> BuiltinResult<i32> {
     if !value.is_finite() {
-        return Err("file identifier must be finite".to_string());
+        return Err(fclose_error("file identifier must be finite"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("file identifier must be an integer".to_string());
+        return Err(fclose_error("file identifier must be an integer"));
     }
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
-        return Err("file identifier is out of range".to_string());
+        return Err(fclose_error("file identifier is out of range"));
     }
     Ok(rounded as i32)
 }
 
-fn gather_args(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        gathered.push(gather_if_needed(value).map_err(|e| format!("fclose: {e}"))?);
+        gathered.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(gathered)
 }
@@ -409,23 +433,12 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn extract_scalar_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn char_array_value(text: &str) -> Value {
-    Value::CharArray(CharArray::new_row(text))
-}
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fopen, registry};
+    use crate::RuntimeControlFlow;
     use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_filesystem as fs;
@@ -436,6 +449,13 @@ pub(crate) mod tests {
     use std::time::UNIX_EPOCH;
 
     static REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     fn registry_guard() -> MutexGuard<'static, ()> {
         REGISTRY_LOCK.lock().unwrap()
@@ -599,7 +619,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let tensor = Tensor::new(vec![1.5], vec![1, 1]).expect("tensor");
-        let err = evaluate(&[Value::Tensor(tensor)]).unwrap_err();
+        let err = unwrap_error_message(evaluate(&[Value::Tensor(tensor)]).unwrap_err());
         assert_eq!(err, "fclose: file identifier must be an integer");
     }
 
@@ -630,7 +650,7 @@ pub(crate) mod tests {
     fn fclose_errors_on_non_numeric_input() {
         let _guard = registry_guard();
         registry::reset_for_tests();
-        let err = evaluate(&[Value::from("not-a-fid")]).unwrap_err();
+        let err = unwrap_error_message(evaluate(&[Value::from("not-a-fid")]).unwrap_err());
         assert_eq!(err, "fclose: file identifier must be numeric or 'all'");
     }
 

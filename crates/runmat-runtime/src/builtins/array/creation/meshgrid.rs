@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -246,6 +247,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a dedicated meshgrid hook; until then the runtime builds grids on the host and uploads them when GPU residency is requested.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("meshgrid").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::meshgrid")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "meshgrid",
@@ -268,11 +273,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&rest)?;
-    eval.first().map_err(Into::into)
+    eval.first()
 }
 
 /// Evaluate the `meshgrid` builtin once and reuse the result for multiple outputs.
-pub fn evaluate(args: &[Value]) -> Result<MeshgridEval, String> {
+pub fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
     let parsed = ParsedMeshgrid::parse(args)?;
     let (x_axis, y_axis, z_axis) = normalise_axes(&parsed.axes);
 
@@ -371,9 +376,9 @@ struct ParsedMeshgrid {
 }
 
 impl ParsedMeshgrid {
-    fn parse(args: &[Value]) -> Result<Self, String> {
+    fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
-            return Err("meshgrid: at least one input vector is required".to_string());
+            return Err(builtin_error("meshgrid: at least one input vector is required"));
         }
         let mut axis_values: Vec<Value> = Vec::new();
         let mut like_proto: Option<Value> = None;
@@ -385,27 +390,29 @@ impl ParsedMeshgrid {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err(
-                                "meshgrid: multiple 'like' specifications are not supported"
-                                    .to_string(),
-                            );
+                            return Err(builtin_error(
+                                "meshgrid: multiple 'like' specifications are not supported",
+                            ));
                         }
                         if axis_values.is_empty() {
-                            return Err("meshgrid: 'like' must follow at least one input vector"
-                                .to_string());
+                            return Err(builtin_error(
+                                "meshgrid: 'like' must follow at least one input vector",
+                            ));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("meshgrid: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("meshgrid: expected prototype after 'like'"));
                         };
                         like_proto = Some(proto);
                         idx += 2;
                         if idx < args.len() {
-                            return Err("meshgrid: 'like' must be the final argument".to_string());
+                            return Err(builtin_error("meshgrid: 'like' must be the final argument"));
                         }
                         break;
                     }
                     other => {
-                        return Err(format!("meshgrid: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!(
+                            "meshgrid: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
@@ -418,10 +425,10 @@ impl ParsedMeshgrid {
         }
 
         if axis_values.is_empty() {
-            return Err("meshgrid: at least one input vector is required".to_string());
+            return Err(builtin_error("meshgrid: at least one input vector is required"));
         }
         if axis_values.len() > 3 {
-            return Err("meshgrid: expected at most three input vectors".to_string());
+            return Err(builtin_error("meshgrid: expected at most three input vectors"));
         }
 
         let mut axes = Vec::with_capacity(max(axis_values.len(), 2));
@@ -482,7 +489,7 @@ enum DevicePreference {
     Gpu,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<PrototypeSpec, String> {
+fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> {
     match proto {
         Value::GpuTensor(_) => Ok(PrototypeSpec {
             residency: DevicePreference::Gpu,
@@ -501,7 +508,9 @@ fn analyse_like_prototype(proto: &Value) -> Result<PrototypeSpec, String> {
             class: PrototypeClass::Real,
         }),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err("meshgrid: prototypes must be numeric or gpuArray values".to_string())
+            Err(builtin_error(
+                "meshgrid: prototypes must be numeric or gpuArray values",
+            ))
         }
         Value::Cell(_)
         | Value::Struct(_)
@@ -511,7 +520,9 @@ fn analyse_like_prototype(proto: &Value) -> Result<PrototypeSpec, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("meshgrid: prototypes must be numeric arrays".to_string()),
+        | Value::MException(_) => Err(builtin_error(
+            "meshgrid: prototypes must be numeric arrays",
+        )),
     }
 }
 
@@ -522,7 +533,11 @@ struct AxisData {
     is_complex: bool,
 }
 
-fn axis_from_value(value: Value, index: usize, prefer_gpu: &mut bool) -> Result<AxisData, String> {
+fn axis_from_value(
+    value: Value,
+    index: usize,
+    prefer_gpu: &mut bool,
+) -> crate::BuiltinResult<AxisData> {
     match value {
         Value::Tensor(tensor) => axis_from_tensor(tensor),
         Value::LogicalArray(logical) => {
@@ -558,16 +573,18 @@ fn axis_from_value(value: Value, index: usize, prefer_gpu: &mut bool) -> Result<
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             axis_from_tensor(tensor)
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "meshgrid: input argument {} must be numeric, got {other:?}",
             index + 1
-        )),
+        ))),
     }
 }
 
-fn axis_from_tensor(tensor: Tensor) -> Result<AxisData, String> {
+fn axis_from_tensor(tensor: Tensor) -> crate::BuiltinResult<AxisData> {
     if !is_vector_shape(&tensor.shape) {
-        return Err("meshgrid: input vectors must be one-dimensional".to_string());
+        return Err(builtin_error(
+            "meshgrid: input vectors must be one-dimensional",
+        ));
     }
     let mut values = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
@@ -580,9 +597,11 @@ fn axis_from_tensor(tensor: Tensor) -> Result<AxisData, String> {
     })
 }
 
-fn axis_from_complex_tensor(tensor: ComplexTensor) -> Result<AxisData, String> {
+fn axis_from_complex_tensor(tensor: ComplexTensor) -> crate::BuiltinResult<AxisData> {
     if !is_vector_shape(&tensor.shape) {
-        return Err("meshgrid: input vectors must be one-dimensional".to_string());
+        return Err(builtin_error(
+            "meshgrid: input vectors must be one-dimensional",
+        ));
     }
     let is_complex = tensor
         .data
@@ -693,33 +712,33 @@ impl GridOutput {
         &self,
         class: PrototypeClass,
         residency: DevicePreference,
-    ) -> Result<Value, String> {
+    ) -> crate::BuiltinResult<Value> {
         match class {
             PrototypeClass::Real => self.to_real_value(residency),
             PrototypeClass::Complex => self.to_complex_value(residency),
         }
     }
 
-    fn to_real_value(&self, residency: DevicePreference) -> Result<Value, String> {
+    fn to_real_value(&self, residency: DevicePreference) -> crate::BuiltinResult<Value> {
         let mut real = Vec::with_capacity(self.data.len());
         for &(re, im) in &self.data {
             if im != 0.0 {
-                return Err(
-                    "meshgrid: cannot represent complex values in a real output".to_string()
-                );
+                return Err(builtin_error(
+                    "meshgrid: cannot represent complex values in a real output",
+                ));
             }
             real.push(re);
         }
-        let tensor = Tensor::new(real, self.shape.clone()).map_err(|e| format!("meshgrid: {e}"))?;
+        let tensor = Tensor::new(real, self.shape.clone()).map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
             DevicePreference::Host => Ok(tensor::tensor_into_value(tensor)),
             DevicePreference::Gpu => to_gpu_tensor_value(tensor),
         }
     }
 
-    fn to_complex_value(&self, residency: DevicePreference) -> Result<Value, String> {
+    fn to_complex_value(&self, residency: DevicePreference) -> crate::BuiltinResult<Value> {
         let tensor = ComplexTensor::new(self.data.clone(), self.shape.clone())
-            .map_err(|e| format!("meshgrid: {e}"))?;
+            .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
             DevicePreference::Host => Ok(complex_tensor_into_value(tensor)),
             DevicePreference::Gpu => {
@@ -730,7 +749,7 @@ impl GridOutput {
     }
 }
 
-fn to_gpu_tensor_value(tensor: Tensor) -> Result<Value, String> {
+fn to_gpu_tensor_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
             data: &tensor.data,
@@ -746,10 +765,10 @@ fn to_gpu_tensor_value(tensor: Tensor) -> Result<Value, String> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn tensor_to_complex_value(tensor: Tensor) -> Result<Value, String> {
+fn tensor_to_complex_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
     let complex =
-        ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| format!("meshgrid: {e}"))?;
+        ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
     Ok(complex_tensor_into_value(complex))
 }
 
@@ -763,7 +782,7 @@ impl MeshgridOutput {
         &self,
         class: PrototypeClass,
         residency: DevicePreference,
-    ) -> Result<Value, String> {
+    ) -> crate::BuiltinResult<Value> {
         match self {
             MeshgridOutput::Host(host) => host.to_value(class, residency),
             MeshgridOutput::GpuReal(handle) => match (class, residency) {
@@ -801,21 +820,23 @@ impl MeshgridEval {
         self.outputs.len()
     }
 
-    pub fn first(&self) -> Result<Value, String> {
+    pub fn first(&self) -> crate::BuiltinResult<Value> {
         self.outputs[0].to_value(self.target_class, self.target_residency)
     }
 
-    pub fn second(&self) -> Result<Value, String> {
+    pub fn second(&self) -> crate::BuiltinResult<Value> {
         if self.outputs.len() < 2 {
-            Err("meshgrid: second output unavailable".to_string())
+            Err(builtin_error("meshgrid: second output unavailable"))
         } else {
             self.outputs[1].to_value(self.target_class, self.target_residency)
         }
     }
 
-    pub fn third(&self) -> Result<Value, String> {
+    pub fn third(&self) -> crate::BuiltinResult<Value> {
         if self.outputs.len() < 3 {
-            Err("meshgrid: third output requested but no Z vector was supplied".to_string())
+            Err(builtin_error(
+                "meshgrid: third output requested but no Z vector was supplied",
+            ))
         } else {
             self.outputs[2].to_value(self.target_class, self.target_residency)
         }

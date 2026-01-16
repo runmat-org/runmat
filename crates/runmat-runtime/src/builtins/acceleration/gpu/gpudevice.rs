@@ -4,7 +4,7 @@ use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -18,7 +18,7 @@ const ERR_RESET_NOT_SUPPORTED: &str = "gpuDevice: reset is not supported by the 
 const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive integer";
 
 fn gpu_device_error(message: impl Into<String>) -> RuntimeError {
-    runtime_error(message)
+    build_runtime_error(message)
         .with_builtin("gpuDevice")
         .build()
 }

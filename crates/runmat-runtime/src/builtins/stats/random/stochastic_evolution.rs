@@ -2,21 +2,29 @@
 //! unavailable.
 
 use crate::builtins::common::random;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_builtins::Tensor;
+
+const NAME: &str = "stochastic_evolution";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
 
 pub fn stochastic_evolution_host(
     tensor: &mut Tensor,
     drift: f64,
     scale: f64,
     steps: u32,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if tensor.data.is_empty() || steps == 0 {
         return Ok(());
     }
 
     let len = tensor.data.len();
     for _ in 0..steps {
-        let samples = random::generate_normal(len, "stochastic_evolution_host")?;
+        let samples =
+            random::generate_normal(len, "stochastic_evolution_host").map_err(builtin_error)?;
         for (value, noise) in tensor.data.iter_mut().zip(samples.iter()) {
             let term = drift + scale * noise;
             *value *= term.exp();

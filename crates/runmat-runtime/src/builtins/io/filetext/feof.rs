@@ -14,11 +14,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
 const IDENTIFIER_TYPE_ERROR: &str = "feof: file identifier must be a numeric scalar";
+const BUILTIN_NAME: &str = "feof";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -182,6 +183,28 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O query; providers are not involved.",
 };
 
+fn feof_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::feof")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "feof",
@@ -207,25 +230,29 @@ fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
 }
 
 /// Evaluate the `feof` builtin without invoking the runtime dispatcher.
-pub fn evaluate(fid_value: &Value) -> Result<bool, String> {
-    let fid_host = gather_if_needed(fid_value).map_err(|e| format!("feof: {e}"))?;
+pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
+    let fid_host = gather_if_needed(fid_value).map_err(map_control_flow)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
-        return Err("feof: file identifier must be non-negative".to_string());
+        return Err(feof_error("feof: file identifier must be non-negative"));
     }
     if fid < 3 {
         return Ok(false);
     }
 
-    let handle =
-        registry::take_handle(fid).ok_or_else(|| format!("feof: {INVALID_IDENTIFIER_MESSAGE}"))?;
+    let handle = registry::take_handle(fid)
+        .ok_or_else(|| feof_error(format!("feof: {INVALID_IDENTIFIER_MESSAGE}")))?;
     let mut file = handle
         .lock()
-        .map_err(|_| "feof: failed to lock file handle (poisoned mutex)".to_string())?;
+        .map_err(|_| feof_error("feof: failed to lock file handle (poisoned mutex)"))?;
 
-    let position = file
-        .seek(SeekFrom::Current(0))
-        .map_err(|err| format!("feof: failed to query file position: {err}"))?;
+    let position = file.seek(SeekFrom::Current(0)).map_err(|err| {
+        build_runtime_error(format!("feof: failed to query file position: {err}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build()
+            .into()
+    })?;
 
     let end_position = match file.seek(SeekFrom::End(0)) {
         Ok(pos) => pos,
@@ -234,18 +261,28 @@ pub fn evaluate(fid_value: &Value) -> Result<bool, String> {
                 let _ = file.seek(SeekFrom::Start(position));
                 return Ok(false);
             }
-            return Err(format!("feof: failed to query file length: {err}"));
+            return Err(build_runtime_error(format!("feof: failed to query file length: {err}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err)
+                .build()
+                .into());
         }
     };
 
     if let Err(err) = file.seek(SeekFrom::Start(position)) {
-        return Err(format!("feof: failed to restore file position: {err}"));
+        return Err(build_runtime_error(format!(
+            "feof: failed to restore file position: {err}"
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
+        .into());
     }
 
     Ok(position >= end_position)
 }
 
-fn parse_fid(value: &Value) -> Result<i32, String> {
+fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::Num(n) => parse_scalar_fid(*n),
         Value::Int(int) => {
@@ -256,29 +293,29 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
             if t.data.len() == 1 {
                 parse_scalar_fid(t.data[0])
             } else {
-                Err(IDENTIFIER_TYPE_ERROR.to_string())
+                Err(feof_error(IDENTIFIER_TYPE_ERROR))
             }
         }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             let v = if la.data[0] != 0 { 1.0 } else { 0.0 };
             parse_scalar_fid(v)
         }
-        Value::LogicalArray(_) => Err(IDENTIFIER_TYPE_ERROR.to_string()),
+        Value::LogicalArray(_) => Err(feof_error(IDENTIFIER_TYPE_ERROR)),
         Value::Bool(b) => parse_scalar_fid(if *b { 1.0 } else { 0.0 }),
-        _ => Err(IDENTIFIER_TYPE_ERROR.to_string()),
+        _ => Err(feof_error(IDENTIFIER_TYPE_ERROR)),
     }
 }
 
-fn parse_scalar_fid(value: f64) -> Result<i32, String> {
+fn parse_scalar_fid(value: f64) -> BuiltinResult<i32> {
     if !value.is_finite() {
-        return Err("feof: file identifier must be finite".to_string());
+        return Err(feof_error("feof: file identifier must be finite"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("feof: file identifier must be an integer".to_string());
+        return Err(feof_error("feof: file identifier must be an integer"));
     }
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
-        return Err("feof: file identifier is out of range".to_string());
+        return Err(feof_error("feof: file identifier is out of range"));
     }
     Ok(rounded as i32)
 }
@@ -287,6 +324,7 @@ fn parse_scalar_fid(value: f64) -> Result<i32, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
     use runmat_filesystem::{self as fs, File};
@@ -294,6 +332,13 @@ pub(crate) mod tests {
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
+
+    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -371,7 +416,7 @@ pub(crate) mod tests {
     #[test]
     fn feof_invalid_identifier_errors() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(42.0)).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(42.0)).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
     }
 
@@ -379,7 +424,7 @@ pub(crate) mod tests {
     #[test]
     fn feof_rejects_non_integer_identifier() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(1.5)).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(1.5)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be an integer");
     }
 
@@ -387,7 +432,7 @@ pub(crate) mod tests {
     #[test]
     fn feof_rejects_nan_identifier() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(f64::NAN)).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(f64::NAN)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be finite");
     }
 
@@ -395,7 +440,7 @@ pub(crate) mod tests {
     #[test]
     fn feof_rejects_negative_identifier() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::Num(-1.0)).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(-1.0)).unwrap_err());
         assert_eq!(err, "feof: file identifier must be non-negative");
     }
 
@@ -403,7 +448,7 @@ pub(crate) mod tests {
     #[test]
     fn feof_rejects_non_numeric_inputs() {
         registry::reset_for_tests();
-        let err = evaluate(&Value::from("abc")).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::from("abc")).unwrap_err());
         assert_eq!(err, IDENTIFIER_TYPE_ERROR);
     }
 
@@ -451,7 +496,7 @@ pub(crate) mod tests {
 
         fclose::evaluate(&[Value::Num(fid)]).unwrap();
 
-        let err = evaluate(&Value::Num(fid)).unwrap_err();
+        let err = unwrap_error_message(evaluate(&Value::Num(fid)).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
 
         fs::remove_file(path).unwrap();

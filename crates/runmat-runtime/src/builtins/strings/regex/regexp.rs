@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, make_cell};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -232,16 +232,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
 };
 
+const BUILTIN_NAME: &str = "regexp";
+
+fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(builtin).build().into()
+}
+
+fn with_builtin_context(builtin: &'static str, flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Error(mut err) => {
+            if err.context.builtin.is_none() {
+                err.context = err.context.with_builtin(builtin);
+            }
+            RuntimeControlFlow::Error(err)
+        }
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+    }
+}
+
 /// Evaluate a regular expression and return an evaluation handle that can produce MATLAB-compatible outputs.
-pub fn evaluate(
+pub fn evaluate(subject: Value, pattern: Value, rest: &[Value]) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with(BUILTIN_NAME, subject, pattern, rest)
+}
+
+/// Evaluate a regular expression using the specified builtin name for error context.
+pub fn evaluate_with(
+    builtin: &'static str,
     subject: Value,
     pattern: Value,
     rest: &[Value],
-) -> Result<RegexpEvaluation, String> {
-    let subject = gather_if_needed(&subject).map_err(|e| format!("regexp: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("regexp: {e}"))?;
-    let options = RegexpOptions::parse(rest)?;
-    RegexpEvaluation::new(subject, pattern, options)
+) -> BuiltinResult<RegexpEvaluation> {
+    let subject = gather_if_needed(&subject).map_err(|err| with_builtin_context(builtin, err))?;
+    let pattern = gather_if_needed(&pattern).map_err(|err| with_builtin_context(builtin, err))?;
+    let options = RegexpOptions::parse(builtin, rest)?;
+    RegexpEvaluation::new(builtin, subject, pattern, options)
 }
 
 #[runtime_builtin(
@@ -262,7 +286,8 @@ fn regexp_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> crate::Bu
         Ok(outputs.remove(0))
     } else {
         let len = outputs.len();
-        make_cell(outputs, 1, len).map_err(Into::into)
+        make_cell(outputs, 1, len)
+            .map_err(|err| runtime_error_for(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))
     }
 }
 
@@ -295,7 +320,7 @@ struct RegexpOptions {
 }
 
 impl RegexpOptions {
-    fn parse(rest: &[Value]) -> Result<Self, String> {
+    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
         let mut outputs = Vec::new();
         let mut once = false;
         let mut emptymatch = EmptyMatchPolicy::Remove;
@@ -305,8 +330,12 @@ impl RegexpOptions {
         let mut dot_all = false;
         let mut idx = 0usize;
         while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx])
-                .ok_or_else(|| format!("regexp: expected option string, got {:?}", rest[idx]))?;
+            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
+                runtime_error_for(
+                    builtin,
+                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
+                )
+            })?;
             idx += 1;
             match raw.as_str() {
                 "match" => outputs.push(OutputSpec::Match),
@@ -322,21 +351,30 @@ impl RegexpOptions {
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'lineanchors'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'lineanchors'"),
+                        )
                     })?;
                     multi_line = flag;
                     idx += 1;
                 }
                 "dotall" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'dotall'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'dotall'"),
+                        )
                     })?;
                     dot_all = flag;
                     idx += 1;
                 }
                 "dotexceptnewline" => {
                     let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        "regexp: expected 'on' or 'off' after 'dotExceptNewline'".to_string()
+                        runtime_error_for(
+                            builtin,
+                            format!("{builtin}: expected 'on' or 'off' after 'dotExceptNewline'"),
+                        )
                     })?;
                     dot_all = !flag;
                     idx += 1;

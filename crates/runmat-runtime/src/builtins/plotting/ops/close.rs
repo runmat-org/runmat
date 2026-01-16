@@ -6,7 +6,9 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use super::handle_args::{handle_from_string, handles_from_value, parse_string};
-use super::state::{close_figure, figure_handles, FigureHandle};
+use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
+
+use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "close",
@@ -20,19 +22,19 @@ use super::state::{close_figure, figure_handles, FigureHandle};
 pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     match parse_close_action(&rest)? {
         CloseAction::Current => {
-            let closed = close_figure(None).map_err(|err| format!("close: {err}"))?;
+            let closed = close_figure_with_builtin("close", None)?;
             Ok(format!("Closed figure {}", closed.as_u32()))
         }
         CloseAction::Handles(handles) => {
             let unique: BTreeSet<u32> = handles.into_iter().map(|h| h.as_u32()).collect();
             if unique.is_empty() {
-                let closed = close_figure(None).map_err(|err| format!("close: {err}"))?;
+                let closed = close_figure_with_builtin("close", None)?;
                 return Ok(format!("Closed figure {}", closed.as_u32()));
             }
             let mut closed = Vec::new();
             for id in unique {
                 let handle = FigureHandle::from(id);
-                close_figure(Some(handle)).map_err(|err| format!("close: {err}"))?;
+                close_figure_with_builtin("close", Some(handle))?;
                 closed.push(id);
             }
             if closed.len() == 1 {
@@ -61,7 +63,7 @@ enum CloseAction {
     All,
 }
 
-fn parse_close_action(args: &[Value]) -> Result<CloseAction, String> {
+fn parse_close_action(args: &[Value]) -> BuiltinResult<CloseAction> {
     if args.is_empty() {
         return Ok(CloseAction::Current);
     }

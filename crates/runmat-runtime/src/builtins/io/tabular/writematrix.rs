@@ -12,7 +12,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "writematrix";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -208,6 +210,39 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
+fn writematrix_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn writematrix_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message().to_string())
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "writematrix",
@@ -229,15 +264,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err((("writematrix: filename is required".to_string())).into());
+        return Err(writematrix_error("writematrix: filename is required"));
     }
 
-    let filename_value = gather_if_needed(&rest[0]).map_err(|e| format!("writematrix: {e}"))?;
+    let filename_value = gather_if_needed(&rest[0]).map_err(map_control_flow)?;
     let path = resolve_path(&filename_value)?;
 
     let options = parse_options(&rest[1..])?;
 
-    let gathered = gather_if_needed(&data).map_err(|e| format!("writematrix: {e}"))?;
+    let gathered = gather_if_needed(&data).map_err(map_control_flow)?;
     let matrix = MatrixData::from_value(gathered)?;
 
     let bytes_written = write_matrix(&path, &matrix, &options)?;
@@ -298,27 +333,29 @@ enum FileType {
     Text,
 }
 
-fn parse_options(args: &[Value]) -> Result<WriteMatrixOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
     if args.is_empty() {
         return Ok(WriteMatrixOptions::default());
     }
     if !args.len().is_multiple_of(2) {
-        return Err("writematrix: name/value inputs must appear in pairs".to_string());
+        return Err(writematrix_error(
+            "writematrix: name/value inputs must appear in pairs",
+        ));
     }
 
     let mut options = WriteMatrixOptions::default();
     let mut index = 0usize;
     while index < args.len() {
-        let name_value = gather_if_needed(&args[index]).map_err(|e| format!("writematrix: {e}"))?;
+        let name_value = gather_if_needed(&args[index]).map_err(map_control_flow)?;
         let name = option_name_from_value(&name_value)?;
-        let value = gather_if_needed(&args[index + 1]).map_err(|e| format!("writematrix: {e}"))?;
+        let value = gather_if_needed(&args[index + 1]).map_err(map_control_flow)?;
         apply_option(&mut options, &name, &value)?;
         index += 2;
     }
     Ok(options)
 }
 
-fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> Result<(), String> {
+fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> BuiltinResult<()> {
     if name.eq_ignore_ascii_case("Delimiter") {
         let delimiter = parse_delimiter(value)?;
         options.delimiter = Some(delimiter);
@@ -348,14 +385,14 @@ fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> 
     Ok(())
 }
 
-fn option_name_from_value(value: &Value) -> Result<String, String> {
+fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
     value_to_string_scalar(value, "option name")
 }
 
-fn parse_delimiter(value: &Value) -> Result<String, String> {
+fn parse_delimiter(value: &Value) -> BuiltinResult<String> {
     let text = value_to_string_scalar(value, "Delimiter")?;
     if text.is_empty() {
-        return Err("writematrix: Delimiter cannot be empty".to_string());
+        return Err(writematrix_error("writematrix: Delimiter cannot be empty"));
     }
     let trimmed = text.trim();
     let lowered = trimmed.to_ascii_lowercase();
@@ -369,17 +406,19 @@ fn parse_delimiter(value: &Value) -> Result<String, String> {
     }
 }
 
-fn parse_write_mode(value: &Value) -> Result<WriteMode, String> {
+fn parse_write_mode(value: &Value) -> BuiltinResult<WriteMode> {
     let text = value_to_string_scalar(value, "WriteMode")?;
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "overwrite" => Ok(WriteMode::Overwrite),
         "append" => Ok(WriteMode::Append),
-        _ => Err("writematrix: WriteMode must be 'overwrite' or 'append'".to_string()),
+        _ => Err(writematrix_error(
+            "writematrix: WriteMode must be 'overwrite' or 'append'",
+        )),
     }
 }
 
-fn parse_bool_like(value: &Value, context: &str) -> Result<bool, String> {
+fn parse_bool_like(value: &Value, context: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => {
@@ -387,7 +426,9 @@ fn parse_bool_like(value: &Value, context: &str) -> Result<bool, String> {
             match raw {
                 0 => Ok(false),
                 1 => Ok(true),
-                _ => Err(format!("writematrix: {context} must be logical (0 or 1)")),
+                _ => Err(writematrix_error(format!(
+                    "writematrix: {context} must be logical (0 or 1)"
+                ))),
             }
         }
         Value::Num(n) => {
@@ -396,7 +437,9 @@ fn parse_bool_like(value: &Value, context: &str) -> Result<bool, String> {
             } else if (*n - 1.0).abs() < f64::EPSILON {
                 Ok(true)
             } else {
-                Err(format!("writematrix: {context} must be logical (0 or 1)"))
+                Err(writematrix_error(format!(
+                    "writematrix: {context} must be logical (0 or 1)"
+                )))
             }
         }
         _ => {
@@ -405,30 +448,34 @@ fn parse_bool_like(value: &Value, context: &str) -> Result<bool, String> {
             match lowered.as_str() {
                 "on" | "true" | "yes" | "1" => Ok(true),
                 "off" | "false" | "no" | "0" => Ok(false),
-                _ => Err(format!(
+                _ => Err(writematrix_error(format!(
                     "writematrix: {context} must be logical (true/on or false/off)"
-                )),
+                ))),
             }
         }
     }
 }
 
-fn parse_decimal_separator(value: &Value) -> Result<char, String> {
+fn parse_decimal_separator(value: &Value) -> BuiltinResult<char> {
     let text = value_to_string_scalar(value, "DecimalSeparator")?;
     let mut chars = text.chars();
-    let ch = chars
-        .next()
-        .ok_or_else(|| "writematrix: DecimalSeparator must be a single character".to_string())?;
+    let ch = chars.next().ok_or_else(|| {
+        writematrix_error("writematrix: DecimalSeparator must be a single character")
+    })?;
     if chars.next().is_some() {
-        return Err("writematrix: DecimalSeparator must be a single character".to_string());
+        return Err(writematrix_error(
+            "writematrix: DecimalSeparator must be a single character",
+        ));
     }
     if ch == '\n' || ch == '\r' {
-        return Err("writematrix: DecimalSeparator cannot be a newline character".to_string());
+        return Err(writematrix_error(
+            "writematrix: DecimalSeparator cannot be a newline character",
+        ));
     }
     Ok(ch)
 }
 
-fn parse_line_ending(value: &Value) -> Result<LineEnding, String> {
+fn parse_line_ending(value: &Value) -> BuiltinResult<LineEnding> {
     let text = value_to_string_scalar(value, "LineEnding")?;
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
@@ -436,11 +483,13 @@ fn parse_line_ending(value: &Value) -> Result<LineEnding, String> {
         "unix" => Ok(LineEnding::Unix),
         "pc" | "windows" => Ok(LineEnding::Windows),
         "mac" => Ok(LineEnding::Mac),
-        _ => Err("writematrix: LineEnding must be 'auto', 'unix', 'pc', or 'mac'".to_string()),
+        _ => Err(writematrix_error(
+            "writematrix: LineEnding must be 'auto', 'unix', 'pc', or 'mac'",
+        )),
     }
 }
 
-fn parse_file_type(value: &Value) -> Result<FileType, String> {
+fn parse_file_type(value: &Value) -> BuiltinResult<FileType> {
     let text = value_to_string_scalar(value, "FileType")?;
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
@@ -451,22 +500,21 @@ fn parse_file_type(value: &Value) -> Result<FileType, String> {
                 Ok(FileType::DelimitedText)
             }
         }
-        "spreadsheet" => Err(
-            "writematrix: FileType 'spreadsheet' is not supported; export delimited text instead"
-                .to_string(),
-        ),
-        _ => Err("writematrix: unsupported FileType".to_string()),
+        "spreadsheet" => Err(writematrix_error(
+            "writematrix: FileType 'spreadsheet' is not supported; export delimited text instead",
+        )),
+        _ => Err(writematrix_error("writematrix: unsupported FileType")),
     }
 }
 
-fn value_to_string_scalar(value: &Value, context: &str) -> Result<String, String> {
+fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(format!(
+        _ => Err(writematrix_error(format!(
             "writematrix: expected {context} as a string scalar or character vector"
-        )),
+        ))),
     }
 }
 
@@ -480,7 +528,7 @@ enum MatrixData {
 }
 
 impl MatrixData {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::StringArray(sa) => {
                 ensure_matrix_shape(&sa.shape, "string")?;
@@ -500,20 +548,18 @@ impl MatrixData {
                 cols: 1,
                 data: vec![s],
             }),
-            Value::CharArray(_) => Err(
-                "writematrix: character arrays are not supported; convert to string arrays or use writecell"
-                    .to_string(),
-            ),
-            Value::Cell(_) => Err(
-                "writematrix: cell arrays are not supported; use writecell for heterogeneous content"
-                    .to_string(),
-            ),
-            Value::ComplexTensor(_) | Value::Complex(_, _) => Err(
-                "writematrix: complex values are not supported; write real and imaginary parts separately"
-                    .to_string(),
-            ),
+            Value::CharArray(_) => Err(writematrix_error(
+                "writematrix: character arrays are not supported; convert to string arrays or use writecell",
+            )),
+            Value::Cell(_) => Err(writematrix_error(
+                "writematrix: cell arrays are not supported; use writecell for heterogeneous content",
+            )),
+            Value::ComplexTensor(_) | Value::Complex(_, _) => Err(writematrix_error(
+                "writematrix: complex values are not supported; write real and imaginary parts separately",
+            )),
             other => {
-                let tensor = tensor::value_into_tensor_for("writematrix", other)?;
+                let tensor = tensor::value_into_tensor_for("writematrix", other)
+                    .map_err(writematrix_error)?;
                 ensure_matrix_shape(&tensor.shape, "numeric")?;
                 Ok(MatrixData::Numeric(tensor))
             }
@@ -559,16 +605,16 @@ impl MatrixData {
     }
 }
 
-fn ensure_matrix_shape(shape: &[usize], context: &str) -> Result<(), String> {
+fn ensure_matrix_shape(shape: &[usize], context: &str) -> BuiltinResult<()> {
     if shape.len() <= 2 {
         return Ok(());
     }
     if shape[2..].iter().all(|&dim| dim == 1) {
         Ok(())
     } else {
-        Err(format!(
+        Err(writematrix_error(format!(
             "writematrix: {context} input must be 2-D; reshape or use writecell for higher dimensions"
-        ))
+        )))
     }
 }
 
@@ -576,7 +622,7 @@ fn write_matrix(
     path: &Path,
     matrix: &MatrixData,
     options: &WriteMatrixOptions,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
 
@@ -592,9 +638,12 @@ fn write_matrix(
     }
 
     let mut file = open_options.open(path).map_err(|err| {
-        format!(
-            "writematrix: unable to open \"{}\" for writing ({err})",
-            path.display()
+        writematrix_error_with_source(
+            format!(
+                "writematrix: unable to open \"{}\" for writing ({err})",
+                path.display()
+            ),
+            err,
         )
     })?;
 
@@ -604,32 +653,52 @@ fn write_matrix(
 
     if rows == 0 {
         // Nothing else to do; file was truncated or created above.
-        file.flush()
-            .map_err(|err| format!("writematrix: failed to flush output ({err})"))?;
+        file.flush().map_err(|err| {
+            writematrix_error_with_source(
+                format!("writematrix: failed to flush output ({err})"),
+                err,
+            )
+        })?;
         return Ok(0);
     }
 
     for row in 0..rows {
         for col in 0..cols {
             if col > 0 {
-                file.write_all(delimiter.as_bytes())
-                    .map_err(|err| format!("writematrix: failed to write delimiter ({err})"))?;
+                file.write_all(delimiter.as_bytes()).map_err(|err| {
+                    writematrix_error_with_source(
+                        format!("writematrix: failed to write delimiter ({err})"),
+                        err,
+                    )
+                })?;
                 bytes_written += delimiter.len();
             }
             let cell = matrix.format_cell(row, col, options, &delimiter);
             if !cell.is_empty() {
-                file.write_all(cell.as_bytes())
-                    .map_err(|err| format!("writematrix: failed to write value ({err})"))?;
+                file.write_all(cell.as_bytes()).map_err(|err| {
+                    writematrix_error_with_source(
+                        format!("writematrix: failed to write value ({err})"),
+                        err,
+                    )
+                })?;
                 bytes_written += cell.len();
             }
         }
-        file.write_all(line_ending.as_bytes())
-            .map_err(|err| format!("writematrix: failed to write line ending ({err})"))?;
+        file.write_all(line_ending.as_bytes()).map_err(|err| {
+            writematrix_error_with_source(
+                format!("writematrix: failed to write line ending ({err})"),
+                err,
+            )
+        })?;
         bytes_written += line_ending.len();
     }
 
-    file.flush()
-        .map_err(|err| format!("writematrix: failed to flush output ({err})"))?;
+    file.flush().map_err(|err| {
+        writematrix_error_with_source(
+            format!("writematrix: failed to flush output ({err})"),
+            err,
+        )
+    })?;
 
     Ok(bytes_written)
 }
@@ -735,29 +804,29 @@ fn format_string(value: &str, quote: bool, _delimiter: &str) -> String {
     escaped
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
             normalize_path(&text)
         }
-        Value::CharArray(_) => {
-            Err("writematrix: expected a 1-by-N character vector for the filename".to_string())
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
-        Value::StringArray(_) => {
-            Err("writematrix: filename string array inputs must be scalar".to_string())
-        }
-        other => Err(format!(
-            "writematrix: expected filename as string scalar or character vector, got {other:?}"
+        Value::CharArray(_) => Err(writematrix_error(
+            "writematrix: expected a 1-by-N character vector for the filename",
         )),
+        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
+        Value::StringArray(_) => Err(writematrix_error(
+            "writematrix: filename string array inputs must be scalar",
+        )),
+        other => Err(writematrix_error(format!(
+            "writematrix: expected filename as string scalar or character vector, got {other:?}"
+        ))),
     }
 }
 
-fn normalize_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
-        return Err("writematrix: filename must not be empty".to_string());
+        return Err(writematrix_error("writematrix: filename must not be empty"));
     }
     Ok(Path::new(raw).to_path_buf())
 }

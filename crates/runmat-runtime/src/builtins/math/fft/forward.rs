@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -188,6 +189,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "FFT participates in fusion plans only as a boundary; no fused kernels are generated today.",
 };
 
+const BUILTIN_NAME: &str = "fft";
+
+fn fft_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
+fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(builtin).build().into()
+}
+
 #[runtime_builtin(
     name = "fft",
     category = "math/fft",
@@ -198,8 +209,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (length, dimension) = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (fft_gpu(handle, length, dimension)).map_err(Into::into),
-        other => (fft_host(other, length, dimension)).map_err(Into::into),
+        Value::GpuTensor(handle) => fft_gpu(handle, length, dimension),
+        other => fft_host(other, length, dimension),
     }
 }
 
@@ -207,8 +218,8 @@ fn fft_host(
     value: Value,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<Value, String> {
-    let tensor = value_to_complex_tensor(value, "fft")?;
+) -> BuiltinResult<Value> {
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(tensor, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -217,7 +228,7 @@ fn fft_gpu(
     handle: GpuTensorHandle,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let mut shape = if handle.shape.is_empty() {
         vec![1]
     } else {
@@ -225,7 +236,7 @@ fn fft_gpu(
     };
 
     let dim_one_based = match dimension {
-        Some(0) => return Err("fft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
         Some(dim) => dim,
         None => default_dimension(&shape),
     };
@@ -239,20 +250,20 @@ fn fft_gpu(
 
     if target_len == 0 {
         let tensor = gpu_helpers::gather_tensor(&handle)?;
-        let complex = tensor_to_complex_tensor(tensor, "fft")?;
+        let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
         return Ok(complex_tensor_into_value(transformed));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(out) = provider.fft_dim(&handle, length, dim_index) {
-            let complex = fft_download_gpu_result(provider, &out)?;
+            let complex = fft_download_gpu_result(provider, &out, BUILTIN_NAME)?;
             return Ok(complex_tensor_into_value(complex));
         }
     }
 
     let tensor = gpu_helpers::gather_tensor(&handle)?;
-    let complex = tensor_to_complex_tensor(tensor, "fft")?;
+    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -260,26 +271,34 @@ fn fft_gpu(
 pub(super) fn fft_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<ComplexTensor, String> {
-    let host = provider.download(handle).map_err(|e| format!("fft: {e}"))?;
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let host = provider
+        .download(handle)
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);
-    host_to_complex_tensor(host, "fft")
+    host_to_complex_tensor(host, builtin)
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>), String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
-            let len = parse_length(&args[0], "fft")?;
+            let len = parse_length(&args[0], BUILTIN_NAME)?;
             Ok((len, None))
         }
         2 => {
-            let len = parse_length(&args[0], "fft")?;
-            let dim = Some(tensor::parse_dimension(&args[1], "fft")?);
+            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let dim = Some(
+                tensor::parse_dimension(&args[1], BUILTIN_NAME)
+                    .map_err(|e| fft_error(e))?,
+            );
             Ok((len, dim))
         }
-        _ => Err("fft: expected fft(X), fft(X, N), or fft(X, N, DIM)".to_string()),
+        _ => Err(fft_error(
+            "fft: expected fft(X), fft(X, N), or fft(X, N, DIM)",
+        )),
     }
 }
 
@@ -287,7 +306,7 @@ pub(super) fn fft_complex_tensor(
     mut tensor: ComplexTensor,
     length: Option<usize>,
     dimension: Option<usize>,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     if tensor.shape.is_empty() {
         tensor.shape = vec![tensor.data.len()];
         tensor.rows = tensor.shape.first().copied().unwrap_or(1);
@@ -297,7 +316,7 @@ pub(super) fn fft_complex_tensor(
     let mut shape = tensor.shape.clone();
     let origin_rank = shape.len();
     let dim = match dimension {
-        Some(0) => return Err("fft: dimension must be >= 1".to_string()),
+        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
         Some(dim) => dim - 1,
         None => default_dimension(&shape) - 1,
     };
@@ -314,7 +333,7 @@ pub(super) fn fft_complex_tensor(
         out_shape[dim] = 0;
         trim_trailing_ones(&mut out_shape, origin_rank);
         return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| format!("fft: {e}"));
+            .map_err(|e| fft_error(format!("fft: {e}")));
     }
 
     let inner_stride = shape[..dim]
@@ -338,7 +357,7 @@ pub(super) fn fft_complex_tensor(
         out_shape[dim] = target_len;
         trim_trailing_ones(&mut out_shape, origin_rank);
         let data = vec![(0.0, 0.0); 0];
-        return ComplexTensor::new(data, out_shape).map_err(|e| format!("fft: {e}"));
+        return ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")));
     }
 
     let output_len = target_len.saturating_mul(num_slices);
@@ -384,7 +403,7 @@ pub(super) fn fft_complex_tensor(
     trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
 
     let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape).map_err(|e| format!("fft: {e}"))
+    ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")))
 }
 
 #[cfg(test)]
@@ -397,6 +416,15 @@ pub(crate) mod tests {
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
+    }
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => {
+                panic!("unexpected suspension in fft tests")
+            }
+        }
     }
 
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
@@ -630,21 +658,23 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_negative_length() {
-        let err = parse_arguments(&[Value::Num(-1.0)]).unwrap_err();
+        let err = error_message(parse_arguments(&[Value::Num(-1.0)]).unwrap_err());
         assert!(err.contains("length must be non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_fractional_length() {
-        let err = parse_arguments(&[Value::Num(1.5)]).unwrap_err();
+        let err = error_message(parse_arguments(&[Value::Num(1.5)]).unwrap_err());
         assert!(err.contains("length must be an integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_dimension_zero() {
-        let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
+        let err = error_message(
+            parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err(),
+        );
         assert!(err.contains("dimension must be >= 1"));
     }
 

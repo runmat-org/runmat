@@ -22,8 +22,11 @@ use crate::builtins::common::spec::{
 use super::bar::apply_bar_style;
 use super::common::{gather_tensor_from_gpu, numeric_vector, value_as_f64};
 use super::gpu_helpers::axis_bounds;
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
+
+use crate::{BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -33,6 +36,8 @@ use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+const BUILTIN_NAME: &str = "hist";
+
 pub const DOC_MD: &str = r#"---
 title: "hist"
 category: "plotting"
@@ -112,6 +117,10 @@ const HIST_BAR_WIDTH: f32 = 0.95;
 const HIST_DEFAULT_COLOR: Vec4 = Vec4::new(0.15, 0.5, 0.8, 0.95);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
 
+fn hist_err(message: impl Into<String>) -> RuntimeControlFlow {
+    plotting_error(BUILTIN_NAME, message)
+}
+
 struct HistComputation {
     counts: Vec<f64>,
     centers: Vec<f64>,
@@ -133,9 +142,9 @@ impl HistEvaluation {
         centers: Vec<f64>,
         chart: BarChart,
         normalization: HistNormalization,
-    ) -> Result<Self, String> {
+    ) -> BuiltinResult<Self> {
         if counts.len() != centers.len() {
-            return Err("hist: mismatch between counts and bin centers".to_string());
+            return Err(hist_err("hist: mismatch between counts and bin centers"));
         }
         let cols = counts.len();
         let shape = vec![1, cols];
@@ -158,7 +167,7 @@ impl HistEvaluation {
         Value::Tensor(self.centers.clone())
     }
 
-    pub fn render_plot(&self) -> Result<(), String> {
+    pub fn render_plot(&self) -> BuiltinResult<()> {
         let y_label = match self.normalization {
             HistNormalization::Count => "Count",
             HistNormalization::Probability => "Probability",
@@ -171,19 +180,19 @@ impl HistEvaluation {
             y_label,
             ..Default::default()
         };
-        render_active_plot(opts, move |figure, axes| {
+        render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
             let chart = chart_opt
                 .take()
                 .expect("hist chart consumed exactly once at render time");
             figure.add_bar_chart_on_axes(chart, axes);
             Ok(())
-        })
-        .map(|_| ())
+        })?;
+        Ok(())
     }
 }
 
 impl HistComputation {
-    fn into_evaluation(self, normalization: HistNormalization) -> Result<HistEvaluation, String> {
+    fn into_evaluation(self, normalization: HistNormalization) -> BuiltinResult<HistEvaluation> {
         HistEvaluation::new(self.counts, self.centers, self.chart, normalization)
     }
 }
@@ -245,24 +254,24 @@ enum HistWeightsInput {
 }
 
 impl HistWeightsInput {
-    fn from_value(value: Value, expected_len: usize) -> Result<Self, String> {
+    fn from_value(value: Value, expected_len: usize) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
                 let len: usize = handle.shape.iter().product();
                 if len != expected_len {
-                    return Err(format!(
+                    return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {len})"
-                    ));
+                    )));
                 }
                 Ok(HistWeightsInput::Gpu(handle))
             }
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("hist: Weights {e}"))?;
+                let tensor = Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
                 if tensor.data.len() != expected_len {
-                    return Err(format!(
+                    return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {})",
                         tensor.data.len()
-                    ));
+                    )));
                 }
                 Ok(HistWeightsInput::Host(tensor))
             }
@@ -273,7 +282,7 @@ impl HistWeightsInput {
         &self,
         context: &str,
         sample_len: usize,
-    ) -> Result<(Option<Vec<f64>>, f64), String> {
+    ) -> BuiltinResult<(Option<Vec<f64>>, f64)> {
         match self {
             HistWeightsInput::None => Ok((None, sample_len as f64)),
             HistWeightsInput::Host(tensor) => {
@@ -301,7 +310,7 @@ impl HistWeightsInput {
         }
     }
 
-    fn to_gpu_weights(&self, sample_len: usize) -> Result<HistogramGpuWeights, String> {
+    fn to_gpu_weights(&self, sample_len: usize) -> BuiltinResult<HistogramGpuWeights> {
         match self {
             HistWeightsInput::None => Ok(HistogramGpuWeights::Uniform {
                 total_weight: sample_len as f32,
@@ -325,7 +334,7 @@ impl HistWeightsInput {
             }
             HistWeightsInput::Gpu(handle) => {
                 let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
-                    .ok_or_else(|| "hist: unable to export GPU weights".to_string())?;
+                    .ok_or_else(|| hist_err("hist: unable to export GPU weights"))?;
                 match exported.precision {
                     ProviderPrecision::F32 => Ok(HistogramGpuWeights::GpuF32 {
                         buffer: exported.buffer.clone(),
@@ -355,7 +364,7 @@ pub fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
 }
 
 /// Evaluate the histogram inputs once so renderers and MATLAB outputs share the same data.
-pub fn evaluate(data: Value, rest: &[Value]) -> Result<HistEvaluation, String> {
+pub fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistEvaluation> {
     let mut input = Some(HistInput::from_value(data)?);
     let sample_len = input.as_ref().map(|value| value.len()).unwrap_or(0);
     let (bin_options, normalization, style_args, weights_value) =
@@ -421,7 +430,7 @@ pub fn evaluate(data: Value, rest: &[Value]) -> Result<HistEvaluation, String> {
 fn parse_hist_arguments(
     sample_len: usize,
     args: &[Value],
-) -> Result<(HistBinOptions, HistNormalization, Vec<Value>, Option<Value>), String> {
+) -> BuiltinResult<(HistBinOptions, HistNormalization, Vec<Value>, Option<Value>)> {
     let mut idx = 0usize;
     let mut bin_options = HistBinOptions::new(HistBinSpec::Auto);
     let mut bin_set = false;
@@ -455,7 +464,7 @@ fn parse_hist_arguments(
             break;
         };
         if idx + 1 >= args.len() {
-            return Err(format!("hist: missing value for '{key}' option"));
+            return Err(hist_err(format!("hist: missing value for '{key}' option")));
         }
         let value = args[idx + 1].clone();
         let lower = key.trim().to_ascii_lowercase();
@@ -466,9 +475,7 @@ fn parse_hist_arguments(
             }
             "binedges" => {
                 if bin_set {
-                    return Err(
-                        "hist: specify either bins argument or 'BinEdges', not both".to_string()
-                    );
+                    return Err(hist_err("hist: specify either bins argument or 'BinEdges', not both"));
                 }
                 let edges = parse_bin_edges_value(value)?;
                 ensure_spec_compatible(
@@ -481,7 +488,7 @@ fn parse_hist_arguments(
             }
             "numbins" => {
                 if bin_set {
-                    return Err("hist: NumBins cannot be combined with explicit bins".to_string());
+                    return Err(hist_err("hist: NumBins cannot be combined with explicit bins"));
                 }
                 let count = parse_num_bins_value(&value)?;
                 ensure_spec_compatible(&HistBinSpec::Count(count), &bin_options, "NumBins")?;
@@ -490,11 +497,11 @@ fn parse_hist_arguments(
             }
             "binwidth" => {
                 if bin_set {
-                    return Err("hist: BinWidth cannot be combined with explicit bins".to_string());
+                    return Err(hist_err("hist: BinWidth cannot be combined with explicit bins"));
                 }
                 ensure_no_explicit_bins(&bin_options, "BinWidth")?;
                 if bin_options.bin_width.is_some() {
-                    return Err("hist: BinWidth specified more than once".to_string());
+                    return Err(hist_err("hist: BinWidth specified more than once"));
                 }
                 let width = parse_positive_scalar(
                     &value,
@@ -505,25 +512,25 @@ fn parse_hist_arguments(
             "binlimits" => {
                 ensure_no_explicit_bins(&bin_options, "BinLimits")?;
                 if bin_options.bin_limits.is_some() {
-                    return Err("hist: BinLimits specified more than once".to_string());
+                    return Err(hist_err("hist: BinLimits specified more than once"));
                 }
                 let limits = parse_bin_limits_value(value)?;
                 bin_options.bin_limits = Some(limits);
             }
             "binmethod" => {
                 if bin_options.bin_width.is_some() {
-                    return Err("hist: BinMethod cannot be combined with BinWidth".to_string());
+                    return Err(hist_err("hist: BinMethod cannot be combined with BinWidth"));
                 }
                 ensure_no_explicit_bins(&bin_options, "BinMethod")?;
                 if bin_options.bin_method.is_some() {
-                    return Err("hist: BinMethod specified more than once".to_string());
+                    return Err(hist_err("hist: BinMethod specified more than once"));
                 }
                 let method = parse_hist_bin_method(&value)?;
                 bin_options.bin_method = Some(method);
             }
             "weights" => {
                 if weights_value.is_some() {
-                    return Err("hist: Weights specified more than once".to_string());
+                    return Err(hist_err("hist: Weights specified more than once"));
                 }
                 weights_value = Some(value);
             }
@@ -538,21 +545,22 @@ fn parse_hist_arguments(
     Ok((bin_options, normalization, style_args, weights_value))
 }
 
-fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> Result<HistBinSpec, String> {
+fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> BuiltinResult<HistBinSpec> {
     let spec = match arg {
         None => HistBinSpec::Auto,
         Some(Value::Tensor(tensor)) => parse_center_vector(tensor)?,
         Some(Value::GpuTensor(_)) => {
-            return Err("hist: bin definitions must reside on the host".to_string())
+            return Err(hist_err("hist: bin definitions must reside on the host"))
         }
         Some(other) => {
             if let Some(numeric) = value_as_f64(&other) {
                 parse_bin_count_value(numeric)?
             } else {
-                return Err(
-                    "hist: bin argument must be a scalar count or a vector of centers".to_string(),
-                );
+                return Err(hist_err(
+                    "hist: bin argument must be a scalar count or a vector of centers",
+                ));
             }
+
         }
     };
     Ok(match spec {
@@ -597,9 +605,9 @@ struct RealizedBins {
 }
 
 impl RealizedBins {
-    fn from_edges(edges: Vec<f64>) -> Result<Self, String> {
+    fn from_edges(edges: Vec<f64>) -> BuiltinResult<Self> {
         if edges.len() < 2 {
-            return Err("hist: bin definitions must contain at least two edges".to_string());
+            return Err(hist_err("hist: bin definitions must contain at least two edges"));
         }
         let widths = widths_from_edges(&edges);
         let labels = histogram_labels_from_edges(&edges);
@@ -628,7 +636,7 @@ fn realize_bins(
     sample_len: usize,
     stats: Option<&HistDataStats>,
     fallback_value: Option<f64>,
-) -> Result<RealizedBins, String> {
+) -> BuiltinResult<RealizedBins> {
     match &options.spec {
         HistBinSpec::Centers(centers) => {
             let edges = edges_from_centers(centers)?;
@@ -650,7 +658,7 @@ fn integer_edges(
     options: &HistBinOptions,
     stats: Option<&HistDataStats>,
     fallback_value: Option<f64>,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     let (lower, upper) = determine_limits(options, stats, fallback_value)?;
     let start = lower.floor();
     let mut end = upper.ceil();
@@ -677,7 +685,7 @@ fn uniform_edges_from_options(
     sample_len: usize,
     stats: Option<&HistDataStats>,
     fallback_value: Option<f64>,
-) -> Result<Vec<f64>, String> {
+) -> BuiltinResult<Vec<f64>> {
     let (mut lower, mut upper) = determine_limits(options, stats, fallback_value)?;
     if !lower.is_finite() || !upper.is_finite() {
         lower = -0.5;
@@ -725,10 +733,10 @@ fn determine_limits(
     options: &HistBinOptions,
     stats: Option<&HistDataStats>,
     fallback_value: Option<f64>,
-) -> Result<(f64, f64), String> {
+) -> BuiltinResult<(f64, f64)> {
     if let Some((lo, hi)) = options.bin_limits {
         if hi <= lo {
-            return Err("hist: BinLimits must be increasing".to_string());
+            return Err(hist_err("hist: BinLimits must be increasing"));
         }
         return Ok((lo, hi));
     }
@@ -746,7 +754,7 @@ fn determine_limits(
     Ok((center - span * 0.5, center + span * 0.5))
 }
 
-fn determine_bin_count(options: &HistBinOptions, sample_len: usize) -> Result<usize, String> {
+fn determine_bin_count(options: &HistBinOptions, sample_len: usize) -> BuiltinResult<usize> {
     if let HistBinSpec::Count(count) = options.spec {
         return Ok(count.max(1));
     }
@@ -755,7 +763,7 @@ fn determine_bin_count(options: &HistBinOptions, sample_len: usize) -> Result<us
             HistBinMethod::Sqrt => sqrt_bin_count(sample_len),
             HistBinMethod::Sturges => sturges_bin_count(sample_len),
             HistBinMethod::Integers => {
-                return Err("hist: internal integer bin method misuse".to_string())
+                return Err(hist_err("hist: internal integer bin method misuse"))
             }
         });
     }
@@ -779,91 +787,92 @@ fn ensure_spec_compatible(
     new_spec: &HistBinSpec,
     options: &HistBinOptions,
     source: &str,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if matches!(new_spec, HistBinSpec::Centers(_) | HistBinSpec::Edges(_))
         && (options.bin_width.is_some()
             || options.bin_method.is_some()
             || options.bin_limits.is_some())
     {
-        return Err(format!(
+        return Err(hist_err(format!(
             "hist: {source} cannot be combined with BinWidth, BinLimits, or BinMethod"
-        ));
+        )));
     }
     Ok(())
 }
 
-fn ensure_no_explicit_bins(options: &HistBinOptions, source: &str) -> Result<(), String> {
+fn ensure_no_explicit_bins(options: &HistBinOptions, source: &str) -> BuiltinResult<()> {
     if matches!(
         options.spec,
         HistBinSpec::Centers(_) | HistBinSpec::Edges(_)
     ) {
-        return Err(format!(
+        return Err(hist_err(format!(
             "hist: {source} cannot be combined with explicit bin centers or edges"
-        ));
+        )));
     }
     Ok(())
 }
 
-fn parse_num_bins_value(value: &Value) -> Result<usize, String> {
+fn parse_num_bins_value(value: &Value) -> BuiltinResult<usize> {
     let Some(scalar) = value_as_f64(value) else {
-        return Err("hist: NumBins must be a numeric scalar".to_string());
+        return Err(hist_err("hist: NumBins must be a numeric scalar"));
     };
     if !scalar.is_finite() || scalar <= 0.0 {
-        return Err("hist: NumBins must be a positive finite scalar".to_string());
+        return Err(hist_err("hist: NumBins must be a positive finite scalar"));
     }
     let rounded = scalar.round();
     if (scalar - rounded).abs() > 1e-9 {
-        return Err("hist: NumBins must be an integer".to_string());
+        return Err(hist_err("hist: NumBins must be an integer"));
     }
     Ok(rounded as usize)
 }
 
-fn parse_positive_scalar(value: &Value, err: &str) -> Result<f64, String> {
+fn parse_positive_scalar(value: &Value, err: &str) -> BuiltinResult<f64> {
     let Some(scalar) = value_as_f64(value) else {
-        return Err(err.to_string());
+        return Err(hist_err(err));
     };
     if !scalar.is_finite() || scalar <= 0.0 {
-        return Err(err.to_string());
+        return Err(hist_err(err));
     }
+
     Ok(scalar)
 }
 
-fn parse_bin_limits_value(value: Value) -> Result<(f64, f64), String> {
+fn parse_bin_limits_value(value: Value) -> BuiltinResult<(f64, f64)> {
     let tensor = Tensor::try_from(&value)
-        .map_err(|_| "hist: BinLimits must be provided as a numeric vector".to_string())?;
+        .map_err(|_| hist_err("hist: BinLimits must be provided as a numeric vector"))?;
     let values = numeric_vector(tensor);
     if values.len() != 2 {
-        return Err("hist: BinLimits must contain exactly two elements".to_string());
+        return Err(hist_err("hist: BinLimits must contain exactly two elements"));
     }
     let lo = values[0];
     let hi = values[1];
     if !lo.is_finite() || !hi.is_finite() {
-        return Err("hist: BinLimits must be finite".to_string());
+        return Err(hist_err("hist: BinLimits must be finite"));
     }
     if hi <= lo {
-        return Err("hist: BinLimits must be increasing".to_string());
+        return Err(hist_err("hist: BinLimits must be increasing"));
     }
     Ok((lo, hi))
 }
 
-fn parse_hist_bin_method(value: &Value) -> Result<HistBinMethod, String> {
+fn parse_hist_bin_method(value: &Value) -> BuiltinResult<HistBinMethod> {
     let Some(text) = value_as_string(value) else {
-        return Err("hist: BinMethod must be a string".to_string());
+        return Err(hist_err("hist: BinMethod must be a string"));
     };
     match text.trim().to_ascii_lowercase().as_str() {
         "sqrt" => Ok(HistBinMethod::Sqrt),
         "sturges" => Ok(HistBinMethod::Sturges),
         "integers" => Ok(HistBinMethod::Integers),
-        other => Err(format!(
+        other => Err(hist_err(format!(
             "hist: BinMethod '{other}' is not supported yet (supported: 'sqrt', 'sturges', 'integers')"
-        )),
+        ))),
     }
 }
 
-fn parse_center_vector(tensor: Tensor) -> Result<HistBinSpec, String> {
+fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
     let values = numeric_vector(tensor);
     if values.is_empty() {
-        return Err("hist: bin center array cannot be empty".to_string());
+        return Err(hist_err("hist: bin center array cannot be empty"));
     }
     if values.len() == 1 {
         return parse_bin_count_value(values[0]);
@@ -873,11 +882,11 @@ fn parse_center_vector(tensor: Tensor) -> Result<HistBinSpec, String> {
     Ok(HistBinSpec::Centers(values))
 }
 
-fn parse_bin_count_value(value: f64) -> Result<HistBinSpec, String> {
+fn parse_bin_count_value(value: f64) -> BuiltinResult<HistBinSpec> {
     if value.is_finite() && value > 0.0 {
         Ok(HistBinSpec::Count(value.round() as usize))
     } else {
-        Err("hist: bin count must be positive".to_string())
+        Err(hist_err("hist: bin count must be positive"))
     }
 }
 
@@ -888,7 +897,7 @@ fn is_bin_candidate(value: &Value) -> bool {
     )
 }
 
-fn try_parse_norm_literal(value: &Value) -> Option<Result<HistNormalization, String>> {
+fn try_parse_norm_literal(value: &Value) -> Option<BuiltinResult<HistNormalization>> {
     match value {
         Value::String(_) | Value::CharArray(_) => {
             let cloned = value.clone();
@@ -901,34 +910,34 @@ fn try_parse_norm_literal(value: &Value) -> Option<Result<HistNormalization, Str
     }
 }
 
-fn parse_bin_edges_value(value: Value) -> Result<Vec<f64>, String> {
+fn parse_bin_edges_value(value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             let edges = numeric_vector(tensor);
             if edges.len() < 2 {
-                return Err("hist: 'BinEdges' must contain at least two elements".to_string());
+                return Err(hist_err("hist: 'BinEdges' must contain at least two elements"));
             }
             validate_monotonic(&edges)?;
             Ok(edges)
         }
-        Value::GpuTensor(_) => Err("hist: 'BinEdges' must be provided on the host".to_string()),
-        _ => Err("hist: 'BinEdges' expects a numeric vector".to_string()),
+        Value::GpuTensor(_) => Err(hist_err("hist: 'BinEdges' must be provided on the host")),
+        _ => Err(hist_err("hist: 'BinEdges' expects a numeric vector")),
     }
 }
 
-fn ensure_uniform_spacing(values: &[f64]) -> Result<(), String> {
+fn ensure_uniform_spacing(values: &[f64]) -> BuiltinResult<()> {
     if values.len() <= 2 {
         return Ok(());
     }
     let mut diffs = values.windows(2).map(|pair| pair[1] - pair[0]);
     let first = diffs.next().unwrap();
     if first <= 0.0 || !first.is_finite() {
-        return Err("hist: bin centers must be strictly increasing".to_string());
+        return Err(hist_err("hist: bin centers must be strictly increasing"));
     }
     let tol = first.abs().max(1.0) * 1e-6;
     for diff in diffs {
         if (diff - first).abs() > tol {
-            return Err("hist: bin centers must be evenly spaced".to_string());
+            return Err(hist_err("hist: bin centers must be evenly spaced"));
         }
     }
     Ok(())
@@ -955,7 +964,7 @@ fn uniform_edge_width(edges: &[f64]) -> Option<f64> {
     Some(first)
 }
 
-fn parse_hist_normalization(arg: Option<Value>) -> Result<HistNormalization, String> {
+fn parse_hist_normalization(arg: Option<Value>) -> BuiltinResult<HistNormalization> {
     match arg {
         None => Ok(HistNormalization::Count),
         Some(Value::String(s)) => parse_norm_string(&s),
@@ -967,20 +976,20 @@ fn parse_hist_normalization(arg: Option<Value>) -> Result<HistNormalization, Str
             if let Some(text) = value_as_string(&value) {
                 parse_norm_string(&text)
             } else {
-                Err("hist: normalization must be 'count', 'probability', or 'pdf'".to_string())
+                Err(hist_err("hist: normalization must be 'count', 'probability', or 'pdf'"))
             }
         }
     }
 }
 
-fn parse_norm_string(text: &str) -> Result<HistNormalization, String> {
+fn parse_norm_string(text: &str) -> BuiltinResult<HistNormalization> {
     match text.trim().to_ascii_lowercase().as_str() {
         "count" | "counts" => Ok(HistNormalization::Count),
         "probability" | "prob" => Ok(HistNormalization::Probability),
         "pdf" => Ok(HistNormalization::Pdf),
-        other => Err(format!(
+        other => Err(hist_err(format!(
             "hist: unsupported normalization '{other}' (expected 'count', 'probability', or 'pdf')"
-        )),
+        ))),
     }
 }
 
@@ -1002,7 +1011,7 @@ fn build_histogram_chart(
     normalization: HistNormalization,
     weights: Option<&[f64]>,
     total_weight: f64,
-) -> Result<HistComputation, String> {
+) -> BuiltinResult<HistComputation> {
     let sample_len = data.len();
     if sample_len == 0 {
         return build_empty_histogram_chart(bin_options, normalization, 0, total_weight);
@@ -1029,15 +1038,15 @@ fn build_empty_histogram_chart(
     _normalization: HistNormalization,
     sample_len: usize,
     _total_weight: f64,
-) -> Result<HistComputation, String> {
+) -> BuiltinResult<HistComputation> {
     let bins = realize_bins(bin_options, sample_len, None, None)?;
     let counts = vec![0.0; bins.bin_count()];
     build_hist_cpu_result(&bins, counts)
 }
 
-fn build_hist_cpu_result(bins: &RealizedBins, counts: Vec<f64>) -> Result<HistComputation, String> {
+fn build_hist_cpu_result(bins: &RealizedBins, counts: Vec<f64>) -> BuiltinResult<HistComputation> {
     let mut bar =
-        BarChart::new(bins.labels.clone(), counts.clone()).map_err(|err| format!("hist: {err}"))?;
+        BarChart::new(bins.labels.clone(), counts.clone()).map_err(|err| hist_err(format!("hist: {err}")))?;
     bar.label = Some(HIST_DEFAULT_LABEL.to_string());
     Ok(HistComputation {
         counts,
@@ -1046,11 +1055,11 @@ fn build_hist_cpu_result(bins: &RealizedBins, counts: Vec<f64>) -> Result<HistCo
     })
 }
 
-fn validate_monotonic(values: &[f64]) -> Result<(), String> {
+fn validate_monotonic(values: &[f64]) -> BuiltinResult<()> {
     if values.windows(2).all(|w| w[0] < w[1]) {
         Ok(())
     } else {
-        Err("hist: values must be strictly increasing".to_string())
+        Err(hist_err("hist: values must be strictly increasing"))
     }
 }
 
@@ -1067,9 +1076,9 @@ fn find_bin_index(edges: &[f64], value: f64) -> usize {
     last
 }
 
-fn edges_from_centers(centers: &[f64]) -> Result<Vec<f64>, String> {
+fn edges_from_centers(centers: &[f64]) -> BuiltinResult<Vec<f64>> {
     if centers.is_empty() {
-        return Err("hist: bin centers must contain at least one element".to_string());
+        return Err(hist_err("hist: bin centers must contain at least one element"));
     }
     if centers.len() == 1 {
         let half = 0.5;
@@ -1137,11 +1146,11 @@ fn build_histogram_gpu_chart(
     normalization: HistNormalization,
     style: &BarStyle,
     weights: &HistWeightsInput,
-) -> Result<HistComputation, String> {
+) -> BuiltinResult<HistComputation> {
     let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "hist: plotting GPU context unavailable".to_string())?;
+        .ok_or_else(|| hist_err("hist: plotting GPU context unavailable"))?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
-        .ok_or_else(|| "hist: unable to export GPU data".to_string())?;
+        .ok_or_else(|| hist_err("hist: unable to export GPU data"))?;
     if exported.len == 0 {
         let total_hint = weights
             .total_weight_hint(sample_len)
@@ -1150,7 +1159,7 @@ fn build_histogram_gpu_chart(
     }
 
     let sample_count_u32 = u32::try_from(exported.len)
-        .map_err(|_| "hist: sample count exceeds supported range".to_string())?;
+        .map_err(|_| hist_err("hist: sample count exceeds supported range"))?;
     let gpu_weights = weights.to_gpu_weights(sample_len)?;
     let (min_value_f32, max_value_f32) = axis_bounds(values, "hist")?;
     let stats = HistDataStats {
@@ -1164,11 +1173,11 @@ fn build_histogram_gpu_chart(
         Some(min_value_f32 as f64),
     )?;
     let Some(uniform_width_f64) = bins.uniform_width else {
-        return Err("hist: GPU rendering currently requires uniform bin edges".to_string());
+        return Err(hist_err("hist: GPU rendering currently requires uniform bin edges"));
     };
     let uniform_width = uniform_width_f64 as f32;
     let bin_count_u32 = u32::try_from(bins.bin_count())
-        .map_err(|_| "hist: bin count exceeds supported range for GPU execution".to_string())?;
+        .map_err(|_| hist_err("hist: bin count exceeds supported range for GPU execution"))?;
 
     let histogram_inputs = HistogramGpuInputs {
         samples: exported.buffer.clone(),
@@ -1196,7 +1205,7 @@ fn build_histogram_gpu_chart(
         &histogram_params,
         normalization_mode,
     )
-    .map_err(|e| format!("hist: failed to build GPU histogram counts: {e}"))?;
+    .map_err(|e| hist_err(format!("hist: failed to build GPU histogram counts: {e}")))?;
 
     let HistogramGpuOutput {
         values_buffer,
@@ -1225,7 +1234,7 @@ fn build_histogram_gpu_chart(
         &bar_inputs,
         &bar_params,
     )
-    .map_err(|e| format!("hist: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| hist_err(format!("hist: failed to build GPU vertices: {e}")))?;
 
     let bin_count = bins.bin_count();
     let normalization_scale = match normalization {
@@ -1267,7 +1276,7 @@ fn build_histogram_gpu_chart(
         bar_inputs.values_buffer.as_ref(),
         bin_count,
     )
-    .map_err(|e| format!("hist: failed to read GPU histogram counts: {e}"))?;
+    .map_err(|e| hist_err(format!("hist: failed to read GPU histogram counts: {e}")))?;
     let counts: Vec<f64> = counts_f32.iter().map(|v| *v as f64).collect();
 
     Ok(HistComputation {
@@ -1300,11 +1309,11 @@ enum HistInput {
 }
 
 impl HistInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("hist: {e}"))?;
+                let tensor = Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
@@ -1324,7 +1333,7 @@ impl HistInput {
         }
     }
 
-    fn into_tensor(self, context: &str) -> Result<Tensor, String> {
+    fn into_tensor(self, context: &str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, context),
@@ -1351,12 +1360,17 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(msg: &str) {
-        let lower = msg.to_lowercase();
-        assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-            "unexpected error: {msg}"
-        );
+    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                let lower = err.to_string().to_lowercase();
+                assert!(
+                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+                    "unexpected error: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("hist suspended unexpectedly"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1366,8 +1380,8 @@ pub(crate) mod tests {
         let data = Value::Tensor(tensor_from(&[1.0, 2.0, 3.0, 4.0]));
         let bins = vec![Value::from(2.0)];
         let result = hist_builtin(data, bins);
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -1378,8 +1392,8 @@ pub(crate) mod tests {
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0, 1.5]));
         let centers = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0]));
         let result = hist_builtin(data, vec![centers]);
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -1392,8 +1406,8 @@ pub(crate) mod tests {
             data,
             vec![Value::from(3.0), Value::String("probability".into())],
         );
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -1403,8 +1417,8 @@ pub(crate) mod tests {
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("pdf".into())]);
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -1420,8 +1434,8 @@ pub(crate) mod tests {
                 Value::String("probability".into()),
             ],
         );
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 
@@ -1432,8 +1446,8 @@ pub(crate) mod tests {
         let data = Value::Tensor(tensor_from(&[0.1, 0.4, 0.7]));
         let edges = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = hist_builtin(data, vec![Value::String("BinEdges".into()), edges]);
-        if let Err(msg) = result {
-            assert_plotting_unavailable(&msg);
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
         }
     }
 

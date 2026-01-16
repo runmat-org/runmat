@@ -3,8 +3,8 @@ use runmat_plot::plots::{Figure, LineStyle};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use std::fmt;
 use std::ops::{Deref, DerefMut};
+use thiserror::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
 #[cfg(test)]
@@ -13,6 +13,10 @@ use std::sync::{Arc, Mutex};
 
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 use super::engine::render_figure;
+use super::{plotting_error, plotting_error_with_source};
+
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::{BuiltinResult, RuntimeControlFlow};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
@@ -226,45 +230,54 @@ impl<'a> DerefMut for PlotRegistryGuard<'a> {
 const AXES_INDEX_BITS: u32 = 20;
 const AXES_INDEX_MASK: u64 = (1 << AXES_INDEX_BITS) - 1;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Error)]
 pub enum FigureError {
+    #[error("figure handle {0} does not exist")]
     InvalidHandle(u32),
-    InvalidSubplotGrid {
-        rows: usize,
-        cols: usize,
-    },
+    #[error("subplot grid dimensions must be positive (rows={rows}, cols={cols})")]
+    InvalidSubplotGrid { rows: usize, cols: usize },
+    #[error("subplot index {index} is out of range for a {rows}x{cols} grid")]
     InvalidSubplotIndex {
         rows: usize,
         cols: usize,
         index: usize,
     },
+    #[error("invalid axes handle")]
     InvalidAxesHandle,
-    RenderFailure(String),
+    #[error("failed to render figure snapshot: {source}")]
+    RenderFailure {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
-impl fmt::Display for FigureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FigureError::InvalidHandle(handle) => {
-                write!(f, "figure handle {handle} does not exist")
-            }
-            FigureError::InvalidSubplotGrid { rows, cols } => write!(
-                f,
-                "subplot grid dimensions must be positive (rows={rows}, cols={cols})"
-            ),
-            FigureError::InvalidSubplotIndex { rows, cols, index } => write!(
-                f,
-                "subplot index {index} is out of range for a {rows}x{cols} grid"
-            ),
-            FigureError::InvalidAxesHandle => write!(f, "invalid axes handle"),
-            FigureError::RenderFailure(message) => {
-                write!(f, "failed to render figure snapshot: {message}")
-            }
-        }
-    }
+fn map_figure_error(builtin: &'static str, err: FigureError) -> RuntimeControlFlow {
+    let message = format!("{builtin}: {err}");
+    plotting_error_with_source(builtin, message, err)
 }
 
-impl std::error::Error for FigureError {}
+pub(crate) fn clear_figure_with_builtin(
+    builtin: &'static str,
+    target: Option<FigureHandle>,
+) -> BuiltinResult<FigureHandle> {
+    clear_figure(target).map_err(|err| map_figure_error(builtin, err))
+}
+
+pub(crate) fn close_figure_with_builtin(
+    builtin: &'static str,
+    target: Option<FigureHandle>,
+) -> BuiltinResult<FigureHandle> {
+    close_figure(target).map_err(|err| map_figure_error(builtin, err))
+}
+
+pub(crate) fn configure_subplot_with_builtin(
+    builtin: &'static str,
+    rows: usize,
+    cols: usize,
+    index: usize,
+) -> BuiltinResult<()> {
+    configure_subplot(rows, cols, index).map_err(|err| map_figure_error(builtin, err))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FigureEventKind {
@@ -385,7 +398,7 @@ fn observer_registry() -> &'static FigureObserverRegistry {
     FIGURE_OBSERVERS.get_or_init(FigureObserverRegistry::new)
 }
 
-pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), String> {
+pub fn install_figure_observer(observer: Arc<FigureObserver>) -> BuiltinResult<()> {
     observer_registry().install(observer);
     Ok(())
 }
@@ -596,9 +609,13 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     Ok(())
 }
 
-pub fn render_active_plot<F>(opts: PlotRenderOptions<'_>, mut apply: F) -> Result<String, String>
+pub fn render_active_plot<F>(
+    builtin: &'static str,
+    opts: PlotRenderOptions<'_>,
+    mut apply: F,
+) -> BuiltinResult<String>
 where
-    F: FnMut(&mut Figure, usize) -> Result<(), String>,
+    F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
 {
     let rendering_disabled = interactive_rendering_disabled();
     let (handle, figure_clone) = {
@@ -620,17 +637,19 @@ where
         state.figure.set_axis_equal(opts.axis_equal);
 
         let _axes_context = AxesContextGuard::install(state, axes_index);
-        apply(&mut state.figure, axes_index)?;
+        apply(&mut state.figure, axes_index)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
 
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
     if rendering_disabled {
-        return Err(ERR_PLOTTING_UNAVAILABLE.to_string());
+        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
-    let rendered = render_figure(handle, figure_clone)?;
+    let rendered = render_figure(handle, figure_clone)
+        .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
 }
 

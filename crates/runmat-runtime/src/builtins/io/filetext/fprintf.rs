@@ -15,12 +15,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
 use crate::console::{record_console_output, ConsoleStream};
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
 const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
+const BUILTIN_NAME: &str = "fprintf";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -234,6 +235,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
+fn fprintf_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
+fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
+    result.map_err(fprintf_error)
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "fprintf",
@@ -259,9 +286,9 @@ impl FprintfEval {
 }
 
 /// Evaluate the `fprintf` builtin without going through the dispatcher.
-pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
+pub fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     if args.is_empty() {
-        return Err("fprintf: not enough input arguments".to_string());
+        return Err(fprintf_error("fprintf: not enough input arguments"));
     }
 
     // Gather all arguments to host first
@@ -278,13 +305,13 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         if match_stream_label(value).is_some() {
             continue;
         }
-        if let Some(Value::String(s)) = coerce_to_format_string(value)? {
+        if let Some(Value::String(s)) = map_string_result(coerce_to_format_string(value))? {
             fmt_idx = Some(i);
             format_string_val = Some(s);
             break;
         }
     }
-    let fmt_idx = fmt_idx.ok_or_else(|| MISSING_FORMAT_MESSAGE.to_string())?;
+    let fmt_idx = fmt_idx.ok_or_else(|| fprintf_error(MISSING_FORMAT_MESSAGE))?;
     let raw_format = format_string_val.unwrap();
 
     // Determine output target by scanning only arguments BEFORE the format
@@ -310,7 +337,7 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
             if matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
                 if let Ok(fid) = parse_fid(value) {
                     target_idx = Some(i);
-                    target = target_from_fid(fid)?;
+                    target = map_string_result(target_from_fid(fid))?;
                     break;
                 }
             }
@@ -331,11 +358,11 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         data_args.push(v);
     }
 
-    let format_string = decode_escape_sequences("fprintf", &raw_format)?;
-    let flattened_args = flatten_arguments(&data_args, "fprintf")?;
-    let rendered = format_with_repetition(&format_string, &flattened_args)?;
-    let bytes = encode_output(&rendered, target.encoding_label())?;
-    target.write(&bytes)?;
+    let format_string = decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
+    let flattened_args = flatten_arguments(&data_args, "fprintf").map_err(map_control_flow)?;
+    let rendered = map_string_result(format_with_repetition(&format_string, &flattened_args))?;
+    let bytes = map_string_result(encode_output(&rendered, target.encoding_label()))?;
+    map_string_result(target.write(&bytes))?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })
@@ -480,8 +507,8 @@ fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
     record_console_output(stream, text);
 }
 
-fn gather_value(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|e| format!("fprintf: {e}"))
+fn gather_value(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed(value).map_err(map_control_flow)
 }
 
 #[allow(dead_code)]
@@ -710,6 +737,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, registry};
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
     use runmat_filesystem::{self as fs, File};
@@ -717,6 +745,13 @@ pub(crate) mod tests {
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
+
+    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -765,7 +800,7 @@ pub(crate) mod tests {
             Value::String("%s".to_string()),
             Value::String("café".to_string()),
         ];
-        let err = evaluate(&args).expect_err("fprintf should reject ASCII-incompatible text");
+        let err = unwrap_error_message(evaluate(&args).unwrap_err());
         assert!(err.contains("cannot be encoded as ASCII"), "{err}");
 
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();
@@ -814,26 +849,29 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_missing_format_errors() {
-        let err = evaluate(&[Value::Num(1.0)]).expect_err("fprintf should require format");
+        let err = unwrap_error_message(evaluate(&[Value::Num(1.0)]).unwrap_err());
         assert!(err.contains("missing format string"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_literal_with_extra_args_errors() {
-        let err = evaluate(&[
-            Value::String("literal text".to_string()),
-            Value::Int(IntValue::I32(1)),
-        ])
-        .expect_err("fprintf should reject extra args without conversions");
+        let err = unwrap_error_message(
+            evaluate(&[
+                Value::String("literal text".to_string()),
+                Value::Int(IntValue::I32(1)),
+            ])
+            .unwrap_err(),
+        );
         assert!(err.contains("contains no conversion specifiers"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_invalid_identifier_errors() {
-        let err = evaluate(&[Value::Num(99.0), Value::String("value".to_string())])
-            .expect_err("fprintf should reject unknown fid");
+        let err = unwrap_error_message(
+            evaluate(&[Value::Num(99.0), Value::String("value".to_string())]).unwrap_err(),
+        );
         assert!(err.contains("Invalid file identifier"), "{err}");
     }
 
@@ -849,8 +887,9 @@ pub(crate) mod tests {
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
-        let err = evaluate(&[Value::Num(fid as f64), Value::String("text".to_string())])
-            .expect_err("fprintf should reject read-only handles");
+        let err = unwrap_error_message(
+            evaluate(&[Value::Num(fid as f64), Value::String("text".to_string())]).unwrap_err(),
+        );
         assert!(err.contains("not open for writing"), "{err}");
 
         fclose::evaluate(&[Value::Num(fid as f64)]).unwrap();

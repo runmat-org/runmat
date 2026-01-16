@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "rcond";
 
@@ -184,6 +185,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may reuse dense solver factorizations to expose rcond; current backends gather to the host and re-upload a scalar value when possible.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::rcond")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -203,33 +230,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rcond",
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
-fn rcond_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
     let estimate = match value {
-        Value::GpuTensor(handle) => return (rcond_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => return rcond_gpu(handle),
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
             rcond_complex_tensor(&tensor)?
         }
         other => {
-            let matrix = tensor::value_into_tensor_for(NAME, other)?;
+            let matrix = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             rcond_real_tensor(&matrix)?
         }
     };
     Ok(Value::Num(estimate))
 }
 
-fn rcond_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &handle.shape)?;
+fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let (rows, cols) = matrix_dimensions_for(NAME, &handle.shape).map_err(builtin_error)?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!("{NAME}: input must be a square matrix.")));
     }
 
     if rows == 0 {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(uploaded) = upload_scalar(provider, f64::INFINITY) {
-                return Ok(Value::GpuTensor(uploaded));
+            match upload_scalar(provider, f64::INFINITY) {
+                Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending))
+                }
+                Err(RuntimeControlFlow::Error(_)) => {}
             }
         }
         return Ok(Value::Num(f64::INFINITY));
@@ -238,16 +268,19 @@ fn rcond_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.rcond(&handle) {
             Ok(result) => return Ok(Value::GpuTensor(result)),
-            Err(_) => {
-                if let Ok(Some(value)) = rcond_gpu_via_linsolve(provider, &handle, rows) {
-                    return Ok(value);
+            Err(_) => match rcond_gpu_via_linsolve(provider, &handle, rows) {
+                Ok(Some(value)) => return Ok(value),
+                Ok(None) => {}
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending))
                 }
-            }
+                Err(RuntimeControlFlow::Error(err)) => return Err(RuntimeControlFlow::Error(err)),
+            },
         }
     }
 
-    let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("{NAME}: {e}"))?;
+    let gathered =
+        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
     let estimate = match gathered {
         Value::Tensor(tensor) => rcond_real_tensor(&tensor)?,
         Value::ComplexTensor(tensor) => rcond_complex_tensor(&tensor)?,
@@ -266,14 +299,18 @@ fn rcond_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
             }
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             rcond_real_tensor(&tensor)?
         }
     };
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(uploaded) = upload_scalar(provider, estimate) {
-            return Ok(Value::GpuTensor(uploaded));
+        match upload_scalar(provider, estimate) {
+            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => {}
         }
     }
 
@@ -284,7 +321,7 @@ fn rcond_gpu_via_linsolve(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     order: usize,
-) -> Result<Option<Value>, String> {
+) -> BuiltinResult<Option<Value>> {
     if order == 0 {
         return upload_scalar(provider, f64::INFINITY).map(|gpu| Some(Value::GpuTensor(gpu)));
     }
@@ -292,7 +329,10 @@ fn rcond_gpu_via_linsolve(
     // Attempt to reuse provider linsolve to retrieve an rcond estimate.
     let identity = match upload_identity(provider, order) {
         Ok(id) => id,
-        Err(_) => return Ok(None),
+        Err(RuntimeControlFlow::Suspend(pending)) => {
+            return Err(RuntimeControlFlow::Suspend(pending))
+        }
+        Err(RuntimeControlFlow::Error(_)) => return Ok(None),
     };
 
     let options = runmat_accelerate_api::ProviderLinsolveOptions {
@@ -311,17 +351,31 @@ fn rcond_gpu_via_linsolve(
     let rcond_value = result.reciprocal_condition;
     let _ = provider.free(&result.solution);
 
-    if let Ok(uploaded) = upload_scalar(provider, rcond_value) {
-        return Ok(Some(Value::GpuTensor(uploaded)));
+    match upload_scalar(provider, rcond_value) {
+        Ok(uploaded) => return Ok(Some(Value::GpuTensor(uploaded))),
+        Err(RuntimeControlFlow::Suspend(pending)) => {
+            return Err(RuntimeControlFlow::Suspend(pending))
+        }
+        Err(RuntimeControlFlow::Error(_)) => {}
     }
 
     Ok(Some(Value::Num(rcond_value)))
 }
 
-fn rcond_real_tensor(matrix: &Tensor) -> Result<f64, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape)?;
+fn rcond_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
+    rcond_real_tensor_impl(matrix)
+}
+
+fn rcond_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<f64> {
+    rcond_complex_tensor_impl(matrix)
+}
+
+fn rcond_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<f64> {
+    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 {
         return Ok(f64::INFINITY);
@@ -334,10 +388,12 @@ fn rcond_real_tensor(matrix: &Tensor) -> Result<f64, String> {
     Ok(singular_value_rcond(svd.singular_values.as_slice()))
 }
 
-fn rcond_complex_tensor(matrix: &ComplexTensor) -> Result<f64, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape)?;
+fn rcond_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<f64> {
+    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
     if rows != cols {
-        return Err(format!("{NAME}: input must be a square matrix."));
+        return Err(builtin_error(format!(
+            "{NAME}: input must be a square matrix."
+        )));
     }
     if rows == 0 {
         return Ok(f64::INFINITY);
@@ -360,20 +416,22 @@ fn rcond_complex_tensor(matrix: &ComplexTensor) -> Result<f64, String> {
 fn upload_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: f64,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let data = [value];
     let shape = [1usize, 1usize];
     let view = HostTensorView {
         data: &data,
         shape: &shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn upload_identity(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     n: usize,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     if n == 0 {
         return upload_scalar(provider, 0.0);
     }
@@ -386,20 +444,30 @@ fn upload_identity(
         data: &data,
         shape: &shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 /// Host-accessible helper for acceleration providers that gather matrices.
-pub fn rcond_host_real_for_provider(matrix: &Tensor) -> Result<f64, String> {
-    rcond_real_tensor(matrix)
+pub fn rcond_host_real_for_provider(matrix: &Tensor) -> BuiltinResult<f64> {
+    rcond_real_tensor_impl(matrix)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -464,8 +532,8 @@ pub(crate) mod tests {
     #[test]
     fn rcond_rejects_non_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let err = rcond_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert_eq!(err, "rcond: input must be a square matrix.");
+        let err = unwrap_error(rcond_builtin(Value::Tensor(tensor)).unwrap_err());
+        assert_eq!(err.message(), "rcond: input must be a square matrix.");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

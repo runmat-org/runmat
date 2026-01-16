@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "trace";
 
@@ -209,6 +210,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -228,24 +255,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
-fn trace_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn trace_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (trace_gpu(handle)).map_err(Into::into),
-        Value::ComplexTensor(ct) => (trace_complex_tensor(ct)).map_err(Into::into),
+        Value::GpuTensor(handle) => trace_gpu(handle),
+        Value::ComplexTensor(ct) => trace_complex_tensor(ct),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
-        Value::CharArray(ca) => (trace_char_array(ca)).map_err(Into::into),
-        other => (trace_numeric(other)).map_err(Into::into),
+        Value::CharArray(ca) => trace_char_array(ca),
+        other => trace_numeric(other),
     }
 }
 
-fn trace_numeric(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for(NAME, value)?;
+fn trace_numeric(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for(NAME, value).map_err(builtin_error)?;
     ensure_matrix_shape(NAME, &tensor.shape)?;
     let sum = trace_tensor_sum(&tensor);
     Ok(Value::Num(sum))
 }
 
-fn trace_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn trace_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, &ct.shape)?;
     let rows = if ct.rows == 0 {
         ct.shape.first().copied().unwrap_or(0)
@@ -275,7 +302,7 @@ fn trace_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
     Ok(Value::Complex(sum_re, sum_im))
 }
 
-fn trace_char_array(ca: CharArray) -> Result<Value, String> {
+fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, &[ca.rows, ca.cols])?;
     let diag_len = ca.rows.min(ca.cols);
     let mut sum = 0.0;
@@ -288,7 +315,7 @@ fn trace_char_array(ca: CharArray) -> Result<Value, String> {
     Ok(Value::Num(sum))
 }
 
-fn trace_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, &handle.shape)?;
     let (rows, cols) = matrix_extents_from_shape(&handle.shape);
     let diag_len = rows.min(cols);
@@ -307,12 +334,12 @@ fn trace_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let tensor = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
     let sum = trace_tensor_sum(&tensor);
     trace_gpu_fallback(&handle, sum)
 }
 
-fn trace_gpu_fallback(_handle: &GpuTensorHandle, sum: f64) -> Result<Value, String> {
+fn trace_gpu_fallback(_handle: &GpuTensorHandle, sum: f64) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let data = vec![sum];
         let shape = [1usize, 1usize];
@@ -339,9 +366,9 @@ fn trace_tensor_sum(tensor: &Tensor) -> f64 {
     sum
 }
 
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
-        Err(format!("{name}: input must be 2-D"))
+        Err(builtin_error(format!("{name}: input must be 2-D")))
     } else {
         Ok(())
     }
@@ -359,8 +386,16 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor};
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -522,8 +557,8 @@ pub(crate) mod tests {
     #[test]
     fn trace_rejects_higher_dimensional_inputs() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
-        let err = trace_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert_eq!(err, "trace: input must be 2-D");
+        let err = unwrap_error(trace_builtin(Value::Tensor(tensor)).unwrap_err());
+        assert_eq!(err.message(), "trace: input must be 2-D");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

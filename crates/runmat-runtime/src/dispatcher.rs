@@ -1,7 +1,7 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 use runmat_async::{PendingInteraction, SuspendMarker};
 
-use crate::{make_cell_with_shape, new_object_builtin, runtime_error, RuntimeControlFlow, RuntimeError};
+use crate::{make_cell_with_shape, new_object_builtin, build_runtime_error, RuntimeControlFlow, RuntimeError};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -34,9 +34,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                 }
             }
             let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                runtime_error("gather: no acceleration provider registered")
-                    .build()
-                    .into()
+                RuntimeControlFlow::Error(build_runtime_error("gather: no acceleration provider registered").build())
             })?;
             let is_logical = runmat_accelerate_api::handle_is_logical(handle);
             let host = match provider.download(handle) {
@@ -49,9 +47,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                         }));
                     }
                     return Err(RuntimeControlFlow::Error(
-                        runtime_error(format!("gather: {err}"))
-                            .with_source(err)
-                            .build(),
+                        build_runtime_error(format!("gather: {err}")).build(),
                     ));
                 }
             };
@@ -60,7 +56,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
             if is_logical {
                 let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
                 let logical = LogicalArray::new(bits, shape).map_err(|e| {
-                    runtime_error(format!("gather: {e}")).build().into()
+                    RuntimeControlFlow::Error(build_runtime_error(format!("gather: {e}")).build())
                 })?;
                 Ok(Value::LogicalArray(logical))
             } else {
@@ -77,7 +73,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                     runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
                 };
                 let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
-                    runtime_error(format!("gather: {e}")).build().into()
+                    RuntimeControlFlow::Error(build_runtime_error(format!("gather: {e}")).build())
                 })?;
                 Ok(Value::Tensor(tensor))
             }
@@ -88,7 +84,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                 gathered.push(gather_if_needed(ptr)?);
             }
             make_cell_with_shape(gathered, ca.shape.clone()).map_err(|err| {
-                runtime_error(format!("gather: {err}")).build().into()
+                RuntimeControlFlow::Error(build_runtime_error(format!("gather: {err}")).build())
             })
         }
         Value::Struct(sv) => {
@@ -134,12 +130,10 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlF
             // Otherwise default-construct object
             return new_object_builtin(name.to_string());
         }
-        return Err(runtime_error(format!(
+        return Err(RuntimeControlFlow::Error(build_runtime_error(format!(
             "{}: Undefined function: {name}",
             "MATLAB:UndefinedFunction"
-        ))
-        .build()
-        .into());
+        )).build()));
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -201,7 +195,7 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlF
     }
 
     // If none succeeded, return the last error
-    Err(runtime_error(format!(
+    Err(build_runtime_error(format!(
         "No matching overload for `{}` with {} args: {}",
         name,
         args.len(),

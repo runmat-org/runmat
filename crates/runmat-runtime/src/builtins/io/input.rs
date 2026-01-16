@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::interaction;
-use crate::{call_builtin, gather_if_needed, runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{call_builtin, gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const DEFAULT_PROMPT: &str = "Input: ";
 
@@ -127,7 +127,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(name = "input", builtin_path = "crate::builtins::io::input")]
 fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
-        return Err(runtime_error("MATLAB:input:TooManyInputs").build().into());
+        return Err(build_runtime_error("MATLAB:input:TooManyInputs").build().into());
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -163,7 +163,7 @@ fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let line = interaction::request_line(&prompt, true).map_err(|flow| match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
-            runtime_error(format!("input: {}", err.message()))
+            build_runtime_error(format!("input: {}", err.message()))
                 .with_source(err)
                 .build(),
         ),
@@ -179,7 +179,7 @@ fn parse_prompt(value: &Value) -> Result<String, RuntimeControlFlow> {
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                Err(runtime_error("MATLAB:input:PromptMustBeRowVector")
+                Err(build_runtime_error("MATLAB:input:PromptMustBeRowVector")
                     .build()
                     .into())
             } else {
@@ -191,12 +191,12 @@ fn parse_prompt(value: &Value) -> Result<String, RuntimeControlFlow> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(runtime_error("MATLAB:input:PromptMustBeScalarString")
+                Err(build_runtime_error("MATLAB:input:PromptMustBeScalarString")
                     .build()
                     .into())
             }
         }
-        other => Err(runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})"))
+        other => Err(build_runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})"))
             .build()
             .into()),
     }
@@ -209,7 +209,7 @@ fn parse_string_flag(value: &Value) -> Result<bool, RuntimeControlFlow> {
         Value::String(s) => s,
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         other => {
-            return Err(runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})"))
+            return Err(build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})"))
                 .build()
                 .into())
         }
@@ -218,7 +218,7 @@ fn parse_string_flag(value: &Value) -> Result<bool, RuntimeControlFlow> {
     if trimmed.eq_ignore_ascii_case("s") {
         Ok(true)
     } else {
-        Err(runtime_error(format!("MATLAB:input:InvalidStringFlag ({trimmed})"))
+        Err(build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({trimmed})"))
             .build()
             .into())
     }
@@ -230,7 +230,7 @@ fn parse_numeric_response(line: &str) -> Result<Value, RuntimeControlFlow> {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
     call_builtin("str2double", &[Value::String(trimmed.to_string())]).map_err(|err| {
-        runtime_error(format!("MATLAB:input:InvalidNumericExpression ({})", err.message()))
+        build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({})", err.message()))
             .with_source(err)
             .build()
             .into()

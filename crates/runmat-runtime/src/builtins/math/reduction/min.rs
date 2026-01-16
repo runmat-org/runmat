@@ -7,6 +7,10 @@ use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const NAME: &str = "min";
+
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -190,6 +194,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_min_dim / reduce_min. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
+fn min_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "min",
@@ -244,12 +252,12 @@ impl MinEvaluation {
     accel = "reduction",
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-fn min_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(value, &rest).map(|eval| eval.into_value()).map_err(Into::into)
+fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    evaluate(value, &rest).map(|eval| eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub fn evaluate(value: Value, rest: &[Value]) -> Result<MinEvaluation, String> {
+pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
     match parse_call(rest)? {
         ParsedCall::Elementwise(args) => elementwise_min(value, args),
         ParsedCall::Reduction(args) => reduction_min(value, args),
@@ -302,7 +310,7 @@ struct ElementwiseArgs {
     comparison: ComparisonMethod,
 }
 
-fn parse_call(rest: &[Value]) -> Result<ParsedCall, String> {
+fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     if rest.is_empty() {
         return Ok(ParsedCall::Reduction(ReductionArgs::default()));
     }
@@ -333,7 +341,7 @@ fn is_empty_placeholder(value: &Value) -> bool {
     }
 }
 
-fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(), String> {
+fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
@@ -352,9 +360,9 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(
                 }
                 "all" => {
                     if selection_set {
-                        return Err(
-                            "min: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
+                        return Err(min_error(
+                            "min: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     args.selection = DimSelection::All;
                     selection_set = true;
@@ -363,10 +371,9 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(
                 }
                 "linear" => {
                     if selection_set {
-                        return Err(
-                            "min: 'linear' cannot be combined with an explicit dimension"
-                                .to_string(),
-                        );
+                        return Err(min_error(
+                            "min: 'linear' cannot be combined with an explicit dimension",
+                        ));
                     }
                     args.selection = DimSelection::All;
                     args.linear_index = true;
@@ -376,7 +383,7 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(
                 }
                 "comparisonmethod" => {
                     let Some(value) = rest.get(idx + 1) else {
-                        return Err("min: expected a value after 'ComparisonMethod'".to_string());
+                        return Err(min_error("min: expected a value after 'ComparisonMethod'"));
                     };
                     args.comparison = parse_comparison_method(value)?;
                     comparison_set = true;
@@ -396,7 +403,7 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(
             }
         }
 
-        return Err(format!("min: unrecognised argument {:?}", rest[idx]));
+        return Err(min_error(format!("min: unrecognised argument {:?}", rest[idx])));
     }
 
     if !comparison_set {
@@ -406,7 +413,7 @@ fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Result<(
     Ok(())
 }
 
-fn parse_elementwise_options(rest: &[Value]) -> Result<ComparisonMethod, String> {
+fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> {
     let mut comparison = ComparisonMethod::Auto;
     let mut comparison_set = false;
     let mut idx = 0usize;
@@ -415,7 +422,7 @@ fn parse_elementwise_options(rest: &[Value]) -> Result<ComparisonMethod, String>
             match keyword.as_str() {
                 "comparisonmethod" => {
                     let Some(value) = rest.get(idx + 1) else {
-                        return Err("min: expected a value after 'ComparisonMethod'".to_string());
+                        return Err(min_error("min: expected a value after 'ComparisonMethod'"));
                     };
                     comparison = parse_comparison_method(value)?;
                     comparison_set = true;
@@ -423,15 +430,15 @@ fn parse_elementwise_options(rest: &[Value]) -> Result<ComparisonMethod, String>
                     continue;
                 }
                 "omitnan" | "includenan" | "all" | "linear" => {
-                    return Err(format!(
+                    return Err(min_error(format!(
                         "min: '{}' is only supported for reduction calls",
                         keyword
-                    ));
+                    )));
                 }
                 _ => {}
             }
         }
-        return Err(format!("min: unrecognised argument {:?}", rest[idx]));
+        return Err(min_error(format!("min: unrecognised argument {:?}", rest[idx])));
     }
     if !comparison_set {
         comparison = ComparisonMethod::Auto;
@@ -439,71 +446,70 @@ fn parse_elementwise_options(rest: &[Value]) -> Result<ComparisonMethod, String>
     Ok(comparison)
 }
 
-fn parse_comparison_method(value: &Value) -> Result<ComparisonMethod, String> {
+fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
     let Some(keyword) = keyword_of(value) else {
-        return Err("min: 'ComparisonMethod' expects a string value".to_string());
+        return Err(min_error("min: 'ComparisonMethod' expects a string value"));
     };
     match keyword.as_str() {
         "auto" => Ok(ComparisonMethod::Auto),
         "abs" | "magnitude" => Ok(ComparisonMethod::Abs),
         "real" => Ok(ComparisonMethod::Real),
-        other => Err(format!("min: unsupported ComparisonMethod '{other}'")),
+        other => Err(min_error(format!("min: unsupported ComparisonMethod '{other}'"))),
     }
 }
 
-fn parse_dimension_value(value: &Value) -> Result<Option<DimSelection>, String> {
+fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 1 {
-                return Err("min: dimension must be >= 1".to_string());
+                return Err(min_error("min: dimension must be >= 1"));
             }
             Ok(Some(DimSelection::Dim(raw as usize)))
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("min: dimension must be finite".to_string());
+                return Err(min_error("min: dimension must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("min: dimension must be integral".to_string());
+                return Err(min_error("min: dimension must be integral"));
             }
             if rounded < 1.0 {
-                return Err("min: dimension must be >= 1".to_string());
+                return Err(min_error("min: dimension must be >= 1"));
             }
             Ok(Some(DimSelection::Dim(rounded as usize)))
         }
         Value::Tensor(t) => parse_dimension_tensor(t),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor = tensor::logical_to_tensor(logical).map_err(|err| min_error(err))?;
             parse_dimension_tensor(&tensor)
         }
-        Value::GpuTensor(_) => Err(
-            "min: dimension arguments must reside on the host (they cannot be gpuArray values)"
-                .to_string(),
-        ),
+        Value::GpuTensor(_) => Err(min_error(
+            "min: dimension arguments must reside on the host (they cannot be gpuArray values)",
+        )),
         _ => Ok(None),
     }
 }
 
-fn parse_dimension_tensor(tensor: &Tensor) -> Result<Option<DimSelection>, String> {
+fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>> {
     if tensor.data.is_empty() {
         return Ok(Some(DimSelection::Auto));
     }
     if tensor.rows() != 1 && tensor.cols() != 1 && tensor.shape.len() != 1 {
-        return Err("min: dimension vector must be a row or column vector".to_string());
+        return Err(min_error("min: dimension vector must be a row or column vector"));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
         if !value.is_finite() {
-            return Err("min: dimension entries must be finite".to_string());
+            return Err(min_error("min: dimension entries must be finite"));
         }
         let rounded = value.round();
         if (rounded - value).abs() > f64::EPSILON {
-            return Err("min: dimension entries must be integers".to_string());
+            return Err(min_error("min: dimension entries must be integers"));
         }
         if rounded < 1.0 {
-            return Err("min: dimension indices must be >= 1".to_string());
+            return Err(min_error("min: dimension indices must be >= 1"));
         }
         dims.push(rounded as usize);
     }
@@ -522,7 +528,7 @@ fn parse_dimension_tensor(tensor: &Tensor) -> Result<Option<DimSelection>, Strin
     }
 }
 
-fn reduction_min(value: Value, args: ReductionArgs) -> Result<MinEvaluation, String> {
+fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = reduction_min_gpu(handle.clone(), &args)? {
@@ -539,7 +545,7 @@ fn reduction_min(value: Value, args: ReductionArgs) -> Result<MinEvaluation, Str
 fn reduction_min_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
-) -> Result<Option<MinEvaluation>, String> {
+) -> BuiltinResult<Option<MinEvaluation>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -591,7 +597,7 @@ fn reduction_min_gpu(
     }
 }
 
-fn reduction_min_host(value: Value, args: &ReductionArgs) -> Result<MinEvaluation, String> {
+fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
     match materialize_for_min("min", value)? {
         InputData::Real(tensor) => reduce_real_tensor(tensor, args),
         InputData::Complex(tensor) => reduce_complex_tensor(tensor, args),
@@ -603,56 +609,58 @@ enum InputData {
     Complex(ComplexTensor),
 }
 
-fn materialize_for_min(name: &str, value: Value) -> Result<InputData, String> {
+fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
     match value {
         Value::Tensor(t) => Ok(InputData::Real(t)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| min_error(err))?;
             Ok(InputData::Real(tensor))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Int(i) => {
             let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("{name}: {e}"))?;
+                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("{name}: {e}"))?;
+                .map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{name}: {e}"))?;
+                .map_err(|e| min_error(format!("{name}: {e}")))?;
             Ok(InputData::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputData::Complex(ct)),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
-            format!("{name}: expected numeric or logical input, received non-numeric value"),
+            min_error(format!(
+                "{name}: expected numeric or logical input, received non-numeric value"
+            )),
         ),
-        Value::GpuTensor(_) => Err(format!(
+        Value::GpuTensor(_) => Err(min_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"
-        )),
+        ))),
         Value::Object(_) | Value::HandleObject(_) | Value::Struct(_) | Value::Listener(_) => {
-            Err(format!("{name}: unsupported input type"))
+            Err(min_error(format!("{name}: unsupported input type")))
         }
         Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(format!("{name}: unsupported input type")),
+        | Value::MException(_) => Err(min_error(format!("{name}: unsupported input type"))),
     }
 }
 
-fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> Result<MinEvaluation, String> {
+fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
     if tensor.data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values =
-            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| format!("min: {e}"))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| format!("min: {e}"))?;
+            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -664,8 +672,8 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> Result<MinEvaluat
 
     if output_len == 0 {
         let values =
-            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| format!("min: {e}"))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| format!("min: {e}"))?;
+            Tensor::new(Vec::new(), output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -731,8 +739,8 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> Result<MinEvaluat
     }
 
     let value_tensor =
-        Tensor::new(values, output_shape.clone()).map_err(|e| format!("min: {e}"))?;
-    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| format!("min: {e}"))?;
+        Tensor::new(values, output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -743,13 +751,13 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> Result<MinEvaluat
 fn reduce_complex_tensor(
     tensor: ComplexTensor,
     args: &ReductionArgs,
-) -> Result<MinEvaluation, String> {
+) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
     if tensor.data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| format!("min: {e}"))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| format!("min: {e}"))?;
+            .map_err(|e| min_error(format!("min: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -762,8 +770,8 @@ fn reduce_complex_tensor(
 
     if output_len == 0 {
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| format!("min: {e}"))?;
-        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| format!("min: {e}"))?;
+            .map_err(|e| min_error(format!("min: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape).map_err(|e| min_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -829,8 +837,8 @@ fn reduce_complex_tensor(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, output_shape.clone()).map_err(|e| format!("min: {e}"))?;
-    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| format!("min: {e}"))?;
+        ComplexTensor::new(values, output_shape.clone()).map_err(|e| min_error(format!("min: {e}")))?;
+    let index_tensor = Tensor::new(indices, output_shape).map_err(|e| min_error(format!("min: {e}")))?;
     Ok(MinEvaluation {
         values: complex_tensor_into_value(value_tensor),
         indices: tensor::tensor_into_value(index_tensor),
@@ -883,7 +891,7 @@ fn resolve_output_shape(
     shape: &[usize],
     selection: &DimSelection,
     reduced_dims: &[usize],
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     if shape.is_empty() {
         return Ok(Vec::new());
     }
@@ -914,7 +922,7 @@ struct ResolvedDims {
 fn resolve_reduction_dims(
     shape: &[usize],
     selection: &DimSelection,
-) -> Result<ResolvedDims, String> {
+) -> BuiltinResult<ResolvedDims> {
     if shape.is_empty() {
         return Ok(ResolvedDims {
             output_shape: Vec::new(),
@@ -938,7 +946,7 @@ fn resolve_reduction_dims(
         }
         DimSelection::Dim(dim) => {
             if *dim == 0 {
-                return Err("min: dimension must be >= 1".to_string());
+                return Err(min_error("min: dimension must be >= 1"));
             }
             let index = dim.saturating_sub(1);
             if index >= shape.len() {
@@ -1263,7 +1271,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
     1
 }
 
-fn elementwise_min(value: Value, args: ElementwiseArgs) -> Result<MinEvaluation, String> {
+fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
     let ElementwiseArgs { other, comparison } = args;
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
@@ -1274,7 +1282,7 @@ fn elementwise_min(value: Value, args: ElementwiseArgs) -> Result<MinEvaluation,
                     elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
                         .ok()
                 })
-                .ok_or_else(|| "min: elementwise GPU path failed".to_string())
+                .ok_or_else(|| min_error("min: elementwise GPU path failed"))
         }
         (Value::GpuTensor(handle), other) => {
             elementwise_min_gpu_scalar_left(&handle, &other, comparison)
@@ -1282,7 +1290,7 @@ fn elementwise_min(value: Value, args: ElementwiseArgs) -> Result<MinEvaluation,
                     let t = gpu_helpers::gather_tensor(&handle).ok()?;
                     elementwise_real_or_complex(Value::Tensor(t), other, comparison).ok()
                 })
-                .ok_or_else(|| "min: elementwise GPU scalar path failed".to_string())
+                .ok_or_else(|| min_error("min: elementwise GPU scalar path failed"))
         }
         (other, Value::GpuTensor(handle)) => {
             elementwise_min_gpu_scalar_right(&other, &handle, comparison)
@@ -1290,7 +1298,7 @@ fn elementwise_min(value: Value, args: ElementwiseArgs) -> Result<MinEvaluation,
                     let t = gpu_helpers::gather_tensor(&handle).ok()?;
                     elementwise_real_or_complex(other, Value::Tensor(t), comparison).ok()
                 })
-                .ok_or_else(|| "min: elementwise GPU scalar path failed".to_string())
+                .ok_or_else(|| min_error("min: elementwise GPU scalar path failed"))
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
     }
@@ -1520,7 +1528,7 @@ fn elementwise_real_or_complex(
     lhs: Value,
     rhs: Value,
     comparison: ComparisonMethod,
-) -> Result<MinEvaluation, String> {
+) -> BuiltinResult<MinEvaluation> {
     match (
         materialize_for_min("min", lhs)?,
         materialize_for_min("min", rhs)?,
@@ -1542,7 +1550,7 @@ fn elementwise_real_min(
     lhs: Tensor,
     rhs: Tensor,
     comparison: ComparisonMethod,
-) -> Result<MinEvaluation, String> {
+) -> BuiltinResult<MinEvaluation> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("min: {}", err))?;
     let mut values = vec![0.0f64; plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
@@ -1556,9 +1564,9 @@ fn elementwise_real_min(
     }
 
     let value_tensor =
-        Tensor::new(values, plan.output_shape().to_vec()).map_err(|e| format!("min: {e}"))?;
+        Tensor::new(values, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| format!("min: {e}"))?;
+        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -1570,7 +1578,7 @@ fn elementwise_complex_min(
     lhs: ComplexTensor,
     rhs: ComplexTensor,
     comparison: ComparisonMethod,
-) -> Result<MinEvaluation, String> {
+) -> BuiltinResult<MinEvaluation> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("min: {}", err))?;
     let mut values = vec![(0.0f64, 0.0f64); plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
@@ -1592,9 +1600,9 @@ fn elementwise_complex_min(
     }
 
     let value_tensor = ComplexTensor::new(values, plan.output_shape().to_vec())
-        .map_err(|e| format!("min: {e}"))?;
+        .map_err(|e| min_error(format!("min: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| format!("min: {e}"))?;
+        Tensor::new(indices, plan.output_shape().to_vec()).map_err(|e| min_error(format!("min: {e}")))?;
 
     Ok(MinEvaluation {
         values: complex_tensor_into_value(value_tensor),
@@ -1864,7 +1872,12 @@ pub(crate) mod tests {
             &[Value::Tensor(rhs), Value::from("omitnan")],
         )
         .expect_err("expected error");
-        assert!(err.contains("only supported for reduction"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("only supported for reduction"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1918,7 +1931,14 @@ pub(crate) mod tests {
         });
         let err = evaluate(Value::Tensor(tensor), &[placeholder(), dim_handle])
             .expect_err("expected error");
-        assert!(err.contains("dimension arguments must reside on the host"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err
+                    .message()
+                    .contains("dimension arguments must reside on the host"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1931,7 +1951,12 @@ pub(crate) mod tests {
             Value::from("chebyshev"),
         ];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
-        assert!(err.contains("unsupported ComparisonMethod"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("unsupported ComparisonMethod"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2026,6 +2051,11 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![placeholder(), Value::Int(IntValue::I32(0))];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
-        assert!(err.contains("dimension must be >= 1"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("dimension must be >= 1"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 }

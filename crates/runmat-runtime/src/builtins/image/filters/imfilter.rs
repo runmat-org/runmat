@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
@@ -198,6 +199,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not a fusion candidate; emits standalone correlation kernels.",
 };
 
+const IMFILTER_BUILTIN: &str = "imfilter";
+
+fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(builtin)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "imfilter",
     category = "image/filters",
@@ -210,18 +220,19 @@ fn imfilter_builtin(image: Value, kernel: Value, rest: Vec<Value>) -> crate::Bui
     let options = parse_imfilter_options(&rest)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
-            Ok(imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options)?)
+            imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options)
         }
         (Value::GpuTensor(image_handle), filter_value) => {
-            Ok(imfilter_gpu(image_handle, filter_value, options)?)
+            imfilter_gpu(image_handle, filter_value, options)
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
             let filter_tensor = gpu_helpers::gather_tensor(&filter_handle)?;
-            Ok(imfilter_host_value(image_value, filter_tensor, options)?)
+            imfilter_host_value(image_value, filter_tensor, options)
         }
         (image_value, filter_value) => {
-            let filter_tensor = tensor::value_into_tensor_for("imfilter", filter_value)?;
-            Ok(imfilter_host_value(image_value, filter_tensor, options)?)
+            let filter_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, filter_value)
+                .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+            imfilter_host_value(image_value, filter_tensor, options)
         }
     }
 }
@@ -230,9 +241,10 @@ fn imfilter_host_value(
     image_value: Value,
     kernel_tensor: Tensor,
     options: ImfilterOptions,
-) -> Result<Value, String> {
-    let image_tensor = tensor::value_into_tensor_for("imfilter", image_value)?;
-    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options)?;
+) -> BuiltinResult<Value> {
+    let image_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, image_value)
+        .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
     Ok(tensor::tensor_into_value(result))
 }
 
@@ -240,7 +252,7 @@ fn imfilter_gpu(
     image_handle: GpuTensorHandle,
     kernel_value: Value,
     options: ImfilterOptions,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         let kernel_is_wgpu = matches!(kernel_value, Value::GpuTensor(ref h) if h.device_id != 0);
@@ -257,12 +269,13 @@ fn imfilter_gpu(
             return match kernel_value {
                 Value::GpuTensor(handle) => {
                     let kernel_tensor = gpu_helpers::gather_tensor(&handle)?;
-                    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options)?;
+                    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
                     Ok(tensor::tensor_into_value(result))
                 }
                 other => {
-                    let kernel_tensor = tensor::value_into_tensor_for("imfilter", other)?;
-                    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options)?;
+                    let kernel_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
+                        .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+                    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
                     Ok(tensor::tensor_into_value(result))
                 }
             };
@@ -272,7 +285,8 @@ fn imfilter_gpu(
     let (kernel_handle, uploaded_handle, kernel_tensor_for_fallback) = match kernel_value {
         Value::GpuTensor(handle) => (handle.clone(), None, None),
         other => {
-            let tensor = tensor::value_into_tensor_for("imfilter", other)?;
+            let tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
+                .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
@@ -281,7 +295,7 @@ fn imfilter_gpu(
                 Ok(uploaded) => (uploaded.clone(), Some(uploaded), Some(tensor)),
                 Err(_) => {
                     let image_tensor = gpu_helpers::gather_tensor(&image_handle)?;
-                    let result = apply_imfilter_tensor(&image_tensor, &tensor, &options)?;
+                    let result = apply_imfilter_tensor(&image_tensor, &tensor, &options, IMFILTER_BUILTIN)?;
                     return Ok(tensor::tensor_into_value(result));
                 }
             }
@@ -305,19 +319,19 @@ fn imfilter_gpu(
             } else {
                 gpu_helpers::gather_tensor(&kernel_handle)?
             };
-            let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options)?;
+            let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
             Ok(tensor::tensor_into_value(result))
         }
     }
 }
 
-fn parse_imfilter_options(args: &[Value]) -> Result<ImfilterOptions, String> {
+fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
     let mut options = ImfilterOptions::default();
     let mut idx = 0usize;
     while idx < args.len() {
         let mut consumed = 0usize;
         if matches_numeric_scalar(&args[idx]) {
-            let scalar = parse_scalar("imfilter", &args[idx])?;
+            let scalar = parse_scalar(IMFILTER_BUILTIN, &args[idx])?;
             options.padding = ImfilterPadding::Constant;
             options.constant_value = scalar;
         } else if let Some(text) = tensor::value_to_string(&args[idx]) {
@@ -330,15 +344,15 @@ fn parse_imfilter_options(args: &[Value]) -> Result<ImfilterOptions, String> {
                     options.padding = ImfilterPadding::Constant;
                     if let Some(next) = args.get(idx + 1) {
                         if matches_numeric_scalar(next) {
-                            let scalar = parse_scalar("imfilter", next)?;
+                            let scalar = parse_scalar(IMFILTER_BUILTIN, next)?;
                             options.constant_value = scalar;
                             consumed = 1;
                         } else if tensor::value_to_string(next).is_some() {
                             options.constant_value = 0.0;
                         } else {
-                            return Err(
-                                "imfilter: expected numeric pad value after 'fill'".to_string()
-                            );
+                            return Err(filter_error(IMFILTER_BUILTIN, 
+                                "imfilter: expected numeric pad value after 'fill'",
+                            ));
                         }
                     } else {
                         options.constant_value = 0.0;
@@ -350,17 +364,17 @@ fn parse_imfilter_options(args: &[Value]) -> Result<ImfilterOptions, String> {
                 "conv" => options.mode = ImfilterMode::Convolution,
                 "corr" => options.mode = ImfilterMode::Correlation,
                 other => {
-                    return Err(format!(
+                    return Err(filter_error(IMFILTER_BUILTIN, format!(
                         "imfilter: unknown option '{}' (supported: 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', 'conv', 'corr')",
                         other
-                    ))
+                    )))
                 }
             }
         } else {
-            return Err(format!(
+            return Err(filter_error(IMFILTER_BUILTIN, format!(
                 "imfilter: unsupported option {:?}; expected string flags or numeric pad values",
                 args[idx]
-            ));
+            )));
         }
         idx += 1 + consumed;
     }
@@ -374,7 +388,7 @@ fn matches_numeric_scalar(value: &Value) -> bool {
     )
 }
 
-fn parse_scalar(name: &str, value: &Value) -> Result<f64, String> {
+fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -383,23 +397,26 @@ fn parse_scalar(name: &str, value: &Value) -> Result<f64, String> {
             if t.data.len() == 1 {
                 Ok(t.data[0])
             } else {
-                Err(format!(
-                    "{name}: expected scalar value, got tensor of size {}",
+                Err(filter_error(builtin, format!(
+                    "{builtin}: expected scalar value, got tensor of size {}",
                     t.data.len()
-                ))
+                )))
             }
         }
         Value::LogicalArray(la) => {
             if la.data.len() == 1 {
                 Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
             } else {
-                Err(format!(
-                    "{name}: expected scalar logical value, got array of size {}",
+                Err(filter_error(builtin, format!(
+                    "{builtin}: expected scalar logical value, got array of size {}",
                     la.data.len()
-                ))
+                )))
             }
         }
-        other => Err(format!("{name}: expected numeric scalar, got {:?}", other)),
+        other => Err(filter_error(builtin, format!(
+            "{builtin}: expected numeric scalar, got {:?}",
+            other
+        ))),
     }
 }
 
@@ -440,9 +457,13 @@ pub fn build_imfilter_plan(
     image_shape: &[usize],
     kernel: &Tensor,
     options: &ImfilterOptions,
-) -> Result<ImfilterPlan, String> {
+    builtin: &str,
+) -> BuiltinResult<ImfilterPlan> {
     if kernel.data.is_empty() || kernel.shape.contains(&0) {
-        return Err("imfilter: filter must be non-empty along every dimension".to_string());
+        return Err(filter_error(
+            builtin,
+            format!("{builtin}: filter must be non-empty along every dimension"),
+        ));
     }
 
     let image_shape_norm = normalize_shape(image_shape);
@@ -451,7 +472,7 @@ pub fn build_imfilter_plan(
     let image_ext = extend_shape(&image_shape_norm, rank);
     let kernel_ext = extend_shape(&kernel_shape_norm, rank);
 
-    validate_kernel_shape(&image_shape_norm, &kernel_ext)?;
+    validate_kernel_shape(&image_shape_norm, &kernel_ext, builtin)?;
 
     let origin: Vec<usize> = kernel_ext.iter().map(|&dim| dim / 2).collect();
     let full_shape: Vec<usize> = image_ext
@@ -503,10 +524,12 @@ pub fn apply_imfilter_tensor(
     image: &Tensor,
     kernel: &Tensor,
     options: &ImfilterOptions,
-) -> Result<Tensor, String> {
-    let plan = build_imfilter_plan(&image.shape, kernel, options)?;
+    builtin: &str,
+) -> BuiltinResult<Tensor> {
+    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
     let data = plan.evaluate(&image.data, options);
-    Tensor::new(data, plan.final_shape.clone()).map_err(|e| format!("imfilter: {e}"))
+    Tensor::new(data, plan.final_shape.clone())
+        .map_err(|e| filter_error(builtin, format!("{builtin}: {e}")))
 }
 
 fn normalize_shape(shape: &[usize]) -> Vec<usize> {
@@ -517,18 +540,25 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-fn validate_kernel_shape(image_shape: &[usize], kernel_ext: &[usize]) -> Result<(), String> {
+fn validate_kernel_shape(
+    image_shape: &[usize],
+    kernel_ext: &[usize],
+    builtin: &str,
+) -> BuiltinResult<()> {
     for (dim_idx, &ker_dim) in kernel_ext.iter().enumerate() {
         let img_dim = image_shape.get(dim_idx).copied().unwrap_or(1);
         if dim_idx >= image_shape.len() && ker_dim > 1 {
-            return Err(format!(
-                "imfilter: filter dimension {} is {}, but the image has no corresponding axis",
+            return Err(filter_error(builtin, format!(
+                "{builtin}: filter dimension {} is {}, but the image has no corresponding axis",
                 dim_idx + 1,
                 ker_dim
-            ));
+            )));
         }
         if img_dim == 0 {
-            return Err("imfilter: image must not have zero-length dimensions".to_string());
+            return Err(filter_error(
+                builtin,
+                format!("{builtin}: image must not have zero-length dimensions"),
+            ));
         }
     }
     Ok(())
@@ -730,10 +760,19 @@ fn reflect_index(coord: isize, len: isize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{Tensor, Value};
+
 
     fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
+    }
+
+    fn error_message(err: RuntimeControlFlow) -> String {
+        match err {
+            RuntimeControlFlow::Error(error) => error.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -742,7 +781,7 @@ pub(crate) mod tests {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
         let options = ImfilterOptions::default();
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         assert!(result.data.iter().all(|&v| (v - 10.0).abs() < 1e-12));
     }
@@ -756,7 +795,7 @@ pub(crate) mod tests {
             padding: ImfilterPadding::Replicate,
             ..Default::default()
         };
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [18.0, 24.0, 21.0, 27.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
@@ -773,7 +812,7 @@ pub(crate) mod tests {
             shape: ImfilterShape::Full,
             ..Default::default()
         };
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 3]);
         let expected = [0.0, 0.0, 0.0, 0.0, 4.0, 14.0, 0.0, 11.0, 30.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
@@ -790,7 +829,7 @@ pub(crate) mod tests {
             shape: ImfilterShape::Valid,
             ..Default::default()
         };
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![1, 1]);
         assert!((result.data[0] - 10.0).abs() < 1e-12);
     }
@@ -801,15 +840,15 @@ pub(crate) mod tests {
         let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 3, 2);
         let kernel = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let corr_opts = ImfilterOptions::default();
-        let corr = apply_imfilter_tensor(&image, &kernel, &corr_opts).expect("corr");
+        let corr = apply_imfilter_tensor(&image, &kernel, &corr_opts, IMFILTER_BUILTIN).expect("corr");
         let flipped_kernel = simple_tensor(&[4.0, 3.0, 2.0, 1.0], 2, 2);
         let corr_flipped =
-            apply_imfilter_tensor(&image, &flipped_kernel, &corr_opts).expect("corr flip");
+            apply_imfilter_tensor(&image, &flipped_kernel, &corr_opts, IMFILTER_BUILTIN).expect("corr flip");
         let conv_opts = ImfilterOptions {
             mode: ImfilterMode::Convolution,
             ..Default::default()
         };
-        let conv = apply_imfilter_tensor(&image, &kernel, &conv_opts).expect("conv");
+        let conv = apply_imfilter_tensor(&image, &kernel, &conv_opts, IMFILTER_BUILTIN).expect("conv");
         assert_eq!(conv.shape, corr_flipped.shape);
         for ((a, b), c) in conv
             .data
@@ -830,7 +869,7 @@ pub(crate) mod tests {
             padding: ImfilterPadding::Circular,
             ..Default::default()
         };
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         let expected = [5.0, 5.0, 5.0, 5.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
@@ -874,7 +913,7 @@ pub(crate) mod tests {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = Tensor::new(vec![1.0 / 9.0; 9], vec![3, 3]).unwrap();
         let result =
-            apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default()).expect("imfilter");
+            apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default(), IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         for value in result.data {
             assert!((value - (10.0 / 9.0)).abs() < 1e-12);
@@ -890,7 +929,7 @@ pub(crate) mod tests {
             mode: ImfilterMode::Convolution,
             ..Default::default()
         };
-        let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
+        let result = apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 2]);
         let expected = [1.0, 5.0, 9.0, 6.0, 25.0, 35.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
@@ -909,7 +948,7 @@ pub(crate) mod tests {
             constant_value: 5.0,
             ..Default::default()
         };
-        let manual_res = apply_imfilter_tensor(&image, &kernel, &manual).expect("imfilter");
+        let manual_res = apply_imfilter_tensor(&image, &kernel, &manual, IMFILTER_BUILTIN).expect("imfilter");
 
         let via_builtin = imfilter_builtin(
             Value::Tensor(image.clone()),
@@ -934,8 +973,8 @@ pub(crate) mod tests {
             Value::Tensor(kernel),
             vec![Value::from("unsupported-mode")],
         )
-        .unwrap_err();
-        assert!(err.contains("unknown option"));
+        .expect_err("imfilter should error");
+        assert!(error_message(err).contains("unknown option"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -949,8 +988,8 @@ pub(crate) mod tests {
             Value::Tensor(kernel),
             vec![Value::from("fill"), Value::Tensor(pad)],
         )
-        .unwrap_err();
-        assert!(err.contains("scalar value"));
+        .expect_err("imfilter should error");
+        assert!(error_message(err).contains("scalar value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1011,7 +1050,7 @@ pub(crate) mod tests {
 
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
-        let cpu = apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default()).expect("cpu");
+        let cpu = apply_imfilter_tensor(&image, &kernel, &ImfilterOptions::default(), IMFILTER_BUILTIN).expect("cpu");
 
         let image_view = HostTensorView {
             data: &image.data,

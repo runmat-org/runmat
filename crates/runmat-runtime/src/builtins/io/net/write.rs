@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -176,6 +176,33 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket writes always execute on the host CPU; GPU providers are never consulted.",
 };
 
+fn write_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(message_id)
+        .with_builtin("write")
+        .build()
+}
+
+fn write_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    write_error(message_id, message).into()
+}
+
+fn map_write_flow(
+    flow: RuntimeControlFlow,
+    message_id: &'static str,
+    context: &str,
+) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => build_runtime_error(format!("{context}: {}", err.message()))
+            .with_identifier(message_id)
+            .with_builtin("write")
+            .with_source(err)
+            .build()
+            .into(),
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "write",
@@ -196,16 +223,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let client = gather_if_needed(&client)
-        .map_err(|err| runtime_error(MESSAGE_ID_INVALID_CLIENT, format!("write: {err}")))?;
+        .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_CLIENT, "write"))?;
     let data = gather_if_needed(&data)
-        .map_err(|err| runtime_error(MESSAGE_ID_INVALID_DATA, format!("write: {err}")))?;
+        .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_DATA, "write"))?;
 
     let mut gathered_rest = Vec::with_capacity(rest.len());
     for value in rest {
         gathered_rest.push(
-            gather_if_needed(&value).map_err(|err| {
-                runtime_error(MESSAGE_ID_INVALID_DATATYPE, format!("write: {err}"))
-            })?,
+            gather_if_needed(&value)
+                .map_err(|flow| map_write_flow(flow, MESSAGE_ID_INVALID_DATATYPE, "write"))?,
         );
     }
     let datatype = parse_arguments(&gathered_rest)?;
@@ -213,16 +239,16 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::Builtin
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(((runtime_error(
+            return Err(write_flow(
                 MESSAGE_ID_INVALID_CLIENT,
                 "write: expected tcpclient struct as first argument",
-            ))).into())
+            ))
         }
     };
 
     let client_id = extract_client_id(client_struct)?;
     let handle = client_handle(client_id).ok_or_else(|| {
-        runtime_error(
+        write_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "write: tcpclient handle is no longer valid",
         )
@@ -231,24 +257,24 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::Builtin
     let (mut stream, timeout, byte_order) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(((runtime_error(
+            return Err(write_flow(
                 MESSAGE_ID_NOT_CONNECTED,
                 "write: tcpclient is disconnected",
-            ))).into());
+            ));
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
         let stream = guard.stream.try_clone().map_err(|err| {
-            runtime_error(MESSAGE_ID_INTERNAL, format!("write: clone failed ({err})"))
+            write_flow(MESSAGE_ID_INTERNAL, format!("write: clone failed ({err})"))
         })?;
         (stream, timeout, byte_order)
     };
 
     if let Err(err) = configure_stream(&stream, timeout) {
-        return Err(((runtime_error(
+        return Err(write_flow(
             MESSAGE_ID_INTERNAL,
             format!("write: unable to configure socket timeout ({err})"),
-        ))).into());
+        ));
     }
 
     let payload = prepare_payload(&data, datatype, byte_order)?;
@@ -258,23 +284,23 @@ fn write_builtin(client: Value, data: Value, rest: Vec<Value>) -> crate::Builtin
 
     match write_bytes(&mut stream, &payload.bytes) {
         Ok(_) => Ok(Value::Num(payload.elements as f64)),
-        Err(WriteError::Timeout) => Err(((runtime_error(
+        Err(WriteError::Timeout) => Err(write_flow(
             MESSAGE_ID_TIMEOUT,
             "write: timed out while sending data",
-        ))).into()),
+        )),
         Err(WriteError::ConnectionClosed) => {
             if let Ok(mut guard) = handle.lock() {
                 guard.connected = false;
             }
-            Err(((runtime_error(
+            Err(write_flow(
                 MESSAGE_ID_CONNECTION_CLOSED,
                 "write: connection closed before all data was sent",
-            ))).into())
+            ))
         }
-        Err(WriteError::Io(err)) => Err(((runtime_error(
+        Err(WriteError::Io(err)) => Err(write_flow(
             MESSAGE_ID_INTERNAL,
             format!("write: socket error ({err})"),
-        ))).into()),
+        )),
     }
 }
 
@@ -320,23 +346,22 @@ struct Payload {
     elements: usize,
 }
 
-fn parse_arguments(args: &[Value]) -> Result<DataType, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<DataType> {
     match args.len() {
         0 => Ok(DataType::default()),
         1 => parse_datatype(&args[0]),
-        _ => Err(runtime_error(
+        _ => Err(write_flow(
             MESSAGE_ID_INVALID_DATATYPE,
             "write: expected at most one datatype argument",
         )),
     }
 }
 
-fn parse_datatype(value: &Value) -> Result<DataType, String> {
-    let text =
-        scalar_string(value).map_err(|err| runtime_error(MESSAGE_ID_INVALID_DATATYPE, err))?;
+fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
+    let text = scalar_string(value)?;
     let lowered = text.trim().to_ascii_lowercase();
     if lowered.is_empty() {
-        return Err(runtime_error(
+        return Err(write_flow(
             MESSAGE_ID_INVALID_DATATYPE,
             "write: datatype must not be empty",
         ));
@@ -355,7 +380,7 @@ fn parse_datatype(value: &Value) -> Result<DataType, String> {
         "char" => DataType::Char,
         "string" => DataType::String,
         _ => {
-            return Err(runtime_error(
+            return Err(write_flow(
                 MESSAGE_ID_INVALID_DATATYPE,
                 format!("write: unsupported datatype '{text}'"),
             ))
@@ -364,7 +389,7 @@ fn parse_datatype(value: &Value) -> Result<DataType, String> {
     Ok(dtype)
 }
 
-fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Result<Payload, String> {
+fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
     match datatype {
         DataType::Char => char_payload(data),
         DataType::String => string_payload(data),
@@ -372,7 +397,7 @@ fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Result
     }
 }
 
-fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Result<Payload, String> {
+fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
     let values = flatten_numeric(data)?;
     let mut bytes = Vec::with_capacity(values.len() * datatype.element_size());
     for value in values.iter().copied() {
@@ -396,13 +421,13 @@ fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Result
     })
 }
 
-fn char_payload(data: &Value) -> Result<Payload, String> {
+fn char_payload(data: &Value) -> BuiltinResult<Payload> {
     let bytes = match data {
         Value::CharArray(ca) => ca.data.iter().map(|&ch| (ch as u32 & 0xFF) as u8).collect(),
         Value::String(text) => text.bytes().collect(),
         Value::StringArray(sa) => {
             if sa.data.len() != 1 {
-                return Err(runtime_error(
+                return Err(write_flow(
                     MESSAGE_ID_INVALID_DATA,
                     "write: string array input must be scalar when using 'char'",
                 ));
@@ -419,7 +444,7 @@ fn char_payload(data: &Value) -> Result<Payload, String> {
             .map(|&b| if b != 0 { 1 } else { 0 })
             .collect(),
         _ => {
-            return Err(runtime_error(
+            return Err(write_flow(
                 MESSAGE_ID_INVALID_DATA,
                 "write: unsupported input for 'char' datatype",
             ))
@@ -431,7 +456,7 @@ fn char_payload(data: &Value) -> Result<Payload, String> {
     })
 }
 
-fn string_payload(data: &Value) -> Result<Payload, String> {
+fn string_payload(data: &Value) -> BuiltinResult<Payload> {
     match data {
         Value::String(text) => Ok(Payload {
             elements: 1,
@@ -452,7 +477,7 @@ fn string_payload(data: &Value) -> Result<Payload, String> {
                 });
             }
             if sa.data.len() != 1 {
-                return Err(runtime_error(
+                return Err(write_flow(
                     MESSAGE_ID_INVALID_DATA,
                     "write: string array input must be scalar when using 'string'",
                 ));
@@ -462,14 +487,14 @@ fn string_payload(data: &Value) -> Result<Payload, String> {
                 bytes: sa.data[0].as_bytes().to_vec(),
             })
         }
-        _ => Err(runtime_error(
+        _ => Err(write_flow(
             MESSAGE_ID_INVALID_DATA,
             "write: expected text input when using 'string' datatype",
         )),
     }
 }
 
-fn flatten_numeric(value: &Value) -> Result<Vec<f64>, String> {
+fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(t) => Ok(t.data.clone()),
         Value::Num(n) => Ok(vec![*n]),
@@ -488,14 +513,14 @@ fn flatten_numeric(value: &Value) -> Result<Vec<f64>, String> {
         Value::String(text) => Ok(text.chars().map(|ch| (ch as u32) as f64).collect()),
         Value::StringArray(sa) => {
             if sa.data.len() != 1 {
-                return Err(runtime_error(
+                return Err(write_flow(
                     MESSAGE_ID_INVALID_DATA,
                     "write: string array input must be scalar",
                 ));
             }
             Ok(sa.data[0].chars().map(|ch| (ch as u32) as f64).collect())
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(write_flow(
             MESSAGE_ID_INVALID_DATA,
             "write: complex data is not supported",
         )),
@@ -507,11 +532,11 @@ fn flatten_numeric(value: &Value) -> Result<Vec<f64>, String> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(runtime_error(
+        | Value::MException(_) => Err(write_flow(
             MESSAGE_ID_INVALID_DATA,
             "write: unsupported input type",
         )),
-        Value::GpuTensor(_) => Err(runtime_error(
+        Value::GpuTensor(_) => Err(write_flow(
             MESSAGE_ID_INVALID_DATA,
             "write: GPU tensor should have been gathered before encoding",
         )),
@@ -738,23 +763,24 @@ fn parse_byte_order(text: &str) -> ByteOrder {
     }
 }
 
-fn scalar_string(value: &Value) -> Result<String, String> {
+fn scalar_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(
-            "write: datatype argument must be a string scalar or character row vector".to_string(),
-        ),
+        _ => Err(write_flow(
+            MESSAGE_ID_INVALID_DATATYPE,
+            "write: datatype argument must be a string scalar or character row vector",
+        )),
     }
 }
 
-fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
+fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
     let id_value = struct_value
         .fields
         .get(CLIENT_HANDLE_FIELD)
         .ok_or_else(|| {
-            runtime_error(
+            write_flow(
                 MESSAGE_ID_INVALID_CLIENT,
                 "write: tcpclient struct is missing internal handle",
             )
@@ -762,15 +788,11 @@ fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
     match id_value {
         Value::Int(IntValue::U64(id)) => Ok(*id),
         Value::Int(iv) => Ok(iv.to_i64() as u64),
-        _ => Err(runtime_error(
+        _ => Err(write_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "write: tcpclient struct has invalid handle field",
         )),
     }
-}
-
-fn runtime_error(message_id: &'static str, message: impl Into<String>) -> String {
-    format!("{message_id}: {}", message.into())
 }
 
 enum WriteError {
@@ -847,6 +869,15 @@ pub(crate) mod tests {
                 other => panic!("unexpected id field {other:?}"),
             },
             other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert_eq!(err.identifier(), Some(expected));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 
@@ -966,10 +997,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let err =
             write_builtin(client.clone(), Value::Tensor(tensor), Vec::new()).expect_err("write");
-        assert!(
-            err.starts_with(MESSAGE_ID_NOT_CONNECTED),
-            "unexpected error {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_NOT_CONNECTED);
 
         remove_client_for_test(id);
         barrier.wait();

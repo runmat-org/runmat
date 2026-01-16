@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
 const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
@@ -205,6 +205,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are not eligible for fusion; metadata is registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "tempname";
+
+fn tempname_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "tempname",
     category = "io/repl_fs",
@@ -224,63 +248,64 @@ fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let folder = parse_folder_argument(&gathered)?;
             Ok(path_to_value(&generate_unique_path(&folder)?))
         }
-        _ => Err(((ERR_TOO_MANY_INPUTS.to_string())).into()),
+        _ => Err(tempname_error(ERR_TOO_MANY_INPUTS)),
     }
 }
 
-fn default_temp_directory() -> Result<PathBuf, String> {
+fn default_temp_directory() -> BuiltinResult<PathBuf> {
     let path = std::env::temp_dir();
     if path.as_os_str().is_empty() {
-        Err(ERR_TEMP_DIR_UNAVAILABLE.to_string())
+        Err(tempname_error(ERR_TEMP_DIR_UNAVAILABLE))
     } else {
         Ok(path)
     }
 }
 
-fn gather_argument(value: &Value) -> Result<Value, String> {
-    gather_if_needed(value).map_err(|err| format!("tempname: {err}"))
+fn gather_argument(value: &Value) -> BuiltinResult<Value> {
+    gather_if_needed(value).map_err(map_control_flow)
 }
 
-fn parse_folder_argument(value: &Value) -> Result<PathBuf, String> {
+fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {
     let text = match value {
         Value::String(s) => {
             if s.is_empty() {
-                return Err(ERR_FOLDER_EMPTY.to_string());
+                return Err(tempname_error(ERR_FOLDER_EMPTY));
             }
             s.clone()
         }
         Value::CharArray(array) => {
             if array.rows != 1 {
-                return Err(ERR_FOLDER_TYPE.to_string());
+                return Err(tempname_error(ERR_FOLDER_TYPE));
             }
             let collected: String = array.data.iter().collect();
             if collected.is_empty() {
-                return Err(ERR_FOLDER_EMPTY.to_string());
+                return Err(tempname_error(ERR_FOLDER_EMPTY));
             }
             collected
         }
         Value::StringArray(array) => {
             if array.data.len() != 1 {
-                return Err(ERR_FOLDER_TYPE.to_string());
+                return Err(tempname_error(ERR_FOLDER_TYPE));
             }
             let collected = array.data[0].clone();
             if collected.is_empty() {
-                return Err(ERR_FOLDER_EMPTY.to_string());
+                return Err(tempname_error(ERR_FOLDER_EMPTY));
             }
             collected
         }
-        _ => return Err(ERR_FOLDER_TYPE.to_string()),
+        _ => return Err(tempname_error(ERR_FOLDER_TYPE)),
     };
 
-    let expanded = expand_user_path(&text, "tempname")?;
+    let expanded = expand_user_path(&text, "tempname")
+        .map_err(|err| tempname_error(err))?;
     if expanded.is_empty() {
-        Err(ERR_FOLDER_EMPTY.to_string())
+        Err(tempname_error(ERR_FOLDER_EMPTY))
     } else {
         Ok(PathBuf::from(expanded))
     }
 }
 
-fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
+fn generate_unique_path(base: &Path) -> BuiltinResult<PathBuf> {
     for _ in 0..MAX_ATTEMPTS {
         let token = unique_token();
         let candidate = if base.as_os_str().is_empty() {
@@ -292,7 +317,7 @@ fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
     }
-    Err(ERR_UNABLE_TO_GENERATE.to_string())
+    Err(tempname_error(ERR_UNABLE_TO_GENERATE))
 }
 
 fn unique_token() -> String {
@@ -320,10 +345,18 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::fs::home_directory;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::StringArray;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in tempname tests"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -460,23 +493,25 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_too_many_arguments() {
-        let err = tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("error");
-        assert_eq!(err, ERR_TOO_MANY_INPUTS);
+        let err = unwrap_error(
+            tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("error"),
+        );
+        assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_invalid_type() {
-        let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");
-        assert_eq!(err, ERR_FOLDER_TYPE);
+        let err = unwrap_error(tempname_builtin(vec![Value::Num(1.0)]).expect_err("error"));
+        assert_eq!(err.message(), ERR_FOLDER_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_empty_folder() {
         let empty = Value::CharArray(CharArray::new_row(""));
-        let err = tempname_builtin(vec![empty]).expect_err("error");
-        assert_eq!(err, ERR_FOLDER_EMPTY);
+        let err = unwrap_error(tempname_builtin(vec![empty]).expect_err("error"));
+        assert_eq!(err.message(), ERR_FOLDER_EMPTY);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -69,6 +69,8 @@ use runmat_runtime::builtins::plotting::{
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
+use runmat_runtime::RuntimeControlFlow;
+#[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
     wasm_registry,
@@ -617,7 +619,7 @@ pub async fn wasm_render_figure_image(
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
     let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
         .await
-        .map_err(figure_error_to_js)?;
+        .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 
@@ -1129,9 +1131,21 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 gpu_status.adapter = capture_gpu_adapter_info();
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if let Err(err) = plotting_context::ensure_context_from_provider() {
-                        warn!("RunMat wasm: unable to install shared plotting context: {err}");
-                        gpu_status.error = Some(err.to_string());
+                    if let Err(flow) = plotting_context::ensure_context_from_provider() {
+                        let (log_message, status_message) = match flow {
+                            RuntimeControlFlow::Error(err) => {
+                                let message = err.message().to_string();
+                                (message.clone(), message)
+                            }
+                            RuntimeControlFlow::Suspend(pending) => {
+                                let message = format!("suspend: {}", pending.prompt);
+                                (message.clone(), pending.prompt)
+                            }
+                        };
+                        warn!(
+                            "RunMat wasm: unable to install shared plotting context: {log_message}"
+                        );
+                        gpu_status.error = Some(status_message);
                     }
                 }
             }
@@ -1334,7 +1348,8 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
-        FigureError::RenderFailure(details) => {
+        FigureError::RenderFailure { source } => {
+            let details = source.to_string();
             let _ = Reflect::set(
                 &payload,
                 &JsValue::from_str("details"),
@@ -1354,6 +1369,17 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         &JsValue::from_str(&message),
     );
     JsValue::from(payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_flow_to_js(flow: RuntimeControlFlow) -> JsValue {
+    match flow {
+        RuntimeControlFlow::Error(err) => js_error(err.message()),
+        RuntimeControlFlow::Suspend(pending) => {
+            let message = format!("Execution suspended: {}", pending.prompt);
+            js_error(&message)
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

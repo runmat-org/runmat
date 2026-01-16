@@ -1704,10 +1704,20 @@ fn compare_matmul(
 
 fn time<F, T>(mut f: F) -> Result<Duration>
 where
-    F: FnMut() -> Result<T, String>,
+    F: FnMut() -> runmat_runtime::BuiltinResult<T>,
 {
     let start = Instant::now();
-    let _ = f().map_err(|e| anyhow!(e))?;
+    let _ = f().map_err(|flow| match flow {
+        runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!(err),
+        runmat_runtime::RuntimeControlFlow::Suspend(pending) => anyhow!(
+            runmat_runtime::build_runtime_error(format!(
+                "auto-offload calibration suspended: {}",
+                pending.prompt
+            ))
+            .with_phase("auto_offload")
+            .build()
+        ),
+    })?;
     Ok(start.elapsed())
 }
 

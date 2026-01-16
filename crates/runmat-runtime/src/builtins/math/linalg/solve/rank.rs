@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "rank";
 
@@ -216,6 +217,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may keep the computation on-device via the `rank` hook; the reference backend gathers to the host and re-uploads a scalar.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::rank")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -235,24 +262,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rank",
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
-fn rank_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let tol = parse_tolerance_arg(NAME, &rest)?;
+fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
     match value {
-        Value::GpuTensor(handle) => (rank_gpu(handle, tol)).map_err(Into::into),
-        Value::ComplexTensor(tensor) => (rank_complex_tensor_value(tensor, tol)).map_err(Into::into),
+        Value::GpuTensor(handle) => rank_gpu(handle, tol),
+        Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
-            Ok(rank_complex_tensor_value(tensor, tol)?)
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
+            rank_complex_tensor_value(tensor, tol)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            Ok(rank_real_tensor_value(tensor, tol)?)
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            rank_real_tensor_value(tensor, tol)
         }
     }
 }
 
-fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> {
+fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.rank(&handle, tol) {
             Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
@@ -262,13 +288,17 @@ fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> 
         }
     }
 
-    let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("{NAME}: failed to gather GPU tensor for rank computation ({e})"))?;
+    let gathered =
+        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
     let rank = rank_scalar_from_value(gathered, tol)?;
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(uploaded) = upload_rank_scalar(provider, rank) {
-            return Ok(Value::GpuTensor(uploaded));
+        match upload_rank_scalar(provider, rank) {
+            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => {}
         }
     }
 
@@ -278,44 +308,54 @@ fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> 
 fn upload_rank_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     rank: f64,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let data = [rank];
     let shape = [1usize, 1usize];
     let view = HostTensorView {
         data: &data,
         shape: &shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn rank_real_tensor_value(tensor: Tensor, tol: Option<f64>) -> Result<Value, String> {
+fn rank_real_tensor_value(tensor: Tensor, tol: Option<f64>) -> BuiltinResult<Value> {
     let rank = rank_real_tensor(&tensor, tol)?;
     Ok(Value::Num(rank as f64))
 }
 
-fn rank_complex_tensor_value(tensor: ComplexTensor, tol: Option<f64>) -> Result<Value, String> {
+fn rank_complex_tensor_value(tensor: ComplexTensor, tol: Option<f64>) -> BuiltinResult<Value> {
     let rank = rank_complex_tensor(&tensor, tol)?;
     Ok(Value::Num(rank as f64))
 }
 
-fn rank_scalar_from_value(value: Value, tol: Option<f64>) -> Result<f64, String> {
+fn rank_scalar_from_value(value: Value, tol: Option<f64>) -> BuiltinResult<f64> {
     match value {
         Value::Tensor(t) => rank_real_tensor(&t, tol).map(|r| r as f64),
         Value::ComplexTensor(t) => rank_complex_tensor(&t, tol).map(|r| r as f64),
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
             rank_complex_tensor(&tensor, tol).map(|r| r as f64)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
             rank_real_tensor(&tensor, tol).map(|r| r as f64)
         }
     }
 }
 
-fn rank_real_tensor(matrix: &Tensor, tol: Option<f64>) -> Result<usize, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice())?;
+fn rank_real_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usize> {
+    rank_real_tensor_impl(matrix, tol)
+}
+
+fn rank_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResult<usize> {
+    rank_complex_tensor_impl(matrix, tol)
+}
+
+fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usize> {
+    let (rows, cols) =
+        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -330,8 +370,9 @@ fn rank_real_tensor(matrix: &Tensor, tol: Option<f64>) -> Result<usize, String> 
         .count())
 }
 
-fn rank_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> Result<usize, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice())?;
+fn rank_complex_tensor_impl(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResult<usize> {
+    let (rows, cols) =
+        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -352,15 +393,23 @@ fn rank_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> Result<usize
 }
 
 /// Host helper used by acceleration providers that defer rank to the shared implementation.
-pub fn rank_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Result<usize, String> {
-    rank_real_tensor(matrix, tol)
+pub fn rank_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usize> {
+    rank_real_tensor_impl(matrix, tol)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, Value};
+
+    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -433,9 +482,9 @@ pub(crate) mod tests {
     #[test]
     fn rank_invalid_shape_errors() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
-        let err = rank_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        let err = unwrap_error(rank_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert!(
-            err.contains("2-D matrices or vectors"),
+            err.message().contains("2-D matrices or vectors"),
             "unexpected error message: {err}"
         );
     }
@@ -444,9 +493,10 @@ pub(crate) mod tests {
     #[test]
     fn rank_negative_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let err = rank_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)]).unwrap_err();
+        let err =
+            unwrap_error(rank_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)]).unwrap_err());
         assert!(
-            err.contains("tolerance must be >= 0"),
+            err.message().contains("tolerance must be >= 0"),
             "unexpected error message: {err}"
         );
     }
@@ -456,9 +506,11 @@ pub(crate) mod tests {
     fn rank_non_scalar_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let tol = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = rank_builtin(Value::Tensor(tensor), vec![Value::Tensor(tol)]).unwrap_err();
+        let err = unwrap_error(
+            rank_builtin(Value::Tensor(tensor), vec![Value::Tensor(tol)]).unwrap_err(),
+        );
         assert!(
-            err.contains("tolerance must be a real scalar"),
+            err.message().contains("tolerance must be a real scalar"),
             "unexpected error message: {err}"
         );
     }

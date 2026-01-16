@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -188,6 +189,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "ifft2 terminates fusion plans; fused kernels are not generated for multi-dimensional inverse FFTs.",
 };
 
+const BUILTIN_NAME: &str = "ifft2";
+
+fn ifft2_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "ifft2",
     category = "math/fft",
@@ -198,8 +205,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (ifft2_gpu(handle, (len_rows, len_cols), symmetric)).map_err(Into::into),
-        other => (ifft2_host(other, (len_rows, len_cols), symmetric)).map_err(Into::into),
+        Value::GpuTensor(handle) => ifft2_gpu(handle, (len_rows, len_cols), symmetric),
+        other => ifft2_host(other, (len_rows, len_cols), symmetric),
     }
 }
 
@@ -207,8 +214,8 @@ fn ifft2_host(
     value: Value,
     lengths: (Option<usize>, Option<usize>),
     symmetric: bool,
-) -> Result<Value, String> {
-    let tensor = value_to_complex_tensor(value, "ifft2")?;
+) -> BuiltinResult<Value> {
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = ifft2_complex_tensor(tensor, lengths)?;
     finalize_ifft2_output(transformed, symmetric)
 }
@@ -217,7 +224,7 @@ fn ifft2_gpu(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
     symmetric: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if matches!(lengths.0, Some(0)) || matches!(lengths.1, Some(0)) {
         return ifft2_gpu_fallback(handle, lengths, symmetric);
     }
@@ -248,29 +255,29 @@ fn ifft2_gpu(
 fn ifft2_download_gpu_result(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let host = provider
         .download(handle)
-        .map_err(|e| format!("ifft2: {e}"))?;
+        .map_err(|e| ifft2_error(format!("ifft2: {e}")))?;
     provider.free(handle).ok();
     runmat_accelerate_api::clear_residency(handle);
-    host_to_complex_tensor(host, "ifft2")
+    host_to_complex_tensor(host, BUILTIN_NAME)
 }
 
 fn ifft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
     symmetric: bool,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     let complex = if tensor.shape.last() == Some(&2) {
         let host = HostTensorOwned {
             data: tensor.data,
             shape: tensor.shape,
         };
-        host_to_complex_tensor(host, "ifft2")?
+        host_to_complex_tensor(host, BUILTIN_NAME)?
     } else {
-        tensor_to_complex_tensor(tensor, "ifft2")?
+        tensor_to_complex_tensor(tensor, BUILTIN_NAME)?
     };
     let transformed = ifft2_complex_tensor(complex, lengths)?;
     finalize_ifft2_output(transformed, symmetric)
@@ -279,30 +286,31 @@ fn ifft2_gpu_fallback(
 fn ifft2_complex_tensor(
     tensor: ComplexTensor,
     lengths: (Option<usize>, Option<usize>),
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let (len_rows, len_cols) = lengths;
     let first = ifft_complex_tensor(tensor, len_rows, Some(1))?;
     ifft_complex_tensor(first, len_cols, Some(2))
 }
 
-fn finalize_ifft2_output(tensor: ComplexTensor, symmetric: bool) -> Result<Value, String> {
+fn finalize_ifft2_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
     if symmetric {
-        complex_tensor_to_real_value(tensor, "ifft2")
+        complex_tensor_to_real_value(tensor, BUILTIN_NAME)
     } else {
         Ok(complex_tensor_into_value(tensor))
     }
 }
 
-fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Result<Value, String> {
+fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
     let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
-    let real = Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("{builtin}: {e}"))?;
+    let real = Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| ifft2_error(format!("{builtin}: {e}")))?;
     Ok(Value::Tensor(real))
 }
 
 type LengthPair = (Option<usize>, Option<usize>);
 type LengthsAndSymmetry = (LengthPair, bool);
 
-fn parse_ifft2_arguments(args: &[Value]) -> Result<LengthsAndSymmetry, String> {
+fn parse_ifft2_arguments(args: &[Value]) -> BuiltinResult<LengthsAndSymmetry> {
     if args.is_empty() {
         return Ok(((None, None), false));
     }
@@ -317,28 +325,29 @@ fn parse_ifft2_arguments(args: &[Value]) -> Result<LengthsAndSymmetry, String> {
         0 => (None, None),
         1 => parse_ifft2_single(&rem[0])?,
         2 => {
-            let rows = parse_length(&rem[0], "ifft2")?;
-            let cols = parse_length(&rem[1], "ifft2")?;
+            let rows = parse_length(&rem[0], BUILTIN_NAME)?;
+            let cols = parse_length(&rem[1], BUILTIN_NAME)?;
             (rows, cols)
         }
         _ => {
-            return Err(
-                "ifft2: expected ifft2(X), ifft2(X, M, N), or ifft2(X, SIZE[, symflag])"
-                    .to_string(),
-            )
+            return Err(ifft2_error(
+                "ifft2: expected ifft2(X), ifft2(X, M, N), or ifft2(X, SIZE[, symflag])",
+            ))
         }
     };
 
     Ok((lengths, symmetry))
 }
 
-fn split_symflag(args: &[Value]) -> Result<(Option<bool>, &[Value]), String> {
+fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
     if let Some((last, rest)) = args.split_last() {
         if let Some(flag) = parse_symflag(last)? {
             // Ensure no earlier argument is also a symmetry flag.
             for value in rest {
                 if parse_symflag(value)?.is_some() {
-                    return Err("ifft2: symmetry flag must appear once at the end".to_string());
+                    return Err(ifft2_error(
+                        "ifft2: symmetry flag must appear once at the end",
+                    ));
                 }
             }
             return Ok((Some(flag), rest));
@@ -348,37 +357,42 @@ fn split_symflag(args: &[Value]) -> Result<(Option<bool>, &[Value]), String> {
     // Validate that no argument except the last is a symmetry flag.
     for value in args {
         if parse_symflag(value)?.is_some() {
-            return Err("ifft2: symmetry flag must appear as the final argument".to_string());
+            return Err(ifft2_error(
+                "ifft2: symmetry flag must appear as the final argument",
+            ));
         }
     }
 
     Ok((None, args))
 }
 
-fn parse_ifft2_single(value: &Value) -> Result<(Option<usize>, Option<usize>), String> {
+fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
-        Value::Tensor(tensor) => parse_length_pair(&tensor.data, "ifft2"),
+        Value::Tensor(tensor) => parse_length_pair(&tensor.data, BUILTIN_NAME),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
-            parse_length_pair(&tensor.data, "ifft2")
+            let tensor = tensor::logical_to_tensor(logical)
+                .map_err(|e| ifft2_error(format!("{BUILTIN_NAME}: {e}")))?;
+            parse_length_pair(&tensor.data, BUILTIN_NAME)
         }
         Value::Num(_) | Value::Int(_) => {
-            let len = parse_length(value, "ifft2")?;
+            let len = parse_length(value, BUILTIN_NAME)?;
             Ok((len, len))
         }
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
-                return Err("ifft2: transform lengths must be real-valued".to_string());
+                return Err(ifft2_error("ifft2: transform lengths must be real-valued"));
             }
             let scalar = Value::Num(*re);
-            let len = parse_length(&scalar, "ifft2")?;
+            let len = parse_length(&scalar, BUILTIN_NAME)?;
             Ok((len, len))
         }
-        Value::ComplexTensor(_) => Err("ifft2: size vector must contain real values".to_string()),
-        Value::GpuTensor(_) => {
-            Err("ifft2: size vector must be numeric and host-resident".to_string())
+        Value::ComplexTensor(_) => {
+            Err(ifft2_error("ifft2: size vector must contain real values"))
         }
-        Value::Bool(_) => Err("ifft2: transform lengths must be numeric".to_string()),
+        Value::GpuTensor(_) => Err(ifft2_error(
+            "ifft2: size vector must be numeric and host-resident",
+        )),
+        Value::Bool(_) => Err(ifft2_error("ifft2: transform lengths must be numeric")),
         Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
@@ -390,14 +404,14 @@ fn parse_ifft2_single(value: &Value) -> Result<(Option<usize>, Option<usize>), S
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err("ifft2: transform lengths must be numeric".to_string()),
+        | Value::MException(_) => Err(ifft2_error("ifft2: transform lengths must be numeric")),
     }
 }
 
 fn parse_length_pair(
     data: &[f64],
     builtin: &str,
-) -> Result<(Option<usize>, Option<usize>), String> {
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match data.len() {
         0 => Ok((None, None)),
         1 => {
@@ -412,13 +426,13 @@ fn parse_length_pair(
             let len_cols = parse_length(&second, builtin)?;
             Ok((len_rows, len_cols))
         }
-        _ => Err(format!(
+        _ => Err(ifft2_error(format!(
             "{builtin}: size vector must contain at most two elements"
-        )),
+        ))),
     }
 }
 
-fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
+fn parse_symflag(value: &Value) -> BuiltinResult<Option<bool>> {
     use std::borrow::Cow;
 
     let text: Option<Cow<'_, str>> = match value {
@@ -441,7 +455,7 @@ fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
     } else if trimmed.eq_ignore_ascii_case("nonsymmetric") {
         Ok(Some(false))
     } else {
-        Err(format!("ifft2: unrecognized option '{trimmed}'"))
+        Err(ifft2_error(format!("ifft2: unrecognized option '{trimmed}'")))
     }
 }
 
@@ -454,6 +468,15 @@ pub(crate) mod tests {
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
+    }
+
+    fn error_message(flow: crate::RuntimeControlFlow) -> String {
+        match flow {
+            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
+            crate::RuntimeControlFlow::Suspend(_) => {
+                panic!("unexpected suspension in ifft2 tests")
+            }
+        }
     }
 
     fn fft2_of_tensor(tensor: &HostTensor) -> ComplexTensor {
@@ -574,8 +597,9 @@ pub(crate) mod tests {
     fn ifft2_rejects_boolean_length() {
         let tensor = HostTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let err =
-            ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Bool(true)]).unwrap_err();
+        let err = error_message(
+            ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Bool(true)]).unwrap_err(),
+        );
         assert!(err.contains("ifft2"));
         assert!(err.contains("numeric"));
     }
@@ -585,15 +609,17 @@ pub(crate) mod tests {
     fn ifft2_rejects_excess_arguments() {
         let tensor = HostTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let err = ifft2_builtin(
-            Value::ComplexTensor(spectrum),
-            vec![
-                Value::Int(IntValue::I32(2)),
-                Value::Int(IntValue::I32(2)),
-                Value::Int(IntValue::I32(2)),
-            ],
-        )
-        .unwrap_err();
+        let err = error_message(
+            ifft2_builtin(
+                Value::ComplexTensor(spectrum),
+                vec![
+                    Value::Int(IntValue::I32(2)),
+                    Value::Int(IntValue::I32(2)),
+                    Value::Int(IntValue::I32(2)),
+                ],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("ifft2"));
     }
 
@@ -671,7 +697,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft2_rejects_unknown_symmetry_flag() {
-        let err = parse_ifft2_arguments(&[Value::from("invalid")]).unwrap_err();
+        let err = error_message(parse_ifft2_arguments(&[Value::from("invalid")]).unwrap_err());
         assert!(err.contains("unrecognized option"));
     }
 
@@ -680,11 +706,13 @@ pub(crate) mod tests {
     fn ifft2_requires_symflag_last() {
         let tensor = HostTensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let err = ifft2_builtin(
-            Value::ComplexTensor(spectrum),
-            vec![Value::from("symmetric"), Value::Int(IntValue::I32(2))],
-        )
-        .unwrap_err();
+        let err = error_message(
+            ifft2_builtin(
+                Value::ComplexTensor(spectrum),
+                vec![Value::from("symmetric"), Value::Int(IntValue::I32(2))],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("symmetry flag must appear as the final argument"));
     }
 

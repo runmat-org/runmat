@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -227,11 +228,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest)?;
-    eval.linear_value().map_err(Into::into)
+    eval.linear_value()
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.
-pub fn evaluate(value: Value, args: &[Value]) -> Result<FindEval, String> {
+pub fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<FindEval> {
     let options = parse_options(args)?;
     match value {
         Value::GpuTensor(handle) => {
@@ -356,7 +357,7 @@ impl FindEval {
         }
     }
 
-    pub fn linear_value(&self) -> Result<Value, String> {
+    pub fn linear_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
             FindEvalInner::Host { result, prefer_gpu } => {
                 let tensor = result.linear_tensor()?;
@@ -366,7 +367,7 @@ impl FindEval {
         }
     }
 
-    pub fn row_value(&self) -> Result<Value, String> {
+    pub fn row_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
             FindEvalInner::Host { result, prefer_gpu } => {
                 let tensor = result.row_tensor()?;
@@ -376,7 +377,7 @@ impl FindEval {
         }
     }
 
-    pub fn column_value(&self) -> Result<Value, String> {
+    pub fn column_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
             FindEvalInner::Host { result, prefer_gpu } => {
                 let tensor = result.column_tensor()?;
@@ -386,19 +387,19 @@ impl FindEval {
         }
     }
 
-    pub fn values_value(&self) -> Result<Value, String> {
+    pub fn values_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
             FindEvalInner::Host { result, prefer_gpu } => result.values_value(*prefer_gpu),
             FindEvalInner::Gpu { result } => result
                 .values
                 .as_ref()
                 .map(|handle| Value::GpuTensor(handle.clone()))
-                .ok_or_else(|| "find: provider did not return values buffer".to_string()),
+                .ok_or_else(|| find_error("find: provider did not return values buffer")),
         }
     }
 }
 
-fn parse_options(args: &[Value]) -> Result<FindOptions, String> {
+fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
     match args.len() {
         0 => Ok(FindOptions::default()),
         1 => {
@@ -422,23 +423,23 @@ fn parse_options(args: &[Value]) -> Result<FindOptions, String> {
         2 => {
             let limit = parse_limit(&args[0])?;
             let direction = parse_direction(&args[1])?
-                .ok_or_else(|| "find: third argument must be 'first' or 'last'".to_string())?;
+                .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
             Ok(FindOptions {
                 limit: Some(limit),
                 direction,
             })
         }
-        _ => Err("find: too many input arguments".to_string()),
+        _ => Err(find_error("find: too many input arguments")),
     }
 }
 
-fn parse_direction(value: &Value) -> Result<Option<FindDirection>, String> {
+fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<FindDirection>> {
     if let Some(text) = tensor::value_to_string(value) {
         let lowered = text.trim().to_ascii_lowercase();
         match lowered.as_str() {
             "first" => Ok(Some(FindDirection::First)),
             "last" => Ok(Some(FindDirection::Last)),
-            _ => Err("find: direction must be 'first' or 'last'".to_string()),
+            _ => Err(find_error("find: direction must be 'first' or 'last'")),
         }
     } else {
         Ok(None)
@@ -454,41 +455,42 @@ fn is_direction_like(value: &Value) -> bool {
     }
 }
 
-fn parse_limit(value: &Value) -> Result<usize, String> {
+fn parse_limit(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(handle)?;
             parse_limit_tensor(&tensor)
         }
         _ => {
-            let tensor = tensor::value_to_tensor(value)?;
+            let tensor = tensor::value_to_tensor(value)
+                .map_err(|message| find_error(message))?;
             parse_limit_tensor(&tensor)
         }
     }
 }
 
-fn parse_limit_tensor(tensor: &Tensor) -> Result<usize, String> {
+fn parse_limit_tensor(tensor: &Tensor) -> crate::BuiltinResult<usize> {
     if tensor.data.len() != 1 {
-        return Err("find: second argument must be a scalar".to_string());
+        return Err(find_error("find: second argument must be a scalar"));
     }
     parse_limit_scalar(tensor.data[0])
 }
 
-fn parse_limit_scalar(value: f64) -> Result<usize, String> {
+fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("find: K must be a finite, non-negative integer".to_string());
+        return Err(find_error("find: K must be a finite, non-negative integer"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("find: K must be a finite, non-negative integer".to_string());
+        return Err(find_error("find: K must be a finite, non-negative integer"));
     }
     if rounded < 0.0 {
-        return Err("find: K must be >= 0".to_string());
+        return Err(find_error("find: K must be >= 0"));
     }
     Ok(rounded as usize)
 }
 
-fn materialize_input(value: Value) -> Result<(DataStorage, bool), String> {
+fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, bool)> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -496,26 +498,28 @@ fn materialize_input(value: Value) -> Result<(DataStorage, bool), String> {
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|message| find_error(message))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("find: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Int(i) => {
-            let tensor =
-                Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| format!("find: {e}"))?;
+            let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| format!("find: {e}"))?;
+                .map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Complex(re, im) => {
-            let tensor =
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("find: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Complex(tensor), false))
         }
         Value::ComplexTensor(tensor) => Ok((DataStorage::Complex(tensor), false)),
@@ -528,13 +532,13 @@ fn materialize_input(value: Value) -> Result<(DataStorage, bool), String> {
                 }
             }
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| format!("find: {e}"))?;
+                .map_err(|e| find_error(format!("find: {e}")))?;
             Ok((DataStorage::Real(tensor), false))
         }
-        other => Err(format!(
+        other => Err(find_error(format!(
             "find: unsupported input type {:?}; expected numeric, logical, or char data",
             other
-        )),
+        ))),
     }
 }
 
@@ -631,13 +635,13 @@ impl FindResult {
         }
     }
 
-    fn linear_tensor(&self) -> Result<Tensor, String> {
+    fn linear_tensor(&self) -> crate::BuiltinResult<Tensor> {
         let data: Vec<f64> = self.indices.iter().map(|&idx| idx as f64).collect();
         let rows = data.len();
-        Tensor::new(data, vec![rows, 1]).map_err(|e| format!("find: {e}"))
+        Tensor::new(data, vec![rows, 1]).map_err(|e| find_error(format!("find: {e}")))
     }
 
-    fn row_tensor(&self) -> Result<Tensor, String> {
+    fn row_tensor(&self) -> crate::BuiltinResult<Tensor> {
         let mut data = Vec::with_capacity(self.indices.len());
         let rows = self.shape.first().copied().unwrap_or(1).max(1);
         for &idx in &self.indices {
@@ -645,10 +649,11 @@ impl FindResult {
             let row = (zero_based % rows) + 1;
             data.push(row as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| format!("find: {e}"))
+        Tensor::new(data, vec![self.indices.len(), 1])
+            .map_err(|e| find_error(format!("find: {e}")))
     }
 
-    fn column_tensor(&self) -> Result<Tensor, String> {
+    fn column_tensor(&self) -> crate::BuiltinResult<Tensor> {
         let mut data = Vec::with_capacity(self.indices.len());
         let rows = self.shape.first().copied().unwrap_or(1).max(1);
         for &idx in &self.indices {
@@ -656,19 +661,20 @@ impl FindResult {
             let col = (zero_based / rows) + 1;
             data.push(col as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| format!("find: {e}"))
+        Tensor::new(data, vec![self.indices.len(), 1])
+            .map_err(|e| find_error(format!("find: {e}")))
     }
 
-    fn values_value(&self, prefer_gpu: bool) -> Result<Value, String> {
+    fn values_value(&self, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
         match &self.values {
             FindValues::Real(values) => {
                 let tensor = Tensor::new(values.clone(), vec![values.len(), 1])
-                    .map_err(|e| format!("find: {e}"))?;
+                    .map_err(|e| find_error(format!("find: {e}")))?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
             FindValues::Complex(values) => {
                 let tensor = ComplexTensor::new(values.clone(), vec![values.len(), 1])
-                    .map_err(|e| format!("find: {e}"))?;
+                    .map_err(|e| find_error(format!("find: {e}")))?;
                 Ok(complex_tensor_into_value(tensor))
             }
         }
@@ -688,6 +694,10 @@ fn tensor_to_value(tensor: Tensor, prefer_gpu: bool) -> Value {
         }
     }
     tensor::tensor_into_value(tensor)
+}
+
+fn find_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("find").build().into()
 }
 
 #[cfg(test)]
@@ -784,7 +794,7 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(1)), Value::from("invalid")],
         )
         .expect_err("expected error");
-        assert!(err.contains("direction"));
+        assert!(err.to_string().contains("direction"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

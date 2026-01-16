@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "pinv";
 
@@ -195,6 +196,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "pinv",
@@ -214,24 +241,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "pinv",
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
-fn pinv_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let tol = parse_tolerance_arg(NAME, &rest)?;
+fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
     match value {
-        Value::GpuTensor(handle) => (pinv_gpu(handle, tol)).map_err(Into::into),
-        Value::ComplexTensor(t) => (pinv_complex_value(t, tol)).map_err(Into::into),
+        Value::GpuTensor(handle) => pinv_gpu(handle, tol),
+        Value::ComplexTensor(t) => pinv_complex_value(t, tol),
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
-            Ok(pinv_complex_value(tensor, tol)?)
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
+            pinv_complex_value(tensor, tol)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            Ok(pinv_real_value(tensor, tol)?)
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            pinv_real_value(tensor, tol)
         }
     }
 }
 
-fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> {
+fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let options = ProviderPinvOptions { tolerance: tol };
         match provider.pinv(&handle, options) {
@@ -240,7 +266,7 @@ fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> 
                 // Fall through to host implementation and attempt to re-upload
             }
         }
-        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
         let pinv = pinv_real_tensor(&gathered, tol)?;
         if let Ok(uploaded) = provider.upload(&HostTensorView {
             data: &pinv.data,
@@ -250,37 +276,50 @@ fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> Result<Value, String> 
         }
         return Ok(tensor::tensor_into_value(pinv));
     }
-    let gathered = gpu_helpers::gather_tensor(&handle)?;
+    let gathered = gpu_helpers::gather_tensor(&handle).map_err(map_control_flow)?;
     let pinv = pinv_real_tensor(&gathered, tol)?;
     Ok(tensor::tensor_into_value(pinv))
 }
 
-fn pinv_real_value(tensor: Tensor, tol: Option<f64>) -> Result<Value, String> {
+fn pinv_real_value(tensor: Tensor, tol: Option<f64>) -> BuiltinResult<Value> {
     let pinv = pinv_real_tensor(&tensor, tol)?;
     Ok(tensor::tensor_into_value(pinv))
 }
 
-fn pinv_complex_value(tensor: ComplexTensor, tol: Option<f64>) -> Result<Value, String> {
+fn pinv_complex_value(tensor: ComplexTensor, tol: Option<f64>) -> BuiltinResult<Value> {
     let pinv = pinv_complex_tensor(&tensor, tol)?;
     Ok(complex_tensor_into_value(pinv))
 }
 
-fn pinv_real_tensor(matrix: &Tensor, tol: Option<f64>) -> Result<Tensor, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice())?;
+fn pinv_real_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
+    pinv_real_tensor_impl(matrix, tol)
+}
+
+fn pinv_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResult<ComplexTensor> {
+    pinv_complex_tensor_impl(matrix, tol)
+}
+
+fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
+    let (rows, cols) =
+        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
-            .map_err(|e| format!("{NAME}: {e}"));
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
     let pinv = pseudoinverse_real(&dm, tol)?;
     matrix_to_tensor(NAME, pinv)
 }
 
-fn pinv_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> Result<ComplexTensor, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice())?;
+fn pinv_complex_tensor_impl(
+    matrix: &ComplexTensor,
+    tol: Option<f64>,
+) -> BuiltinResult<ComplexTensor> {
+    let (rows, cols) =
+        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return ComplexTensor::new(vec![(0.0, 0.0); cols * rows], vec![cols, rows])
-            .map_err(|e| format!("{NAME}: {e}"));
+            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
         .data
@@ -292,55 +331,55 @@ fn pinv_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> Result<Compl
     matrix_to_complex_tensor(NAME, pinv)
 }
 
-fn pseudoinverse_real(matrix: &DMatrix<f64>, tol: Option<f64>) -> Result<DMatrix<f64>, String> {
+fn pseudoinverse_real(matrix: &DMatrix<f64>, tol: Option<f64>) -> BuiltinResult<DMatrix<f64>> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let svd = SVD::new(matrix.clone(), true, true);
     let cutoff =
         tol.unwrap_or_else(|| svd_default_tolerance(svd.singular_values.as_slice(), rows, cols));
     svd.pseudo_inverse(cutoff)
-        .map_err(|msg| format!("{NAME}: failed to compute pseudoinverse ({msg})"))
+        .map_err(|msg| builtin_error(format!(
+            "{NAME}: failed to compute pseudoinverse ({msg})"
+        )))
+
 }
 
-fn pseudoinverse_complex(
-    matrix: &DMatrix<Complex64>,
-    tol: Option<f64>,
-) -> Result<DMatrix<Complex64>, String> {
+fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    let svd = SVD::new(matrix.clone(), true, true);
-    let cutoff =
-        tol.unwrap_or_else(|| svd_default_tolerance(svd.singular_values.as_slice(), rows, cols));
-    svd.pseudo_inverse(cutoff)
-        .map_err(|msg| format!("{NAME}: failed to compute pseudoinverse ({msg})"))
-}
-
-fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>) -> Result<Tensor, String> {
-    let rows = matrix.nrows();
-    let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols]).map_err(|e| format!("{label}: {e}"))
+    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 fn matrix_to_complex_tensor(
     label: &str,
     matrix: DMatrix<Complex64>,
-) -> Result<ComplexTensor, String> {
+) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| format!("{label}: {e}"))
+    ComplexTensor::new(data, vec![rows, cols])
+        .map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 /// Host helper used by acceleration providers that delegate `pinv` back to the CPU path.
-pub fn pinv_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Result<Tensor, String> {
-    pinv_real_tensor(matrix, tol)
+pub fn pinv_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
+    pinv_real_tensor_impl(matrix, tol)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{CharArray, IntValue, Tensor, Value};
+
+    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     fn approx_equal(a: &[f64], b: &[f64], tol: f64) {
         assert_eq!(a.len(), b.len(), "length mismatch");
@@ -485,9 +524,10 @@ pub(crate) mod tests {
     #[test]
     fn pinv_rejects_negative_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err =
-            pinv_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(-1))]).unwrap_err();
-        assert!(err.contains("tolerance"));
+        let err = unwrap_error(
+            pinv_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(-1))]).unwrap_err(),
+        );
+        assert!(err.message().contains("tolerance"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -506,8 +546,10 @@ pub(crate) mod tests {
     fn pinv_tolerance_rejects_non_scalar_tensor() {
         let tol_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = pinv_builtin(Value::Tensor(tensor), vec![Value::Tensor(tol_tensor)]).unwrap_err();
-        assert!(err.contains("tolerance must be a real scalar"));
+        let err = unwrap_error(
+            pinv_builtin(Value::Tensor(tensor), vec![Value::Tensor(tol_tensor)]).unwrap_err(),
+        );
+        assert!(err.message().contains("tolerance must be a real scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -515,8 +557,10 @@ pub(crate) mod tests {
     fn pinv_tolerance_rejects_char_array() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let chars = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
-        let err = pinv_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err();
-        assert!(err.contains("tolerance must be a real scalar"));
+        let err = unwrap_error(
+            pinv_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err(),
+        );
+        assert!(err.message().contains("tolerance must be a real scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,14 +5,15 @@ use std::collections::{HashSet, VecDeque};
 
 use log::debug;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::gpu_helpers;
+use crate::{build_runtime_error, BuiltinResult};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -232,6 +233,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Structure-analysis builtin; fusion is not applicable.",
 };
 
+const BUILTIN_NAME: &str = "symrcm";
+
 #[runtime_builtin(
     name = "symrcm",
     category = "math/linalg/structure",
@@ -247,21 +250,71 @@ fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
             Ok(permutation_to_value(&ordering)?)
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("symrcm: {e}"))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
+                build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .build()
+                    .into()
+            })?;
             let ordering = symrcm_host_complex_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
-        Value::GpuTensor(handle) => (symrcm_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => symrcm_gpu(handle),
         other => {
-            let tensor = tensor::value_into_tensor_for("symrcm", other)?;
+            let tensor = value_into_tensor_for(BUILTIN_NAME, other)?;
             let ordering = symrcm_host_real_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
     }
 }
 
-fn symrcm_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+    match value {
+        Value::Tensor(t) => Ok(t),
+        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        other => Err(build_runtime_error(format!(
+            "{name}: unsupported input type {:?}; expected numeric or logical values",
+            other
+        ))
+        .with_builtin(name)
+        .build()
+        .into()),
+    }
+}
+
+fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+    let data: Vec<f64> = logical
+        .data
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
+    Tensor::new(data, logical.shape.clone()).map_err(|e| {
+        build_runtime_error(format!("{name}: {e}"))
+            .with_builtin(name)
+            .build()
+            .into()
+    })
+}
+
+fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.sym_rcm(&handle) {
             Ok(ordering) => return permutation_to_value(&ordering),
@@ -277,17 +330,17 @@ fn symrcm_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
-pub fn symrcm_host_real_tensor(tensor: &Tensor) -> Result<Vec<usize>, String> {
+pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     symrcm_host_real_data(&tensor.shape, &tensor.data)
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
-pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> Result<Vec<usize>, String> {
+pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Vec<usize>> {
     symrcm_host_complex_data(&tensor.shape, &tensor.data)
 }
 
 /// Host implementation for dense real data.
-pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> Result<Vec<usize>, String> {
+pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<usize>> {
     let adjacency = adjacency_from_real_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
@@ -296,12 +349,12 @@ pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> Result<Vec<usize>
 pub fn symrcm_host_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     let adjacency = adjacency_from_complex_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
-fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> Result<Vec<Vec<usize>>, String> {
+fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |value| *value != 0.0)
 }
@@ -309,16 +362,23 @@ fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> Result<Vec<Vec<usi
 fn adjacency_from_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> Result<Vec<Vec<usize>>, String> {
+) -> BuiltinResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |(re, im)| !(*re == 0.0 && *im == 0.0))
 }
 
-fn ensure_square_matrix_shape(shape: &[usize]) -> Result<usize, String> {
-    let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)
-        .map_err(|_| "symrcm: input must be a 2-D matrix".to_string())?;
+fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
+    let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape).map_err(|_| {
+        build_runtime_error("symrcm: input must be a 2-D matrix")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()
+    })?;
     if rows != cols {
-        return Err("symrcm: input matrix must be square".to_string());
+        return Err(build_runtime_error("symrcm: input matrix must be square")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into());
     }
     Ok(rows)
 }
@@ -328,7 +388,7 @@ fn build_adjacency<T, F>(
     cols: usize,
     data: &[T],
     mut is_nonzero: F,
-) -> Result<Vec<Vec<usize>>, String>
+) -> BuiltinResult<Vec<Vec<usize>>>
 where
     F: FnMut(&T) -> bool,
 {
@@ -336,11 +396,17 @@ where
         return Ok(Vec::new());
     }
 
-    let expected = rows
-        .checked_mul(cols)
-        .ok_or_else(|| "symrcm: matrix dimensions overflow when computing adjacency".to_string())?;
+    let expected = rows.checked_mul(cols).ok_or_else(|| {
+        build_runtime_error("symrcm: matrix dimensions overflow when computing adjacency")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()
+    })?;
     if data.len() < expected {
-        return Err("symrcm: data does not match matrix dimensions".to_string());
+        return Err(build_runtime_error("symrcm: data does not match matrix dimensions")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into());
     }
 
     let mut adjacency: Vec<HashSet<usize>> = vec![HashSet::new(); rows];
@@ -431,14 +497,19 @@ fn cuthill_mckee_component(
     component
 }
 
-fn permutation_to_value(ordering: &[usize]) -> Result<Value, String> {
+fn permutation_to_value(ordering: &[usize]) -> BuiltinResult<Value> {
     let n = ordering.len();
     let mut data = Vec::with_capacity(n);
     for &idx in ordering {
         data.push((idx + 1) as f64);
     }
     let shape = if n == 0 { vec![1, 0] } else { vec![1, n] };
-    let tensor = Tensor::new(data, shape).map_err(|e| format!("symrcm: {e}"))?;
+    let tensor = Tensor::new(data, shape).map_err(|e| {
+        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()
+    })?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -613,7 +684,8 @@ pub(crate) mod tests {
     fn symrcm_requires_square_matrix() {
         let tensor = tensor_from_entries(2, 3, &[(0, 1, 1.0)]);
         let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
-        assert!(err.contains("square"), "unexpected error message: {err}");
+        let message = err.to_string();
+        assert!(message.contains("square"), "unexpected error message: {message}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -621,9 +693,10 @@ pub(crate) mod tests {
     fn symrcm_vector_is_not_square() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
         let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
+        let message = err.to_string();
         assert!(
-            err.contains("square"),
-            "unexpected error message for non-square input: {err}"
+            message.contains("square"),
+            "unexpected error message for non-square input: {message}"
         );
     }
 
@@ -632,9 +705,10 @@ pub(crate) mod tests {
     fn symrcm_rejects_higher_dimensional_input() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
         let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
+        let message = err.to_string();
         assert!(
-            err.contains("2-D"),
-            "unexpected error message for high-dimensional input: {err}"
+            message.contains("2-D"),
+            "unexpected error message for high-dimensional input: {message}"
         );
     }
 
@@ -642,9 +716,10 @@ pub(crate) mod tests {
     #[test]
     fn symrcm_rejects_unsupported_type() {
         let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
+        let message = err.to_string();
         assert!(
-            err.contains("unsupported"),
-            "unexpected error message for unsupported type: {err}"
+            message.contains("unsupported"),
+            "unexpected error message for unsupported type: {message}"
         );
     }
 

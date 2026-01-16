@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg(not(test))]
 use crate::interaction;
 #[cfg_attr(
@@ -205,7 +205,7 @@ fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 Ok(state_value(current))
             }
         },
-        _ => Err(runtime_error(ERR_TOO_MANY_INPUTS).build().into()),
+        _ => Err(build_runtime_error(ERR_TOO_MANY_INPUTS).build().into()),
     }
 }
 
@@ -241,7 +241,7 @@ fn wait_for_key_press() -> Result<(), RuntimeControlFlow> {
 
 fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
     let host_value = gpu_helpers::gather_value(arg)
-        .map_err(|e| runtime_error(format!("pause: {e}")).build().into())?;
+        .map_err(|e| build_runtime_error(format!("pause: {e}")).build().into())?;
     match host_value {
         Value::String(text) => parse_command(&text).map_err(Into::into),
         Value::CharArray(ca) => {
@@ -251,7 +251,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
                 let text: String = ca.data.iter().collect();
                 parse_command(&text).map_err(Into::into)
             } else {
-                Err(runtime_error(ERR_INVALID_ARG).build().into())
+                Err(build_runtime_error(ERR_INVALID_ARG).build().into())
             }
         }
         Value::StringArray(sa) => {
@@ -260,7 +260,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
             } else if sa.data.len() == 1 {
                 parse_command(&sa.data[0]).map_err(Into::into)
             } else {
-                Err(runtime_error(ERR_INVALID_ARG).build().into())
+                Err(build_runtime_error(ERR_INVALID_ARG).build().into())
             }
         }
         Value::Num(value) => parse_numeric(value).map_err(Into::into),
@@ -282,7 +282,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(runtime_error(ERR_INVALID_ARG).build().into()),
+        | Value::MException(_) => Err(build_runtime_error(ERR_INVALID_ARG).build().into()),
     }
 }
 

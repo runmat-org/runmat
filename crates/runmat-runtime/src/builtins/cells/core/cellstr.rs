@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{make_cell, make_cell_with_shape};
+use crate::{make_cell, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const ERR_INPUT_NOT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
@@ -233,6 +233,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Terminates fusion because the result is a host-resident cell array of character vectors.",
 };
 
+const IDENT_INVALID_INPUT: &str = "MATLAB:cellstr:InvalidInput";
+const IDENT_INVALID_CONTENTS: &str = "MATLAB:cellstr:InvalidContents";
+
+fn cellstr_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("cellstr")
+        .build()
+        .into()
+}
+
+fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("cellstr")
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "cellstr",
     category = "cells/core",
@@ -242,12 +260,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let host = gather_if_needed(&value).map_err(|e| format!("cellstr: {e}"))?;
+    let host = gather_if_needed(&value)?;
     match host {
-        Value::CharArray(ca) => (cellstr_from_char_array(ca)).map_err(Into::into),
-        Value::StringArray(sa) => (cellstr_from_string_array(sa)).map_err(Into::into),
-        Value::String(text) => (cellstr_from_string(text)).map_err(Into::into),
-        Value::Cell(cell) => (cellstr_from_cell(cell)).map_err(Into::into),
+        Value::CharArray(ca) => cellstr_from_char_array(ca),
+        Value::StringArray(sa) => cellstr_from_string_array(sa),
+        Value::String(text) => cellstr_from_string(text),
+        Value::Cell(cell) => cellstr_from_cell(cell),
         Value::LogicalArray(_)
         | Value::Bool(_)
         | Value::Int(_)
@@ -262,23 +280,27 @@ fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(((ERR_INPUT_NOT_TEXT.to_string())).into()),
-        Value::GpuTensor(_) => {
-            Err((("cellstr: input must be gathered to the host before conversion".to_string())).into())
-        }
+        | Value::MException(_) => Err(cellstr_error_with_identifier(
+            ERR_INPUT_NOT_TEXT,
+            IDENT_INVALID_INPUT,
+        )),
+        Value::GpuTensor(_) => Err(cellstr_error_with_identifier(
+            "cellstr: input must be gathered to the host before conversion",
+            IDENT_INVALID_INPUT,
+        )),
     }
 }
 
-fn cellstr_from_string(text: String) -> Result<Value, String> {
+fn cellstr_from_string(text: String) -> BuiltinResult<Value> {
     let row = Value::CharArray(CharArray::new_row(&text));
-    make_cell(vec![row], 1, 1).map_err(|e| format!("cellstr: {e}"))
+    make_cell(vec![row], 1, 1).map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
-fn cellstr_from_char_array(ca: CharArray) -> Result<Value, String> {
+fn cellstr_from_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let rows = ca.rows;
     let cols = ca.cols;
     if rows == 0 {
-        return make_cell(Vec::new(), 0, 1).map_err(|e| format!("cellstr: {e}"));
+        return make_cell(Vec::new(), 0, 1).map_err(|e| cellstr_error(format!("cellstr: {e}")));
     }
     let mut values = Vec::with_capacity(rows);
     for row in 0..rows {
@@ -288,10 +310,10 @@ fn cellstr_from_char_array(ca: CharArray) -> Result<Value, String> {
         let trimmed = trim_trailing_spaces(slice);
         values.push(Value::CharArray(CharArray::new_row(&trimmed)));
     }
-    make_cell(values, rows, 1).map_err(|e| format!("cellstr: {e}"))
+    make_cell(values, rows, 1).map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
-fn cellstr_from_string_array(sa: StringArray) -> Result<Value, String> {
+fn cellstr_from_string_array(sa: StringArray) -> BuiltinResult<Value> {
     let shape = if sa.shape.is_empty() {
         vec![sa.rows.max(1), sa.cols.max(1)]
     } else {
@@ -299,10 +321,14 @@ fn cellstr_from_string_array(sa: StringArray) -> Result<Value, String> {
     };
     let total = shape.iter().product::<usize>();
     if total == 0 {
-        return make_cell_with_shape(Vec::new(), shape).map_err(|e| format!("cellstr: {e}"));
+        return make_cell_with_shape(Vec::new(), shape)
+            .map_err(|e| cellstr_error(format!("cellstr: {e}")));
     }
     if total != sa.data.len() {
-        return Err("cellstr: internal string array shape mismatch".to_string());
+        return Err(cellstr_error_with_identifier(
+            "cellstr: internal string array shape mismatch",
+            IDENT_INVALID_INPUT,
+        ));
     }
     let mut values = Vec::with_capacity(total);
     for row_major in 0..total {
@@ -311,26 +337,29 @@ fn cellstr_from_string_array(sa: StringArray) -> Result<Value, String> {
         let text = sa.data[column_major].clone();
         values.push(Value::CharArray(CharArray::new_row(&text)));
     }
-    make_cell_with_shape(values, shape).map_err(|e| format!("cellstr: {e}"))
+    make_cell_with_shape(values, shape).map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
-fn cellstr_from_cell(cell: CellArray) -> Result<Value, String> {
+fn cellstr_from_cell(cell: CellArray) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
         let element = unsafe { &*ptr.as_raw() };
-        let gathered = gather_if_needed(element).map_err(|e| format!("cellstr: {e}"))?;
+        let gathered = gather_if_needed(element)?;
         values.push(coerce_to_char_vector(gathered)?);
     }
-    make_cell_with_shape(values, cell.shape.clone()).map_err(|e| format!("cellstr: {e}"))
+    make_cell_with_shape(values, cell.shape.clone()).map_err(|e| cellstr_error(format!("cellstr: {e}")))
 }
 
-fn coerce_to_char_vector(value: Value) -> Result<Value, String> {
+fn coerce_to_char_vector(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(ca) => {
             if ca.rows == 1 || (ca.rows == 0 && ca.cols == 0) {
                 Ok(Value::CharArray(ca))
             } else {
-                Err(ERR_CELL_CONTENT_NOT_TEXT.to_string())
+                Err(cellstr_error_with_identifier(
+                    ERR_CELL_CONTENT_NOT_TEXT,
+                    IDENT_INVALID_CONTENTS,
+                ))
             }
         }
         Value::String(text) => Ok(Value::CharArray(CharArray::new_row(&text))),
@@ -338,7 +367,10 @@ fn coerce_to_char_vector(value: Value) -> Result<Value, String> {
             if sa.data.len() == 1 {
                 Ok(Value::CharArray(CharArray::new_row(&sa.data[0])))
             } else {
-                Err(ERR_CELL_CONTENT_NOT_TEXT.to_string())
+                Err(cellstr_error_with_identifier(
+                    ERR_CELL_CONTENT_NOT_TEXT,
+                    IDENT_INVALID_CONTENTS,
+                ))
             }
         }
         Value::Num(_)
@@ -348,11 +380,20 @@ fn coerce_to_char_vector(value: Value) -> Result<Value, String> {
         | Value::LogicalArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
-        | Value::GpuTensor(_) => Err(ERR_CELL_CONTENT_NOT_TEXT.to_string()),
+        | Value::GpuTensor(_) => Err(cellstr_error_with_identifier(
+            ERR_CELL_CONTENT_NOT_TEXT,
+            IDENT_INVALID_CONTENTS,
+        )),
         Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => {
-            Err(ERR_CELL_CONTENT_NOT_TEXT.to_string())
+            Err(cellstr_error_with_identifier(
+                ERR_CELL_CONTENT_NOT_TEXT,
+                IDENT_INVALID_CONTENTS,
+            ))
         }
-        other => Err(format!("cellstr: unsupported cell element {other:?}")),
+        other => Err(cellstr_error_with_identifier(
+            format!("cellstr: unsupported cell element {other:?}"),
+            IDENT_INVALID_CONTENTS,
+        )),
     }
 }
 
@@ -496,7 +537,9 @@ pub(crate) mod tests {
     #[test]
     fn rejects_non_text_cell_element() {
         let cell = crate::make_cell(vec![Value::Num(1.0)], 1, 1).expect("cell");
-        let err = cellstr_builtin(cell).expect_err("expected error");
+        let err = cellstr_builtin(cell)
+            .expect_err("expected error")
+            .to_string();
         assert!(err.contains("cell array elements must be"));
     }
 
@@ -505,14 +548,18 @@ pub(crate) mod tests {
     fn rejects_multirow_char_element() {
         let ca = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let cell = crate::make_cell(vec![Value::CharArray(ca)], 1, 1).expect("cell");
-        let err = cellstr_builtin(cell).expect_err("expected error");
+        let err = cellstr_builtin(cell)
+            .expect_err("expected error")
+            .to_string();
         assert!(err.contains("cell array elements must be"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_text_input() {
-        let err = cellstr_builtin(Value::Num(std::f64::consts::PI)).expect_err("expected error");
+        let err = cellstr_builtin(Value::Num(std::f64::consts::PI))
+            .expect_err("expected error")
+            .to_string();
         assert!(err.contains("input must be"));
     }
 

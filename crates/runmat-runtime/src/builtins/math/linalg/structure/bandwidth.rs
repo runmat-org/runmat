@@ -2,7 +2,7 @@
 
 use log::debug;
 use runmat_accelerate_api::{self, GpuTensorHandle};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -233,6 +234,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Structure query that returns a small host tensor; fusion treats it as a metadata operation.",
 };
 
+const BUILTIN_NAME: &str = "bandwidth";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BandSelector {
     Both,
@@ -254,8 +257,12 @@ fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let (lower, upper) = data.bandwidth()?;
     match selector {
         BandSelector::Both => {
-            let tensor = Tensor::new(vec![lower as f64, upper as f64], vec![1, 2])
-                .map_err(|e| format!("bandwidth: {e}"))?;
+            let tensor = Tensor::new(vec![lower as f64, upper as f64], vec![1, 2]).map_err(|e| {
+                build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .build()
+                    .into()
+            })?;
             Ok(Value::Tensor(tensor))
         }
         BandSelector::Lower => Ok(Value::Num(lower as f64)),
@@ -263,25 +270,80 @@ fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     }
 }
 
-fn parse_selector(args: &[Value]) -> Result<BandSelector, String> {
+fn parse_selector(args: &[Value]) -> BuiltinResult<BandSelector> {
     match args.len() {
         0 => Ok(BandSelector::Both),
         1 => {
             let text = tensor::value_to_string(&args[0]).ok_or_else(|| {
-                "bandwidth: selector must be a character vector or string scalar".to_string()
+                build_runtime_error("bandwidth: selector must be a character vector or string scalar")
+                    .with_builtin(BUILTIN_NAME)
+                    .build()
+                    .into()
             })?;
             let trimmed = text.trim();
             let lowered = trimmed.to_ascii_lowercase();
             match lowered.as_str() {
                 "lower" => Ok(BandSelector::Lower),
                 "upper" => Ok(BandSelector::Upper),
-                other => Err(format!(
+                other => Err(build_runtime_error(format!(
                     "bandwidth: unrecognized selector '{other}'; expected 'lower' or 'upper'"
-                )),
+                ))
+                .with_builtin(BUILTIN_NAME)
+                .build()
+                .into()),
             }
         }
-        _ => Err("bandwidth: too many input arguments".to_string()),
+        _ => Err(build_runtime_error("bandwidth: too many input arguments")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()),
     }
+}
+
+fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+    match value {
+        Value::Tensor(t) => Ok(t),
+        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        other => Err(build_runtime_error(format!(
+            "{name}: unsupported input type {:?}; expected numeric or logical values",
+            other
+        ))
+        .with_builtin(name)
+        .build()
+        .into()),
+    }
+}
+
+fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+    let data: Vec<f64> = logical
+        .data
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
+    Tensor::new(data, logical.shape.clone()).map_err(|e| {
+        build_runtime_error(format!("{name}: {e}"))
+            .with_builtin(name)
+            .build()
+            .into()
+    })
 }
 
 enum MatrixData {
@@ -291,23 +353,27 @@ enum MatrixData {
 }
 
 impl MatrixData {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::ComplexTensor(ct) => Ok(Self::Complex(ct)),
             Value::Complex(re, im) => {
-                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| format!("bandwidth: {e}"))?;
+                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
+                    build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .build()
+                        .into()
+                })?;
                 Ok(Self::Complex(tensor))
             }
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = tensor::value_into_tensor_for("bandwidth", other)?;
+                let tensor = value_into_tensor_for(BUILTIN_NAME, other)?;
                 Ok(Self::Real(tensor))
             }
         }
     }
 
-    fn bandwidth(&self) -> Result<(usize, usize), String> {
+    fn bandwidth(&self) -> BuiltinResult<(usize, usize)> {
         match self {
             MatrixData::Real(tensor) => bandwidth_host_real_tensor(tensor),
             MatrixData::Complex(tensor) => bandwidth_host_complex_tensor(tensor),
@@ -316,7 +382,7 @@ impl MatrixData {
     }
 }
 
-fn bandwidth_gpu(handle: &GpuTensorHandle) -> Result<(usize, usize), String> {
+fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(&handle.shape)?;
     if rows == 0 || cols == 0 {
         return Ok((0, 0));
@@ -337,13 +403,16 @@ fn bandwidth_gpu(handle: &GpuTensorHandle) -> Result<(usize, usize), String> {
     bandwidth_host_real_tensor(&tensor)
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> Result<(usize, usize), String> {
+pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => Ok((1, shape[0])),
         _ => {
             if shape[2..].iter().any(|&dim| dim > 1) {
-                Err("bandwidth: input must be a 2-D matrix".to_string())
+                Err(build_runtime_error("bandwidth: input must be a 2-D matrix")
+                    .with_builtin(BUILTIN_NAME)
+                    .build()
+                    .into())
             } else {
                 Ok((shape[0], shape[1]))
             }
@@ -351,7 +420,7 @@ pub fn ensure_matrix_shape(shape: &[usize]) -> Result<(usize, usize), String> {
     }
 }
 
-pub fn bandwidth_host_real_data(shape: &[usize], data: &[f64]) -> Result<(usize, usize), String> {
+pub fn bandwidth_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(shape)?;
     Ok(compute_real_bandwidth(rows, cols, data))
 }
@@ -359,16 +428,16 @@ pub fn bandwidth_host_real_data(shape: &[usize], data: &[f64]) -> Result<(usize,
 pub fn bandwidth_host_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> Result<(usize, usize), String> {
+) -> BuiltinResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(shape)?;
     Ok(compute_complex_bandwidth(rows, cols, data))
 }
 
-pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> Result<(usize, usize), String> {
+pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
     bandwidth_host_real_data(&tensor.shape, &tensor.data)
 }
 
-pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> Result<(usize, usize), String> {
+pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<(usize, usize)> {
     bandwidth_host_complex_data(&tensor.shape, &tensor.data)
 }
 
@@ -548,9 +617,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err =
             bandwidth_builtin(Value::Tensor(tensor), vec![Value::from("middle")]).unwrap_err();
+        let message = err.to_string();
         assert!(
-            err.contains("lower") && err.contains("upper"),
-            "unexpected error: {err}"
+            message.contains("lower") && message.contains("upper"),
+            "unexpected error: {message}"
         );
     }
 
@@ -559,7 +629,8 @@ pub(crate) mod tests {
     fn bandwidth_rejects_higher_dimensions() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
         let err = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
-        assert!(err.contains("2-D"), "unexpected error message: {err}");
+        let message = err.to_string();
+        assert!(message.contains("2-D"), "unexpected error message: {message}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

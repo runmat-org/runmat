@@ -19,9 +19,13 @@ use crate::builtins::common::spec::{
 };
 
 use super::gpu_helpers::axis_bounds;
+use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
 
+use crate::{BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "contour";
 const DEFAULT_LEVELS: usize = 10;
 
 #[derive(Clone, Debug, Default)]
@@ -34,30 +38,40 @@ pub(crate) enum ContourLevelSpec {
 }
 
 impl ContourLevelSpec {
-    fn resolve(&self, min_z: f32, max_z: f32) -> Result<Vec<f32>, String> {
+    fn resolve(&self, name: &'static str, min_z: f32, max_z: f32) -> BuiltinResult<Vec<f32>> {
         match self {
             ContourLevelSpec::Auto => Ok(evenly_spaced_levels(DEFAULT_LEVELS, min_z, max_z)),
             ContourLevelSpec::Count(count) => {
                 if *count == 0 {
-                    Err("contour: level count must be positive".to_string())
+                    Err(plotting_error(
+                        name,
+                        format!("{name}: level count must be positive"),
+                    ))
                 } else {
                     Ok(evenly_spaced_levels(*count, min_z, max_z))
                 }
             }
             ContourLevelSpec::Values(values) => {
                 if values.is_empty() {
-                    return Err("contour: level vector must contain at least one value".to_string());
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: level vector must contain at least one value"),
+                    ));
                 }
                 let mut last = None;
                 for &value in values {
                     if !value.is_finite() {
-                        return Err("contour: level values must be finite".to_string());
+                        return Err(plotting_error(
+                            name,
+                            format!("{name}: level values must be finite"),
+                        ));
                     }
                     if let Some(prev) = last {
                         if value <= prev {
-                            return Err(
-                                "contour: level values must be strictly increasing".to_string()
-                            );
+                            return Err(plotting_error(
+                                name,
+                                format!("{name}: level values must be strictly increasing"),
+                            ));
                         }
                     }
                     last = Some(value);
@@ -66,7 +80,10 @@ impl ContourLevelSpec {
             }
             ContourLevelSpec::Step(step) => {
                 if *step <= 0.0 || !step.is_finite() {
-                    return Err("contour: LevelStep must be a positive, finite number".to_string());
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: LevelStep must be a positive, finite number"),
+                    ));
                 }
                 let mut levels = Vec::new();
                 let mut value = min_z;
@@ -108,7 +125,7 @@ pub(crate) fn parse_contour_args(
     name: &'static str,
     first: Value,
     rest: Vec<Value>,
-) -> Result<ContourArgs, String> {
+) -> BuiltinResult<ContourArgs> {
     if rest.is_empty() {
         return from_implicit_args(name, first, None, &[]);
     }
@@ -149,11 +166,11 @@ fn from_implicit_args(
     z_value: Value,
     level_value: Option<Value>,
     options: &[Value],
-) -> Result<ContourArgs, String> {
+) -> BuiltinResult<ContourArgs> {
     let z_input = SurfaceDataInput::from_value(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
     if rows < 2 || cols < 2 {
-        return Err(format!("{name}: Z must be at least 2x2"));
+        return Err(plotting_error(name, format!("{name}: Z must be at least 2x2")));
     }
     let x_axis = implicit_axis(rows);
     let y_axis = implicit_axis(cols);
@@ -180,21 +197,29 @@ fn from_explicit_args(
     z_value: Value,
     level_value: Option<Value>,
     options: &[Value],
-) -> Result<ContourArgs, String> {
-    let x_axis = numeric_vector(Tensor::try_from(&x_value).map_err(|e| format!("{name}: {e}"))?);
-    let y_axis = numeric_vector(Tensor::try_from(&y_value).map_err(|e| format!("{name}: {e}"))?);
+) -> BuiltinResult<ContourArgs> {
+    let x_axis = numeric_vector(
+        Tensor::try_from(&x_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?,
+    );
+    let y_axis = numeric_vector(
+        Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?,
+    );
     if x_axis.len() < 2 || y_axis.len() < 2 {
-        return Err(format!(
-            "{name}: axis vectors must contain at least two elements"
+        return Err(plotting_error(
+            name,
+            format!("{name}: axis vectors must contain at least two elements"),
         ));
     }
     let z_input = SurfaceDataInput::from_value(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
     if rows != x_axis.len() || cols != y_axis.len() {
-        return Err(format!(
-            "{name}: Z must be {}x{} to match axis vectors",
-            x_axis.len(),
-            y_axis.len()
+        return Err(plotting_error(
+            name,
+            format!(
+                "{name}: Z must be {}x{} to match axis vectors",
+                x_axis.len(),
+                y_axis.len()
+            ),
         ));
     }
     let level_spec = match level_value {
@@ -320,7 +345,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let mut call = Some(ContourCall::parse("contour", first, rest)?);
+    let mut call = Some(ContourCall::parse(BUILTIN_NAME, first, rest)?);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
         x_label: "X",
@@ -328,10 +353,11 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<S
         axis_equal: true,
         ..Default::default()
     };
-    (render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let current = call.take().expect("contour call consumed once");
         current.render(figure, axes)
-    })).map_err(Into::into)
+    })?;
+    Ok(rendered)
 }
 
 struct ContourCall {
@@ -341,7 +367,7 @@ struct ContourCall {
 }
 
 impl ContourCall {
-    fn parse(name: &'static str, first: Value, rest: Vec<Value>) -> Result<Self, String> {
+    fn parse(name: &'static str, first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
         let args = parse_contour_args(name, first, rest)?;
         Ok(Self {
             args,
@@ -350,7 +376,7 @@ impl ContourCall {
         })
     }
 
-    fn render(self, figure: &mut runmat_plot::plots::Figure, axes: usize) -> Result<(), String> {
+    fn render(self, figure: &mut runmat_plot::plots::Figure, axes: usize) -> BuiltinResult<()> {
         let ContourCall {
             args,
             color_map,
@@ -371,6 +397,7 @@ impl ContourCall {
 
         if let SurfaceDataInput::Gpu(handle) = &z_input {
             match build_contour_gpu_plot(
+                name,
                 &x_axis,
                 &y_axis,
                 handle,
@@ -383,7 +410,12 @@ impl ContourCall {
                     figure.add_contour_plot_on_axes(contour, axes);
                     return Ok(());
                 }
-                Err(err) => warn!("{name} GPU path unavailable: {err}"),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending));
+                }
+                Err(RuntimeControlFlow::Error(err)) => {
+                    warn!("{name} GPU path unavailable: {err}");
+                }
             }
         }
 
@@ -392,6 +424,7 @@ impl ContourCall {
             return Ok(());
         }
         let contour = build_contour_plot(
+            name,
             &x_axis,
             &y_axis,
             &grid,
@@ -405,59 +438,61 @@ impl ContourCall {
     }
 }
 
-fn parse_level_spec(value: Value, context: &str) -> Result<ContourLevelSpec, String> {
+fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
     match value {
         Value::Tensor(tensor) => parse_tensor_levels(tensor, context),
         other => {
             if let Some(count) = value_as_f64(&other) {
                 parse_scalar_level_count(count, context)
             } else {
-                let tensor = Tensor::try_from(&other).map_err(|e| format!("{context}: {e}"))?;
+                let tensor = Tensor::try_from(&other)
+                    .map_err(|e| plotting_error(context, format!("{context}: {e}")))?;
                 parse_tensor_levels(tensor, context)
             }
         }
     }
 }
 
-fn parse_scalar_level_count(value: f64, context: &str) -> Result<ContourLevelSpec, String> {
+fn parse_scalar_level_count(value: f64, context: &str) -> BuiltinResult<ContourLevelSpec> {
     if !value.is_finite() {
-        return Err(format!("{context}: level count must be finite"));
+        return Err(plotting_error(context, format!("{context}: level count must be finite")));
     }
     if value < 1.0 {
-        return Err(format!("{context}: level count must be positive"));
+        return Err(plotting_error(context, format!("{context}: level count must be positive")));
     }
     let rounded = value.round();
     if rounded < 1.0 {
-        return Err(format!("{context}: level count must be positive"));
+        return Err(plotting_error(context, format!("{context}: level count must be positive")));
     }
     Ok(ContourLevelSpec::Count(rounded as usize))
 }
 
-fn parse_tensor_levels(tensor: Tensor, context: &str) -> Result<ContourLevelSpec, String> {
+fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLevelSpec> {
     if tensor.data.is_empty() {
-        return Err(format!("{context}: level vector must be non-empty"));
+        return Err(plotting_error(context, format!("{context}: level vector must be non-empty")));
     }
     if tensor.data.len() == 1 {
         return parse_scalar_level_count(tensor.data[0], context);
     }
     for pair in tensor.data.windows(2) {
         if pair[1] <= pair[0] {
-            return Err(format!(
-                "{context}: level values must be strictly increasing"
+            return Err(plotting_error(
+                context,
+                format!("{context}: level values must be strictly increasing"),
             ));
         }
     }
     Ok(ContourLevelSpec::Values(tensor.data))
 }
 
-fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<(), String> {
+fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinResult<()> {
     if options.is_empty() {
         return Ok(());
     }
     if !options.len().is_multiple_of(2) {
-        return Err(format!(
-            "{}: name-value arguments must come in pairs",
-            args.name
+        return Err(plotting_error(
+            args.name,
+            format!("{}: name-value arguments must come in pairs", args.name),
         ));
     }
     let opts = LineStyleParseOptions::generic(args.name);
@@ -465,9 +500,9 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
     let mut manual_requested = false;
     for pair in options.chunks_exact(2) {
         let Some(key) = value_as_string(&pair[0]) else {
-            return Err(format!(
-                "{}: option names must be char arrays or strings",
-                args.name
+            return Err(plotting_error(
+                args.name,
+                format!("{}: option names must be char arrays or strings", args.name),
             ));
         };
         let lower = key.trim().to_ascii_lowercase();
@@ -477,12 +512,13 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
                 level_override_seen = true;
             }
             "levelstep" => {
-                let step = value_as_f64(&pair[1])
-                    .ok_or_else(|| format!("{}: LevelStep must be numeric", args.name))?;
+                let step = value_as_f64(&pair[1]).ok_or_else(|| {
+                    plotting_error(args.name, format!("{}: LevelStep must be numeric", args.name))
+                })?;
                 if !step.is_finite() || step <= 0.0 {
-                    return Err(format!(
-                        "{}: LevelStep must be a positive, finite number",
-                        args.name
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LevelStep must be a positive, finite number", args.name),
                     ));
                 }
                 args.level_spec = ContourLevelSpec::Step(step as f32);
@@ -493,9 +529,9 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
             }
             "levellistmode" => {
                 let Some(mode) = value_as_string(&pair[1]) else {
-                    return Err(format!(
-                        "{}: LevelListMode must be the string 'auto' or 'manual'",
-                        args.name
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LevelListMode must be the string 'auto' or 'manual'", args.name),
                     ));
                 };
                 let normalized = mode.trim().to_ascii_lowercase();
@@ -509,22 +545,28 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
                         manual_requested = true;
                     }
                     other => {
-                        return Err(format!(
-                            "{}: unsupported LevelListMode `{other}` (expected 'auto' or 'manual')",
-                            args.name
+                        return Err(plotting_error(
+                            args.name,
+                            format!("{}: unsupported LevelListMode `{other}` (expected 'auto' or 'manual')", args.name),
                         ));
                     }
                 }
             }
             other => {
-                return Err(format!("{}: unsupported option `{other}`", args.name));
+                return Err(plotting_error(
+                    args.name,
+                    format!("{}: unsupported option `{other}`", args.name),
+                ));
             }
         }
     }
     if manual_requested && !level_override_seen {
-        return Err(format!(
-            "{}: LevelListMode 'manual' requires LevelList or LevelStep in the same call",
-            args.name
+        return Err(plotting_error(
+            args.name,
+            format!(
+                "{}: LevelListMode 'manual' requires LevelList or LevelStep in the same call",
+                args.name
+            ),
         ));
     }
     Ok(())
@@ -533,7 +575,7 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> Result<()
 fn parse_line_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<ContourLineColor, String> {
+) -> BuiltinResult<ContourLineColor> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -563,6 +605,7 @@ fn is_contour_option_name(token: &str) -> bool {
 }
 
 pub(crate) fn build_contour_gpu_plot(
+    name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
@@ -570,16 +613,18 @@ pub(crate) fn build_contour_gpu_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
-) -> Result<ContourPlot, String> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "contour: plotting GPU context unavailable".to_string())?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| "contour: unable to export GPU Z data".to_string())?;
+) -> BuiltinResult<ContourPlot> {
+    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
+        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
+    })?;
+    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z).ok_or_else(|| {
+        plotting_error(name, format!("{name}: unable to export GPU Z data"))
+    })?;
 
-    let (min_z, max_z) = axis_bounds(z, "contour")?;
-    let levels = level_spec.resolve(min_z, max_z)?;
+    let (min_z, max_z) = axis_bounds(z, name)?;
+    let levels = level_spec.resolve(name, min_z, max_z)?;
     if levels.is_empty() {
-        return Err("contour: no contour levels available".to_string());
+        return Err(plotting_error(name, format!("{name}: no contour levels available")));
     }
 
     let x_f32: Vec<f32> = x_axis.iter().map(|&v| v as f32).collect();
@@ -633,7 +678,7 @@ pub(crate) fn build_contour_gpu_plot(
         &inputs,
         &params,
     )
-    .map_err(|e| format!("contour: failed to build GPU vertices: {e}"))?;
+    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
@@ -643,6 +688,7 @@ pub(crate) fn build_contour_gpu_plot(
 }
 
 pub(crate) fn build_contour_plot(
+    name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     grid: &[Vec<f64>],
@@ -650,9 +696,9 @@ pub(crate) fn build_contour_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
-) -> Result<ContourPlot, String> {
-    let (min_z, max_z) = grid_extents(grid)?;
-    let levels = level_spec.resolve(min_z, max_z)?;
+) -> BuiltinResult<ContourPlot> {
+    let (min_z, max_z) = grid_extents(name, grid)?;
+    let levels = level_spec.resolve(name, min_z, max_z)?;
     let color_table = match line_color {
         ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
         ContourLineColor::Color(color) => vec![color.to_array()],
@@ -689,19 +735,22 @@ pub(crate) fn build_contour_plot(
 }
 
 pub(crate) fn build_contour_fill_gpu_plot(
+    name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
-) -> Result<ContourFillPlot, String> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| "contourf: plotting GPU context unavailable".to_string())?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| "contourf: unable to export GPU Z data".to_string())?;
-    let (min_z, max_z) = axis_bounds(z, "contourf")?;
-    let levels = ensure_fill_levels(level_spec, min_z, max_z)?;
+) -> BuiltinResult<ContourFillPlot> {
+    let context = runmat_plot::shared_wgpu_context().ok_or_else(|| {
+        plotting_error(name, format!("{name}: plotting GPU context unavailable"))
+    })?;
+    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z).ok_or_else(|| {
+        plotting_error(name, format!("{name}: unable to export GPU Z data"))
+    })?;
+    let (min_z, max_z) = axis_bounds(z, name)?;
+    let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
     let palette = build_color_lut(color_map, palette_size(&levels), 0.95);
 
     let x_f32: Vec<f32> = x_axis.iter().map(|&v| v as f32).collect();
@@ -741,7 +790,7 @@ pub(crate) fn build_contour_fill_gpu_plot(
 
     let gpu_vertices =
         contour_fill::pack_contour_fill_vertices(&context.device, &context.queue, &inputs, &params)
-            .map_err(|e| format!("contourf: failed to build GPU vertices: {e}"))?;
+            .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
         ContourFillPlot::from_gpu_buffer(gpu_vertices, vertex_count, bounds)
@@ -750,22 +799,26 @@ pub(crate) fn build_contour_fill_gpu_plot(
 }
 
 pub(crate) fn build_contour_fill_plot(
+    name: &'static str,
     x_axis: &[f64],
     y_axis: &[f64],
     grid: &[Vec<f64>],
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
-) -> Result<ContourFillPlot, String> {
-    let (min_z, max_z) = grid_extents(grid)?;
-    let levels = ensure_fill_levels(level_spec, min_z, max_z)?;
+) -> BuiltinResult<ContourFillPlot> {
+    let (min_z, max_z) = grid_extents(name, grid)?;
+    let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
     let palette_raw = build_color_lut(color_map, palette_size(&levels), 0.95);
     let palette: Vec<Vec4> = palette_raw.iter().map(|c| Vec4::from_array(*c)).collect();
 
     let nx = x_axis.len();
     let ny = y_axis.len();
     if nx < 2 || ny < 2 {
-        return Err("contourf: axis vectors must contain at least two elements".to_string());
+        return Err(plotting_error(
+            name,
+            format!("{name}: axis vectors must contain at least two elements"),
+        ));
     }
 
     let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * 6);
@@ -820,7 +873,7 @@ pub(crate) fn build_contour_fill_plot(
     Ok(ContourFillPlot::from_vertices(vertices, bounds).with_label("Filled Contours"))
 }
 
-fn grid_extents(grid: &[Vec<f64>]) -> Result<(f32, f32), String> {
+fn grid_extents(name: &'static str, grid: &[Vec<f64>]) -> BuiltinResult<(f32, f32)> {
     let mut min_v = f64::INFINITY;
     let mut max_v = f64::NEG_INFINITY;
     for row in grid {
@@ -832,7 +885,7 @@ fn grid_extents(grid: &[Vec<f64>]) -> Result<(f32, f32), String> {
         }
     }
     if !min_v.is_finite() || !max_v.is_finite() {
-        Err("contour: unable to determine data range".to_string())
+        Err(plotting_error(name, format!("{name}: unable to determine data range")))
     } else {
         Ok((min_v as f32, max_v as f32))
     }
@@ -1071,11 +1124,12 @@ fn implicit_axis(len: usize) -> Vec<f64> {
 }
 
 fn ensure_fill_levels(
+    name: &'static str,
     level_spec: &ContourLevelSpec,
     min_z: f32,
     max_z: f32,
-) -> Result<Vec<f32>, String> {
-    let mut levels = level_spec.resolve(min_z, max_z)?;
+) -> BuiltinResult<Vec<f32>> {
+    let mut levels = level_spec.resolve(name, min_z, max_z)?;
     if levels.len() < 2 {
         let second = if (max_z - min_z).abs() < f32::EPSILON {
             min_z + 1.0

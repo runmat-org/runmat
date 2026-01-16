@@ -4,6 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -194,6 +195,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL truncation; providers can substitute custom kernels when unary_fix is available.",
 };
 
+const BUILTIN_NAME: &str = "fix";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "fix",
     category = "math/rounding",
@@ -202,24 +212,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::fix"
 )]
-fn fix_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn fix_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (fix_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => fix_gpu(handle),
         Value::Complex(re, im) => Ok(Value::Complex(fix_scalar(re), fix_scalar(im))),
-        Value::ComplexTensor(ct) => (fix_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (fix_char_array(ca)).map_err(Into::into),
+        Value::ComplexTensor(ct) => fix_complex_tensor(ct),
+        Value::CharArray(ca) => fix_char_array(ca),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
+            Ok(fix_tensor(tensor)?.map(tensor::tensor_into_value)?)
         }
         Value::String(_) | Value::StringArray(_) => {
-            Err((("fix: expected numeric or logical input".to_string())).into())
+            Err(builtin_error("fix: expected numeric or logical input"))
         }
-        other => (fix_numeric(other)).map_err(Into::into),
+        other => fix_numeric(other),
     }
 }
 
-fn fix_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_fix(&handle) {
             return Ok(Value::GpuTensor(out));
@@ -229,43 +239,45 @@ fn fix_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     fix_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn fix_numeric(value: Value) -> Result<Value, String> {
+fn fix_numeric(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(fix_scalar(n))),
         Value::Int(i) => Ok(Value::Num(fix_scalar(i.to_f64()))),
         Value::Bool(b) => Ok(Value::Num(fix_scalar(if b { 1.0 } else { 0.0 }))),
         Value::Tensor(t) => fix_tensor(t).map(tensor::tensor_into_value),
         other => {
-            let tensor = tensor::value_into_tensor_for("fix", other)?;
+            let tensor = tensor::value_into_tensor_for("fix", other).map_err(|err| builtin_error(err))?;
             Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
         }
     }
 }
 
-fn fix_tensor(mut tensor: Tensor) -> Result<Tensor, String> {
+fn fix_tensor(mut tensor: Tensor) -> BuiltinResult<Tensor> {
     for value in &mut tensor.data {
         *value = fix_scalar(*value);
     }
     Ok(tensor)
 }
 
-fn fix_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct
         .data
         .iter()
         .map(|&(re, im)| (fix_scalar(re), fix_scalar(im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("fix: {e}"))?;
+    let tensor = ComplexTensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("fix: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn fix_char_array(ca: CharArray) -> Result<Value, String> {
+fn fix_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
         .iter()
         .map(|&ch| fix_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("fix: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("fix: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -285,7 +297,23 @@ fn fix_scalar(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray};
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains(needle),
+                    "unexpected error: {}",
+                    err.message()
+                );
+            }
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspend: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -379,10 +407,7 @@ pub(crate) mod tests {
     #[test]
     fn fix_string_errors() {
         let err = fix_builtin(Value::from("abc")).unwrap_err();
-        assert!(
-            err.contains("expected numeric"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "expected numeric");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

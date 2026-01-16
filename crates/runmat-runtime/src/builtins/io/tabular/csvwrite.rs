@@ -19,7 +19,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "csvwrite";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -221,6 +223,39 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
+fn csvwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn csvwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message().to_string())
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "csvwrite",
     category = "io/tabular",
@@ -230,40 +265,41 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
 fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let filename_value = gather_if_needed(&filename).map_err(|e| format!("csvwrite: {e}"))?;
+    let filename_value = gather_if_needed(&filename).map_err(map_control_flow)?;
     let path = resolve_path(&filename_value)?;
 
     let (row_offset, col_offset) = parse_offsets(&rest)?;
 
-    let gathered_data = gather_if_needed(&data).map_err(|e| format!("csvwrite: {e}"))?;
-    let tensor = tensor::value_into_tensor_for("csvwrite", gathered_data)?;
+    let gathered_data = gather_if_needed(&data).map_err(map_control_flow)?;
+    let tensor = tensor::value_into_tensor_for("csvwrite", gathered_data)
+        .map_err(csvwrite_error)?;
     ensure_matrix_shape(&tensor)?;
 
     let bytes = write_csv(&path, &tensor, row_offset, col_offset)?;
     Ok(Value::Num(bytes as f64))
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     let raw = match value {
         Value::String(s) => s.clone(),
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         _ => {
-            return Err(
-                "csvwrite: filename must be a string scalar or character vector".to_string(),
-            )
+            return Err(csvwrite_error(
+                "csvwrite: filename must be a string scalar or character vector",
+            ))
         }
     };
 
     if raw.trim().is_empty() {
-        return Err("csvwrite: filename must not be empty".to_string());
+        return Err(csvwrite_error("csvwrite: filename must not be empty"));
     }
 
-    let expanded = expand_user_path(&raw, "csvwrite").map_err(|e| format!("csvwrite: {e}"))?;
+    let expanded = expand_user_path(&raw, BUILTIN_NAME).map_err(csvwrite_error)?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn parse_offsets(args: &[Value]) -> Result<(usize, usize), String> {
+fn parse_offsets(args: &[Value]) -> BuiltinResult<(usize, usize)> {
     match args.len() {
         0 => Ok((0, 0)),
         2 => {
@@ -271,18 +307,20 @@ fn parse_offsets(args: &[Value]) -> Result<(usize, usize), String> {
             let col = parse_offset(&args[1], "column offset")?;
             Ok((row, col))
         }
-        _ => Err(
-            "csvwrite: offsets must be provided as two numeric arguments (row, column)".to_string(),
-        ),
+        _ => Err(csvwrite_error(
+            "csvwrite: offsets must be provided as two numeric arguments (row, column)",
+        )),
     }
 }
 
-fn parse_offset(value: &Value, context: &str) -> Result<usize, String> {
+fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(format!("csvwrite: {context} must be >= 0"));
+                return Err(csvwrite_error(format!(
+                    "csvwrite: {context} must be >= 0"
+                )));
             }
             Ok(raw as usize)
         }
@@ -290,51 +328,55 @@ fn parse_offset(value: &Value, context: &str) -> Result<usize, String> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(format!(
+                return Err(csvwrite_error(format!(
                     "csvwrite: {context} must be a scalar, got {} elements",
                     t.data.len()
-                ));
+                )));
             }
             coerce_offset_from_float(t.data[0], context)
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
-                return Err(format!(
+                return Err(csvwrite_error(format!(
                     "csvwrite: {context} must be a scalar, got {} elements",
                     logical.data.len()
-                ));
+                )));
             }
             Ok(if logical.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(format!(
+        other => Err(csvwrite_error(format!(
             "csvwrite: {context} must be numeric, got {:?}",
             other
-        )),
+        ))),
     }
 }
 
-fn coerce_offset_from_float(value: f64, context: &str) -> Result<usize, String> {
+fn coerce_offset_from_float(value: f64, context: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(format!("csvwrite: {context} must be finite"));
+        return Err(csvwrite_error(format!("csvwrite: {context} must be finite")));
     }
     let rounded = value.round();
     if (rounded - value).abs() > 1e-9 {
-        return Err(format!("csvwrite: {context} must be an integer"));
+        return Err(csvwrite_error(format!(
+            "csvwrite: {context} must be an integer"
+        )));
     }
     if rounded < 0.0 {
-        return Err(format!("csvwrite: {context} must be >= 0"));
+        return Err(csvwrite_error(format!("csvwrite: {context} must be >= 0")));
     }
     Ok(rounded as usize)
 }
 
-fn ensure_matrix_shape(tensor: &Tensor) -> Result<(), String> {
+fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     if tensor.shape.len() <= 2 {
         return Ok(());
     }
     if tensor.shape[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
-    Err("csvwrite: input must be 2-D; reshape before writing".to_string())
+    Err(csvwrite_error(
+        "csvwrite: input must be 2-D; reshape before writing",
+    ))
 }
 
 fn write_csv(
@@ -342,13 +384,16 @@ fn write_csv(
     tensor: &Tensor,
     row_offset: usize,
     col_offset: usize,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
     let mut file = options.open(path).map_err(|err| {
-        format!(
-            "csvwrite: unable to open \"{}\" for writing ({err})",
-            path.display()
+        csvwrite_error_with_source(
+            format!(
+                "csvwrite: unable to open \"{}\" for writing ({err})",
+                path.display()
+            ),
+            err,
         )
     })?;
 
@@ -359,14 +404,22 @@ fn write_csv(
     let mut bytes_written = 0usize;
 
     for _ in 0..row_offset {
-        file.write_all(line_ending.as_bytes())
-            .map_err(|err| format!("csvwrite: failed to write line ending ({err})"))?;
+        file.write_all(line_ending.as_bytes()).map_err(|err| {
+            csvwrite_error_with_source(
+                format!("csvwrite: failed to write line ending ({err})"),
+                err,
+            )
+        })?;
         bytes_written += line_ending.len();
     }
 
     if rows == 0 || cols == 0 {
-        file.flush()
-            .map_err(|err| format!("csvwrite: failed to flush output ({err})"))?;
+        file.flush().map_err(|err| {
+            csvwrite_error_with_source(
+                format!("csvwrite: failed to flush output ({err})"),
+                err,
+            )
+        })?;
         return Ok(bytes_written);
     }
 
@@ -382,17 +435,29 @@ fn write_csv(
         }
         let line = fields.join(",");
         if !line.is_empty() {
-            file.write_all(line.as_bytes())
-                .map_err(|err| format!("csvwrite: failed to write value ({err})"))?;
+            file.write_all(line.as_bytes()).map_err(|err| {
+                csvwrite_error_with_source(
+                    format!("csvwrite: failed to write value ({err})"),
+                    err,
+                )
+            })?;
             bytes_written += line.len();
         }
-        file.write_all(line_ending.as_bytes())
-            .map_err(|err| format!("csvwrite: failed to write line ending ({err})"))?;
+        file.write_all(line_ending.as_bytes()).map_err(|err| {
+            csvwrite_error_with_source(
+                format!("csvwrite: failed to write line ending ({err})"),
+                err,
+            )
+        })?;
         bytes_written += line_ending.len();
     }
 
-    file.flush()
-        .map_err(|err| format!("csvwrite: failed to flush output ({err})"))?;
+    file.flush().map_err(|err| {
+        csvwrite_error_with_source(
+            format!("csvwrite: failed to flush output ({err})"),
+            err,
+        )
+    })?;
 
     Ok(bytes_written)
 }
@@ -604,9 +669,13 @@ pub(crate) mod tests {
             vec![Value::Num(-1.0), Value::Num(0.0)],
         )
         .expect_err("negative offsets should be rejected");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend from csvwrite"),
+        };
         assert!(
-            err.contains("row offset"),
-            "unexpected error message: {err}"
+            message.contains("row offset"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -674,7 +743,14 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .expect_err("csvwrite should fail");
-        assert!(err.contains("csvwrite"), "unexpected error message: {err}");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend from csvwrite"),
+        };
+        assert!(
+            message.contains("csvwrite"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

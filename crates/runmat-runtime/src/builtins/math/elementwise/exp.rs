@@ -8,12 +8,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -217,6 +218,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `exp` calls; providers can override with fused elementwise kernels.",
 };
 
+const BUILTIN_NAME: &str = "exp";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "exp",
     category = "math/elementwise",
@@ -225,55 +232,59 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::exp"
 )]
-fn exp_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn exp_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (exp_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => exp_gpu(handle),
         Value::Complex(re, im) => Ok(Value::Complex(
             exp_complex_re(re, im),
             exp_complex_im(re, im),
         )),
-        Value::ComplexTensor(ct) => (exp_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (exp_char_array(ca)).map_err(Into::into),
+        Value::ComplexTensor(ct) => exp_complex_tensor(ct),
+        Value::CharArray(ca) => exp_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {
-            Err((("exp: expected numeric input, got string".to_string())).into())
+            Err(builtin_error("exp: expected numeric input, got string"))
         }
-        other => (exp_real(other)).map_err(Into::into),
+        other => exp_real(other),
     }
 }
 
-fn exp_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn exp_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_exp(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    exp_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor(&handle)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(exp_tensor(tensor)?))
 }
 
-fn exp_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("exp", value)?;
-    exp_tensor(tensor).map(tensor::tensor_into_value)
+fn exp_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("exp", value)
+        .map_err(|e| builtin_error(format!("exp: {e}")))?;
+    Ok(tensor::tensor_into_value(exp_tensor(tensor)?))
 }
 
-fn exp_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn exp_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = tensor.data.iter().map(|&v| v.exp()).collect();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("exp: {e}"))
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("exp: {e}")))
 }
 
-fn exp_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn exp_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
         .data
         .iter()
         .map(|&(re, im)| (exp_complex_re(re, im), exp_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("exp: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("exp: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn exp_char_array(ca: CharArray) -> Result<Value, String> {
+fn exp_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data: Vec<f64> = ca.data.iter().map(|&ch| (ch as u32 as f64).exp()).collect();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("exp: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("exp: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -421,10 +432,15 @@ pub(crate) mod tests {
     #[test]
     fn exp_string_rejected() {
         let err = exp_builtin(Value::from("runmat")).unwrap_err();
-        assert!(
-            err.contains("expected numeric input"),
-            "unexpected error: {err}"
-        );
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains("expected numeric input"),
+                    "unexpected error: {err}"
+                );
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

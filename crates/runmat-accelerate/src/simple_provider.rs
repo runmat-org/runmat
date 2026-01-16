@@ -15,6 +15,7 @@ use runmat_accelerate_api::{
     SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
+use runmat_runtime::{build_runtime_error, RuntimeControlFlow};
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -56,6 +57,17 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
 const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
+
+fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
+    match flow {
+        RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
+        RuntimeControlFlow::Suspend(_) => anyhow::Error::new(
+            build_runtime_error(format!("{context}: unexpected suspension"))
+                .with_builtin(context)
+                .build(),
+        ),
+    }
+}
 
 #[derive(Clone, Copy)]
 enum PolyOrientation {
@@ -1720,8 +1732,20 @@ impl AccelProvider for InProcessProvider {
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
             runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
-                .map_err(|e: String| anyhow!(e))?;
-        let tensor = spec.generate_tensor().map_err(|e| anyhow!(e))?;
+                .map_err(|err| match err {
+                    RuntimeControlFlow::Error(error) => anyhow!(error),
+                    RuntimeControlFlow::Suspend(pending) => anyhow!(
+                        "fspecial: unexpected suspend while parsing request ({})",
+                        pending.prompt
+                    ),
+                })?;
+        let tensor = spec.generate_tensor().map_err(|err| match err {
+            RuntimeControlFlow::Error(error) => anyhow!(error),
+            RuntimeControlFlow::Suspend(pending) => anyhow!(
+                "fspecial: unexpected suspend while generating tensor ({})",
+                pending.prompt
+            ),
+        })?;
         Ok(self.allocate_tensor(tensor.data.clone(), tensor.shape.clone()))
     }
 
@@ -1751,8 +1775,15 @@ impl AccelProvider for InProcessProvider {
             &image_tensor,
             &kernel_tensor,
             options,
+            "imfilter",
         )
-        .map_err(|e| anyhow!(e))?;
+        .map_err(|err| match err {
+            RuntimeControlFlow::Error(error) => anyhow!(error),
+            RuntimeControlFlow::Suspend(pending) => anyhow!(
+                "imfilter: unexpected suspension while computing fallback ({})",
+                pending.prompt
+            ),
+        })?;
         let Tensor { data, shape, .. } = result;
         Ok(self.allocate_tensor(data, shape))
     }
@@ -1884,7 +1915,7 @@ impl AccelProvider for InProcessProvider {
         };
 
         let result = runtime_cov_from_tensors(left, right, options.rows, weight_spec)
-            .map_err(|e| anyhow!("covariance: {e}"))?;
+            .map_err(|flow| runtime_flow_to_anyhow("covariance", flow))?;
 
         let view = HostTensorView {
             data: &result.data,
@@ -1901,9 +1932,8 @@ impl AccelProvider for InProcessProvider {
         let host = self.download(matrix)?;
         let tensor = Tensor::new(host.data.clone(), host.shape.clone())
             .map_err(|e| anyhow!("corrcoef: {e}"))?;
-        let result =
-            runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
-                .map_err(|e| anyhow!("corrcoef: {e}"))?;
+        let result = runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
+            .map_err(|flow| runtime_flow_to_anyhow("corrcoef", flow))?;
         let view = HostTensorView {
             data: &result.data,
             shape: &result.shape,
@@ -3624,9 +3654,24 @@ impl AccelProvider for InProcessProvider {
                 .clone()
         };
         let tensor = Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("unique: {e}"))?;
-        unique::unique_numeric_from_tensor(tensor, options)
-            .and_then(|eval| eval.into_numeric_unique_result())
-            .map_err(|e| anyhow!("{e}"))
+        let eval = match unique::unique_numeric_from_tensor(tensor, options) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                        anyhow!("unique: unexpected suspend")
+                    }
+                });
+            }
+        };
+        match eval.into_numeric_unique_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("unique: unexpected suspend"),
+            }),
+        }
     }
 
     fn setdiff(
@@ -3651,11 +3696,26 @@ impl AccelProvider for InProcessProvider {
         };
         let tensor_a = Tensor::new(data_a, a.shape.clone()).map_err(|e| anyhow!("setdiff: {e}"))?;
         let tensor_b = Tensor::new(data_b, b.shape.clone()).map_err(|e| anyhow!("setdiff: {e}"))?;
-        runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
+        let eval = match runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
             tensor_a, tensor_b, options,
-        )
-        .and_then(|eval| eval.into_numeric_setdiff_result())
-        .map_err(|e| anyhow!("setdiff: {e}"))
+        ) {
+            Ok(eval) => eval,
+            Err(flow) => {
+                return Err(match flow {
+                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
+                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
+                        anyhow!("setdiff: unexpected suspend")
+                    }
+                });
+            }
+        };
+        match eval.into_numeric_setdiff_result() {
+            Ok(result) => Ok(result),
+            Err(flow) => Err(match flow {
+                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
+                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+            }),
+        }
     }
 
     fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
@@ -4485,7 +4545,7 @@ impl AccelProvider for InProcessProvider {
             Value::Tensor(tensor),
             &args,
         )
-        .map_err(|e| anyhow!("chol: {e}"))?;
+        .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
         let factor_tensor = tensor_from_value("chol", eval.factor())?;
         let factor = self.allocate_tensor(factor_tensor.data.clone(), factor_tensor.shape.clone());
         Ok(ProviderCholResult {
@@ -4514,7 +4574,7 @@ impl AccelProvider for InProcessProvider {
             Value::Tensor(tensor),
             &args,
         )
-        .map_err(|e| anyhow!("qr: {e}"))?;
+        .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
 
         let q_tensor = tensor_from_value("qr", eval.q())?;
         let r_tensor = tensor_from_value("qr", eval.r())?;

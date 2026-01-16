@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -258,6 +258,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion sink; fusion planner stops GPU fusion before calling cell2mat.",
 };
 
+const IDENT_INVALID_INPUT: &str = "MATLAB:cell2mat:InvalidInput";
+const IDENT_INVALID_CONTENTS: &str = "MATLAB:cell2mat:InvalidContents";
+const IDENT_SIZE_LIMIT: &str = "MATLAB:cell2mat:SizeExceeded";
+
+fn cell2mat_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("cell2mat")
+        .build()
+        .into()
+}
+
+fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("cell2mat")
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "cell2mat",
     category = "cells/core",
@@ -268,10 +287,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Cell(ca) => (cell_array_to_matrix(&ca)).map_err(Into::into),
-        other => Err(((format!(
-            "cell2mat: expected a cell array input, got {other:?}"
-        ))).into()),
+        Value::Cell(ca) => cell_array_to_matrix(&ca),
+        other => Err(cell2mat_error_with_identifier(
+            format!("cell2mat: expected a cell array input, got {other:?}"),
+            IDENT_INVALID_INPUT,
+        )),
     }
 }
 
@@ -315,10 +335,11 @@ impl CellEntry {
     }
 }
 
-fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String> {
+fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         // Mirror MATLAB's behaviour: empty cell array -> 0x0 double matrix.
-        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("cell2mat: {e}"))?;
+        let tensor =
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
 
@@ -329,14 +350,14 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
     let mut detected_kind: Option<ElementKind> = None;
 
     for ptr in &ca.data {
-        let gathered =
-            gather_if_needed(ptr).map_err(|e: crate::RuntimeControlFlow| e.to_string())?;
+        let gathered = gather_if_needed(ptr)?;
         let entry = parse_cell_entry(gathered)?;
         if let Some(kind) = detected_kind {
             if kind != entry.kind {
-                return Err(
-                    "cell2mat: all cell contents must share the same fundamental type".to_string(),
-                );
+                return Err(cell2mat_error_with_identifier(
+                    "cell2mat: all cell contents must share the same fundamental type",
+                    IDENT_INVALID_CONTENTS,
+                ));
             }
         } else {
             detected_kind = Some(entry.kind);
@@ -368,10 +389,10 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
             if *slot == 0 {
                 *slot = size;
             } else if *slot != size {
-                return Err(
-                    "cell2mat: all cells in the same row and column must agree on block sizes"
-                        .to_string(),
-                );
+                return Err(cell2mat_error_with_identifier(
+                    "cell2mat: all cells in the same row and column must agree on block sizes",
+                    IDENT_INVALID_CONTENTS,
+                ));
             }
         }
 
@@ -384,9 +405,10 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
             if existing.len() != entry_extra.len()
                 || existing.iter().zip(&entry_extra).any(|(a, b)| *a != *b)
             {
-                return Err(
-                    "cell2mat: higher-dimensional extents must match across all cells".to_string(),
-                );
+                return Err(cell2mat_error_with_identifier(
+                    "cell2mat: higher-dimensional extents must match across all cells",
+                    IDENT_INVALID_CONTENTS,
+                ));
             }
         } else {
             extra_shape = Some(entry_extra);
@@ -400,7 +422,10 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
             .iter()
             .try_fold(0usize, |acc, &v| acc.checked_add(v))
             .ok_or_else(|| {
-                "cell2mat: resulting matrix is too large to represent on this platform".to_string()
+                cell2mat_error_with_identifier(
+                    "cell2mat: resulting matrix is too large to represent on this platform",
+                    IDENT_SIZE_LIMIT,
+                )
             })?;
         result_shape.push(sum);
     }
@@ -411,13 +436,17 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
     }
 
     if element_kind == ElementKind::Char && result_shape.len() > 2 {
-        return Err(
-            "cell2mat: character cell contents must form a 2-D character array".to_string(),
-        );
+        return Err(cell2mat_error_with_identifier(
+            "cell2mat: character cell contents must form a 2-D character array",
+            IDENT_INVALID_CONTENTS,
+        ));
     }
 
     let total_elems = total_len(&result_shape).ok_or_else(|| {
-        "cell2mat: resulting matrix is too large to represent on this platform".to_string()
+        cell2mat_error_with_identifier(
+            "cell2mat: resulting matrix is too large to represent on this platform",
+            IDENT_SIZE_LIMIT,
+        )
     })?;
 
     let prefix_offsets: Vec<Vec<usize>> =
@@ -434,7 +463,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
                 rank,
                 &mut data,
             )?;
-            let tensor = Tensor::new(data, result_shape).map_err(|e| format!("cell2mat: {e}"))?;
+            let tensor = Tensor::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::Tensor(tensor))
         }
         ElementKind::Complex => {
@@ -448,7 +477,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
                 &mut data,
             )?;
             let tensor =
-                ComplexTensor::new(data, result_shape).map_err(|e| format!("cell2mat: {e}"))?;
+                ComplexTensor::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
         ElementKind::Logical => {
@@ -462,7 +491,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
                 &mut data,
             )?;
             let logical =
-                LogicalArray::new(data, result_shape).map_err(|e| format!("cell2mat: {e}"))?;
+                LogicalArray::new(data, result_shape).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::LogicalArray(logical))
         }
         ElementKind::Char => {
@@ -470,22 +499,22 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
             let cols = result_shape.get(1).copied().unwrap_or(1);
             let char_data = copy_chars(&entries, &multi_indices, rows, cols, &block_sizes)?;
             let array =
-                CharArray::new(char_data, rows, cols).map_err(|e| format!("cell2mat: {e}"))?;
+                CharArray::new(char_data, rows, cols).map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
             Ok(Value::CharArray(array))
         }
     }
 }
 
-fn validate_entry_kinds(entries: &[CellEntry], expected: ElementKind) -> Result<(), String> {
+fn validate_entry_kinds(entries: &[CellEntry], expected: ElementKind) -> BuiltinResult<()> {
     for entry in entries {
         if entry.len() == 0 {
             continue;
         }
         if entry.kind != expected {
-            return Err(
-                "cell2mat: all non-empty cell contents must share the same fundamental type"
-                    .to_string(),
-            );
+            return Err(cell2mat_error_with_identifier(
+                "cell2mat: all non-empty cell contents must share the same fundamental type",
+                IDENT_INVALID_CONTENTS,
+            ));
         }
     }
     Ok(())
@@ -498,7 +527,7 @@ fn copy_numeric(
     prefix_offsets: &[Vec<usize>],
     rank: usize,
     output: &mut [f64],
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let total_rank = result_shape.len();
     let dest_strides = column_major_strides(result_shape);
 
@@ -528,7 +557,7 @@ fn copy_complex(
     prefix_offsets: &[Vec<usize>],
     rank: usize,
     output: &mut [(f64, f64)],
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let total_rank = result_shape.len();
     let dest_strides = column_major_strides(result_shape);
 
@@ -558,7 +587,7 @@ fn copy_logical(
     prefix_offsets: &[Vec<usize>],
     rank: usize,
     output: &mut [u8],
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let total_rank = result_shape.len();
     let dest_strides = column_major_strides(result_shape);
 
@@ -587,7 +616,7 @@ fn copy_chars(
     rows: usize,
     cols: usize,
     block_sizes: &[Vec<usize>],
-) -> Result<Vec<char>, String> {
+) -> BuiltinResult<Vec<char>> {
     let mut output = vec!['\0'; rows.saturating_mul(cols)];
     let row_prefix = block_sizes
         .first()
@@ -623,7 +652,10 @@ fn copy_chars(
                 .checked_mul(cols)
                 .and_then(|v| v.checked_add(dest_col))
                 .ok_or_else(|| {
-                    "cell2mat: resulting character array exceeds supported size".to_string()
+                    cell2mat_error_with_identifier(
+                        "cell2mat: resulting character array exceeds supported size",
+                        IDENT_SIZE_LIMIT,
+                    )
                 })?;
             output[dest_linear] = *value;
         }
@@ -637,20 +669,25 @@ fn compute_base_offsets(
     prefix_offsets: &[Vec<usize>],
     total_rank: usize,
     rank: usize,
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     let mut base = vec![0usize; total_rank];
     for dim in 0..rank.min(prefix_offsets.len()) {
         let idx = multi.get(dim).copied().unwrap_or(0);
         let offset = prefix_offsets[dim]
             .get(idx)
             .copied()
-            .ok_or_else(|| "cell2mat: internal offset calculation failed".to_string())?;
+            .ok_or_else(|| {
+                cell2mat_error_with_identifier(
+                    "cell2mat: internal offset calculation failed",
+                    IDENT_SIZE_LIMIT,
+                )
+            })?;
         base[dim] = offset;
     }
     Ok(base)
 }
 
-fn parse_cell_entry(value: Value) -> Result<CellEntry, String> {
+fn parse_cell_entry(value: Value) -> BuiltinResult<CellEntry> {
     match value {
         Value::Tensor(t) => Ok(CellEntry {
             kind: ElementKind::Numeric,
@@ -692,15 +729,21 @@ fn parse_cell_entry(value: Value) -> Result<CellEntry, String> {
             shape: vec![ca.rows, ca.cols],
             data: EntryData::Char(ca.data.clone()),
         }),
-        Value::Cell(_) => Err("cell2mat: nested cell arrays are not supported".to_string()),
-        Value::String(_) | Value::StringArray(_) => Err(
-            "cell2mat: string inputs are not supported; convert to char arrays first".to_string(),
-        ),
-        Value::GpuTensor(_) => Err(
-            "cell2mat: unexpected GPU tensor after gather; please report this issue".to_string(),
-        ),
-        other => Err(format!(
-            "cell2mat: unsupported cell element type: {other:?}"
+        Value::Cell(_) => Err(cell2mat_error_with_identifier(
+            "cell2mat: nested cell arrays are not supported",
+            IDENT_INVALID_CONTENTS,
+        )),
+        Value::String(_) | Value::StringArray(_) => Err(cell2mat_error_with_identifier(
+            "cell2mat: string inputs are not supported; convert to char arrays first",
+            IDENT_INVALID_CONTENTS,
+        )),
+        Value::GpuTensor(_) => Err(cell2mat_error_with_identifier(
+            "cell2mat: unexpected GPU tensor after gather; please report this issue",
+            IDENT_INVALID_CONTENTS,
+        )),
+        other => Err(cell2mat_error_with_identifier(
+            format!("cell2mat: unsupported cell element type: {other:?}"),
+            IDENT_INVALID_CONTENTS,
         )),
     }
 }
@@ -893,7 +936,7 @@ pub(crate) mod tests {
         let a = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
         let b = Value::Tensor(Tensor::new(vec![3.0], vec![1, 1]).unwrap());
         let cell = crate::make_cell(vec![a, b], 1, 2).expect("cell");
-        let err = cell2mat_builtin(cell).unwrap_err();
+        let err = cell2mat_builtin(cell).unwrap_err().to_string();
         assert!(err.contains("block sizes"));
     }
 

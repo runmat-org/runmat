@@ -3,6 +3,7 @@
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -201,6 +202,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fused kernels emit 0/1 masks; providers can override with native logical-isfinite implementations.",
 };
 
+const BUILTIN_NAME: &str = "isfinite";
+const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isfinite:InvalidInput";
+const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
+
 #[runtime_builtin(
     name = "isfinite",
     category = "logical/tests",
@@ -209,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "elementwise",
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
-fn isfinite_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
@@ -217,29 +222,36 @@ fn isfinite_builtin(value: Value) -> crate::BuiltinResult<Value> {
                     return Ok(gpu_helpers::logical_gpu_value(mask));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            Ok(isfinite_tensor("isfinite", tensor)?)
+            let tensor = gpu_helpers::gather_tensor(&handle)
+                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+            isfinite_tensor(BUILTIN_NAME, tensor)
         }
-        other => (isfinite_host(other)).map_err(Into::into),
+        other => isfinite_host(other),
     }
 }
 
-fn isfinite_host(value: Value) -> Result<Value, String> {
+fn isfinite_host(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(x) => Ok(Value::Bool(x.is_finite())),
         Value::Int(_) | Value::Bool(_) => Ok(Value::Bool(true)),
         Value::Complex(re, im) => Ok(Value::Bool(re.is_finite() && im.is_finite())),
-        Value::Tensor(tensor) => isfinite_tensor("isfinite", tensor),
-        Value::ComplexTensor(tensor) => isfinite_complex_tensor("isfinite", tensor),
-        Value::LogicalArray(array) => logical_full("isfinite", array.shape, true),
-        Value::CharArray(array) => logical_full("isfinite", vec![array.rows, array.cols], true),
+        Value::Tensor(tensor) => isfinite_tensor(BUILTIN_NAME, tensor),
+        Value::ComplexTensor(tensor) => isfinite_complex_tensor(BUILTIN_NAME, tensor),
+        Value::LogicalArray(array) => logical_full(BUILTIN_NAME, array.shape, true),
+        Value::CharArray(array) => logical_full(BUILTIN_NAME, vec![array.rows, array.cols], true),
         Value::String(_) => Ok(Value::Bool(false)),
-        Value::StringArray(array) => logical_full("isfinite", array.shape, false),
-        _ => Err("isfinite: expected numeric, logical, char, or string input".to_string()),
+        Value::StringArray(array) => logical_full(BUILTIN_NAME, array.shape, false),
+        _ => Err(build_runtime_error(format!(
+            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
+        ))
+        .with_identifier(IDENTIFIER_INVALID_INPUT)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()),
     }
 }
 
-fn isfinite_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
+fn isfinite_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -248,7 +260,7 @@ fn isfinite_tensor(name: &str, tensor: Tensor) -> Result<Value, String> {
     logical_result(name, data, tensor.shape)
 }
 
-fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, String> {
+fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
         .data
         .iter()
@@ -263,25 +275,28 @@ fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> Result<Value, S
     logical_result(name, data, tensor.shape)
 }
 
-fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> Result<Value, String> {
+fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total == 0 {
         return LogicalArray::new(Vec::new(), shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"));
+            .map_err(|e| logical_array_error(name, e));
     }
     let fill = if value { 1u8 } else { 0u8 };
     let bits = vec![fill; total];
     logical_result(name, bits, shape)
 }
 
-fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value, String> {
+fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
     let total = tensor::element_count(&shape);
     if total != bits.len() {
-        return Err(format!(
-            "{name}: internal error, mask length {} does not match shape {:?}",
-            bits.len(),
-            shape
+        return Err(internal_error(
+            name,
+            format!(
+                "{name}: internal error, mask length {} does not match shape {:?}",
+                bits.len(),
+                shape
+            ),
         ));
     }
     if total == 1 {
@@ -289,14 +304,27 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> Result<Value,
     } else {
         LogicalArray::new(bits, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| format!("{name}: {e}"))
+            .map_err(|e| logical_array_error(name, e))
     }
+}
+
+fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeControlFlow {
+    internal_error(name, format!("{name}: {err}"))
+}
+
+fn internal_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_identifier(IDENTIFIER_INTERNAL)
+        .with_builtin(name)
+        .build()
+        .into()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, IntValue, StringArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -441,11 +469,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isfinite_rejects_unsupported_types() {
-        let err = isfinite_builtin(Value::FunctionHandle("foo".to_string()))
-            .expect_err("isfinite should reject function handles");
+        let err = unwrap_error(
+            isfinite_builtin(Value::FunctionHandle("foo".to_string()))
+                .expect_err("isfinite should reject function handles"),
+        );
         assert!(
-            err.contains("expected numeric, logical, char, or string input"),
-            "unexpected error message: {err}"
+            err.message()
+                .contains("expected numeric, logical, char, or string input"),
+            "unexpected error message: {err:?}"
         );
     }
 
@@ -507,6 +538,13 @@ pub(crate) mod tests {
                 assert_eq!(data, vec![if flag { 1.0 } else { 0.0 }]);
             }
             other => panic!("unexpected results {other:?}"),
+        }
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in isfinite tests"),
         }
     }
 }

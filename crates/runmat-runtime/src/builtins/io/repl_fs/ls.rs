@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -196,6 +196,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "I/O builtins are excluded from fusion plans; metadata registered for introspection completeness.",
 };
 
+const BUILTIN_NAME: &str = "ls";
+
+fn ls_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "ls",
     category = "io/repl_fs",
@@ -208,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args)?;
     if gathered.len() > 1 {
-        return Err((("ls: too many input arguments".to_string())).into());
+        return Err(ls_error("ls: too many input arguments"));
     }
 
     let entries = if let Some(value) = gathered.first() {
@@ -218,10 +242,10 @@ fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     };
 
     emit_listing_stdout(&entries);
-    rows_to_char_array(&entries).map_err(Into::into)
+    rows_to_char_array(&entries)
 }
 
-fn list_from_value(value: &Value) -> Result<Vec<String>, String> {
+fn list_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     let names = patterns_from_value(value)?;
     if names.is_empty() {
         return list_current_directory();
@@ -243,19 +267,19 @@ fn list_from_value(value: &Value) -> Result<Vec<String>, String> {
     Ok(combined)
 }
 
-fn list_current_directory() -> Result<Vec<String>, String> {
+fn list_current_directory() -> BuiltinResult<Vec<String>> {
     let cwd = env::current_dir()
-        .map_err(|err| format!("ls: unable to determine current directory ({err})"))?;
+        .map_err(|err| ls_error(format!("ls: unable to determine current directory ({err})")))?;
     list_directory(&cwd)
 }
 
-fn list_for_pattern(raw: &str) -> Result<Vec<String>, String> {
+fn list_for_pattern(raw: &str) -> BuiltinResult<Vec<String>> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return list_current_directory();
     }
 
-    let expanded = expand_user_path(trimmed, "ls")?;
+    let expanded = expand_user_path(trimmed, "ls").map_err(ls_error)?;
 
     if contains_wildcards(&expanded) {
         list_glob_pattern(&expanded, trimmed)
@@ -264,11 +288,11 @@ fn list_for_pattern(raw: &str) -> Result<Vec<String>, String> {
     }
 }
 
-fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
+fn list_directory(dir: &Path) -> BuiltinResult<Vec<String>> {
     let mut entries = Vec::new();
     let dir_str = path_to_string(dir);
-    let read_dir =
-        vfs::read_dir(dir).map_err(|err| format!("ls: unable to access '{dir_str}' ({err})"))?;
+    let read_dir = vfs::read_dir(dir)
+        .map_err(|err| ls_error(format!("ls: unable to access '{dir_str}' ({err})")))?;
 
     for entry in read_dir {
         let name = entry.file_name().to_string_lossy();
@@ -284,7 +308,7 @@ fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
     Ok(entries)
 }
 
-fn list_path(expanded: &str, original: &str) -> Result<Vec<String>, String> {
+fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
     let path = PathBuf::from(expanded);
     match vfs::metadata(&path) {
         Ok(metadata) => {
@@ -297,15 +321,15 @@ fn list_path(expanded: &str, original: &str) -> Result<Vec<String>, String> {
             }
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(format!("ls: unable to access '{original}' ({err})")),
+        Err(err) => Err(ls_error(format!("ls: unable to access '{original}' ({err})"))),
     }
 }
 
-fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<String>, String> {
+fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
     let mut entries = Vec::new();
 
-    let matcher =
-        glob(expanded).map_err(|err| format!("ls: invalid pattern '{original}' ({err})"))?;
+    let matcher = glob(expanded)
+        .map_err(|err| ls_error(format!("ls: invalid pattern '{original}' ({err})")))?;
     for item in matcher {
         match item {
             Ok(path) => {
@@ -317,9 +341,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<String>, Stri
                 entries.push(name);
             }
             Err(err) => {
-                return Err(format!(
+                return Err(ls_error(format!(
                     "ls: unable to enumerate matches for '{original}' ({err})"
-                ))
+                )))
             }
         }
     }
@@ -327,9 +351,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<String>, Stri
     Ok(entries)
 }
 
-fn rows_to_char_array(rows: &[String]) -> Result<Value, String> {
+fn rows_to_char_array(rows: &[String]) -> BuiltinResult<Value> {
     if rows.is_empty() {
-        let array = CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("ls: {e}"))?;
+        let array = CharArray::new(Vec::new(), 0, 0).map_err(|e| ls_error(format!("ls: {e}")))?;
         return Ok(Value::CharArray(array));
     }
 
@@ -348,7 +372,8 @@ fn rows_to_char_array(rows: &[String]) -> Result<Value, String> {
         data.extend(chars);
     }
 
-    let array = CharArray::new(data, rows.len(), width).map_err(|e| format!("ls: {e}"))?;
+    let array =
+        CharArray::new(data, rows.len(), width).map_err(|e| ls_error(format!("ls: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
@@ -360,19 +385,19 @@ fn emit_listing_stdout(rows: &[String]) {
     record_console_output(ConsoleStream::Stdout, text);
 }
 
-fn patterns_from_value(value: &Value) -> Result<Vec<String>, String> {
+fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(StringArray { data, .. }) => {
             if data.len() == 1 {
                 Ok(vec![data[0].clone()])
             } else {
-                Err("ls: name must be a character vector or string scalar".to_string())
+                Err(ls_error("ls: name must be a character vector or string scalar"))
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err("ls: name must be a character vector or string scalar".to_string());
+                return Err(ls_error("ls: name must be a character vector or string scalar"));
             }
             let mut row = String::with_capacity(chars.cols);
             for c in 0..chars.cols {
@@ -380,7 +405,7 @@ fn patterns_from_value(value: &Value) -> Result<Vec<String>, String> {
             }
             Ok(vec![row.trim_end().to_string()])
         }
-        _ => Err("ls: name must be a character vector or string scalar".to_string()),
+        _ => Err(ls_error("ls: name must be a character vector or string scalar")),
     }
 }
 
@@ -393,10 +418,10 @@ fn append_directory_suffix(text: &mut String, is_dir: bool) {
     }
 }
 
-fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
-        out.push(gather_if_needed(value).map_err(|err| format!("ls: {err}"))?);
+        out.push(gather_if_needed(value).map_err(map_control_flow)?);
     }
     Ok(out)
 }
@@ -405,6 +430,7 @@ fn gather_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::CharArray;
     use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
@@ -423,6 +449,13 @@ pub(crate) mod tests {
     impl Drop for DirGuard {
         fn drop(&mut self) {
             let _ = env::set_current_dir(&self.original);
+        }
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in ls tests"),
         }
     }
 
@@ -554,8 +587,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ls_rejects_numeric_argument() {
-        let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, "ls: name must be a character vector or string scalar");
+        let err = unwrap_error(ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        assert_eq!(err.message(), "ls: name must be a character vector or string scalar");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

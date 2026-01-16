@@ -7,6 +7,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
@@ -260,6 +261,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation is a sink and terminates fusion pipelines.",
 };
 
+fn cat_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("cat").build()
+}
+
+fn cat_err(message: impl Into<String>) -> RuntimeControlFlow {
+    cat_error(message).into()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CatCategory {
     Numeric,
@@ -292,7 +301,7 @@ impl Default for LikeSpec {
 }
 
 impl LikeSpec {
-    fn from_prototype(proto: Value) -> Result<Self, String> {
+    fn from_prototype(proto: Value) -> BuiltinResult<Self> {
         match proto {
             Value::GpuTensor(_) => Ok(Self {
                 device: LikeDevice::Gpu,
@@ -310,23 +319,23 @@ impl LikeSpec {
                 device: LikeDevice::Host,
                 category_hint: Some(CatCategory::Complex),
             }),
-            other => Err(format!(
+            other => Err(cat_err(format!(
                 "cat: unsupported prototype for 'like' ({other:?}); provide a numeric or gpuArray prototype"
-            )),
+            ))),
         }
     }
 
-    fn ensure_device(&self, category: CatCategory) -> Result<(), String> {
+    fn ensure_device(&self, category: CatCategory) -> BuiltinResult<()> {
         if matches!(self.device, LikeDevice::Gpu) && !matches!(category, CatCategory::Numeric) {
-            return Err(
-                "cat: GPU 'like' prototypes are only supported for numeric inputs".to_string(),
-            );
+            return Err(cat_err(
+                "cat: GPU 'like' prototypes are only supported for numeric inputs",
+            ));
         }
         Ok(())
     }
 }
 
-fn extract_like(mut inputs: Vec<Value>) -> Result<(Vec<Value>, LikeSpec), String> {
+fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)> {
     if inputs.len() >= 2 {
         if let Some(keyword) = keyword_of(&inputs[inputs.len() - 2]) {
             if keyword == "like" {
@@ -360,37 +369,37 @@ fn extract_like(mut inputs: Vec<Value>) -> Result<(Vec<Value>, LikeSpec), String
 )]
 fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
-        return Err((("cat: at least two input arrays are required".to_string())).into());
+        return Err(cat_err("cat: at least two input arrays are required"));
     }
-    let dim_index = tensor::parse_dimension(&dim, "cat")?;
+    let dim_index = tensor::parse_dimension(&dim, "cat").map_err(cat_err)?;
     let dim_zero = dim_index - 1;
 
     let (inputs, like) = extract_like(rest)?;
     if inputs.len() < 2 {
-        return Err((("cat: at least two input arrays are required".to_string())).into());
+        return Err(cat_err("cat: at least two input arrays are required"));
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
         if !inputs.iter().all(|v| matches!(v, Value::GpuTensor(_))) {
-            return Err(
-                (("cat: cannot mix gpuArray inputs with host arrays; convert them first".to_string())).into(),
-            );
+            return Err(cat_err(
+                "cat: cannot mix gpuArray inputs with host arrays; convert them first",
+            ));
         }
-        return (cat_gpu_tensors(dim_zero, inputs, &like)).map_err(Into::into);
+        return cat_gpu_tensors(dim_zero, inputs, &like);
     }
 
     let category = determine_category(&inputs, &like)?;
     match category {
-        CatCategory::String => (cat_string_arrays(dim_zero, inputs)).map_err(Into::into),
-        CatCategory::Char => (cat_char_arrays(dim_zero, inputs)).map_err(Into::into),
-        CatCategory::Cell => (cat_cell_arrays(dim_zero, inputs)).map_err(Into::into),
-        CatCategory::Logical => (cat_logical_arrays(dim_zero, inputs, &like)).map_err(Into::into),
-        CatCategory::Complex => (cat_complex_arrays(dim_zero, inputs, &like)).map_err(Into::into),
-        CatCategory::Numeric => (cat_numeric_tensors(dim_zero, inputs, &like)).map_err(Into::into),
+        CatCategory::String => cat_string_arrays(dim_zero, inputs),
+        CatCategory::Char => cat_char_arrays(dim_zero, inputs),
+        CatCategory::Cell => cat_cell_arrays(dim_zero, inputs),
+        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, &like),
+        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, &like),
+        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, &like),
     }
 }
 
-fn determine_category(inputs: &[Value], like: &LikeSpec) -> Result<CatCategory, String> {
+fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCategory> {
     let mut category = infer_category(inputs)?;
     if let Some(hint) = like.category_hint {
         category = match hint {
@@ -402,15 +411,17 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> Result<CatCategory, 
                         | CatCategory::Cell
                         | CatCategory::Complex
                 ) {
-                    return Err(
-                        "cat: 'like' prototype class does not match the input classes".to_string(),
-                    );
+                    return Err(cat_err(
+                        "cat: 'like' prototype class does not match the input classes",
+                    ));
                 }
                 CatCategory::Numeric
             }
             CatCategory::Logical => {
                 if !matches!(category, CatCategory::Logical) {
-                    return Err("cat: 'like' logical prototypes require logical inputs".to_string());
+                    return Err(cat_err(
+                        "cat: 'like' logical prototypes require logical inputs",
+                    ));
                 }
                 CatCategory::Logical
             }
@@ -419,18 +430,16 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> Result<CatCategory, 
                     category,
                     CatCategory::String | CatCategory::Char | CatCategory::Cell
                 ) {
-                    return Err(
-                        "cat: 'like' complex prototypes require numeric or complex inputs"
-                            .to_string(),
-                    );
+                    return Err(cat_err(
+                        "cat: 'like' complex prototypes require numeric or complex inputs",
+                    ));
                 }
                 CatCategory::Complex
             }
             CatCategory::Char | CatCategory::String | CatCategory::Cell => {
-                return Err(
-                    "cat: 'like' prototypes for char, string, or cell arrays are not supported"
-                        .to_string(),
-                );
+                return Err(cat_err(
+                    "cat: 'like' prototypes for char, string, or cell arrays are not supported",
+                ));
             }
         };
     }
@@ -438,7 +447,7 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> Result<CatCategory, 
     Ok(category)
 }
 
-fn infer_category(inputs: &[Value]) -> Result<CatCategory, String> {
+fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
     let mut has_string = false;
     let mut has_char = false;
     let mut has_cell = false;
@@ -473,14 +482,14 @@ fn infer_category(inputs: &[Value]) -> Result<CatCategory, String> {
                 all_logical = false;
             }
             Value::GpuTensor(_) => {
-                return Err(
-                    "cat: gpuArray inputs must be concatenated using the GPU path".to_string(),
-                );
+                return Err(cat_err(
+                    "cat: gpuArray inputs must be concatenated using the GPU path",
+                ));
             }
             other => {
-                return Err(format!(
+                return Err(cat_err(format!(
                     "cat: unsupported input type for concatenation: {other:?}"
-                ));
+                )));
             }
         }
         if !matches!(value, Value::LogicalArray(_) | Value::Bool(_)) {
@@ -489,16 +498,24 @@ fn infer_category(inputs: &[Value]) -> Result<CatCategory, String> {
     }
 
     if has_string && (has_char || has_cell || has_complex || (has_numeric && !all_logical)) {
-        return Err("cat: cannot mix string arrays with other classes".to_string());
+        return Err(cat_err(
+            "cat: cannot mix string arrays with other classes",
+        ));
     }
     if has_char && (has_cell || has_complex || (has_numeric && !all_logical) || has_string) {
-        return Err("cat: cannot mix char arrays with other classes".to_string());
+        return Err(cat_err(
+            "cat: cannot mix char arrays with other classes",
+        ));
     }
     if has_cell && (has_complex || (has_numeric && !all_logical) || has_string || has_char) {
-        return Err("cat: cannot mix cell arrays with other classes".to_string());
+        return Err(cat_err(
+            "cat: cannot mix cell arrays with other classes",
+        ));
     }
     if has_complex && (has_string || has_char || has_cell) {
-        return Err("cat: cannot mix complex arrays with textual or cell arrays".to_string());
+        return Err(cat_err(
+            "cat: cannot mix complex arrays with textual or cell arrays",
+        ));
     }
 
     if has_string {
@@ -516,14 +533,13 @@ fn infer_category(inputs: &[Value]) -> Result<CatCategory, String> {
     }
 }
 
-fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> Result<Value, String> {
+fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> BuiltinResult<Value> {
     like.ensure_device(CatCategory::Numeric)?;
     match like.device {
         LikeDevice::Host => Ok(tensor::tensor_into_value(tensor)),
         LikeDevice::Gpu => {
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                "cat: GPU output requested via 'like' but no acceleration provider is active"
-                    .to_string()
+                cat_err("cat: GPU output requested via 'like' but no acceleration provider is active")
             })?;
             let view = HostTensorView {
                 data: &tensor.data,
@@ -531,7 +547,7 @@ fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> Result<Value, Str
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|err| format!("cat: failed to upload concatenated tensor: {err}"))?;
+                .map_err(|err| cat_err(format!("cat: failed to upload concatenated tensor: {err}")))?;
             Ok(Value::GpuTensor(handle))
         }
     }
@@ -541,17 +557,17 @@ fn cat_numeric_tensors(
     dim_zero: usize,
     values: Vec<Value>,
     like: &LikeSpec,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let mut tensors = Vec::with_capacity(values.len());
     for value in values {
-        let tensor = tensor::value_into_tensor_for("cat", value)?;
+        let tensor = tensor::value_into_tensor_for("cat", value).map_err(cat_err)?;
         tensors.push(tensor);
     }
 
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
     let data_refs: Vec<&[f64]> = tensors.iter().map(|t| t.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = Tensor::new(data, shape).map_err(|e| format!("cat: {e}"))?;
+    let tensor = Tensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     finalize_numeric_output(tensor, like)
 }
 
@@ -559,7 +575,7 @@ fn cat_logical_arrays(
     dim_zero: usize,
     values: Vec<Value>,
     _like: &LikeSpec,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
         arrays.push(value_into_logical(value)?);
@@ -567,7 +583,7 @@ fn cat_logical_arrays(
     let shapes: Vec<Vec<usize>> = arrays.iter().map(|a| a.shape.clone()).collect();
     let data_refs: Vec<&[u8]> = arrays.iter().map(|a| a.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let logical = LogicalArray::new(data, shape).map_err(|e| format!("cat: {e}"))?;
+    let logical = LogicalArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::LogicalArray(logical))
 }
 
@@ -575,12 +591,11 @@ fn cat_complex_arrays(
     dim_zero: usize,
     values: Vec<Value>,
     _like: &LikeSpec,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
-        return Err(
-            "cat: complex concatenation requires host arrays; convert gpuArray values first"
-                .to_string(),
-        );
+        return Err(cat_err(
+            "cat: complex concatenation requires host arrays; convert gpuArray values first",
+        ));
     }
 
     let mut tensors = Vec::with_capacity(values.len());
@@ -588,10 +603,11 @@ fn cat_complex_arrays(
         let tensor = match value {
             Value::ComplexTensor(ct) => ct,
             Value::Complex(re, im) => {
-                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| format!("cat: {e}"))?
+                ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                    .map_err(|e| cat_err(format!("cat: {e}")))?
             }
             other => {
-                let real = tensor::value_into_tensor_for("cat", other)?;
+                let real = tensor::value_into_tensor_for("cat", other).map_err(cat_err)?;
                 tensor_to_complex(real)?
             }
         };
@@ -601,20 +617,20 @@ fn cat_complex_arrays(
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
     let data_refs: Vec<&[(f64, f64)]> = tensors.iter().map(|t| t.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = ComplexTensor::new(data, shape).map_err(|e| format!("cat: {e}"))?;
+    let tensor = ComplexTensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, String> {
+fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
     if dim_zero > 1 {
-        return Err("cat: char arrays only support dimensions 1 or 2".to_string());
+        return Err(cat_err("cat: char arrays only support dimensions 1 or 2"));
     }
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
         if let Value::CharArray(ca) = value {
             arrays.push(ca);
         } else {
-            return Err("cat: expected char arrays".to_string());
+            return Err(cat_err("cat: expected char arrays"));
         }
     }
     match dim_zero {
@@ -623,48 +639,48 @@ fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, String>
     }
 }
 
-fn concat_char_rows(arrays: Vec<CharArray>) -> Result<Value, String> {
+fn concat_char_rows(arrays: Vec<CharArray>) -> BuiltinResult<Value> {
     let cols = arrays.first().map(|a| a.cols).unwrap_or(0);
     for (idx, arr) in arrays.iter().enumerate() {
         if arr.cols != cols {
-            return Err(format!(
+            return Err(cat_err(format!(
                 "cat: dimension 2 mismatch between input 1 (size {}) and input {} (size {})",
                 cols,
                 idx + 1,
                 arr.cols
-            ));
+            )));
         }
     }
     let total_rows = arrays.iter().map(|a| a.rows).sum();
     if total_rows == 0 || cols == 0 {
         let data = Vec::new();
-        let result = CharArray::new(data, total_rows, cols).map_err(|e| format!("cat: {e}"))?;
+        let result = CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::CharArray(result));
     }
     let mut data = Vec::with_capacity(total_rows * cols);
     for arr in arrays {
         data.extend_from_slice(&arr.data);
     }
-    let result = CharArray::new(data, total_rows, cols).map_err(|e| format!("cat: {e}"))?;
+    let result = CharArray::new(data, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::CharArray(result))
 }
 
-fn concat_char_cols(arrays: Vec<CharArray>) -> Result<Value, String> {
+fn concat_char_cols(arrays: Vec<CharArray>) -> BuiltinResult<Value> {
     let rows = arrays.first().map(|a| a.rows).unwrap_or(0);
     for (idx, arr) in arrays.iter().enumerate() {
         if arr.rows != rows {
-            return Err(format!(
+            return Err(cat_err(format!(
                 "cat: dimension 1 mismatch between input 1 (size {}) and input {} (size {})",
                 rows,
                 idx + 1,
                 arr.rows
-            ));
+            )));
         }
     }
     let total_cols = arrays.iter().map(|a| a.cols).sum();
     if total_cols == 0 || rows == 0 {
         let data = Vec::new();
-        let result = CharArray::new(data, rows, total_cols).map_err(|e| format!("cat: {e}"))?;
+        let result = CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::CharArray(result));
     }
     let mut data = Vec::with_capacity(rows * total_cols);
@@ -676,11 +692,11 @@ fn concat_char_cols(arrays: Vec<CharArray>) -> Result<Value, String> {
             }
         }
     }
-    let result = CharArray::new(data, rows, total_cols).map_err(|e| format!("cat: {e}"))?;
+    let result = CharArray::new(data, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::CharArray(result))
 }
 
-fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, String> {
+fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
         arrays.push(value_into_string_array(value)?);
@@ -688,22 +704,22 @@ fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, Strin
     let shapes: Vec<Vec<usize>> = arrays.iter().map(|a| a.shape.clone()).collect();
     let data_refs: Vec<&[String]> = arrays.iter().map(|a| a.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let array = StringArray::new(data, shape).map_err(|e| format!("cat: {e}"))?;
+    let array = StringArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
-fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, String> {
+fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
     if dim_zero > 1 {
-        return Err(
-            "cat: cell arrays only support concatenation along dimensions 1 or 2".to_string(),
-        );
+        return Err(cat_err(
+            "cat: cell arrays only support concatenation along dimensions 1 or 2",
+        ));
     }
     let mut arrays = Vec::with_capacity(values.len());
     for value in values {
         if let Value::Cell(cell) = value {
             arrays.push(cell);
         } else {
-            return Err("cat: expected cell arrays".to_string());
+            return Err(cat_err("cat: expected cell arrays"));
         }
     }
     match dim_zero {
@@ -712,21 +728,22 @@ fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> Result<Value, String>
     }
 }
 
-fn concat_cell_rows(arrays: Vec<CellArray>) -> Result<Value, String> {
+fn concat_cell_rows(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
     let cols = arrays.first().map(|a| a.cols).unwrap_or(0);
     for (idx, arr) in arrays.iter().enumerate() {
         if arr.cols != cols {
-            return Err(format!(
+            return Err(cat_err(format!(
                 "cat: dimension 2 mismatch between input 1 (size {}) and input {} (size {})",
                 cols,
                 idx + 1,
                 arr.cols
-            ));
+            )));
         }
     }
     let total_rows = arrays.iter().map(|a| a.rows).sum();
     if total_rows == 0 || cols == 0 {
-        let cell = CellArray::new(Vec::new(), total_rows, cols).map_err(|e| format!("cat: {e}"))?;
+        let cell = CellArray::new(Vec::new(), total_rows, cols)
+            .map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::Cell(cell));
     }
     let mut values = Vec::with_capacity(total_rows * cols);
@@ -736,25 +753,26 @@ fn concat_cell_rows(arrays: Vec<CellArray>) -> Result<Value, String> {
             values.push(value);
         }
     }
-    let cell = CellArray::new(values, total_rows, cols).map_err(|e| format!("cat: {e}"))?;
+    let cell = CellArray::new(values, total_rows, cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::Cell(cell))
 }
 
-fn concat_cell_cols(arrays: Vec<CellArray>) -> Result<Value, String> {
+fn concat_cell_cols(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
     let rows = arrays.first().map(|a| a.rows).unwrap_or(0);
     for (idx, arr) in arrays.iter().enumerate() {
         if arr.rows != rows {
-            return Err(format!(
+            return Err(cat_err(format!(
                 "cat: dimension 1 mismatch between input 1 (size {}) and input {} (size {})",
                 rows,
                 idx + 1,
                 arr.rows
-            ));
+            )));
         }
     }
     let total_cols = arrays.iter().map(|a| a.cols).sum();
     if total_cols == 0 || rows == 0 {
-        let cell = CellArray::new(Vec::new(), rows, total_cols).map_err(|e| format!("cat: {e}"))?;
+        let cell = CellArray::new(Vec::new(), rows, total_cols)
+            .map_err(|e| cat_err(format!("cat: {e}")))?;
         return Ok(Value::Cell(cell));
     }
     let mut values = Vec::with_capacity(rows * total_cols);
@@ -767,20 +785,22 @@ fn concat_cell_cols(arrays: Vec<CellArray>) -> Result<Value, String> {
             }
         }
     }
-    let cell = CellArray::new(values, rows, total_cols).map_err(|e| format!("cat: {e}"))?;
+    let cell = CellArray::new(values, rows, total_cols).map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::Cell(cell))
 }
 
-fn cat_gpu_tensors(dim_zero: usize, values: Vec<Value>, like: &LikeSpec) -> Result<Value, String> {
+fn cat_gpu_tensors(dim_zero: usize, values: Vec<Value>, like: &LikeSpec) -> BuiltinResult<Value> {
     if let Some(hint) = like.category_hint {
         if !matches!(hint, CatCategory::Numeric) {
-            return Err("cat: 'like' prototype class does not match gpuArray inputs".to_string());
+            return Err(cat_err(
+                "cat: 'like' prototype class does not match gpuArray inputs",
+            ));
         }
     }
     like.ensure_device(CatCategory::Numeric)?;
 
     let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| "cat: no acceleration provider is registered".to_string())?;
+        .ok_or_else(|| cat_err("cat: no acceleration provider is registered"))?;
 
     let mut handles = Vec::with_capacity(values.len());
     for value in values {
@@ -803,7 +823,7 @@ fn cat_gpu_tensors(dim_zero: usize, values: Vec<Value>, like: &LikeSpec) -> Resu
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
     let data_refs: Vec<&[f64]> = tensors.iter().map(|t| t.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = Tensor::new(data, shape.clone()).map_err(|e| format!("cat: {e}"))?;
+    let tensor = Tensor::new(data, shape.clone()).map_err(|e| cat_err(format!("cat: {e}")))?;
     if matches!(like.device, LikeDevice::Host) {
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -823,9 +843,9 @@ fn concat_column_major<T: Clone>(
     shapes: &[Vec<usize>],
     data: &[&[T]],
     context: &str,
-) -> Result<(Vec<T>, Vec<usize>), String> {
+) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
     if shapes.is_empty() {
-        return Err(format!("{context}: no inputs to concatenate"));
+        return Err(cat_err(format!("{context}: no inputs to concatenate")));
     }
     let rank = shapes
         .iter()
@@ -845,14 +865,14 @@ fn concat_column_major<T: Clone>(
 
     for (idx, (shape, slice)) in padded.iter().zip(data.iter()).enumerate() {
         let expected = checked_product(shape)
-            .ok_or_else(|| format!("{context}: input {} exceeds maximum size", idx + 1))?;
+            .ok_or_else(|| cat_err(format!("{context}: input {} exceeds maximum size", idx + 1)))?;
         if expected != slice.len() {
-            return Err(format!(
+            return Err(cat_err(format!(
                 "{context}: input {} has {} elements but the shape multiplies to {}",
                 idx + 1,
                 slice.len(),
                 expected
-            ));
+            )));
         }
     }
 
@@ -863,13 +883,13 @@ fn concat_column_major<T: Clone>(
         let reference = padded[0][axis];
         for (idx, shape) in padded.iter().enumerate().skip(1) {
             if shape[axis] != reference {
-                return Err(format!(
+                return Err(cat_err(format!(
                     "{context}: dimension {} mismatch between input 1 (size {}) and input {} (size {})",
                     axis + 1,
                     reference,
                     idx + 1,
                     shape[axis]
-                ));
+                )));
             }
         }
     }
@@ -879,13 +899,13 @@ fn concat_column_major<T: Clone>(
     for shape in &padded {
         concat_dim = concat_dim
             .checked_add(shape[dim_zero])
-            .ok_or_else(|| format!("{context}: concatenated dimension exceeds maximum size"))?;
+            .ok_or_else(|| cat_err(format!("{context}: concatenated dimension exceeds maximum size")))?;
     }
     output_shape[dim_zero] = concat_dim;
 
     let total = match checked_product(&output_shape) {
         Some(total) => total,
-        None => return Err(format!("{context}: resulting array exceeds maximum size")),
+        None => return Err(cat_err(format!("{context}: resulting array exceeds maximum size"))),
     };
     if total == 0 {
         return Ok((Vec::new(), normalize_shape(output_shape, dim_zero)));
@@ -931,34 +951,34 @@ fn checked_product(dims: &[usize]) -> Option<usize> {
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
 
-fn value_into_logical(value: Value) -> Result<LogicalArray, String> {
+fn value_into_logical(value: Value) -> BuiltinResult<LogicalArray> {
     match value {
         Value::LogicalArray(array) => Ok(array),
         Value::Bool(flag) => LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
-            .map_err(|e| format!("cat: {e}")),
-        other => Err(format!("cat: expected logical inputs, got {:?}", other)),
+            .map_err(|e| cat_err(format!("cat: {e}"))),
+        other => Err(cat_err(format!("cat: expected logical inputs, got {:?}", other))),
     }
 }
 
-fn value_into_string_array(value: Value) -> Result<StringArray, String> {
+fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
     match value {
         Value::StringArray(array) => Ok(array),
         Value::String(text) => {
-            StringArray::new(vec![text], vec![1, 1]).map_err(|e| format!("cat: {e}"))
+            StringArray::new(vec![text], vec![1, 1]).map_err(|e| cat_err(format!("cat: {e}")))
         }
-        other => Err(format!("cat: expected string arrays, got {:?}", other)),
+        other => Err(cat_err(format!("cat: expected string arrays, got {:?}", other))),
     }
 }
 
-fn tensor_to_complex(tensor: Tensor) -> Result<ComplexTensor, String> {
+fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<ComplexTensor> {
     let data = tensor.data.into_iter().map(|re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape).map_err(|e| format!("cat: {e}"))
+    ComplexTensor::new(data, tensor.shape).map_err(|e| cat_err(format!("cat: {e}")))
 }
 
 fn finalize_gpu_value(
     handle: runmat_accelerate_api::GpuTensorHandle,
     like: &LikeSpec,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if matches!(like.device, LikeDevice::Host) {
         let tensor = gpu_helpers::gather_tensor(&handle)?;
         return Ok(tensor::tensor_into_value(tensor));

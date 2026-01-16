@@ -14,12 +14,12 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
 
 fn gpu_array_error(message: impl Into<String>) -> RuntimeError {
-    runtime_error(message)
+    build_runtime_error(message)
         .with_builtin("gpuArray")
         .build()
 }
@@ -363,17 +363,17 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
                 idx += 1;
                 if idx >= rest.len() {
                     return Err(
-                        gpu_array_error("gpuArray: expected a prototype value after 'like'").into(),
+                        gpu_array_error("gpuArray: expected a prototype value after 'like'"),
                     );
                 }
                 if options.prototype.is_some() {
-                    return Err(gpu_array_error("gpuArray: duplicate 'like' qualifier").into());
+                    return Err(gpu_array_error("gpuArray: duplicate 'like' qualifier"));
                 }
                 options.prototype = Some(rest[idx].clone());
             }
             "distributed" | "codistributed" => {
                 return Err(
-                    gpu_array_error("gpuArray: codistributed arrays are not supported yet").into(),
+                    gpu_array_error("gpuArray: codistributed arrays are not supported yet"),
                 );
             }
             tag => {
@@ -448,7 +448,7 @@ fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
     let raw = value.to_i64();
     if raw < 0 {
         return Err(
-            gpu_array_error("gpuArray: size arguments must be non-negative integers").into(),
+            gpu_array_error("gpuArray: size arguments must be non-negative integers"),
         );
     }
     Ok(raw as usize)
@@ -457,15 +457,15 @@ fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
 fn float_to_dim(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(
-            gpu_array_error("gpuArray: size arguments must be finite integers").into(),
+            gpu_array_error("gpuArray: size arguments must be finite integers"),
         );
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(gpu_array_error("gpuArray: size arguments must be integers").into());
+        return Err(gpu_array_error("gpuArray: size arguments must be integers"));
     }
     if rounded < 0.0 {
-        return Err(gpu_array_error("gpuArray: size arguments must be non-negative").into());
+        return Err(gpu_array_error("gpuArray: size arguments must be non-negative"));
     }
     Ok(rounded as usize)
 }
@@ -719,7 +719,7 @@ fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, b
 fn convert_to_logical(data: &mut [f64]) -> BuiltinResult<()> {
     for value in data.iter_mut() {
         if value.is_nan() {
-            return Err(gpu_array_error("gpuArray: cannot convert NaN to logical").into());
+            return Err(gpu_array_error("gpuArray: cannot convert NaN to logical"));
         }
         *value = if *value != 0.0 { 1.0 } else { 0.0 };
     }

@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use runmat_builtins::NumericDType;
+use crate::build_runtime_error;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -205,6 +206,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Allocates device ones when providers expose dedicated hooks; otherwise falls back to scalar fill or host upload.",
 };
 
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("ones").build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ones",
@@ -237,7 +242,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedOnes::parse(rest)?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 struct ParsedOnes {
@@ -256,7 +261,7 @@ enum OutputTemplate {
 }
 
 impl ParsedOnes {
-    fn parse(args: Vec<Value>) -> Result<Self, String> {
+    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -271,15 +276,17 @@ impl ParsedOnes {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err("ones: multiple 'like' specifications are not supported"
-                                .to_string());
+                            return Err(builtin_error(
+                                "ones: multiple 'like' specifications are not supported",
+                            ));
                         }
                         if class_override.is_some() {
-                            return Err("ones: cannot combine 'like' with other class specifiers"
-                                .to_string());
+                            return Err(builtin_error(
+                                "ones: cannot combine 'like' with other class specifiers",
+                            ));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("ones: expected prototype after 'like'".to_string());
+                            return Err(builtin_error("ones: expected prototype after 'like'"));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -290,7 +297,9 @@ impl ParsedOnes {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("ones: cannot combine 'like' with 'logical'".to_string());
+                            return Err(builtin_error(
+                                "ones: cannot combine 'like' with 'logical'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Logical);
                         idx += 1;
@@ -298,7 +307,9 @@ impl ParsedOnes {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("ones: cannot combine 'like' with 'double'".to_string());
+                            return Err(builtin_error(
+                                "ones: cannot combine 'like' with 'double'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -306,14 +317,18 @@ impl ParsedOnes {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err("ones: cannot combine 'like' with 'single'".to_string());
+                            return Err(builtin_error(
+                                "ones: cannot combine 'like' with 'single'",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
                         continue;
                     }
                     other => {
-                        return Err(format!("ones: unrecognised option '{other}'"));
+                        return Err(builtin_error(format!(
+                            "ones: unrecognised option '{other}'"
+                        )));
                     }
                 }
             }
@@ -366,7 +381,7 @@ impl ParsedOnes {
     }
 }
 
-fn build_output(parsed: ParsedOnes) -> Result<Value, String> {
+fn build_output(parsed: ParsedOnes) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => ones_double(&parsed.shape),
         OutputTemplate::Single => ones_single(&parsed.shape),
@@ -375,24 +390,24 @@ fn build_output(parsed: ParsedOnes) -> Result<Value, String> {
     }
 }
 
-fn ones_double(shape: &[usize]) -> Result<Value, String> {
+fn ones_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let tensor = tensor::ones(shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn ones_single(shape: &[usize]) -> Result<Value, String> {
+fn ones_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let tensor = tensor::ones_with_dtype(shape, NumericDType::F32)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn ones_logical(shape: &[usize]) -> Result<Value, String> {
+fn ones_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
     LogicalArray::new(vec![1u8; len], shape.to_vec())
         .map(Value::LogicalArray)
-        .map_err(|e| format!("ones: {e}"))
+        .map_err(|e| builtin_error(format!("ones: {e}")))
 }
 
-fn ones_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => ones_logical(shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
@@ -400,7 +415,7 @@ fn ones_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             let data = vec![(1.0, 0.0); len];
             ComplexTensor::new(data, shape.to_vec())
                 .map(Value::ComplexTensor)
-                .map_err(|e| format!("ones: {e}"))
+                .map_err(|e| builtin_error(format!("ones: {e}")))
         }
         Value::GpuTensor(handle) => ones_like_gpu(handle, shape),
         Value::Tensor(t) => match t.dtype {
@@ -413,7 +428,7 @@ fn ones_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     }
 }
 
-fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let attempt = if handle.shape == shape {
             provider.ones_like(handle)
@@ -450,7 +465,7 @@ fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("ones: {e}"))?;
+        .map_err(|e| builtin_error(format!("ones: {e}")))?;
     ones_like(&gathered, shape)
 }
 
@@ -466,12 +481,14 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
+fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
     match value {
         Value::Int(i) => {
             let dim = i.to_i64();
             if dim < 0 {
-                return Err("ones: matrix dimensions must be non-negative".to_string());
+                return Err(builtin_error(
+                    "ones: matrix dimensions must be non-negative",
+                ));
             }
             Ok(Some(vec![dim as usize]))
         }
@@ -482,21 +499,23 @@ fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
     }
 }
 
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
+fn parse_numeric_dimension(n: f64) -> crate::BuiltinResult<usize> {
     if !n.is_finite() {
-        return Err("ones: dimensions must be finite".to_string());
+        return Err(builtin_error("ones: dimensions must be finite"));
     }
     if n < 0.0 {
-        return Err("ones: matrix dimensions must be non-negative".to_string());
+        return Err(builtin_error(
+            "ones: matrix dimensions must be non-negative",
+        ));
     }
     let rounded = n.round();
     if (rounded - n).abs() > f64::EPSILON {
-        return Err("ones: dimensions must be integers".to_string());
+        return Err(builtin_error("ones: dimensions must be integers"));
     }
     Ok(rounded as usize)
 }
 
-fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
+fn dims_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Option<Vec<usize>>> {
     let is_row = tensor.rows() == 1;
     let is_column = tensor.cols() == 1;
     let is_scalar = tensor.data.len() == 1;
@@ -513,11 +532,11 @@ fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
     Ok(Some(dims))
 }
 
-fn dims_from_logical(_logical: &LogicalArray) -> Result<Option<Vec<usize>>, String> {
+fn dims_from_logical(_logical: &LogicalArray) -> crate::BuiltinResult<Option<Vec<usize>>> {
     Ok(None)
 }
 
-fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
+fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => Ok(t.shape.clone()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
@@ -526,7 +545,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
-        other => Err(format!("ones: unsupported prototype {other:?}")),
+        other => Err(builtin_error(format!("ones: unsupported prototype {other:?}"))),
     }
 }
 

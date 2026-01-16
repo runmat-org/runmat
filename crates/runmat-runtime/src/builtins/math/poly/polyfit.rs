@@ -8,6 +8,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
 use crate::dispatcher;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -16,6 +17,7 @@ use crate::builtins::common::spec::{
 
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
+const BUILTIN_NAME: &str = "polyfit";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -221,6 +223,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
+fn polyfit_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "polyfit",
@@ -247,24 +256,24 @@ fn polyfit_builtin(x: Value, y: Value, degree: Value, rest: Vec<Value>) -> crate
 }
 
 /// Evaluate `polyfit`, returning the multi-output envelope used by the VM.
-pub fn evaluate(x: Value, y: Value, degree: Value, rest: &[Value]) -> Result<PolyfitEval, String> {
+pub fn evaluate(x: Value, y: Value, degree: Value, rest: &[Value]) -> BuiltinResult<PolyfitEval> {
     let deg = parse_degree(&degree)?;
 
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest)? {
         return Ok(eval);
     }
 
-    let x_host = dispatcher::gather_if_needed(&x).map_err(|e| format!("polyfit: {e}"))?;
-    let y_host = dispatcher::gather_if_needed(&y).map_err(|e| format!("polyfit: {e}"))?;
+    let x_host = dispatcher::gather_if_needed(&x)?;
+    let y_host = dispatcher::gather_if_needed(&y)?;
 
     let x_data = real_vector("polyfit", "X", x_host)?;
     let (y_data, is_complex_input) = complex_vector("polyfit", "Y", y_host)?;
 
     if x_data.len() != y_data.len() {
-        return Err("polyfit: X and Y vectors must be the same length".to_string());
+        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
     }
     if x_data.is_empty() {
-        return Err("polyfit: X and Y must contain at least one sample".to_string());
+        return Err(polyfit_error("polyfit: X and Y must contain at least one sample"));
     }
     if deg + 1 > x_data.len() && x_data.len() > 1 {
         warn!(
@@ -288,7 +297,7 @@ fn try_gpu_polyfit(
     y: &Value,
     degree: usize,
     rest: &[Value],
-) -> Result<Option<PolyfitEval>, String> {
+) -> BuiltinResult<Option<PolyfitEval>> {
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -338,13 +347,13 @@ struct PolyfitSolution {
 }
 
 impl PolyfitSolution {
-    fn from_provider(result: ProviderPolyfitResult) -> Result<Self, String> {
+    fn from_provider(result: ProviderPolyfitResult) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
         if cols == 0 {
-            return Err("polyfit: provider returned empty coefficient vector".to_string());
+            return Err(polyfit_error("polyfit: provider returned empty coefficient vector"));
         }
         if result.r_matrix.len() != cols * cols {
-            return Err("polyfit: provider returned malformed R matrix".to_string());
+            return Err(polyfit_error("polyfit: provider returned malformed R matrix"));
         }
         let [mu_mean, mu_scale] = result.mu;
         Ok(Self {
@@ -374,7 +383,7 @@ pub struct PolyfitEval {
 }
 
 impl PolyfitEval {
-    fn from_solution(solution: PolyfitSolution) -> Result<Self, String> {
+    fn from_solution(solution: PolyfitSolution) -> BuiltinResult<Self> {
         let coefficients = coefficients_to_value(&solution.coeffs)?;
         let stats = build_stats(
             &solution.r_matrix,
@@ -412,25 +421,25 @@ impl PolyfitEval {
     }
 }
 
-fn parse_degree(value: &Value) -> Result<usize, String> {
+fn parse_degree(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err("polyfit: degree must be a non-negative integer".to_string());
+                return Err(polyfit_error("polyfit: degree must be a non-negative integer"));
             }
             Ok(raw as usize)
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("polyfit: degree must be finite".to_string());
+                return Err(polyfit_error("polyfit: degree must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > EPS {
-                return Err("polyfit: degree must be an integer".to_string());
+                return Err(polyfit_error("polyfit: degree must be an integer"));
             }
             if rounded < 0.0 {
-                return Err("polyfit: degree must be a non-negative integer".to_string());
+                return Err(polyfit_error("polyfit: degree must be a non-negative integer"));
             }
             Ok(rounded as usize)
         }
@@ -438,20 +447,20 @@ fn parse_degree(value: &Value) -> Result<usize, String> {
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
-        other => Err(format!(
+        other => Err(polyfit_error(format!(
             "polyfit: degree must be a scalar numeric value, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn real_vector(context: &str, label: &str, value: Value) -> Result<Vec<f64>, String> {
+fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(mut tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok(tensor.data.drain(..).collect())
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok(tensor.data)
         }
@@ -462,12 +471,12 @@ fn real_vector(context: &str, label: &str, value: Value) -> Result<Vec<f64>, Str
             let gathered = crate::builtins::common::gpu_helpers::gather_tensor(&handle)?;
             real_vector(context, label, Value::Tensor(gathered))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(format!(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(polyfit_error(format!(
             "{context}: {label} must be real-valued; complex inputs are not supported"
-        )),
-        other => Err(format!(
+        ))),
+        other => Err(polyfit_error(format!(
             "{context}: expected {label} to be a numeric vector, got {other:?}"
-        )),
+        ))),
     }
 }
 
@@ -475,7 +484,7 @@ fn complex_vector(
     context: &str,
     label: &str,
     value: Value,
-) -> Result<(Vec<Complex64>, bool), String> {
+) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::Tensor(mut tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
@@ -498,7 +507,7 @@ fn complex_vector(
             Ok((data, is_complex))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok((
                 tensor
@@ -520,39 +529,38 @@ fn complex_vector(
                 &handle,
             )?),
         ),
-        other => Err(format!(
+        other => Err(polyfit_error(format!(
             "{context}: expected {label} to be a numeric vector, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_weights(rest: &[Value], len: usize) -> Result<Option<Vec<f64>>, String> {
+fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> {
     match rest.len() {
         0 => Ok(None),
         1 => {
-            let gathered =
-                dispatcher::gather_if_needed(&rest[0]).map_err(|e| format!("polyfit: {e}"))?;
+            let gathered = dispatcher::gather_if_needed(&rest[0])?;
             let data = real_vector("polyfit", "weights", gathered)?;
             if data.len() != len {
-                return Err("polyfit: weight vector must match the size of X".to_string());
+                return Err(polyfit_error("polyfit: weight vector must match the size of X"));
             }
             validate_weights(&data)?;
             Ok(Some(data))
         }
-        _ => Err("polyfit: too many input arguments".to_string()),
+        _ => Err(polyfit_error("polyfit: too many input arguments")),
     }
 }
 
-fn validate_weights(weights: &[f64]) -> Result<(), String> {
+fn validate_weights(weights: &[f64]) -> BuiltinResult<()> {
     for (idx, w) in weights.iter().enumerate() {
         if !w.is_finite() {
-            return Err(format!(
+            return Err(polyfit_error(format!(
                 "polyfit: weight at position {} must be finite",
                 idx + 1
-            ));
+            )));
         }
         if *w < 0.0 {
-            return Err("polyfit: weights must be non-negative".to_string());
+            return Err(polyfit_error("polyfit: weights must be non-negative"));
         }
     }
     Ok(())
@@ -563,23 +571,23 @@ fn solve_polyfit(
     y_data: &[Complex64],
     degree: usize,
     weights: Option<&[f64]>,
-) -> Result<PolyfitSolution, String> {
+) -> BuiltinResult<PolyfitSolution> {
     if x_data.len() != y_data.len() {
-        return Err("polyfit: X and Y vectors must be the same length".to_string());
+        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
     }
     if x_data.is_empty() {
-        return Err("polyfit: X and Y must contain at least one sample".to_string());
+        return Err(polyfit_error("polyfit: X and Y must contain at least one sample"));
     }
     if let Some(w) = weights {
         if w.len() != x_data.len() {
-            return Err("polyfit: weight vector must match the size of X".to_string());
+            return Err(polyfit_error("polyfit: weight vector must match the size of X"));
         }
         validate_weights(w)?;
     }
 
     let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
     if !mean.is_finite() {
-        return Err("polyfit: mean of X must be finite".to_string());
+        return Err(polyfit_error("polyfit: mean of X must be finite"));
     }
     let scale = compute_scale(x_data, mean)?;
     let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
@@ -587,10 +595,10 @@ fn solve_polyfit(
     let mut rhs = y_data.to_vec();
     for (idx, value) in rhs.iter().enumerate() {
         if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(format!(
+            return Err(polyfit_error(format!(
                 "polyfit: Y must contain finite values (encountered NaN/Inf at position {})",
                 idx + 1
-            ));
+            )));
         }
     }
     if let Some(w) = weights {
@@ -630,14 +638,14 @@ fn solve_polyfit(
     })
 }
 
-fn compute_scale(data: &[f64], mean: f64) -> Result<f64, String> {
+fn compute_scale(data: &[f64], mean: f64) -> BuiltinResult<f64> {
     if data.len() <= 1 {
         return Ok(1.0);
     }
     let mut acc = 0.0;
     for &value in data {
         if !value.is_finite() {
-            return Err("polyfit: X must contain finite values".to_string());
+            return Err(polyfit_error("polyfit: X must contain finite values"));
         }
         let diff = value - mean;
         acc += diff * diff;
@@ -646,7 +654,7 @@ fn compute_scale(data: &[f64], mean: f64) -> Result<f64, String> {
     let std = (acc / denom).sqrt();
     let scale = if std.abs() <= EPS { 1.0 } else { std };
     if !scale.is_finite() {
-        return Err("polyfit: failed to compute a stable scaling factor".to_string());
+        return Err(polyfit_error("polyfit: failed to compute a stable scaling factor"));
     }
     Ok(scale)
 }
@@ -675,14 +683,14 @@ fn apply_weights_matrix(
     rows: usize,
     cols: usize,
     weights: &[f64],
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     for (row, weight) in weights.iter().enumerate().take(rows) {
         let sqrt_w = weight.sqrt();
         if !sqrt_w.is_finite() {
-            return Err(format!(
+            return Err(polyfit_error(format!(
                 "polyfit: weight at position {} must be finite",
                 row + 1
-            ));
+            )));
         }
         for col in 0..cols {
             let idx = row + col * rows;
@@ -692,23 +700,23 @@ fn apply_weights_matrix(
     Ok(())
 }
 
-fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> Result<(), String> {
+fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> BuiltinResult<()> {
     for (idx, (value, weight)) in rhs.iter_mut().zip(weights.iter()).enumerate() {
         let sqrt_w = weight.sqrt();
         if !sqrt_w.is_finite() {
-            return Err(format!(
+            return Err(polyfit_error(format!(
                 "polyfit: weight at position {} must be finite",
                 idx + 1
-            ));
+            )));
         }
         *value *= sqrt_w;
     }
     Ok(())
 }
 
-fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
     if !is_vector_shape(shape) {
-        return Err(format!("{context}: {label} must be a vector"));
+        return Err(polyfit_error(format!("{context}: {label} must be a vector")));
     }
     Ok(())
 }
@@ -722,7 +730,7 @@ fn householder_qr(
     rows: usize,
     cols: usize,
     rhs: &mut [Complex64],
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let min_dim = rows.min(cols);
     for k in 0..min_dim {
         let mut norm_sq = 0.0;
@@ -781,9 +789,9 @@ fn solve_upper(
     rows: usize,
     cols: usize,
     rhs: &[Complex64],
-) -> Result<Vec<Complex64>, String> {
+) -> BuiltinResult<Vec<Complex64>> {
     if rhs.len() < rows {
-        return Err("polyfit internal error: RHS dimension mismatch".to_string());
+        return Err(polyfit_error("polyfit internal error: RHS dimension mismatch"));
     }
     let mut coeffs = vec![Complex64::new(0.0, 0.0); cols];
     for col in (0..cols).rev() {
@@ -850,25 +858,26 @@ fn transform_coefficients(coeffs: &[Complex64], mean: f64, scale: f64) -> Vec<Co
     poly
 }
 
-fn coefficients_to_value(coeffs: &[Complex64]) -> Result<Value, String> {
+fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
     let all_real = coeffs
         .iter()
         .all(|c| c.im.abs() <= EPS_NAN && c.re.is_finite());
     if all_real {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
-        let tensor =
-            Tensor::new(data, vec![1, coeffs.len()]).map_err(|e| format!("polyfit: {e}"))?;
+        let tensor = Tensor::new(data, vec![1, coeffs.len()])
+            .map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
-        let tensor =
-            ComplexTensor::new(data, vec![1, coeffs.len()]).map_err(|e| format!("polyfit: {e}"))?;
+        let tensor = ComplexTensor::new(data, vec![1, coeffs.len()])
+            .map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
-fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> Result<Value, String> {
-    let tensor = Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| format!("polyfit: {e}"))?;
+fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value> {
+    let tensor =
+        Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
     let mut st = StructValue::new();
     st.fields.insert("R".to_string(), Value::Tensor(tensor));
     st.fields.insert("df".to_string(), Value::Num(df));
@@ -876,11 +885,12 @@ fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> Result<Value, String
     Ok(Value::Struct(st))
 }
 
-fn build_mu(mean: f64, scale: f64) -> Result<Value, String> {
+fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {
     if !scale.is_finite() || scale.abs() <= EPS {
-        return Err("polyfit: mu(2) must be non-zero and finite".to_string());
+        return Err(polyfit_error("polyfit: mu(2) must be non-zero and finite"));
     }
-    let tensor = Tensor::new(vec![mean, scale], vec![1, 2]).map_err(|e| format!("polyfit: {e}"))?;
+    let tensor = Tensor::new(vec![mean, scale], vec![1, 2])
+        .map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -898,13 +908,13 @@ pub fn polyfit_host_real_for_provider(
     y: &[f64],
     degree: usize,
     weights: Option<&[f64]>,
-) -> Result<PolyfitHostRealResult, String> {
+) -> BuiltinResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
-        return Err("polyfit: X and Y vectors must be the same length".to_string());
+        return Err(polyfit_error("polyfit: X and Y vectors must be the same length"));
     }
     if let Some(w) = weights {
         if w.len() != x.len() {
-            return Err("polyfit: weight vector must match the size of X".to_string());
+            return Err(polyfit_error("polyfit: weight vector must match the size of X"));
         }
         validate_weights(w)?;
     }
@@ -921,9 +931,9 @@ pub fn polyfit_host_real_for_provider(
         is_complex,
     } = solution;
     if is_complex {
-        return Err(
-            "polyfit: provider fallback produced complex coefficients for real data".to_string(),
-        );
+        return Err(polyfit_error(
+            "polyfit: provider fallback produced complex coefficients for real data",
+        ));
     }
     let coeffs: Vec<f64> = coeffs.into_iter().map(|c| c.re).collect();
     let mu = [mu_mean, mu_scale];
@@ -940,6 +950,20 @@ pub fn polyfit_host_real_for_provider(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => assert!(
+                err.message().contains(needle),
+                "expected error containing '{needle}', got '{}'",
+                err.message()
+            ),
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspension in polyfit tests: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1043,7 +1067,7 @@ pub(crate) mod tests {
         let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
         let err = evaluate(Value::Tensor(x), Value::Tensor(y), Value::Num(1.5), &[])
             .expect_err("polyfit should reject non-integer degree");
-        assert!(err.contains("integer"));
+        assert_error_contains(err, "integer");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1059,7 +1083,7 @@ pub(crate) mod tests {
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject infinite weights");
-        assert!(err.contains("weight at position 2"));
+        assert_error_contains(err, "weight at position 2");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1264,7 +1288,7 @@ pub(crate) mod tests {
             &[],
         )
         .expect_err("polyfit should reject mismatched vector lengths");
-        assert!(err.contains("same length"));
+        assert_error_contains(err, "same length");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1279,7 +1303,7 @@ pub(crate) mod tests {
             &[],
         )
         .expect_err("polyfit should reject non-vector X");
-        assert!(err.contains("vector"));
+        assert_error_contains(err, "vector");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1295,7 +1319,7 @@ pub(crate) mod tests {
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject mismatched weights");
-        assert!(err.contains("weight vector must match"));
+        assert_error_contains(err, "weight vector must match");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1311,7 +1335,7 @@ pub(crate) mod tests {
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject negative weights");
-        assert!(err.contains("non-negative"));
+        assert_error_contains(err, "non-negative");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

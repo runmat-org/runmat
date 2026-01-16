@@ -4,6 +4,8 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+use super::plotting_error;
+
 fn as_lower_str(val: &Value) -> Option<String> {
     match val {
         Value::String(s) => Some(s.to_ascii_lowercase()),
@@ -29,7 +31,7 @@ fn accepts_arg(arg: Option<&Value>, allowed: &[&str]) -> bool {
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["on", "off"]) {
-        return Err("grid: expected 'on' or 'off'".into());
+        return Err(plotting_error("grid", "grid: expected 'on' or 'off'"));
     }
     Ok("grid toggled".into())
 }
@@ -44,7 +46,7 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
 )]
 pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["on", "off"]) {
-        return Err("box: expected 'on' or 'off'".into());
+        return Err(plotting_error("box", "box: expected 'on' or 'off'"));
     }
     Ok("box toggled".into())
 }
@@ -66,7 +68,7 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         )
     });
     if !ok {
-        return Err("axis: unsupported argument".into());
+        return Err(plotting_error("axis", "axis: unsupported argument"));
     }
     Ok("axis updated".into())
 }
@@ -81,7 +83,10 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
 )]
 pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if !accepts_arg(args.first(), &["flat", "interp", "faceted"]) {
-        return Err("shading: expected 'flat', 'interp', or 'faceted'".into());
+        return Err(plotting_error(
+            "shading",
+            "shading: expected 'flat', 'interp', or 'faceted'",
+        ));
     }
     Ok("shading set".into())
 }

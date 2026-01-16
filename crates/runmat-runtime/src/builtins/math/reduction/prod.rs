@@ -8,6 +8,7 @@ const NAME: &str = "prod";
 
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -204,6 +205,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_prod_dim / reduce_prod. Requests using 'omitnan', multi-axis reductions, or class coercions fall back to the host implementation.",
 };
 
+
+fn prod_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::prod")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "prod",
@@ -235,7 +241,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     if matches!(input_meta.class, InputClass::Complex) {
-        return Err((("prod: complex inputs are not yet supported".to_string())).into());
+        return Err(prod_error("prod: complex inputs are not yet supported"));
     }
     let parsed = parse_arguments(&rest)?;
     let raw_result = match value {
@@ -246,13 +252,13 @@ fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         | Value::Int(_)
         | Value::Bool(_) => prod_host(value, &parsed)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err((("prod: complex inputs are not yet supported".to_string())).into())
+            return Err(prod_error("prod: complex inputs are not yet supported"));
         }
         other => {
-            return Err(((format!("prod: unsupported input value {other:?}"))).into());
+            return Err(prod_error(format!("prod: unsupported input value {other:?}")));
         }
     };
-    apply_output_template(raw_result, &parsed.output, &input_meta).map_err(Into::into)
+    apply_output_template(raw_result, &parsed.output, &input_meta)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -373,13 +379,13 @@ impl IntClass {
         }
     }
 
-    fn to_value(self, scalar: f64) -> Result<Value, String> {
+    fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err("prod: cannot represent NaN as an integer output".to_string());
+            return Err(prod_error("prod: cannot represent NaN as an integer output"));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err("prod: integer output overflowed the target type".to_string());
+            return Err(prod_error("prod: integer output overflowed the target type"));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -394,7 +400,7 @@ impl IntClass {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut selection = DimSelection::Auto;
     let mut selection_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -418,9 +424,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "all" => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(
-                            "prod: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
+                        return Err(prod_error(
+                            "prod: 'all' cannot be combined with an explicit dimension",
+                        ));
                     }
                     selection = DimSelection::All;
                     selection_set = true;
@@ -429,9 +435,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(
-                            "prod: multiple output class specifications provided".to_string()
-                        );
+                        return Err(prod_error(
+                            "prod: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Double;
                     output_set = true;
@@ -440,9 +446,9 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(
-                            "prod: multiple output class specifications provided".to_string()
-                        );
+                        return Err(prod_error(
+                            "prod: multiple output class specifications provided",
+                        ));
                     }
                     output = OutputTemplate::Native;
                     output_set = true;
@@ -451,18 +457,17 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(
-                            "prod: cannot combine 'like' with another output class specifier"
-                                .to_string(),
-                        );
+                        return Err(prod_error(
+                            "prod: cannot combine 'like' with another output class specifier",
+                        ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err("prod: expected prototype after 'like'".to_string());
+                        return Err(prod_error("prod: expected prototype after 'like'"));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err("prod: 'like' must be the final argument".to_string());
+                        return Err(prod_error("prod: 'like' must be the final argument"));
                     }
                     break;
                 }
@@ -479,7 +484,7 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
             }
         }
 
-        return Err(format!("prod: unrecognised argument {arg:?}"));
+        return Err(prod_error(format!("prod: unrecognised argument {arg:?}")));
     }
 
     Ok(ParsedArguments {
@@ -489,58 +494,58 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
     })
 }
 
-fn parse_dimension_spec(value: &Value) -> Result<Option<DimSelection>, String> {
+fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
         Value::Int(i) => {
             let dim = i.to_i64();
             if dim < 1 {
-                return Err("prod: dimension must be >= 1".to_string());
+                return Err(prod_error("prod: dimension must be >= 1"));
             }
             Ok(Some(DimSelection::Dim(dim as usize)))
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("prod: dimension must be finite".to_string());
+                return Err(prod_error("prod: dimension must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("prod: dimension must be an integer".to_string());
+                return Err(prod_error("prod: dimension must be an integer"));
             }
             if rounded < 1.0 {
-                return Err("prod: dimension must be >= 1".to_string());
+                return Err(prod_error("prod: dimension must be >= 1"));
             }
             Ok(Some(DimSelection::Dim(rounded as usize)))
         }
         Value::Tensor(t) => parse_dimension_tensor(t),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)?;
+            let tensor = tensor::logical_to_tensor(logical).map_err(prod_error)?;
             parse_dimension_tensor(&tensor)
         }
-        Value::GpuTensor(_) => Err("prod: dimension arguments must reside on the host".to_string()),
+        Value::GpuTensor(_) => Err(prod_error("prod: dimension arguments must reside on the host")),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
     }
 }
 
-fn parse_dimension_tensor(tensor: &Tensor) -> Result<Option<DimSelection>, String> {
+fn parse_dimension_tensor(tensor: &Tensor) -> BuiltinResult<Option<DimSelection>> {
     if tensor.data.is_empty() {
         return Ok(Some(DimSelection::Auto));
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err("prod: dimension vector must be a row or column vector".to_string());
+        return Err(prod_error("prod: dimension vector must be a row or column vector"));
     }
     let mut dims = Vec::with_capacity(tensor.data.len());
     for &v in &tensor.data {
         if !v.is_finite() {
-            return Err("prod: dimensions must be finite".to_string());
+            return Err(prod_error("prod: dimensions must be finite"));
         }
         let rounded = v.round();
         if (rounded - v).abs() > f64::EPSILON {
-            return Err("prod: dimensions must contain integers".to_string());
+            return Err(prod_error("prod: dimensions must contain integers"));
         }
         if rounded < 1.0 {
-            return Err("prod: dimension indices must be >= 1".to_string());
+            return Err(prod_error("prod: dimension indices must be >= 1"));
         }
         dims.push(rounded as usize);
     }
@@ -551,6 +556,8 @@ fn parse_dimension_tensor(tensor: &Tensor) -> Result<Option<DimSelection>, Strin
     }
 }
 
+
+
 fn is_vector_shape(shape: &[usize]) -> bool {
     match shape.len() {
         0 => true,
@@ -560,14 +567,14 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn prod_host(value: Value, parsed: &ParsedArguments) -> Result<Value, String> {
+fn prod_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("prod", value)?;
     let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
     let reduced = prod_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> Result<Value, String> {
+fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -607,14 +614,14 @@ fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> Result<Value, 
     Ok(Value::GpuTensor(current))
 }
 
-fn prod_gpu_fallback(handle: &GpuTensorHandle, parsed: &ParsedArguments) -> Result<Value, String> {
+fn prod_gpu_fallback(handle: &GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor(handle)?;
     let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
     let reduced = prod_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
-fn resolve_dims(shape: &[usize], selection: &DimSelection) -> Result<ResolvedDims, String> {
+fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<ResolvedDims> {
     let dims_1_based: Vec<usize> = match selection {
         DimSelection::Auto => vec![default_dimension_from_shape(shape)],
         DimSelection::Dim(d) => vec![*d],
@@ -637,7 +644,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> Result<ResolvedDim
 
     for dim1 in dims_1_based {
         if dim1 == 0 {
-            return Err("prod: dimension indices must be >= 1".to_string());
+            return Err(prod_error("prod: dimension indices must be >= 1"));
         }
         if !seen.insert(dim1) {
             continue;
@@ -693,7 +700,7 @@ fn prod_tensor(
     tensor: &Tensor,
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
-) -> Result<Tensor, String> {
+) -> BuiltinResult<Tensor> {
     let mut shape = tensor.shape.clone();
     if shape.is_empty() {
         shape = vec![tensor.rows, tensor.cols];
@@ -770,14 +777,14 @@ fn prod_tensor(
         output.push(result);
     }
 
-    Tensor::new(output, output_shape).map_err(|e| format!("prod: {e}"))
+    Tensor::new(output, output_shape).map_err(|e| prod_error(format!("prod: {e}")))
 }
 
 fn apply_output_template(
     value: Value,
     template: &OutputTemplate,
     meta: &InputMeta,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     match template {
         OutputTemplate::Double => Ok(value),
         OutputTemplate::Native => {
@@ -788,7 +795,7 @@ fn apply_output_template(
     }
 }
 
-fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String> {
+fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
@@ -810,7 +817,7 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
     }
 }
 
-fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32 => match value {
@@ -820,12 +827,12 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, Str
             }
             Value::Num(n) => {
                 let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
-                    .map_err(|e| format!("{NAME}: {e}"))?;
+                    .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
                 let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                    tensor::logical_to_tensor(&logical).map_err(|e| prod_error(format!("{NAME}: {e}")))?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -854,7 +861,7 @@ fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
     tensor
 }
 
-fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
+fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
@@ -867,33 +874,35 @@ fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("prod: {e}"))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_error(format!("prod: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(prod_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(format!("prod: cannot place value {other:?} on the GPU")),
+            other => Err(prod_error(format!("prod: cannot place value {other:?} on the GPU"))),
         },
     }
 }
 
-fn upload_tensor(tensor: Tensor) -> Result<Value, String> {
+fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err("prod: no acceleration provider available to honour GPU output".to_string());
+        return Err(prod_error("prod: no acceleration provider available to honour GPU output"));
     };
+
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| format!("prod: failed to upload GPU result: {e}"))?;
+        .map_err(|e| prod_error(format!("prod: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
-fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String> {
+fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
     let analysed = analyse_like_prototype(prototype)?;
     match analysed.class {
         PrototypeClass::Real => match analysed.device {
@@ -907,23 +916,23 @@ fn apply_like_template(value: Value, prototype: &Value) -> Result<Value, String>
     }
 }
 
-fn real_to_complex(value: Value) -> Result<Value, String> {
+fn real_to_complex(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| format!("prod: {e}"))?;
+            let tensor = ComplexTensor::new(data, t.shape.clone())
+                .map_err(|e| prod_error(format!("prod: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(prod_error)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(format!(
+        other => Err(prod_error(format!(
             "prod: cannot convert value {other:?} to a complex result"
-        )),
+        ))),
     }
 }
 
@@ -937,7 +946,7 @@ enum PrototypeClass {
     Complex,
 }
 
-fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
+fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
         Value::GpuTensor(_) => Ok(LikeAnalysis {
             device: DevicePreference::Gpu,
@@ -956,8 +965,8 @@ fn analyse_like_prototype(proto: &Value) -> Result<LikeAnalysis, String> {
             class: PrototypeClass::Complex,
         }),
         other => {
-            let gathered =
-                crate::dispatcher::gather_if_needed(other).map_err(|e| format!("prod: {e}"))?;
+            let gathered = crate::dispatcher::gather_if_needed(other)
+                .map_err(|e| prod_error(format!("prod: {e}")))?;
             analyse_like_prototype(&gathered)
         }
     }
@@ -1099,14 +1108,24 @@ pub(crate) mod tests {
     fn prod_like_without_prototype_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = prod_builtin(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
-        assert!(err.contains("expected prototype"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("expected prototype"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_rejects_complex_input() {
         let err = prod_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
-        assert!(err.contains("complex inputs"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("complex inputs"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

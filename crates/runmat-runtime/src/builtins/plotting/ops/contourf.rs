@@ -12,6 +12,8 @@ use super::contour::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
+use crate::RuntimeControlFlow;
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -20,6 +22,8 @@ use super::state::{render_active_plot, PlotRenderOptions};
     )
 )]
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+const BUILTIN_NAME: &str = "contourf";
+
 pub const DOC_MD: &str = r#"---
 title: "contourf"
 category: "plotting"
@@ -73,7 +77,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         axis_equal: true,
         ..Default::default()
     };
-    (render_active_plot(opts, move |figure, axes| {
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let ContourArgs {
             name,
             x_axis,
@@ -87,6 +91,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
         if let Some(handle) = z_input.gpu_handle() {
             match build_contour_fill_gpu_plot(
+                name,
                 &x_axis,
                 &y_axis,
                 handle,
@@ -97,7 +102,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 Ok(fill_plot) => {
                     figure.add_contour_fill_plot_on_axes(fill_plot, axes);
                     if !matches!(line_color, ContourLineColor::None) {
-                        if let Ok(contours) = build_contour_gpu_plot(
+                        match build_contour_gpu_plot(
+                            name,
                             &x_axis,
                             &y_axis,
                             handle,
@@ -106,25 +112,42 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                             &level_spec,
                             &line_color,
                         ) {
-                            figure.add_contour_plot_on_axes(contours, axes);
-                        } else {
-                            warn!(
-                                "contourf contour overlay unavailable: failed to build contour lines"
-                            );
+                            Ok(contours) => {
+                                figure.add_contour_plot_on_axes(contours, axes);
+                            }
+                            Err(RuntimeControlFlow::Suspend(pending)) => {
+                                return Err(RuntimeControlFlow::Suspend(pending));
+                            }
+                            Err(RuntimeControlFlow::Error(err)) => {
+                                warn!("contourf contour overlay unavailable: {err}");
+                            }
                         }
                     }
                     return Ok(());
                 }
-                Err(err) => warn!("contourf GPU path unavailable: {err}"),
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending));
+                }
+                Err(RuntimeControlFlow::Error(err)) => {
+                    warn!("contourf GPU path unavailable: {err}");
+                }
             }
         }
 
         let grid = tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len())?;
-        let fill_plot =
-            build_contour_fill_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)?;
+        let fill_plot = build_contour_fill_plot(
+            name,
+            &x_axis,
+            &y_axis,
+            &grid,
+            color_map,
+            base_z,
+            &level_spec,
+        )?;
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
         if !matches!(line_color, ContourLineColor::None) {
-            if let Ok(contours) = build_contour_plot(
+            match build_contour_plot(
+                name,
                 &x_axis,
                 &y_axis,
                 &grid,
@@ -133,13 +156,20 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 &level_spec,
                 &line_color,
             ) {
-                figure.add_contour_plot_on_axes(contours, axes);
-            } else {
-                warn!("contourf overlay contour unavailable: failed to build contour lines");
+                Ok(contours) => {
+                    figure.add_contour_plot_on_axes(contours, axes);
+                }
+                Err(RuntimeControlFlow::Suspend(pending)) => {
+                    return Err(RuntimeControlFlow::Suspend(pending));
+                }
+                Err(RuntimeControlFlow::Error(err)) => {
+                    warn!("contourf overlay contour unavailable: {err}");
+                }
             }
         }
         Ok(())
-    })).map_err(Into::into)
+    })?;
+    Ok(rendered)
 }
 
 #[cfg(test)]

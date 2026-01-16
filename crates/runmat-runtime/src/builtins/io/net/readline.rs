@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -208,6 +208,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Networking occurs on the host CPU; GPU providers are not involved.",
 };
 
+fn readline_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(message_id)
+        .with_builtin("readline")
+        .build()
+}
+
+fn readline_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    readline_error(message_id, message).into()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readline",
@@ -228,26 +239,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(((runtime_error(
+        return Err(readline_flow(
             MESSAGE_ID_INVALID_ARGUMENTS,
             "readline: expected only the tcpclient argument",
-        ))).into());
+        ));
     }
 
     let client = gather_if_needed(&client)?;
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
-            return Err(((runtime_error(
+            return Err(readline_flow(
                 MESSAGE_ID_INVALID_CLIENT,
                 "readline: expected tcpclient struct as first argument",
-            ))).into())
+            ))
         }
     };
 
     let client_id = extract_client_id(client_struct)?;
     let handle = client_handle(client_id).ok_or_else(|| {
-        runtime_error(
+        readline_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "readline: tcpclient handle is no longer valid",
         )
@@ -256,13 +267,13 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     let (mut stream, timeout, mut buffer) = {
         let mut guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(((runtime_error(
+            return Err(readline_flow(
                 MESSAGE_ID_NOT_CONNECTED,
                 "readline: tcpclient is disconnected",
-            ))).into());
+            ));
         }
         let stream = guard.stream.try_clone().map_err(|err| {
-            runtime_error(
+            readline_flow(
                 MESSAGE_ID_INTERNAL,
                 format!("readline: unable to clone socket ({err})"),
             )
@@ -276,10 +287,10 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         if let Ok(mut guard) = handle.lock() {
             guard.readline_buffer = buffer;
         }
-        return Err(((runtime_error(
+        return Err(readline_flow(
             MESSAGE_ID_INTERNAL,
             format!("readline: unable to configure socket timeout ({err})"),
-        ))).into());
+        ));
     }
 
     let outcome = match read_line(&mut stream, &mut buffer) {
@@ -288,10 +299,10 @@ fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             if let Ok(mut guard) = handle.lock() {
                 guard.readline_buffer = buffer;
             }
-            return Err(((runtime_error(
+            return Err(readline_flow(
                 MESSAGE_ID_INTERNAL,
                 format!("readline: socket error ({err})"),
-            ))).into());
+            ));
         }
     };
 
@@ -384,9 +395,9 @@ fn empty_double_matrix() -> Value {
     Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("valid 0x0 tensor"))
 }
 
-fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
+fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
     let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
-        runtime_error(
+        readline_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "readline: tcpclient struct is missing internal handle",
         )
@@ -394,7 +405,7 @@ fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
     match id_value {
         Value::Int(IntValue::U64(id)) => Ok(*id),
         Value::Int(iv) => Ok(iv.to_i64() as u64),
-        _ => Err(runtime_error(
+        _ => Err(readline_flow(
             MESSAGE_ID_INVALID_CLIENT,
             "readline: tcpclient struct has invalid handle field",
         )),
@@ -403,10 +414,6 @@ fn extract_client_id(struct_value: &StructValue) -> Result<u64, String> {
 
 fn struct_field<'a>(value: &'a StructValue, name: &str) -> Option<&'a Value> {
     value.fields.get(name)
-}
-
-fn runtime_error(message_id: &'static str, message: impl Into<String>) -> String {
-    format!("{message_id}: {}", message.into())
 }
 
 #[cfg(test)]
@@ -442,6 +449,15 @@ pub(crate) mod tests {
                 other => panic!("unexpected id field {other:?}"),
             },
             other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert_eq!(err.identifier(), Some(expected));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 
@@ -605,10 +621,7 @@ pub(crate) mod tests {
     fn readline_errors_on_additional_arguments() {
         let err = readline_builtin(Value::Num(42.0), vec![Value::Num(1.0)])
             .expect_err("expected invalid argument error");
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_ARGUMENTS),
-            "unexpected error: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENTS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -616,10 +629,7 @@ pub(crate) mod tests {
     fn readline_rejects_non_struct_argument() {
         let err = readline_builtin(Value::Num(5.0), Vec::new())
             .expect_err("expected invalid client error");
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_CLIENT),
-            "unexpected error: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_CLIENT);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -646,10 +656,7 @@ pub(crate) mod tests {
 
         let err =
             readline_builtin(client.clone(), Vec::new()).expect_err("expected not-connected error");
-        assert!(
-            err.starts_with(MESSAGE_ID_NOT_CONNECTED),
-            "unexpected error: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_NOT_CONNECTED);
 
         handle.join().expect("server");
         remove_client_for_test(id);

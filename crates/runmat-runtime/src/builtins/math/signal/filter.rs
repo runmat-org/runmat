@@ -11,7 +11,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const EPS: f64 = 1.0e-12;
 
@@ -227,6 +228,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Filtering is handled via dedicated runtime logic; fusion does not currently optimise IIR/FIR chains.",
 };
 
+const BUILTIN_NAME: &str = "filter";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "filter",
     category = "math/signal",
@@ -236,11 +243,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 fn filter_builtin(b: Value, a: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    evaluate(b, a, x, &rest).map(|eval| eval.into_value()).map_err(Into::into)
+    let eval = evaluate(b, a, x, &rest)?;
+    Ok(eval.into_value())
 }
 
 /// Evaluate the builtin once and expose both filter output and final state.
-pub fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> Result<FilterEvaluation, String> {
+pub fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
     let args = FilterArgs::parse(b, a, x, rest)?;
     if let Some(eval) = try_filter_gpu(&args)? {
         return Ok(eval);
@@ -285,7 +293,7 @@ struct FilterArgs {
 }
 
 impl FilterArgs {
-    fn parse(b: Value, a: Value, x: Value, rest: &[Value]) -> Result<Self, String> {
+    fn parse(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<Self> {
         let (zi_raw, dim_raw) = parse_optional_arguments(rest)?;
         let zi_value = match zi_raw {
             Some(val) if is_empty_placeholder(&val) => None,
@@ -300,16 +308,21 @@ impl FilterArgs {
         let coeffs_a = CoeffInput::from_value("filter", "denominator", a)?;
 
         if coeffs_a.len == 0 {
-            return Err("filter: denominator coefficients cannot be empty".to_string());
+            return Err(runtime_error_for(
+                "filter: denominator coefficients cannot be empty",
+            ));
         }
         if coeffs_b.len == 0 {
-            return Err("filter: numerator coefficients cannot be empty".to_string());
+            return Err(runtime_error_for(
+                "filter: numerator coefficients cannot be empty",
+            ));
         }
 
         let signal = SignalInput::from_value(x)?;
 
         let dim = if let Some(dim_val) = dim_value {
-            tensor::parse_dimension(&dim_val, "filter")?
+            tensor::parse_dimension(&dim_val, "filter")
+                .map_err(|err| runtime_error_for(err))?
         } else {
             default_dimension_from_shape(&signal.shape)
         };
@@ -373,17 +386,21 @@ struct CoeffInput {
 }
 
 impl CoeffInput {
-    fn from_value(name: &str, label: &str, value: Value) -> Result<Self, String> {
+    fn from_value(name: &str, label: &str, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 Self::from_tensor(name, label, tensor)
             }
             Value::Tensor(tensor) => Self::from_tensor(name, label, tensor),
             Value::ComplexTensor(tensor) => {
                 let len = tensor.data.len();
                 if len == 0 {
-                    return Err(format!("{}: {} coefficients cannot be empty", name, label));
+                    return Err(runtime_error_for(format!(
+                        "{}: {} coefficients cannot be empty",
+                        name, label
+                    )));
                 }
                 ensure_vector_shape(name, label, &tensor.shape)?;
                 let data = tensor
@@ -398,8 +415,9 @@ impl CoeffInput {
                 })
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| format!("{}: {label} coefficients: {e}", name))?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
+                    runtime_error_for(format!("{}: {label} coefficients: {e}", name))
+                })?;
                 Self::from_tensor(name, label, tensor)
             }
             Value::Num(n) => Ok(Self {
@@ -422,18 +440,21 @@ impl CoeffInput {
                 len: 1,
                 is_complex: true,
             }),
-            other => Err(format!(
+            other => Err(runtime_error_for(format!(
                 "{}: unsupported {} type {:?}; expected numeric or logical values",
                 name, label, other
-            )),
+            ))),
         }
     }
 
-    fn from_tensor(name: &str, label: &str, tensor: Tensor) -> Result<Self, String> {
+    fn from_tensor(name: &str, label: &str, tensor: Tensor) -> BuiltinResult<Self> {
         ensure_vector_shape(name, label, &tensor.shape)?;
         let len = tensor.data.len();
         if len == 0 {
-            return Err(format!("{}: {} coefficients cannot be empty", name, label));
+            return Err(runtime_error_for(format!(
+                "{}: {} coefficients cannot be empty",
+                name, label
+            )));
         }
         let data = tensor
             .data
@@ -456,10 +477,11 @@ struct SignalInput {
 }
 
 impl SignalInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 let shape = tensor.shape.clone();
                 let data = tensor
                     .data
@@ -502,8 +524,8 @@ impl SignalInput {
                 })
             }
             Value::LogicalArray(logical) => {
-                let tensor =
-                    tensor::logical_to_tensor(&logical).map_err(|e| format!("filter: {e}"))?;
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
                 let shape = tensor.shape.clone();
                 let data = tensor
                     .data
@@ -541,10 +563,10 @@ impl SignalInput {
                 is_complex: true,
                 gpu_handle: None,
             }),
-            other => Err(format!(
+            other => Err(runtime_error_for(format!(
                 "filter: unsupported signal type {:?}; expected numeric or logical values",
                 other
-            )),
+            ))),
         }
     }
 }
@@ -574,19 +596,20 @@ impl InitialState {
         expected_shape: &[usize],
         expected_states: usize,
         name: &str,
-    ) -> Result<Self, String> {
+    ) -> BuiltinResult<Self> {
         if state_len == 0 {
             match value {
                 Value::Tensor(tensor) if tensor.data.is_empty() => {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
-                    let tensor = gpu_helpers::gather_tensor(&handle)?;
+                    let tensor = gpu_helpers::gather_tensor(&handle)
+                        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                     if !tensor.data.is_empty() {
-                        return Err(format!(
+                        return Err(runtime_error_for(format!(
                             "{}: initial conditions must be empty when the filter order is zero",
                             name
-                        ));
+                        )));
                     }
                     return Ok(Self {
                         provided: true,
@@ -613,7 +636,7 @@ impl InitialState {
                         "{}: initial conditions must be empty when the filter order is zero",
                         name
                     );
-                    return Err(match other {
+                    let detail = match other {
                         Value::Tensor(t)
                             if t.data.is_empty()
                                 && !shapes_compatible(expected_shape, &t.shape) =>
@@ -624,14 +647,16 @@ impl InitialState {
                             msg.clone()
                         }
                         _ => format!("{msg}; received {:?}", other),
-                    });
+                    };
+                    return Err(runtime_error_for(detail));
                 }
             }
         }
 
         let (column_major, shape, is_complex, gpu_handle) = match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)
+                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 (
                     tensor
                         .data
@@ -664,8 +689,9 @@ impl InitialState {
                 None,
             ),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| format!("{name}: initial conditions: {e}"))?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
+                    runtime_error_for(format!("{name}: initial conditions: {e}"))
+                })?;
                 (
                     tensor
                         .data
@@ -687,26 +713,26 @@ impl InitialState {
             ),
             Value::Complex(re, im) => (vec![Complex::new(re, im)], vec![1, 1], true, None),
             other => {
-                return Err(format!(
+                return Err(runtime_error_for(format!(
                     "{name}: unsupported initial condition type {:?}; expected numeric values",
                     other
-                ))
+                )))
             }
         };
 
         if column_major.len() != expected_states {
-            return Err(format!(
+            return Err(runtime_error_for(format!(
                 "{name}: initial conditions have {} elements but {} were expected",
                 column_major.len(),
                 expected_states
-            ));
+            )));
         }
 
         if !shapes_compatible(expected_shape, &shape) {
-            return Err(format!(
+            return Err(runtime_error_for(format!(
                 "{name}: initial conditions must have shape {:?}, received {:?}",
                 expected_shape, shape
-            ));
+            )));
         }
 
         Ok(Self {
@@ -719,15 +745,14 @@ impl InitialState {
     }
 }
 
-fn parse_optional_arguments(rest: &[Value]) -> Result<(Option<Value>, Option<Value>), String> {
+fn parse_optional_arguments(rest: &[Value]) -> BuiltinResult<(Option<Value>, Option<Value>)> {
     match rest.len() {
         0 => Ok((None, None)),
         1 => Ok((Some(rest[0].clone()), None)),
         2 => Ok((Some(rest[0].clone()), Some(rest[1].clone()))),
-        _ => Err(
-            "filter: expected between three and five input arguments (b, a, x [, zi [, dim]])"
-                .to_string(),
-        ),
+        _ => Err(runtime_error_for(
+            "filter: expected between three and five input arguments (b, a, x [, zi [, dim]])",
+        )),
     }
 }
 
@@ -745,7 +770,7 @@ fn is_empty_placeholder(value: &Value) -> bool {
     }
 }
 
-fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String> {
+fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -784,7 +809,9 @@ fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String>
     };
     let b_handle = provider
         .upload(&view_b)
-        .map_err(|e| format!("filter: failed to upload numerator coefficients: {e}"))?;
+        .map_err(|e| runtime_error_for(format!(
+            "filter: failed to upload numerator coefficients: {e}"
+        )))?;
     temp_handles.push(b_handle.clone());
 
     let a_shape = vec![args.coeffs_a.len, 1];
@@ -794,7 +821,9 @@ fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String>
     };
     let a_handle = provider
         .upload(&view_a)
-        .map_err(|e| format!("filter: failed to upload denominator coefficients: {e}"))?;
+        .map_err(|e| runtime_error_for(format!(
+            "filter: failed to upload denominator coefficients: {e}"
+        )))?;
     temp_handles.push(a_handle.clone());
 
     let (zi_handle_opt, zi_temp) = if args.state_len == 0 || !args.initial.provided {
@@ -813,10 +842,14 @@ fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String>
             data: &zi_real,
             shape: &args.initial.shape,
         };
-        let handle = provider.upload(&view).map_err(|e| {
-            cleanup_temp_handles(provider, temp_handles.clone());
-            format!("filter: failed to upload initial conditions: {e}")
-        })?;
+        let handle = provider
+            .upload(&view)
+            .map_err(|e| {
+                cleanup_temp_handles(provider, temp_handles.clone());
+                runtime_error_for(format!(
+                    "filter: failed to upload initial conditions: {e}"
+                ))
+            })?;
         (Some(handle.clone()), Some(handle))
     };
 
@@ -851,7 +884,7 @@ fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String>
                 vec![0.0; tensor::element_count(&args.state_shape)],
                 args.state_shape.clone(),
             )
-            .map_err(|e| format!("filter: {e}"))?;
+            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             tensor::tensor_into_value(zeros)
         }
     };
@@ -871,13 +904,15 @@ fn cleanup_temp_handles(
     }
 }
 
-fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
+fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
     let mut b_norm = args.coeffs_b.data.clone();
     let mut a_norm = args.coeffs_a.data.clone();
 
     let a0 = a_norm[0];
     if a0 == Complex::new(0.0, 0.0) {
-        return Err("filter: denominator coefficient a(1) must be non-zero".to_string());
+        return Err(runtime_error_for(
+            "filter: denominator coefficient a(1) must be non-zero",
+        ));
     }
 
     for coeff in &mut b_norm {
@@ -905,11 +940,11 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
         Vec::<Complex<f64>>::new()
     } else if args.initial.provided {
         if args.initial.column_major.len() != expected_states {
-            return Err(format!(
+            return Err(runtime_error_for(format!(
                 "filter: initial conditions have {} elements but {} were expected",
                 args.initial.column_major.len(),
                 expected_states
-            ));
+            )));
         }
         states_from_column_major_complex(
             &args.initial.column_major,
@@ -936,23 +971,23 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
             let base = t
                 .checked_mul(dim_len)
                 .and_then(|v| v.checked_mul(args.leading))
-                .ok_or_else(|| "filter: index overflow during evaluation".to_string())?;
+                .ok_or_else(|| runtime_error_for("filter: index overflow during evaluation"))?;
             for l in 0..args.leading {
                 let channel_idx = t
                     .checked_mul(args.leading)
                     .and_then(|v| v.checked_add(l))
-                    .ok_or_else(|| "filter: index overflow during evaluation".to_string())?;
+                    .ok_or_else(|| runtime_error_for("filter: index overflow during evaluation"))?;
                 if channel_idx >= args.channel_count {
                     continue;
                 }
                 let state_base = channel_idx
                     .checked_mul(args.state_len)
-                    .ok_or_else(|| "filter: state index overflow".to_string())?;
+                    .ok_or_else(|| runtime_error_for("filter: state index overflow"))?;
                 for step in 0..dim_len {
                     let idx = base
                         .checked_add(l)
                         .and_then(|v| v.checked_add(step.saturating_mul(args.leading)))
-                        .ok_or_else(|| "filter: signal index overflow".to_string())?;
+                        .ok_or_else(|| runtime_error_for("filter: signal index overflow"))?;
                     if idx >= args.signal.data.len() {
                         break;
                     }
@@ -985,13 +1020,13 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
             Value::Complex(data[0].0, data[0].1)
         } else {
             let tensor = ComplexTensor::new(data, args.signal.shape.clone())
-                .map_err(|e| format!("filter: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             Value::ComplexTensor(tensor)
         }
     } else {
         let data: Vec<f64> = output.iter().map(|c| c.re).collect();
         let tensor =
-            Tensor::new(data, args.signal.shape.clone()).map_err(|e| format!("filter: {e}"))?;
+            Tensor::new(data, args.signal.shape.clone()).map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 
@@ -1000,7 +1035,7 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
             vec![0.0; tensor::element_count(&args.state_shape)],
             args.state_shape.clone(),
         )
-        .map_err(|e| format!("filter: {e}"))?;
+        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     } else if args.is_complex || args.initial.is_complex {
         let data: Vec<(f64, f64)> = final_states_column.iter().map(|c| (c.re, c.im)).collect();
@@ -1008,13 +1043,13 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
             Value::Complex(data[0].0, data[0].1)
         } else {
             let tensor = ComplexTensor::new(data, args.state_shape.clone())
-                .map_err(|e| format!("filter: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             Value::ComplexTensor(tensor)
         }
     } else {
         let data: Vec<f64> = final_states_column.iter().map(|c| c.re).collect();
         let tensor =
-            Tensor::new(data, args.state_shape.clone()).map_err(|e| format!("filter: {e}"))?;
+            Tensor::new(data, args.state_shape.clone()).map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 
@@ -1024,13 +1059,13 @@ fn filter_host(args: &FilterArgs) -> Result<FilterEvaluation, String> {
     })
 }
 
-fn ensure_vector_shape(name: &str, label: &str, shape: &[usize]) -> Result<(), String> {
+fn ensure_vector_shape(name: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
     let non_singleton = shape.iter().copied().filter(|&d| d > 1).count();
     if non_singleton > 1 {
-        Err(format!(
+        Err(runtime_error_for(format!(
             "{}: {} coefficients must be a row or column vector",
             name, label
-        ))
+        )))
     } else {
         Ok(())
     }
@@ -1227,6 +1262,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::IntValue;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     fn approx_eq_slice(lhs: &[f64], rhs: &[f64]) {
         assert_eq!(
@@ -1493,13 +1535,15 @@ pub(crate) mod tests {
         let x = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let zi = Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).unwrap();
 
-        let err = evaluate(
-            Value::Tensor(b),
-            Value::Tensor(a),
-            Value::Tensor(x),
-            &[Value::Tensor(zi)],
-        )
-        .unwrap_err();
+        let err = error_message(
+            evaluate(
+                Value::Tensor(b),
+                Value::Tensor(a),
+                Value::Tensor(x),
+                &[Value::Tensor(zi)],
+            )
+            .unwrap_err(),
+        );
         assert!(err.contains("initial conditions"));
     }
 

@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 const NAME: &str = "cond";
 
@@ -189,6 +190,32 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a direct condition-number kernel; the reference backends gather to the host, evaluate the shared implementation, and upload the scalar result.",
 };
 
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(NAME).build().into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier.to_string());
+            }
+            if let Some(task_id) = err.context.task_id.clone() {
+                builder = builder.with_task_id(task_id);
+            }
+            if !err.context.call_stack.is_empty() {
+                builder = builder.with_call_stack(err.context.call_stack.clone());
+            }
+            if let Some(phase) = err.context.phase.clone() {
+                builder = builder.with_phase(phase);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -208,39 +235,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cond",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
-fn cond_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let norm = parse_norm_argument(&rest)?;
     let result = match value {
-        Value::GpuTensor(handle) => return (cond_gpu(handle, norm)).map_err(Into::into),
-        Value::ComplexTensor(matrix) => cond_complex_tensor(&matrix, norm)?,
+        Value::GpuTensor(handle) => return cond_gpu(handle, norm),
+        Value::ComplexTensor(matrix) => cond_complex_tensor_builtin(&matrix, norm)?,
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| format!("{NAME}: {e}"))?;
-            cond_complex_tensor(&tensor, norm)?
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
+            cond_complex_tensor_builtin(&tensor, norm)?
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            cond_real_tensor(&tensor, norm)?
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            cond_real_tensor_builtin(&tensor, norm)?
         }
     };
     Ok(Value::Num(result))
 }
 
-fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> Result<Value, String> {
+fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
-        if let Ok(Some(value)) = cond_gpu_via_provider(provider, &handle, norm) {
+        if let Some(value) = cond_gpu_via_provider(provider, &handle, norm)? {
             return Ok(value);
         }
     }
 
-    let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("{NAME}: {e}"))?;
+    let gathered =
+        gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())).map_err(map_control_flow)?;
 
     let cond_value = match gathered {
-        Value::Tensor(tensor) => cond_real_tensor(&tensor, norm)?,
-        Value::ComplexTensor(tensor) => cond_complex_tensor(&tensor, norm)?,
+        Value::Tensor(tensor) => cond_real_tensor_builtin(&tensor, norm)?,
+        Value::ComplexTensor(tensor) => cond_complex_tensor_builtin(&tensor, norm)?,
         Value::Num(n) => {
             if n == 0.0 {
                 f64::INFINITY
@@ -256,14 +282,18 @@ fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> Result<Value, String> {
             }
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other)?;
-            cond_real_tensor(&tensor, norm)?
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            cond_real_tensor_builtin(&tensor, norm)?
         }
     };
 
     if let Some(provider) = maybe_provider {
-        if let Ok(uploaded) = upload_scalar(provider, cond_value) {
-            return Ok(Value::GpuTensor(uploaded));
+        match upload_scalar(provider, cond_value) {
+            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
+            Err(RuntimeControlFlow::Suspend(pending)) => {
+                return Err(RuntimeControlFlow::Suspend(pending))
+            }
+            Err(RuntimeControlFlow::Error(_)) => {}
         }
     }
 
@@ -274,7 +304,7 @@ fn cond_gpu_via_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     norm: CondNorm,
-) -> Result<Option<Value>, String> {
+) -> BuiltinResult<Option<Value>> {
     let provider_norm = ProviderCondNorm::from(norm);
     match provider.cond(handle, provider_norm) {
         Ok(result) => Ok(Some(Value::GpuTensor(result))),
@@ -282,8 +312,16 @@ fn cond_gpu_via_provider(
     }
 }
 
-fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> Result<f64, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape)?;
+fn cond_real_tensor_builtin(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
+    cond_real_tensor(matrix, norm)
+}
+
+fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<f64> {
+    cond_complex_tensor(matrix, norm)
+}
+
+fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
+    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -299,17 +337,17 @@ fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> Result<f64, String> {
         CondNorm::Two => cond_two_norm_real(matrix, rows, cols),
         _ => {
             if rows != cols {
-                return Err(format!(
+                return Err(builtin_error(format!(
                     "{NAME}: matrix must be square for the requested norm."
-                ));
+                )));
             }
             cond_inverse_based_real(matrix, rows, norm)
         }
     }
 }
 
-fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> Result<f64, String> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape)?;
+fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<f64> {
+    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -323,22 +361,22 @@ fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> Result<f64, St
         CondNorm::Two => cond_two_norm_complex(matrix, rows, cols),
         _ => {
             if rows != cols {
-                return Err(format!(
+                return Err(builtin_error(format!(
                     "{NAME}: matrix must be square for the requested norm."
-                ));
+                )));
             }
             cond_inverse_based_complex(matrix, rows, norm)
         }
     }
 }
 
-fn cond_two_norm_real(matrix: &Tensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn cond_two_norm_real(matrix: &Tensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     let a = DMatrix::from_column_slice(rows, cols, &matrix.data);
     let svd = SVD::new(a, false, false);
     Ok(singular_value_cond(svd.singular_values.as_slice()))
 }
 
-fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> Result<f64, String> {
+fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     let data: Vec<Complex64> = matrix
         .data
         .iter()
@@ -349,7 +387,7 @@ fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> Re
     Ok(singular_value_cond(svd.singular_values.as_slice()))
 }
 
-fn cond_inverse_based_real(matrix: &Tensor, order: usize, norm: CondNorm) -> Result<f64, String> {
+fn cond_inverse_based_real(matrix: &Tensor, order: usize, norm: CondNorm) -> BuiltinResult<f64> {
     let dm = DMatrix::from_column_slice(order, order, &matrix.data);
     if let Some(inv) = dm.try_inverse() {
         let norm_a = matrix_norm_real(matrix.data.as_slice(), order, order, norm);
@@ -369,7 +407,7 @@ fn cond_inverse_based_complex(
     matrix: &ComplexTensor,
     order: usize,
     norm: CondNorm,
-) -> Result<f64, String> {
+) -> BuiltinResult<f64> {
     let data: Vec<Complex64> = matrix
         .data
         .iter()
@@ -475,15 +513,15 @@ fn singular_value_cond(singular_values: &[f64]) -> f64 {
     }
 }
 
-fn parse_norm_argument(args: &[Value]) -> Result<CondNorm, String> {
+fn parse_norm_argument(args: &[Value]) -> BuiltinResult<CondNorm> {
     match args.len() {
         0 => Ok(CondNorm::Two),
         1 => parse_norm_value(&args[0]),
-        _ => Err(format!("{NAME}: too many input arguments")),
+        _ => Err(builtin_error(format!("{NAME}: too many input arguments"))),
     }
 }
 
-fn parse_norm_value(value: &Value) -> Result<CondNorm, String> {
+fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
     if let Some(text) = tensor::value_to_string(value) {
         return parse_norm_string(&text);
     }
@@ -495,21 +533,21 @@ fn parse_norm_value(value: &Value) -> Result<CondNorm, String> {
             if *b {
                 Ok(CondNorm::One)
             } else {
-                Err(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'"))
+                Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
             }
         }
         Value::LogicalArray(logical) if logical.len() == 1 => {
             if logical.data[0] != 0 {
                 Ok(CondNorm::One)
             } else {
-                Err(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'"))
+                Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
             }
         }
-        _ => Err(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")),
+        _ => Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'"))),
     }
 }
 
-fn parse_norm_numeric(raw: f64) -> Result<CondNorm, String> {
+fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
     if raw == 1.0 {
         Ok(CondNorm::One)
     } else if raw == 2.0 {
@@ -517,36 +555,41 @@ fn parse_norm_numeric(raw: f64) -> Result<CondNorm, String> {
     } else if raw.is_infinite() && raw.is_sign_positive() {
         Ok(CondNorm::Inf)
     } else {
-        Err(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'"))
+        Err(builtin_error(format!("{NAME}: norm must be 1, 2, Inf, or 'fro'")))
     }
 }
 
-fn parse_norm_string(text: &str) -> Result<CondNorm, String> {
+fn parse_norm_string(text: &str) -> BuiltinResult<CondNorm> {
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "2" | "two" => Ok(CondNorm::Two),
         "1" | "one" => Ok(CondNorm::One),
         "inf" | "infinity" => Ok(CondNorm::Inf),
         "fro" | "frobenius" => Ok(CondNorm::Fro),
-        _ => Err(format!("{NAME}: unrecognised norm '{text}'")),
+        _ => Err(builtin_error(format!("{NAME}: unrecognised norm '{text}'"))),
     }
 }
 
 fn upload_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: f64,
-) -> Result<GpuTensorHandle, String> {
+) -> BuiltinResult<GpuTensorHandle> {
     let data = [value];
     let shape = [1usize, 1usize];
     let view = HostTensorView {
         data: &data,
         shape: &shape,
     };
-    provider.upload(&view).map_err(|e| format!("{NAME}: {e}"))
+    provider
+        .upload(&view)
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 /// Helper for provider backends that reuse the host implementation.
-pub fn cond_host_real_for_provider(matrix: &Tensor, norm: ProviderCondNorm) -> Result<f64, String> {
+pub fn cond_host_real_for_provider(
+    matrix: &Tensor,
+    norm: ProviderCondNorm,
+) -> BuiltinResult<f64> {
     cond_real_tensor(matrix, CondNorm::from(norm))
 }
 
@@ -584,8 +627,16 @@ impl From<ProviderCondNorm> for CondNorm {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
+
+    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -670,8 +721,13 @@ pub(crate) mod tests {
     #[test]
     fn cond_rejects_non_square_for_other_norms() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let err = cond_builtin(Value::Tensor(tensor), vec![Value::from("inf")]).unwrap_err();
-        assert_eq!(err, "cond: matrix must be square for the requested norm.");
+        let err = unwrap_error(
+            cond_builtin(Value::Tensor(tensor), vec![Value::from("inf")]).unwrap_err(),
+        );
+        assert_eq!(
+            err.message(),
+            "cond: matrix must be square for the requested norm."
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

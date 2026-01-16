@@ -7,6 +7,8 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, RuntimeControlFlow, RuntimeError};
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -218,6 +220,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
+fn vertcat_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("vertcat").build()
+}
+
+fn vertcat_err(message: impl Into<String>) -> RuntimeControlFlow {
+    vertcat_error(message).into()
+}
+
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
@@ -228,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return empty_double().map_err(Into::into);
+        return empty_double();
     }
     if args.len() == 1 {
         return Ok(args.into_iter().next().unwrap());
@@ -237,20 +247,22 @@ fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut forwarded = Vec::with_capacity(args.len() + 1);
     forwarded.push(Value::Int(IntValue::I32(1)));
     forwarded.extend(args);
-    crate::call_builtin("cat", &forwarded)
-        .map_err(|e: crate::RuntimeControlFlow| e.to_string())
-        .map_err(adapt_cat_error)
-        .map_err(Into::into)
+    match crate::call_builtin("cat", &forwarded) {
+        Ok(value) => Ok(value),
+        Err(RuntimeControlFlow::Error(err)) => Err(adapt_cat_error(err).into()),
+        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending)),
+    }
 }
 
-fn empty_double() -> Result<Value, String> {
+fn empty_double() -> crate::BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| format!("vertcat: {e}"))
+        .map_err(|e| vertcat_err(format!("vertcat: {e}")))
 }
 
-fn adapt_cat_error(message: String) -> String {
-    if let Some(rest) = message.strip_prefix("cat:") {
+fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {
+    let message = error.message.clone();
+    let adjusted = if let Some(rest) = message.strip_prefix("cat:") {
         format!("vertcat:{rest}")
     } else if let Some(idx) = message.find("cat:") {
         let rest = &message[idx + 4..];
@@ -259,7 +271,10 @@ fn adapt_cat_error(message: String) -> String {
         message
     } else {
         format!("vertcat: {message}")
-    }
+    };
+    error.message = adjusted;
+    error.context = error.context.with_builtin("vertcat");
+    error
 }
 
 #[cfg(test)]

@@ -5,6 +5,10 @@ use runmat_plot::plots::{
     SurfacePlot,
 };
 
+use crate::BuiltinResult;
+
+use super::plotting_error;
+
 #[derive(Clone, Copy, Debug)]
 pub struct BarStyleDefaults {
     pub face_color: Vec4,
@@ -107,8 +111,9 @@ pub const DEFAULT_LINE_WIDTH: f32 = 2.0;
 pub const DEFAULT_LINE_COLOR: Vec4 = Vec4::new(0.0, 0.4, 0.8, 1.0);
 pub const DEFAULT_LINE_MARKER_SIZE: f32 = 6.0;
 
-fn ctx_err(opts: &LineStyleParseOptions, msg: impl Into<String>) -> String {
-    format!("{}: {}", opts.builtin_name, msg.into())
+fn ctx_err(opts: &LineStyleParseOptions, msg: impl Into<String>) -> crate::RuntimeControlFlow {
+    let message = format!("{}: {}", opts.builtin_name, msg.into());
+    plotting_error(opts.builtin_name, message)
 }
 
 #[derive(Clone, Debug)]
@@ -375,7 +380,7 @@ pub struct ParsedLineStyle {
 pub fn parse_line_style_args(
     rest: &[Value],
     opts: &LineStyleParseOptions,
-) -> Result<ParsedLineStyle, String> {
+) -> BuiltinResult<ParsedLineStyle> {
     if rest.is_empty() {
         return Ok(ParsedLineStyle {
             appearance: LineAppearance::default(),
@@ -430,7 +435,7 @@ pub fn parse_surface_style_args(
     builtin: &'static str,
     rest: &[Value],
     defaults: SurfaceStyleDefaults,
-) -> Result<SurfaceStyle, String> {
+) -> BuiltinResult<SurfaceStyle> {
     let opts = LineStyleParseOptions::generic(builtin);
     let mut style = SurfaceStyle::from_defaults(defaults);
     if rest.is_empty() {
@@ -501,7 +506,7 @@ fn begins_with_numeric(rest: &[Value]) -> bool {
 fn parse_style_string(
     opts: &LineStyleParseOptions,
     token: &str,
-) -> Result<LineStyleOptions, String> {
+) -> BuiltinResult<LineStyleOptions> {
     let mut options = LineStyleOptions::default();
     let mut chars = token.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -545,7 +550,7 @@ fn parse_style_string(
 fn parse_name_value_pairs(
     opts: &LineStyleParseOptions,
     args: &[Value],
-) -> Result<LineStyleOptions, String> {
+) -> BuiltinResult<LineStyleOptions> {
     let mut options = LineStyleOptions::default();
     let mut iter = args.chunks_exact(2);
     for pair in iter.by_ref() {
@@ -616,7 +621,7 @@ fn parse_name_value_pairs(
     Ok(options)
 }
 
-fn parse_line_style_name(opts: &LineStyleParseOptions, value: &str) -> Result<LineStyle, String> {
+fn parse_line_style_name(opts: &LineStyleParseOptions, value: &str) -> BuiltinResult<LineStyle> {
     match value.trim() {
         "-" => Ok(LineStyle::Solid),
         "--" => Ok(LineStyle::Dashed),
@@ -629,7 +634,7 @@ fn parse_line_style_name(opts: &LineStyleParseOptions, value: &str) -> Result<Li
 fn parse_marker_string(
     opts: &LineStyleParseOptions,
     value: &str,
-) -> Result<Option<MarkerKind>, String> {
+) -> BuiltinResult<Option<MarkerKind>> {
     let trimmed = value.trim();
     if trimmed.eq_ignore_ascii_case("none") {
         return Ok(None);
@@ -665,7 +670,7 @@ fn marker_kind_from_token(token: char) -> Option<MarkerKind> {
 fn parse_marker_color_value(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<MarkerColor, String> {
+) -> BuiltinResult<MarkerColor> {
     if let Some(name) = value_as_string(value) {
         let lower = name.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -681,12 +686,10 @@ fn parse_marker_color_value(
 fn parse_line_style_order_value(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<Vec<LineStyle>, String> {
+) -> BuiltinResult<Vec<LineStyle>> {
     let strings = match value {
         Value::StringArray(arr) => arr.data.clone(),
-        Value::Cell(cell) => {
-            collect_cell_strings(cell).map_err(|e| ctx_err(opts, format!("LineStyleOrder: {e}")))?
-        }
+        Value::Cell(cell) => collect_cell_strings(cell, opts)?,
         _ => {
             if let Some(text) = value_as_string(value) {
                 vec![text]
@@ -710,16 +713,24 @@ fn parse_line_style_order_value(
     Ok(styles)
 }
 
-fn collect_cell_strings(cell: &CellArray) -> Result<Vec<String>, String> {
+fn collect_cell_strings(
+    cell: &CellArray,
+    opts: &LineStyleParseOptions,
+) -> BuiltinResult<Vec<String>> {
     let mut strings = Vec::with_capacity(cell.rows * cell.cols);
     for row in 0..cell.rows {
         for col in 0..cell.cols {
-            let value = cell.get(row, col)?;
+            let value = cell
+                .get(row, col)
+                .map_err(|e| ctx_err(opts, format!("LineStyleOrder: {e}")))?;
             if let Some(text) = value_as_string(&value) {
                 strings.push(text);
             } else {
-                return Err(format!(
-                    "cell entry at ({row}, {col}) is not a char array or string"
+                return Err(ctx_err(
+                    opts,
+                    format!(
+                        "LineStyleOrder: cell entry at ({row}, {col}) is not a char array or string"
+                    ),
                 ));
             }
         }
@@ -730,7 +741,7 @@ fn collect_cell_strings(cell: &CellArray) -> Result<Vec<String>, String> {
 pub(crate) fn parse_color_value(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<Vec4, String> {
+) -> BuiltinResult<Vec4> {
     if let Some(name) = value_as_string(value) {
         if let Some(color) = name.trim().chars().next().and_then(color_from_token) {
             return Ok(color);
@@ -825,7 +836,7 @@ fn bool_from_text(text: &str) -> Option<bool> {
     }
 }
 
-fn parse_colormap_option(opts: &LineStyleParseOptions, value: &Value) -> Result<ColorMap, String> {
+fn parse_colormap_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<ColorMap> {
     if let Some(name) = value_as_string(value) {
         if let Some(map) = parse_colormap_name(&name) {
             return Ok(map);
@@ -863,7 +874,7 @@ fn parse_colormap_name(name: &str) -> Option<ColorMap> {
 fn parse_shading_option(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<ShadingMode, String> {
+) -> BuiltinResult<ShadingMode> {
     let Some(text) = value_as_string(value) else {
         return Err(ctx_err(opts, "Shading must be a string"));
     };
@@ -876,7 +887,7 @@ fn parse_shading_option(
     }
 }
 
-fn parse_alpha_value(opts: &LineStyleParseOptions, value: &Value) -> Result<f32, String> {
+fn parse_alpha_value(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<f32> {
     let alpha =
         value_as_f64(value).ok_or_else(|| ctx_err(opts, "Alpha/FacesAlpha must be numeric"))?;
     Ok(alpha.clamp(0.0, 1.0) as f32)
@@ -886,7 +897,7 @@ fn apply_face_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
     style: &mut SurfaceStyle,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -926,7 +937,7 @@ fn apply_edge_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
     style: &mut SurfaceStyle,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -954,11 +965,11 @@ fn parse_surface_bool(
     opts: &LineStyleParseOptions,
     field: &str,
     value: &Value,
-) -> Result<bool, String> {
+) -> BuiltinResult<bool> {
     value_as_bool(value).ok_or_else(|| ctx_err(opts, format!("{field} must be logical (on/off)")))
 }
 
-fn parse_lighting_option(opts: &LineStyleParseOptions, value: &Value) -> Result<bool, String> {
+fn parse_lighting_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<bool> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -977,7 +988,7 @@ pub fn parse_bar_style_args(
     builtin: &'static str,
     rest: &[Value],
     defaults: BarStyleDefaults,
-) -> Result<BarStyle, String> {
+) -> BuiltinResult<BarStyle> {
     let opts = LineStyleParseOptions::generic(builtin);
     let mut style = BarStyle {
         face_color: defaults.face_color,
@@ -1173,7 +1184,7 @@ enum EdgeColorSpec {
 fn parse_bar_face_color(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<FaceColorSpec, String> {
+) -> BuiltinResult<FaceColorSpec> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -1193,7 +1204,7 @@ fn parse_bar_face_color(
 fn parse_bar_edge_color(
     opts: &LineStyleParseOptions,
     value: &Value,
-) -> Result<EdgeColorSpec, String> {
+) -> BuiltinResult<EdgeColorSpec> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
@@ -1210,7 +1221,7 @@ fn parse_bar_edge_color(
     Ok(EdgeColorSpec::Color(color))
 }
 
-fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> Result<Vec4, String> {
+fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> BuiltinResult<Vec4> {
     if let Some(ch) = token.trim().chars().next() {
         if let Some(color) = color_from_token(ch) {
             return Ok(color);
@@ -1222,8 +1233,9 @@ fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> Result<
     ))
 }
 
-fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> String {
-    format!("{builtin}: {}", msg.into())
+fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeControlFlow {
+    let message = format!("{builtin}: {}", msg.into());
+    plotting_error(builtin, message)
 }
 
 #[cfg(test)]

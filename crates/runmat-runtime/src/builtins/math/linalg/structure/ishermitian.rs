@@ -1,15 +1,15 @@
 //! MATLAB-compatible `ishermitian` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::linalg::{matrix_dimensions_for, parse_tolerance_arg};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -223,6 +223,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Returns a host logical scalar and terminates fusion graphs.",
 };
 
+const BUILTIN_NAME: &str = "ishermitian";
+
 #[runtime_builtin(
     name = "ishermitian",
     category = "math/linalg/structure",
@@ -234,7 +236,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
     match value {
-        Value::GpuTensor(handle) => (ishermitian_gpu(handle, mode, tol)).map_err(Into::into),
+        Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol),
         other => {
             let matrix = MatrixInput::from_value(other)?;
             let result = evaluate_matrix(&matrix, mode, tol);
@@ -247,7 +249,7 @@ fn ishermitian_gpu(
     handle: GpuTensorHandle,
     mode: HermitianMode,
     tol: f64,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let provider_mode = match mode {
             HermitianMode::Hermitian => ProviderHermitianKind::Hermitian,
@@ -293,33 +295,40 @@ impl MatrixData {
 }
 
 impl MatrixInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         let data = match value {
             Value::Tensor(tensor) => MatrixData::Real(tensor),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)?;
+                let tensor = logical_to_tensor(BUILTIN_NAME, &logical)?;
                 MatrixData::Real(tensor)
             }
             Value::ComplexTensor(tensor) => MatrixData::Complex(tensor),
             Value::Complex(re, im) => {
-                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| format!("ishermitian: {e}"))?;
+                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
+                    build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .build()
+                        .into()
+                })?;
                 MatrixData::Complex(tensor)
             }
             v @ Value::Num(_) | v @ Value::Int(_) | v @ Value::Bool(_) => {
-                let tensor = tensor::value_into_tensor_for("ishermitian", v)?;
+                let tensor = value_into_tensor_for(BUILTIN_NAME, v)?;
                 MatrixData::Real(tensor)
             }
             other => {
-                return Err(format!(
+                return Err(build_runtime_error(format!(
                     "ishermitian: unsupported input type {:?}; expected numeric or logical matrix",
                     other
-                ));
+                ))
+                .with_builtin(BUILTIN_NAME)
+                .build()
+                .into());
             }
         };
 
         let shape = data.shape();
-        let (rows, cols) = matrix_dimensions_for("ishermitian", shape)?;
+        let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
         Ok(Self { data, rows, cols })
     }
 }
@@ -334,9 +343,12 @@ fn evaluate_matrix(matrix: &MatrixInput, mode: HermitianMode, tol: f64) -> bool 
     }
 }
 
-fn parse_optional_args(args: &[Value]) -> Result<(HermitianMode, f64), String> {
+fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
     if args.len() > 2 {
-        return Err("ishermitian: too many input arguments".to_string());
+        return Err(build_runtime_error("ishermitian: too many input arguments")
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into());
     }
 
     let mut mode = HermitianMode::Hermitian;
@@ -346,7 +358,10 @@ fn parse_optional_args(args: &[Value]) -> Result<(HermitianMode, f64), String> {
     for arg in args {
         if let Some(flag) = parse_mode_flag(arg)? {
             if mode_set {
-                return Err("ishermitian: duplicate symmetry flag".to_string());
+                return Err(build_runtime_error("ishermitian: duplicate symmetry flag")
+                    .with_builtin(BUILTIN_NAME)
+                    .build()
+                    .into());
             }
             mode = flag;
             mode_set = true;
@@ -354,7 +369,10 @@ fn parse_optional_args(args: &[Value]) -> Result<(HermitianMode, f64), String> {
         }
 
         if tol.is_some() {
-            return Err("ishermitian: tolerance specified more than once".to_string());
+            return Err(build_runtime_error("ishermitian: tolerance specified more than once")
+                .with_builtin(BUILTIN_NAME)
+                .build()
+                .into());
         }
 
         let local = parse_single_tolerance(arg)?;
@@ -364,7 +382,7 @@ fn parse_optional_args(args: &[Value]) -> Result<(HermitianMode, f64), String> {
     Ok((mode, tol.unwrap_or(0.0)))
 }
 
-fn parse_mode_flag(value: &Value) -> Result<Option<HermitianMode>, String> {
+fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<HermitianMode>> {
     let text = match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
@@ -380,15 +398,124 @@ fn parse_mode_flag(value: &Value) -> Result<Option<HermitianMode>, String> {
     match lowered.as_str() {
         "skew" | "skewhermitian" | "skew-hermitian" => Ok(Some(HermitianMode::Skew)),
         "hermitian" | "nonskew" | "non-skew" | "symmetric" => Ok(Some(HermitianMode::Hermitian)),
-        other => Err(format!("ishermitian: unknown flag '{other}'")),
+        other => Err(build_runtime_error(format!("ishermitian: unknown flag '{other}'"))
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()),
     }
 }
 
-fn parse_single_tolerance(arg: &Value) -> Result<f64, String> {
-    match parse_tolerance_arg("ishermitian", std::slice::from_ref(arg))? {
-        Some(value) => Ok(value),
-        None => Err("ishermitian: tolerance must be a real scalar".to_string()),
+fn parse_single_tolerance(arg: &Value) -> BuiltinResult<f64> {
+    let value = parse_tolerance_value(BUILTIN_NAME, arg)?;
+    Ok(value)
+}
+
+fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
+    let raw = match value {
+        Value::Num(n) => *n,
+        Value::Int(i) => i.to_f64(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+        Value::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Value::LogicalArray(l) if l.len() == 1 => {
+            if l.data[0] != 0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        other => {
+            return Err(build_runtime_error(format!(
+                "{name}: tolerance must be a real scalar, got {other:?}"
+            ))
+            .with_builtin(name)
+            .build()
+            .into())
+        }
+    };
+    if !raw.is_finite() {
+        return Err(build_runtime_error(format!("{name}: tolerance must be finite"))
+            .with_builtin(name)
+            .build()
+            .into());
     }
+    if raw < 0.0 {
+        return Err(build_runtime_error(format!("{name}: tolerance must be >= 0"))
+            .with_builtin(name)
+            .build()
+            .into());
+    }
+    Ok(raw)
+}
+
+fn matrix_dimensions_for(name: &str, shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+    match shape.len() {
+        0 => Ok((1, 1)),
+        1 => Ok((shape[0], 1)),
+        _ => {
+            if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
+                Err(build_runtime_error(format!(
+                    "{name}: inputs must be 2-D matrices or vectors"
+                ))
+                .with_builtin(name)
+                .build()
+                .into())
+            } else {
+                Ok((shape[0], shape[1]))
+            }
+        }
+    }
+}
+
+fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+    match value {
+        Value::Tensor(t) => Ok(t),
+        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
+            build_runtime_error(format!("{name}: {e}"))
+                .with_builtin(name)
+                .build()
+                .into()
+        }),
+        other => Err(build_runtime_error(format!(
+            "{name}: unsupported input type {:?}; expected numeric or logical values",
+            other
+        ))
+        .with_builtin(name)
+        .build()
+        .into()),
+    }
+}
+
+fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+    let data: Vec<f64> = logical
+        .data
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
+    Tensor::new(data, logical.shape.clone()).map_err(|e| {
+        build_runtime_error(format!("{name}: {e}"))
+            .with_builtin(name)
+            .build()
+            .into()
+    })
 }
 
 fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
@@ -480,12 +607,12 @@ fn complex_within(re: f64, im: f64, ref_re: f64, ref_im: f64, tol: f64) -> bool 
     diff_r.hypot(diff_i) <= tol
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> Result<(usize, usize), String> {
-    matrix_dimensions_for("ishermitian", shape)
+pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+    matrix_dimensions_for(BUILTIN_NAME, shape)
 }
 
-pub fn ishermitian_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("ishermitian", &tensor.shape)?;
+pub fn ishermitian_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -501,8 +628,8 @@ pub fn ishermitian_host_complex_tensor(
     tensor: &ComplexTensor,
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("ishermitian", &tensor.shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -519,13 +646,17 @@ pub fn ishermitian_host_real_data(
     data: &[f64],
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("ishermitian", shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
     if rows != cols {
         return Ok(false);
     }
-    let tensor =
-        Tensor::new(data.to_vec(), shape.to_vec()).map_err(|e| format!("ishermitian: {e}"))?;
+    let tensor = Tensor::new(data.to_vec(), shape.to_vec()).map_err(|e| {
+        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()
+    })?;
     ishermitian_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -534,13 +665,17 @@ pub fn ishermitian_host_complex_data(
     data: &[(f64, f64)],
     skew: bool,
     tol: f64,
-) -> Result<bool, String> {
-    let (rows, cols) = matrix_dimensions_for("ishermitian", shape)?;
+) -> BuiltinResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
     if rows != cols {
         return Ok(false);
     }
-    let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| format!("ishermitian: {e}"))?;
+    let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec()).map_err(|e| {
+        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
+            .with_builtin(BUILTIN_NAME)
+            .build()
+            .into()
+    })?;
     ishermitian_host_complex_tensor(&tensor, skew, tol)
 }
 
@@ -708,7 +843,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::from("not-a-flag")])
             .expect_err("ishermitian should error on unknown flag");
-        assert!(err.contains("unknown flag"));
+        let message = err.to_string();
+        assert!(message.contains("unknown flag"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -717,7 +853,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::Num(-1.0)])
             .expect_err("ishermitian should error on negative tolerance");
-        assert!(err.contains("tolerance must be >= 0"));
+        let message = err.to_string();
+        assert!(message.contains("tolerance must be >= 0"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -727,7 +864,8 @@ pub(crate) mod tests {
         let tolerance = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
             .expect_err("ishermitian should error on non-scalar tolerance");
-        assert!(err.contains("tolerance must be a real scalar"));
+        let message = err.to_string();
+        assert!(message.contains("tolerance must be a real scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -739,7 +877,8 @@ pub(crate) mod tests {
             vec![Value::Num(0.0), Value::from("skew"), Value::Num(0.0)],
         )
         .expect_err("ishermitian should error on too many inputs");
-        assert!(err.contains("too many input arguments"));
+        let message = err.to_string();
+        assert!(message.contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -747,7 +886,8 @@ pub(crate) mod tests {
     fn rejects_unsupported_input_type() {
         let err = ishermitian_builtin(Value::String("abc".into()), Vec::new())
             .expect_err("ishermitian should reject strings");
-        assert!(err.contains("unsupported input type"));
+        let message = err.to_string();
+        assert!(message.contains("unsupported input type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
 
 use super::accept::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
@@ -197,6 +197,33 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Networking resources are host-only; the builtin gathers GPU values before closing handles.",
 };
 
+fn close_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(message_id)
+        .with_builtin("close")
+        .build()
+}
+
+fn close_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
+    close_error(message_id, message).into()
+}
+
+fn map_close_flow(
+    flow: RuntimeControlFlow,
+    message_id: &'static str,
+    context: &str,
+) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => build_runtime_error(format!("{context}: {}", err.message()))
+            .with_identifier(message_id)
+            .with_builtin("close")
+            .with_source(err)
+            .build()
+            .into(),
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::close")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "close",
@@ -224,14 +251,14 @@ fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut any_closed = false;
     for raw in args {
         let gathered = gather_if_needed(&raw)
-            .map_err(|err| runtime_error(MESSAGE_ID_INVALID_ARGUMENT, err))?;
+            .map_err(|flow| map_close_flow(flow, MESSAGE_ID_INVALID_ARGUMENT, "close"))?;
         any_closed |= close_value(&gathered)?;
     }
 
     Ok(Value::Num(if any_closed { 1.0 } else { 0.0 }))
 }
 
-fn close_value(value: &Value) -> Result<bool, String> {
+fn close_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Struct(st) => close_struct(st),
         Value::String(text) => close_command(text),
@@ -242,7 +269,7 @@ fn close_value(value: &Value) -> Result<bool, String> {
                 let text: String = chars.data.iter().collect();
                 close_command(&text)
             } else {
-                Err(runtime_error(
+                Err(close_flow(
                     MESSAGE_ID_INVALID_ARGUMENT,
                     "close: character arrays must be a single row of text",
                 ))
@@ -251,7 +278,7 @@ fn close_value(value: &Value) -> Result<bool, String> {
         Value::StringArray(sa) => match sa.data.len() {
             0 => Ok(false),
             1 => close_command(&sa.data[0]),
-            _ => Err(runtime_error(
+            _ => Err(close_flow(
                 MESSAGE_ID_INVALID_ARGUMENT,
                 "close: string array inputs must be scalar",
             )),
@@ -266,17 +293,17 @@ fn close_value(value: &Value) -> Result<bool, String> {
         }
         Value::Tensor(tensor) if tensor.data.is_empty() => Ok(false),
         Value::LogicalArray(logical) if logical.is_empty() => Ok(false),
-        _ => Err(runtime_error(
+        _ => Err(close_flow(
             MESSAGE_ID_INVALID_ARGUMENT,
             format!("close: unsupported argument {value:?}"),
         )),
     }
 }
 
-fn close_struct(struct_value: &StructValue) -> Result<bool, String> {
+fn close_struct(struct_value: &StructValue) -> BuiltinResult<bool> {
     if let Some(id_value) = struct_value.fields.get(CLIENT_HANDLE_FIELD) {
         let id = value_to_u64(id_value).ok_or_else(|| {
-            runtime_error(
+            close_flow(
                 MESSAGE_ID_INVALID_HANDLE,
                 "close: tcpclient identifier is missing or invalid",
             )
@@ -286,7 +313,7 @@ fn close_struct(struct_value: &StructValue) -> Result<bool, String> {
 
     if let Some(id_value) = struct_value.fields.get(HANDLE_ID_FIELD) {
         let id = value_to_u64(id_value).ok_or_else(|| {
-            runtime_error(
+            close_flow(
                 MESSAGE_ID_INVALID_HANDLE,
                 "close: tcpserver identifier is missing or invalid",
             )
@@ -296,20 +323,20 @@ fn close_struct(struct_value: &StructValue) -> Result<bool, String> {
         return Ok(server_closed || clients_closed > 0);
     }
 
-    Err(runtime_error(
+    Err(close_flow(
         MESSAGE_ID_INVALID_HANDLE,
         "close: expected tcpclient or tcpserver struct",
     ))
 }
 
-fn close_command(raw: &str) -> Result<bool, String> {
+fn close_command(raw: &str) -> BuiltinResult<bool> {
     let token = raw.trim().to_ascii_lowercase();
     match token.as_str() {
         "all" => Ok(close_everything()),
         "clients" | "client" => Ok(close_all_clients() > 0),
         "servers" | "server" => Ok(close_all_servers() > 0),
         "" => Ok(false),
-        _ => Err(runtime_error(
+        _ => Err(close_flow(
             MESSAGE_ID_INVALID_ARGUMENT,
             format!("close: unrecognised option '{raw}'"),
         )),
@@ -343,10 +370,6 @@ fn value_to_u64(value: &Value) -> Option<u64> {
     }
 }
 
-fn runtime_error(id: &'static str, message: impl Into<String>) -> String {
-    format!("{id}: {}", message.into())
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -373,6 +396,15 @@ pub(crate) mod tests {
                 other => panic!("unexpected client id {other:?}"),
             },
             other => panic!("expected tcpclient struct, got {other:?}"),
+        }
+    }
+
+    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert_eq!(err.identifier(), Some(expected));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 
@@ -615,25 +647,16 @@ pub(crate) mod tests {
         let _lock = TEST_GUARD.lock().unwrap();
 
         let err = close_builtin(vec![Value::Num(13.0)]).unwrap_err();
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_ARGUMENT),
-            "error did not include id: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
 
         let multi = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         let err = close_builtin(vec![Value::CharArray(multi)]).unwrap_err();
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_ARGUMENT),
-            "char array error missing id: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
 
         let strings =
             StringArray::new(vec!["clients".to_string(), "servers".to_string()], vec![2]).unwrap();
         let err = close_builtin(vec![Value::StringArray(strings)]).unwrap_err();
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_ARGUMENT),
-            "string array error missing id: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENT);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -643,10 +666,7 @@ pub(crate) mod tests {
 
         let st = StructValue::new();
         let err = close_builtin(vec![Value::Struct(st)]).unwrap_err();
-        assert!(
-            err.starts_with(MESSAGE_ID_INVALID_HANDLE),
-            "error did not include id: {err}"
-        );
+        assert_error_identifier(err, MESSAGE_ID_INVALID_HANDLE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

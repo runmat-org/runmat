@@ -4,12 +4,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -197,6 +198,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion kernels treat imag as a zero-producing transform for real tensors; providers can override via fused pipelines to keep tensors resident on the GPU.",
 };
 
+const BUILTIN_NAME: &str = "imag";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+}
+
 #[runtime_builtin(
     name = "imag",
     category = "math/elementwise",
@@ -205,54 +212,60 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::elementwise::imag"
 )]
-fn imag_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn imag_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => (imag_gpu(handle)).map_err(Into::into),
+        Value::GpuTensor(handle) => imag_gpu(handle),
         Value::Complex(_, im) => Ok(Value::Num(im)),
-        Value::ComplexTensor(ct) => (imag_complex_tensor(ct)).map_err(Into::into),
-        Value::CharArray(ca) => (imag_char_array(ca)).map_err(Into::into),
-        Value::String(_) | Value::StringArray(_) => Err((("imag: expected numeric input".to_string())).into()),
+        Value::ComplexTensor(ct) => imag_complex_tensor(ct),
+        Value::CharArray(ca) => imag_char_array(ca),
+        Value::String(_) | Value::StringArray(_) => {
+            Err(builtin_error("imag: expected numeric input"))
+        }
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
-        | Value::Bool(_)) => (imag_real(x)).map_err(Into::into),
-        other => Err(((format!(
+        | Value::Bool(_)) => imag_real(x),
+        other => Err(builtin_error(format!(
             "imag: unsupported input type {:?}; expected numeric, logical, or char input",
             other
-        ))).into()),
+        ))),
     }
 }
 
-fn imag_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_imag(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle)?;
-    imag_tensor(tensor).map(tensor::tensor_into_value)
+    let tensor = gpu_helpers::gather_tensor(&handle)
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    Ok(tensor::tensor_into_value(imag_tensor(tensor)?))
 }
 
-fn imag_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("imag", value)?;
-    imag_tensor(tensor).map(tensor::tensor_into_value)
+fn imag_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("imag", value)
+        .map_err(|e| builtin_error(format!("imag: {e}")))?;
+    Ok(tensor::tensor_into_value(imag_tensor(tensor)?))
 }
 
-fn imag_tensor(tensor: Tensor) -> Result<Tensor, String> {
+fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     Tensor::new(vec![0.0; tensor.data.len()], tensor.shape.clone())
-        .map_err(|e| format!("imag: {e}"))
+        .map_err(|e| builtin_error(format!("imag: {e}")))
 }
 
-fn imag_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct.data.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone()).map_err(|e| format!("imag: {e}"))?;
+    let tensor = Tensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("imag: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn imag_char_array(ca: CharArray) -> Result<Value, String> {
+fn imag_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let zeros = vec![0.0; ca.rows * ca.cols];
-    let tensor = Tensor::new(zeros, vec![ca.rows, ca.cols]).map_err(|e| format!("imag: {e}"))?;
+    let tensor = Tensor::new(zeros, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("imag: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -377,7 +390,12 @@ pub(crate) mod tests {
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
-        assert!(err.contains("expected numeric"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("expected numeric"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -386,7 +404,12 @@ pub(crate) mod tests {
         let arr =
             StringArray::new(vec!["a".to_string(), "b".to_string()], vec![2, 1]).expect("array");
         let err = imag_builtin(Value::StringArray(arr)).expect_err("imag should error");
-        assert!(err.contains("expected numeric"));
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert!(err.message().contains("expected numeric"));
+            }
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

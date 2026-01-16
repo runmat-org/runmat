@@ -4,6 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -235,6 +236,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner emits WGSL `ceil` calls; providers can substitute custom kernels when available.",
 };
 
+const BUILTIN_NAME: &str = "ceil";
+
+fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "ceil",
     category = "math/rounding",
@@ -243,7 +253,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     builtin_path = "crate::builtins::math::rounding::ceil"
 )]
-fn ceil_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = parse_arguments(&rest)?;
     let base = match value {
         Value::GpuTensor(handle) => ceil_gpu(handle, &args)?,
@@ -254,32 +264,32 @@ fn ceil_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         Value::ComplexTensor(ct) => ceil_complex_tensor(ct, args.strategy)?,
         Value::CharArray(ca) => ceil_char_array(ca, args.strategy)?,
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
             let ceiled = ceil_tensor(tensor, args.strategy)?;
             tensor::tensor_into_value(ceiled)
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err((("ceil: expected numeric or logical input".to_string())).into())
+            return Err(builtin_error("ceil: expected numeric or logical input"));
         }
         other => ceil_numeric(other, args.strategy)?,
     };
-    apply_output_template(base, &args.output).map_err(Into::into)
+    apply_output_template(base, &args.output)
 }
 
-fn ceil_numeric(value: Value, strategy: CeilStrategy) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("ceil", value)?;
+fn ceil_numeric(value: Value, strategy: CeilStrategy) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for("ceil", value).map_err(|err| builtin_error(err))?;
     let ceiled = ceil_tensor(tensor, strategy)?;
     Ok(tensor::tensor_into_value(ceiled))
 }
 
-fn ceil_tensor(mut tensor: Tensor, strategy: CeilStrategy) -> Result<Tensor, String> {
+fn ceil_tensor(mut tensor: Tensor, strategy: CeilStrategy) -> BuiltinResult<Tensor> {
     for value in &mut tensor.data {
         *value = apply_ceil_scalar(*value, strategy);
     }
     Ok(tensor)
 }
 
-fn ceil_complex_tensor(ct: ComplexTensor, strategy: CeilStrategy) -> Result<Value, String> {
+fn ceil_complex_tensor(ct: ComplexTensor, strategy: CeilStrategy) -> BuiltinResult<Value> {
     let data: Vec<(f64, f64)> = ct
         .data
         .iter()
@@ -290,20 +300,22 @@ fn ceil_complex_tensor(ct: ComplexTensor, strategy: CeilStrategy) -> Result<Valu
             )
         })
         .collect();
-    let tensor = ComplexTensor::new(data, ct.shape.clone()).map_err(|e| format!("ceil: {e}"))?;
+    let tensor = ComplexTensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error(format!("ceil: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn ceil_char_array(ca: CharArray, strategy: CeilStrategy) -> Result<Value, String> {
+fn ceil_char_array(ca: CharArray, strategy: CeilStrategy) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
     for ch in ca.data {
         data.push(apply_ceil_scalar(ch as u32 as f64, strategy));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("ceil: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+        .map_err(|e| builtin_error(format!("ceil: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> Result<Value, String> {
+fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> BuiltinResult<Value> {
     if matches!(args.strategy, CeilStrategy::Integer) {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_ceil(&handle) {
@@ -335,7 +347,7 @@ enum OutputTemplate {
     Like(Value),
 }
 
-fn parse_arguments(args: &[Value]) -> Result<CeilArgs, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<CeilArgs> {
     let (strategy_len, output) = parse_output_template(args)?;
     let strategy = match strategy_len {
         0 => CeilStrategy::Integer,
@@ -347,23 +359,22 @@ fn parse_arguments(args: &[Value]) -> Result<CeilArgs, String> {
                 CeilMode::Decimals => CeilStrategy::Decimals(digits),
                 CeilMode::Significant => {
                     if digits <= 0 {
-                        return Err(
-                            "ceil: N must be a positive integer for 'significant' rounding"
-                                .to_string(),
-                        );
+                        return Err(builtin_error(
+                            "ceil: N must be a positive integer for 'significant' rounding",
+                        ));
                     }
                     CeilStrategy::Significant(digits)
                 }
             }
         }
-        _ => return Err("ceil: too many input arguments".to_string()),
+        _ => return Err(builtin_error("ceil: too many input arguments")),
     };
     Ok(CeilArgs { strategy, output })
 }
 
-fn parse_output_template(args: &[Value]) -> Result<(usize, OutputTemplate), String> {
+fn parse_output_template(args: &[Value]) -> BuiltinResult<(usize, OutputTemplate)> {
     if !args.is_empty() && is_keyword(&args[args.len() - 1], "like") {
-        return Err("ceil: expected prototype after 'like'".to_string());
+        return Err(builtin_error("ceil: expected prototype after 'like'"));
     }
     if args.len() >= 2 && is_keyword(&args[args.len() - 2], "like") {
         let proto = &args[args.len() - 1];
@@ -371,25 +382,25 @@ fn parse_output_template(args: &[Value]) -> Result<(usize, OutputTemplate), Stri
             proto,
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
         ) {
-            return Err("ceil: unsupported prototype for 'like'".to_string());
+            return Err(builtin_error("ceil: unsupported prototype for 'like'"));
         }
         return Ok((args.len() - 2, OutputTemplate::Like(proto.clone())));
     }
     Ok((args.len(), OutputTemplate::Default))
 }
 
-fn parse_digits(value: &Value) -> Result<i32, String> {
+fn parse_digits(value: &Value) -> BuiltinResult<i32> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle.clone());
-            let gathered = gpu_helpers::gather_value(&proxy).map_err(|e| format!("ceil: {e}"))?;
+            let gathered = gpu_helpers::gather_value(&proxy)?;
             parse_digits_inner(&gathered)
         }
         other => parse_digits_inner(other),
     }
 }
 
-fn parse_digits_inner(value: &Value) -> Result<i32, String> {
+fn parse_digits_inner(value: &Value) -> BuiltinResult<i32> {
     const ERR: &str = "ceil: N must be an integer scalar";
     let raw = match value {
         Value::Int(i) => i.to_i64(),
@@ -403,13 +414,13 @@ fn parse_digits_inner(value: &Value) -> Result<i32, String> {
         }
         Value::Tensor(tensor) => {
             if !tensor::is_scalar_tensor(tensor) {
-                return Err(ERR.to_string());
+                return Err(builtin_error(ERR));
             }
             return digits_from_f64(tensor.data[0]);
         }
         Value::LogicalArray(logical) => {
             if logical.len() != 1 {
-                return Err(ERR.to_string());
+                return Err(builtin_error(ERR));
             }
             if logical.data[0] != 0 {
                 1
@@ -417,28 +428,33 @@ fn parse_digits_inner(value: &Value) -> Result<i32, String> {
                 0
             }
         }
-        other => return Err(format!("ceil: N must be numeric, got {:?}", other)),
+        other => {
+            return Err(builtin_error(format!(
+                "ceil: N must be numeric, got {:?}",
+                other
+            )))
+        }
     };
     digits_from_i64(raw)
 }
 
-fn digits_from_f64(value: f64) -> Result<i32, String> {
+fn digits_from_f64(value: f64) -> BuiltinResult<i32> {
     if !value.is_finite() {
-        return Err("ceil: N must be an integer scalar".to_string());
+        return Err(builtin_error("ceil: N must be an integer scalar"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("ceil: N must be an integer scalar".to_string());
+        return Err(builtin_error("ceil: N must be an integer scalar"));
     }
     if rounded > i64::MAX as f64 || rounded < i64::MIN as f64 {
-        return Err("ceil: integer overflow in N".to_string());
+        return Err(builtin_error("ceil: integer overflow in N"));
     }
     digits_from_i64(rounded as i64)
 }
 
-fn digits_from_i64(raw: i64) -> Result<i32, String> {
+fn digits_from_i64(raw: i64) -> BuiltinResult<i32> {
     if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-        return Err("ceil: integer overflow in N".to_string());
+        return Err(builtin_error("ceil: integer overflow in N"));
     }
     Ok(raw as i32)
 }
@@ -449,15 +465,19 @@ enum CeilMode {
     Significant,
 }
 
-fn parse_mode(value: &Value) -> Result<CeilMode, String> {
+fn parse_mode(value: &Value) -> BuiltinResult<CeilMode> {
     let Some(text) = tensor::value_to_string(value) else {
-        return Err("ceil: mode must be a character vector or string scalar".to_string());
+        return Err(builtin_error(
+            "ceil: mode must be a character vector or string scalar",
+        ));
     };
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "significant" => Ok(CeilMode::Significant),
         "decimal" | "decimals" | "digits" | "places" | "place" => Ok(CeilMode::Decimals),
-        other => Err(format!("ceil: unknown rounding mode '{other}'")),
+        other => Err(builtin_error(format!(
+            "ceil: unknown rounding mode '{other}'"
+        ))),
     }
 }
 
@@ -503,7 +523,7 @@ fn ceil_with_significant(value: f64, digits: i32) -> f64 {
     (value * scale).ceil() / scale
 }
 
-fn apply_output_template(value: Value, output: &OutputTemplate) -> Result<Value, String> {
+fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
     match output {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
@@ -515,17 +535,16 @@ fn apply_output_template(value: Value, output: &OutputTemplate) -> Result<Value,
             | Value::LogicalArray(_)
             | Value::Complex(_, _)
             | Value::ComplexTensor(_) => convert_to_host_like(value),
-            _ => Err(
-                "ceil: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
-                    .to_string(),
-            ),
+            _ => Err(builtin_error(
+                "ceil: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            )),
         },
     }
 }
 
-fn convert_to_gpu(value: Value) -> Result<Value, String> {
+fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "ceil: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        builtin_error("ceil: GPU output requested via 'like' but no acceleration provider is active")
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -534,28 +553,31 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("ceil: {e}"))?;
+            let handle = provider
+                .upload(&view)
+                .map_err(|e| builtin_error(format!("ceil: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("ceil: {e}"))?;
+            let tensor =
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("ceil: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        other => Err(format!(
+        other => Err(builtin_error(format!(
             "ceil: 'like' GPU prototypes are only supported for real numeric outputs (got {other:?})"
-        )),
+        ))),
     }
 }
 
-fn convert_to_host_like(value: Value) -> Result<Value, String> {
+fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("ceil: {e}"))
+            gpu_helpers::gather_value(&proxy)
         }
         other => Ok(other),
     }
@@ -565,8 +587,24 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, Tensor, Value};
+
+    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
+        match flow {
+            RuntimeControlFlow::Error(err) => {
+                assert!(
+                    err.message().contains(needle),
+                    "unexpected error: {}",
+                    err.message()
+                );
+            }
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspend: {pending:?}");
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -745,7 +783,7 @@ pub(crate) mod tests {
     fn ceil_significant_requires_positive_digits() {
         let args = vec![Value::Int(IntValue::I32(0)), Value::from("significant")];
         let err = ceil_builtin(Value::Num(1.23), args).unwrap_err();
-        assert!(err.contains("positive integer"), "unexpected error: {err}");
+        assert_error_contains(err, "positive integer");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -779,7 +817,7 @@ pub(crate) mod tests {
     #[test]
     fn ceil_string_input_errors() {
         let err = ceil_builtin(Value::from("hello"), Vec::new()).unwrap_err();
-        assert!(err.contains("numeric"), "unexpected error: {err}");
+        assert_error_contains(err, "numeric");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -787,17 +825,14 @@ pub(crate) mod tests {
     fn ceil_like_invalid_prototype_errors() {
         let args = vec![Value::from("like"), Value::from("prototype")];
         let err = ceil_builtin(Value::Num(1.0), args).unwrap_err();
-        assert!(err.contains("unsupported prototype"), "unexpected: {err}");
+        assert_error_contains(err, "unsupported prototype");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_like_missing_prototype_errors() {
         let err = ceil_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
-        assert!(
-            err.contains("expected prototype"),
-            "unexpected error message: {err}"
-        );
+        assert_error_contains(err, "expected prototype");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

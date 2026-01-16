@@ -1,7 +1,7 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
-use crate::runtime_error;
+use crate::build_runtime_error;
 
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
@@ -25,7 +25,7 @@ pub fn gather_tensor(
     match gathered {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|e| runtime_error(format!("gather: {e}")).build().into()),
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build().into()),
         Value::LogicalArray(la) => {
             let data: Vec<f64> = la
                 .data
@@ -33,9 +33,9 @@ pub fn gather_tensor(
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
             Tensor::new(data, la.shape.clone())
-                .map_err(|e| runtime_error(format!("gather: {e}")).build().into())
+                .map_err(|e| build_runtime_error(format!("gather: {e}")).build().into())
         }
-        other => Err(runtime_error(format!(
+        other => Err(build_runtime_error(format!(
             "gather: unexpected value kind {other:?}"
         ))
         .build()

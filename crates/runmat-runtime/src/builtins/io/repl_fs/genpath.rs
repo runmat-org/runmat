@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -195,6 +195,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "I/O-oriented builtins are not eligible for fusion; metadata registered for completeness.",
 };
 
+const BUILTIN_NAME: &str = "genpath";
+
+fn genpath_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "genpath",
     category = "io/repl_fs",
@@ -207,16 +231,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(args)?;
     match gathered.len() {
-        0 => (generate_from_current_directory()).map_err(Into::into),
-        1 => (generate_from_root(&gathered[0], None)).map_err(Into::into),
-        2 => (generate_from_root(&gathered[0], Some(&gathered[1]))).map_err(Into::into),
-        _ => Err((("genpath: too many input arguments".to_string())).into()),
+        0 => generate_from_current_directory(),
+        1 => generate_from_root(&gathered[0], None),
+        2 => generate_from_root(&gathered[0], Some(&gathered[1])),
+        _ => Err(genpath_error("genpath: too many input arguments")),
     }
 }
 
-fn generate_from_current_directory() -> Result<Value, String> {
-    let cwd = env::current_dir()
-        .map_err(|err| format!("genpath: unable to resolve current directory: {err}"))?;
+fn generate_from_current_directory() -> BuiltinResult<Value> {
+    let cwd = env::current_dir().map_err(|err| {
+        genpath_error(format!("genpath: unable to resolve current directory: {err}"))
+    })?;
     let (canonical_path, canonical_str) = canonicalize_existing(&cwd, "current directory")?;
     let excludes = ExcludeSet::default();
     let mut seen = HashSet::new();
@@ -231,7 +256,7 @@ fn generate_from_current_directory() -> Result<Value, String> {
     Ok(char_array_value(&join_segments(&segments)))
 }
 
-fn generate_from_root(root: &Value, excludes: Option<&Value>) -> Result<Value, String> {
+fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<Value> {
     let root_text = extract_text(root, ERROR_FOLDER_TYPE)?;
     let root_info = normalize_root(&root_text)?;
     let exclude_text = excludes
@@ -250,10 +275,10 @@ fn generate_from_root(root: &Value, excludes: Option<&Value>) -> Result<Value, S
     Ok(char_array_value(&join_segments(&segments)))
 }
 
-fn gather_arguments(args: Vec<Value>) -> Result<Vec<Value>, String> {
+fn gather_arguments(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
-        let host_value = gather_if_needed(&value).map_err(|err| format!("genpath: {err}"))?;
+        let host_value = gather_if_needed(&value).map_err(map_control_flow)?;
         gathered.push(host_value);
     }
     Ok(gathered)
@@ -264,18 +289,19 @@ struct RootInfo {
     canonical: String,
 }
 
-fn normalize_root(text: &str) -> Result<RootInfo, String> {
+fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     if text.trim().is_empty() {
-        return Err(format!("genpath: folder '{text}' not found"));
+        return Err(genpath_error(format!("genpath: folder '{text}' not found")));
     }
 
-    let expanded = expand_user_path(text, "genpath")?;
+    let expanded = expand_user_path(text, "genpath").map_err(genpath_error)?;
     let raw_path = PathBuf::from(&expanded);
     let absolute = if raw_path.is_absolute() {
         raw_path
     } else {
-        let cwd = env::current_dir()
-            .map_err(|err| format!("genpath: unable to resolve current directory: {err}"))?;
+        let cwd = env::current_dir().map_err(|err| {
+            genpath_error(format!("genpath: unable to resolve current directory: {err}"))
+        })?;
         cwd.join(raw_path)
     };
 
@@ -287,9 +313,9 @@ fn normalize_root(text: &str) -> Result<RootInfo, String> {
     })
 }
 
-fn canonicalize_existing(path: &Path, display: &str) -> Result<(PathBuf, String), String> {
-    let canonical =
-        vfs::canonicalize(path).map_err(|_| format!("genpath: folder '{display}' not found"))?;
+fn canonicalize_existing(path: &Path, display: &str) -> BuiltinResult<(PathBuf, String)> {
+    let canonical = vfs::canonicalize(path)
+        .map_err(|_| genpath_error(format!("genpath: folder '{display}' not found")))?;
     let canonical_str = canonical_string_from_path(&canonical);
     Ok((canonical, canonical_str))
 }
@@ -328,7 +354,7 @@ fn traverse(
     excludes: &ExcludeSet,
     seen: &mut HashSet<String>,
     segments: &mut Vec<String>,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let normalized = normalize_case(&canonical);
     if !seen.insert(normalized) {
         return Ok(());
@@ -451,7 +477,7 @@ struct ExcludeEntry {
     normalized_with_sep: String,
 }
 
-fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> Result<ExcludeSet, String> {
+fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<ExcludeSet> {
     let mut entries = Vec::new();
     if let Some(text) = excludes {
         for raw in text.split(crate::builtins::common::path_state::PATH_LIST_SEPARATOR) {
@@ -507,50 +533,50 @@ fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn extract_text(value: &Value, type_error: &str) -> Result<String, String> {
+fn extract_text(value: &Value, type_error: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(StringArray { data, .. }) => {
             if data.len() != 1 {
-                Err(type_error.to_string())
+                Err(genpath_error(type_error))
             } else {
                 Ok(data[0].clone())
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(type_error.to_string());
+                return Err(genpath_error(type_error));
             }
             Ok(chars.data.iter().collect())
         }
         Value::Tensor(tensor) => tensor_to_string(tensor, type_error),
-        _ => Err(type_error.to_string()),
+        _ => Err(genpath_error(type_error)),
     }
 }
 
-fn tensor_to_string(tensor: &Tensor, type_error: &str) -> Result<String, String> {
+fn tensor_to_string(tensor: &Tensor, type_error: &str) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(type_error.to_string());
+        return Err(genpath_error(type_error));
     }
 
     if tensor.rows() != 1 {
-        return Err(type_error.to_string());
+        return Err(genpath_error(type_error));
     }
 
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(type_error.to_string());
+            return Err(genpath_error(type_error));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(type_error.to_string());
+            return Err(genpath_error(type_error));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(type_error.to_string());
+            return Err(genpath_error(type_error));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| type_error.to_string())?;
+        let ch = char::from_u32(int_code as u32).ok_or_else(|| genpath_error(type_error))?;
         text.push(ch);
     }
 
@@ -562,6 +588,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
+    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
@@ -592,6 +619,13 @@ pub(crate) mod tests {
         let (_, canonical_str) =
             canonicalize_existing(path, &path_to_string(path)).expect("canonical path");
         canonical_str
+    }
+
+    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
+        match flow {
+            RuntimeControlFlow::Error(err) => err,
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in genpath tests"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -752,8 +786,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = genpath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err, ERROR_FOLDER_TYPE);
+        let err = unwrap_error(genpath_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        assert_eq!(err.message(), ERROR_FOLDER_TYPE);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -912,8 +946,8 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let missing = Value::String("this/does/not/exist".into());
-        let err = genpath_builtin(vec![missing]).expect_err("expected error");
-        assert!(err.contains("not found"));
+        let err = unwrap_error(genpath_builtin(vec![missing]).expect_err("expected error"));
+        assert!(err.message().contains("not found"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -14,7 +14,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+const BUILTIN_NAME: &str = "readmatrix";
 
 #[cfg_attr(
     feature = "doc_export",
@@ -219,6 +221,39 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
+fn readmatrix_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn readmatrix_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .build()
+        .into()
+}
+
+fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut builder = build_runtime_error(err.message().to_string())
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build().into()
+        }
+    }
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "readmatrix",
@@ -239,15 +274,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let path_value = gather_if_needed(&path).map_err(|e| format!("readmatrix: {e}"))?;
+    let path_value = gather_if_needed(&path).map_err(map_control_flow)?;
     let options = parse_options(&rest)?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
     let tensor = read_numeric_matrix(&resolved, &options)?;
-    finalize_output(tensor, &options).map_err(Into::into)
+    finalize_output(tensor, &options)
 }
 
-fn parse_options(args: &[Value]) -> Result<ReadMatrixOptions, String> {
+fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0usize;
     if let Some(Value::Struct(struct_value)) = args.get(index) {
@@ -256,9 +291,11 @@ fn parse_options(args: &[Value]) -> Result<ReadMatrixOptions, String> {
     }
     while index < args.len() {
         if index + 1 >= args.len() {
-            return Err("readmatrix: name/value inputs must appear in pairs".to_string());
+            return Err(readmatrix_error(
+                "readmatrix: name/value inputs must appear in pairs",
+            ));
         }
-        let name_value = gather_if_needed(&args[index]).map_err(|e| format!("readmatrix: {e}"))?;
+        let name_value = gather_if_needed(&args[index]).map_err(map_control_flow)?;
         let name = option_name_from_value(&name_value)?;
         let value = &args[index + 1];
         apply_option(&mut options, &name, value)?;
@@ -270,20 +307,20 @@ fn parse_options(args: &[Value]) -> Result<ReadMatrixOptions, String> {
 fn parse_struct_options(
     struct_value: &runmat_builtins::StructValue,
     options: &mut ReadMatrixOptions,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     for (name, value) in &struct_value.fields {
         apply_option(options, name, value)?;
     }
     Ok(())
 }
 
-fn apply_option(options: &mut ReadMatrixOptions, name: &str, value: &Value) -> Result<(), String> {
+fn apply_option(options: &mut ReadMatrixOptions, name: &str, value: &Value) -> BuiltinResult<()> {
     let lowered = name.trim().to_ascii_lowercase();
     let is_like = lowered == "like";
     let effective_value = if is_like {
         value.clone()
     } else {
-        gather_if_needed(value).map_err(|e| format!("readmatrix: {e}"))?
+        gather_if_needed(value).map_err(map_control_flow)?
     };
     if name.eq_ignore_ascii_case("Delimiter") {
         let delimiter = parse_delimiter(&effective_value)?;
@@ -335,14 +372,14 @@ fn apply_option(options: &mut ReadMatrixOptions, name: &str, value: &Value) -> R
     Ok(())
 }
 
-fn option_name_from_value(value: &Value) -> Result<String, String> {
+fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
     value_to_string_scalar(value, "option name")
 }
 
-fn parse_delimiter(value: &Value) -> Result<Delimiter, String> {
+fn parse_delimiter(value: &Value) -> BuiltinResult<Delimiter> {
     let text = value_to_string_scalar(value, "Delimiter")?;
     if text.is_empty() {
-        return Err("readmatrix: Delimiter cannot be empty".to_string());
+        return Err(readmatrix_error("readmatrix: Delimiter cannot be empty"));
     }
     let trimmed_lower = text.trim().to_ascii_lowercase();
     match trimmed_lower.as_str() {
@@ -361,29 +398,29 @@ fn parse_delimiter(value: &Value) -> Result<Delimiter, String> {
     }
 }
 
-fn parse_separator_char(value: &Value, option_name: &str) -> Result<char, String> {
+fn parse_separator_char(value: &Value, option_name: &str) -> BuiltinResult<char> {
     let text = value_to_string_scalar(value, option_name)?;
     if text.is_empty() {
-        return Err(format!(
+        return Err(readmatrix_error(format!(
             "readmatrix: {option_name} must be a single character"
-        ));
+        )));
     }
     let mut chars = text.chars();
     let ch = chars.next().unwrap();
     if chars.next().is_some() {
-        return Err(format!(
+        return Err(readmatrix_error(format!(
             "readmatrix: {option_name} must be a single character"
-        ));
+        )));
     }
     if ch == '\n' || ch == '\r' {
-        return Err(format!(
+        return Err(readmatrix_error(format!(
             "readmatrix: {option_name} cannot be a newline character"
-        ));
+        )));
     }
     Ok(ch)
 }
 
-fn value_to_string_scalar(value: &Value, context: &str) -> Result<String, String> {
+fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
@@ -391,60 +428,62 @@ fn value_to_string_scalar(value: &Value, context: &str) -> Result<String, String
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(format!(
+                Err(readmatrix_error(format!(
                     "readmatrix: {context} must be a scalar string array"
-                ))
+                )))
             }
         }
-        _ => Err(format!(
+        _ => Err(readmatrix_error(format!(
             "readmatrix: expected {context} as a string scalar or character vector"
-        )),
+        ))),
     }
 }
 
-fn value_to_usize(value: &Value, context: &str) -> Result<usize, String> {
+fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let num = i.to_i64();
             if num < 0 {
-                Err(format!(
+                Err(readmatrix_error(format!(
                     "readmatrix: {context} must be a non-negative integer"
-                ))
+                )))
             } else {
                 Ok(num as usize)
             }
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(format!(
+                return Err(readmatrix_error(format!(
                     "readmatrix: {context} must be a finite non-negative integer"
-                ));
+                )));
             }
             if *n < 0.0 {
-                return Err(format!(
+                return Err(readmatrix_error(format!(
                     "readmatrix: {context} must be a non-negative integer"
-                ));
+                )));
             }
             if (n.round() - n).abs() > f64::EPSILON {
-                return Err(format!("readmatrix: {context} must be an integer value"));
+                return Err(readmatrix_error(format!(
+                    "readmatrix: {context} must be an integer value"
+                )));
             }
             Ok(n.round() as usize)
         }
-        _ => Err(format!(
+        _ => Err(readmatrix_error(format!(
             "readmatrix: {context} must be provided as a numeric scalar"
-        )),
+        ))),
     }
 }
 
-fn value_to_f64(value: &Value, context: &str) -> Result<f64, String> {
+fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => {
             if n.is_finite() {
                 Ok(*n)
             } else {
-                Err(format!(
+                Err(readmatrix_error(format!(
                     "readmatrix: {context} must be a finite numeric scalar"
-                ))
+                )))
             }
         }
         Value::Int(i) => Ok(i.to_f64()),
@@ -454,19 +493,23 @@ fn value_to_f64(value: &Value, context: &str) -> Result<f64, String> {
                 if v.is_finite() {
                     Ok(v)
                 } else {
-                    Err(format!(
+                    Err(readmatrix_error(format!(
                         "readmatrix: {context} must be a finite numeric scalar"
-                    ))
+                    )))
                 }
             } else {
-                Err(format!("readmatrix: {context} must be a numeric scalar"))
+                Err(readmatrix_error(format!(
+                    "readmatrix: {context} must be a numeric scalar"
+                )))
             }
         }
-        _ => Err(format!("readmatrix: {context} must be a numeric scalar")),
+        _ => Err(readmatrix_error(format!(
+            "readmatrix: {context} must be a numeric scalar"
+        ))),
     }
 }
 
-fn parse_treat_as_missing(value: &Value) -> Result<Vec<String>, String> {
+fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data.iter().collect()]),
@@ -477,25 +520,27 @@ fn parse_treat_as_missing(value: &Value) -> Result<Vec<String>, String> {
             if t.data.len() == 1 {
                 Ok(vec![format_numeric_token(t.data[0])])
             } else {
-                Err("readmatrix: TreatAsMissing entries must be scalar values".to_string())
+                Err(readmatrix_error(
+                    "readmatrix: TreatAsMissing entries must be scalar values",
+                ))
             }
         }
         Value::Cell(_) => {
             let nested = Vec::<Value>::try_from(value).map_err(|_| {
-                "readmatrix: TreatAsMissing cell arrays must contain scalars".to_string()
+                readmatrix_error("readmatrix: TreatAsMissing cell arrays must contain scalars")
             })?;
             let mut out = Vec::new();
             for entry in nested {
-                let gathered = gather_if_needed(&entry).map_err(|e| format!("readmatrix: {e}"))?;
+                let gathered = gather_if_needed(&entry).map_err(map_control_flow)?;
                 for token in parse_treat_as_missing(&gathered)? {
                     out.push(token);
                 }
             }
             Ok(out)
         }
-        _ => {
-            Err("readmatrix: TreatAsMissing values must be strings or numeric scalars".to_string())
-        }
+        _ => Err(readmatrix_error(
+            "readmatrix: TreatAsMissing values must be strings or numeric scalars",
+        )),
     }
 }
 
@@ -552,23 +597,25 @@ impl ReadMatrixOptions {
         self.empty_value.unwrap_or(f64::NAN)
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> BuiltinResult<()> {
         if let Some(range) = &self.range {
             range.validate()?;
         }
         if let Some(sep) = self.thousands_separator {
             if sep == self.decimal_separator {
-                return Err(
-                    "readmatrix: DecimalSeparator and ThousandsSeparator must differ".to_string(),
-                );
+                return Err(readmatrix_error(
+                    "readmatrix: DecimalSeparator and ThousandsSeparator must differ",
+                ));
             }
         }
         Ok(())
     }
 
-    fn set_output_type(&mut self, spec: &str) -> Result<(), String> {
+    fn set_output_type(&mut self, spec: &str) -> BuiltinResult<()> {
         if matches!(self.output_template, OutputTemplate::Like(_)) {
-            return Err("readmatrix: cannot combine 'Like' with OutputType".to_string());
+            return Err(readmatrix_error(
+                "readmatrix: cannot combine 'Like' with OutputType",
+            ));
         }
         if spec.eq_ignore_ascii_case("double") {
             self.output_template = OutputTemplate::Double;
@@ -578,15 +625,22 @@ impl ReadMatrixOptions {
             self.output_template = OutputTemplate::Logical;
             return Ok(());
         }
-        Err(format!("readmatrix: unsupported OutputType '{}'", spec))
+        Err(readmatrix_error(format!(
+            "readmatrix: unsupported OutputType '{}'",
+            spec
+        )))
     }
 
-    fn set_like(&mut self, proto: Value) -> Result<(), String> {
+    fn set_like(&mut self, proto: Value) -> BuiltinResult<()> {
         if matches!(self.output_template, OutputTemplate::Like(_)) {
-            return Err("readmatrix: multiple 'Like' specifications are not supported".to_string());
+            return Err(readmatrix_error(
+                "readmatrix: multiple 'Like' specifications are not supported",
+            ));
         }
         if !matches!(self.output_template, OutputTemplate::Double) {
-            return Err("readmatrix: cannot combine 'Like' with OutputType overrides".to_string());
+            return Err(readmatrix_error(
+                "readmatrix: cannot combine 'Like' with OutputType overrides",
+            ));
         }
         self.output_template = OutputTemplate::Like(proto);
         Ok(())
@@ -616,15 +670,19 @@ struct RangeSpec {
 }
 
 impl RangeSpec {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> BuiltinResult<()> {
         if let Some(end_row) = self.end_row {
             if end_row < self.start_row {
-                return Err("readmatrix: Range end row must be >= start row".to_string());
+                return Err(readmatrix_error(
+                    "readmatrix: Range end row must be >= start row",
+                ));
             }
         }
         if let Some(end_col) = self.end_col {
             if end_col < self.start_col {
-                return Err("readmatrix: Range end column must be >= start column".to_string());
+                return Err(readmatrix_error(
+                    "readmatrix: Range end column must be >= start column",
+                ));
             }
         }
         Ok(())
@@ -635,7 +693,7 @@ fn normalize_missing_token(token: &str) -> String {
     token.trim().to_ascii_lowercase()
 }
 
-fn parse_range(value: &Value) -> Result<RangeSpec, String> {
+fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
     match value {
         Value::String(s) => parse_range_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
@@ -646,29 +704,35 @@ fn parse_range(value: &Value) -> Result<RangeSpec, String> {
             if sa.data.len() == 1 {
                 parse_range_string(&sa.data[0])
             } else {
-                Err("readmatrix: Range string array inputs must be scalar".to_string())
+                Err(readmatrix_error(
+                    "readmatrix: Range string array inputs must be scalar",
+                ))
             }
         }
         Value::Tensor(_) => parse_range_numeric(value),
-        _ => Err("readmatrix: Range must be provided as a string or numeric vector".to_string()),
+        _ => Err(readmatrix_error(
+            "readmatrix: Range must be provided as a string or numeric vector",
+        )),
     }
 }
 
-fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
+fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Err("readmatrix: Range string cannot be empty".to_string());
+        return Err(readmatrix_error("readmatrix: Range string cannot be empty"));
     }
     let parts: Vec<&str> = trimmed.split(':').collect();
     if parts.len() > 2 {
-        return Err(format!(
+        return Err(readmatrix_error(format!(
             "readmatrix: invalid Range specification '{}'",
             text
-        ));
+        )));
     }
     let start = parse_cell_reference(parts[0])?;
     if start.col.is_none() {
-        return Err("readmatrix: Range must specify a starting column".to_string());
+        return Err(readmatrix_error(
+            "readmatrix: Range must specify a starting column",
+        ));
     }
     let end_ref = if parts.len() == 2 {
         Some(parse_cell_reference(parts[1])?)
@@ -677,7 +741,9 @@ fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
     };
     if let Some(ref end) = end_ref {
         if end.col.is_none() {
-            return Err("readmatrix: Range end must include a column reference".to_string());
+            return Err(readmatrix_error(
+                "readmatrix: Range end must include a column reference",
+            ));
         }
     }
     let start_row = start.row.unwrap_or(0);
@@ -692,18 +758,19 @@ fn parse_range_string(text: &str) -> Result<RangeSpec, String> {
     })
 }
 
-fn parse_range_numeric(value: &Value) -> Result<RangeSpec, String> {
+fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
         Value::Tensor(t) => t.data.clone(),
         _ => {
-            return Err(
-                "readmatrix: numeric Range must be provided as a vector with 2 or 4 elements"
-                    .to_string(),
-            )
+            return Err(readmatrix_error(
+                "readmatrix: numeric Range must be provided as a vector with 2 or 4 elements",
+            ))
         }
     };
     if elements.len() != 2 && elements.len() != 4 {
-        return Err("readmatrix: numeric Range must contain exactly 2 or 4 elements".to_string());
+        return Err(readmatrix_error(
+            "readmatrix: numeric Range must contain exactly 2 or 4 elements",
+        ));
     }
     let mut indices = Vec::with_capacity(elements.len());
     for (idx, value) in elements.iter().enumerate() {
@@ -725,26 +792,28 @@ fn parse_range_numeric(value: &Value) -> Result<RangeSpec, String> {
     })
 }
 
-fn positive_index(value: f64, position: usize) -> Result<usize, String> {
+fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err("readmatrix: Range indices must be finite".to_string());
+        return Err(readmatrix_error("readmatrix: Range indices must be finite"));
     }
     if value < 1.0 {
-        return Err("readmatrix: Range indices must be >= 1".to_string());
+        return Err(readmatrix_error("readmatrix: Range indices must be >= 1"));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("readmatrix: Range indices must be integers".to_string());
+        return Err(readmatrix_error(
+            "readmatrix: Range indices must be integers",
+        ));
     }
     let zero_based = (rounded as i64) - 1;
     if zero_based < 0 {
-        return Err("readmatrix: Range indices must be >= 1".to_string());
+        return Err(readmatrix_error("readmatrix: Range indices must be >= 1"));
     }
     usize::try_from(zero_based).map_err(|_| {
-        format!(
+        readmatrix_error(format!(
             "readmatrix: Range index {} is too large to fit in usize",
             position + 1
-        )
+        ))
     })
 }
 
@@ -754,7 +823,7 @@ struct CellReference {
     col: Option<usize>,
 }
 
-fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
+fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
     let mut letters = String::new();
     let mut digits = String::new();
     for ch in token.trim().chars() {
@@ -766,11 +835,16 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
         } else if ch.is_ascii_digit() {
             digits.push(ch);
         } else {
-            return Err(format!("readmatrix: invalid Range component '{}'", token));
+            return Err(readmatrix_error(format!(
+                "readmatrix: invalid Range component '{}'",
+                token
+            )));
         }
     }
     if letters.is_empty() && digits.is_empty() {
-        return Err("readmatrix: Range references cannot be empty".to_string());
+        return Err(readmatrix_error(
+            "readmatrix: Range references cannot be empty",
+        ));
     }
     let col = if letters.is_empty() {
         None
@@ -781,37 +855,37 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
         None
     } else {
         let parsed = digits.parse::<usize>().map_err(|_| {
-            format!(
+            readmatrix_error(format!(
                 "readmatrix: invalid row index '{}' in Range component '{}'",
                 digits, token
-            )
+            ))
         })?;
         if parsed == 0 {
-            return Err("readmatrix: Range rows must be >= 1".to_string());
+            return Err(readmatrix_error("readmatrix: Range rows must be >= 1"));
         }
         Some(parsed - 1)
     };
     Ok(CellReference { row, col })
 }
 
-fn column_index_from_letters(letters: &str) -> Result<usize, String> {
+fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
     let mut value: usize = 0;
     for ch in letters.chars() {
         if !ch.is_ascii_uppercase() {
-            return Err(format!(
+            return Err(readmatrix_error(format!(
                 "readmatrix: invalid column designator '{}' in Range",
                 letters
-            ));
+            )));
         }
         let digit = (ch as u8 - b'A' + 1) as usize;
         value = value
             .checked_mul(26)
             .and_then(|v| v.checked_add(digit))
-            .ok_or_else(|| "readmatrix: Range column index overflowed".to_string())?;
+            .ok_or_else(|| readmatrix_error("readmatrix: Range column index overflowed"))?;
     }
     value
         .checked_sub(1)
-        .ok_or_else(|| "readmatrix: Range column index underflowed".to_string())
+        .ok_or_else(|| readmatrix_error("readmatrix: Range column index underflowed"))
 }
 
 fn apply_range(
@@ -870,7 +944,7 @@ fn apply_range(
     }
 }
 
-fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> Result<Value, String> {
+fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> BuiltinResult<Value> {
     match &options.output_template {
         OutputTemplate::Double => Ok(Value::Tensor(tensor)),
         OutputTemplate::Logical => tensor_to_logical(tensor),
@@ -878,18 +952,18 @@ fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> Result<Value,
     }
 }
 
-fn tensor_to_logical(tensor: Tensor) -> Result<Value, String> {
+fn tensor_to_logical(tensor: Tensor) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(tensor.data.len());
     for value in &tensor.data {
         let bit = if *value == 0.0 { 0 } else { 1 };
         data.push(bit);
     }
-    let logical =
-        LogicalArray::new(data, tensor.shape.clone()).map_err(|e| format!("readmatrix: {e}"))?;
+    let logical = LogicalArray::new(data, tensor.shape.clone())
+        .map_err(|e| readmatrix_error(format!("readmatrix: {e}")))?;
     Ok(Value::LogicalArray(logical))
 }
 
-fn finalize_like(tensor: Tensor, proto: &Value) -> Result<Value, String> {
+fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => tensor_to_logical(tensor),
         Value::GpuTensor(handle) => tensor_to_gpu(tensor, handle),
@@ -904,7 +978,7 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> Result<Value, String> {
 fn tensor_to_gpu(
     tensor: Tensor,
     _handle: &runmat_accelerate_api::GpuTensorHandle,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
             data: &tensor.data,
@@ -917,15 +991,23 @@ fn tensor_to_gpu(
     Ok(Value::Tensor(tensor))
 }
 
-fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Result<Tensor, String> {
-    let file = File::open(path)
-        .map_err(|err| format!("readmatrix: unable to read '{}': {}", path.display(), err))?;
+fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
+    let file = File::open(path).map_err(|err| {
+        readmatrix_error_with_source(
+            format!("readmatrix: unable to read '{}': {err}", path.display()),
+            err,
+        )
+    })?;
     let reader = BufReader::new(file);
     let mut data_lines: Vec<(usize, String)> = Vec::new();
     for (idx, line_result) in reader.lines().enumerate() {
         let line_number = idx + 1;
-        let line = line_result
-            .map_err(|err| format!("readmatrix: error reading '{}': {}", path.display(), err))?;
+        let line = line_result.map_err(|err| {
+            readmatrix_error_with_source(
+                format!("readmatrix: error reading '{}': {err}", path.display()),
+                err,
+            )
+        })?;
         let cleaned = line.trim_end_matches('\r');
         if line_number <= options.num_header_lines {
             continue;
@@ -937,7 +1019,8 @@ fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Result<Tenso
     }
 
     if data_lines.is_empty() {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("readmatrix: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| readmatrix_error(format!("readmatrix: {e}")));
     }
 
     if let Some((_, first_line)) = data_lines.first_mut() {
@@ -973,7 +1056,8 @@ fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Result<Tenso
     }
 
     if rows.is_empty() {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("readmatrix: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| readmatrix_error(format!("readmatrix: {e}")));
     }
 
     let default_fill = options.empty_value();
@@ -984,7 +1068,8 @@ fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Result<Tenso
     }
 
     if rows.is_empty() || max_cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("readmatrix: {e}"));
+        return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| readmatrix_error(format!("readmatrix: {e}")));
     }
     let row_count = rows.len();
     let mut data = vec![default_fill; row_count * max_cols];
@@ -996,7 +1081,8 @@ fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Result<Tenso
         }
     }
 
-    Tensor::new(data, vec![row_count, max_cols]).map_err(|e| format!("readmatrix: {e}"))
+    Tensor::new(data, vec![row_count, max_cols])
+        .map_err(|e| readmatrix_error(format!("readmatrix: {e}")))
 }
 
 fn detect_delimiter(lines: &[(usize, String)]) -> Option<Delimiter> {
@@ -1094,7 +1180,7 @@ fn parse_numeric_token(
     options: &ReadMatrixOptions,
     line_number: usize,
     column_number: usize,
-) -> Result<f64, String> {
+) -> BuiltinResult<f64> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
         return Ok(options.empty_value());
@@ -1122,10 +1208,10 @@ fn parse_numeric_token(
         return Ok(f64::NEG_INFINITY);
     }
     normalized.parse::<f64>().map_err(|_| {
-        format!(
+        readmatrix_error(format!(
             "readmatrix: unable to parse numeric value '{}' on line {} column {}",
             inner, line_number, column_number
-        )
+        ))
     })
 }
 
@@ -1154,32 +1240,34 @@ fn unquote(token: &str) -> &str {
     token
 }
 
-fn resolve_path(value: &Value) -> Result<PathBuf, String> {
+fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
             normalize_path(&text)
         }
-        Value::CharArray(_) => {
-            Err("readmatrix: expected a 1-by-N character vector for the file name".to_string())
-        }
+        Value::CharArray(_) => Err(readmatrix_error(
+            "readmatrix: expected a 1-by-N character vector for the file name",
+        )),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err("readmatrix: string array inputs must be scalar".to_string())
+                Err(readmatrix_error(
+                    "readmatrix: string array inputs must be scalar",
+                ))
             }
         }
-        other => Err(format!(
+        other => Err(readmatrix_error(format!(
             "readmatrix: expected filename as string scalar or character vector, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn normalize_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.is_empty() {
-        return Err("readmatrix: filename must not be empty".to_string());
+        return Err(readmatrix_error("readmatrix: filename must not be empty"));
     }
     Ok(Path::new(raw).to_path_buf())
 }
@@ -1391,9 +1479,13 @@ pub(crate) mod tests {
         fs::write(&path, "1,abc,3\n").expect("write sample file");
         let err = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect_err("readmatrix should fail");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend from readmatrix"),
+        };
         assert!(
-            err.contains("unable to parse numeric value"),
-            "unexpected error message: {err}"
+            message.contains("unable to parse numeric value"),
+            "unexpected error message: {message}"
         );
         let _ = fs::remove_file(&path);
     }
