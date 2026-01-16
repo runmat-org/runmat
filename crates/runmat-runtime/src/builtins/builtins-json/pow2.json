@@ -1,0 +1,137 @@
+{
+  "title": "pow2",
+  "category": "math/elementwise",
+  "keywords": [
+    "pow2",
+    "ldexp",
+    "binary scaling",
+    "gpu"
+  ],
+  "summary": "Compute 2.^X or scale mantissas by binary exponents with MATLAB-compatible semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/pow2.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "pow2(X) and pow2(F,E) run on the GPU when providers implement unary_pow2 and pow2_scale for matching shapes; other cases fall back to the host automatically."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::pow2::tests",
+    "integration": "builtins::math::elementwise::pow2::tests::pow2_gpu_roundtrip",
+    "gpu": "builtins::math::elementwise::pow2::tests::pow2_wgpu_matches_cpu_unary"
+  },
+  "description": "`Y = pow2(X)` computes the element-wise power-of-two `2.^X`. With two inputs, `Z = pow2(F, E)` returns the element-wise product `F .* 2.^E`, mirroring MATLAB's `ldexp`-style scaling.",
+  "behaviors": [
+    "Accepts scalars, vectors, matrices, and N-D tensors with MATLAB's implicit expansion (broadcasting).",
+    "Logical inputs are promoted to double before applying `2.^X`.",
+    "Character arrays operate on their Unicode code points and return dense double tensors.",
+    "Complex exponents yield complex outputs using the identity `2^z = exp(z * ln(2))`.",
+    "`pow2(F, E)` supports scalar expansion on either argument and raises a dimension mismatch error when expansion is impossible.",
+    "Empty tensors propagate emptiness with the correct MATLAB-visible shape."
+  ],
+  "examples": [
+    {
+      "description": "Compute power-of-two for scalar exponents",
+      "input": "y = pow2(3);",
+      "output": "y = 8;"
+    },
+    {
+      "description": "Apply `pow2` to a vector of exponents",
+      "input": "exponents = [-1 0 1 2];\nvalues = pow2(exponents);",
+      "output": "values = [0.5 1 2 4];"
+    },
+    {
+      "description": "Scale mantissas by binary exponents",
+      "input": "mantissa = [0.75 1.5];\nexponent = [4 5];\nscaled = pow2(mantissa, exponent);",
+      "output": "scaled = [12 48];"
+    },
+    {
+      "description": "Use complex exponents with `pow2`",
+      "input": "z = pow2(1 + 2i);",
+      "output": "z = -0.3667 + 0.8894i;"
+    },
+    {
+      "description": "Run `pow2` on GPU arrays",
+      "input": "G = gpuArray([1 2 3]);\nresult_gpu = pow2(G);\nresult = gather(result_gpu);",
+      "output": "result = [2 4 8];"
+    },
+    {
+      "description": "Convert characters to power-of-two values",
+      "input": "codes = pow2('ABC');",
+      "output": "codes = [5.9874e+41 1.2946e+42 2.7992e+42];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `pow2` overflow for large exponents?",
+      "answer": "Results follow IEEE arithmetic. Very large positive exponents produce `Inf`; very negative exponents underflow to zero."
+    },
+    {
+      "question": "How are logical inputs handled?",
+      "answer": "Logical values convert to doubles (`true \u2192 1`, `false \u2192 0`) before applying the power."
+    },
+    {
+      "question": "Can I mix scalars and arrays?",
+      "answer": "Yes. MATLAB's implicit expansion applies: singleton dimensions expand to match the other operand."
+    },
+    {
+      "question": "What happens with complex inputs?",
+      "answer": "Complex exponents and/or mantissas produce complex outputs using `exp((re + i\u00b7im) * ln(2))`."
+    },
+    {
+      "question": "Will GPU and CPU results differ?",
+      "answer": "Double-precision providers match CPU results bit-for-bit. Single-precision providers may differ by expected floating-point round-off."
+    },
+    {
+      "question": "Does `pow2(F,E)` allocate a new array?",
+      "answer": "Yes. The builtin returns a fresh tensor (or complex tensor). Fusion can remove intermediates when the expression is part of a larger GPU kernel."
+    },
+    {
+      "question": "Can I use `pow2` for bit shifting?",
+      "answer": "Yes. `pow2(F, E)` mirrors `ldexp`, scaling mantissas by powers of two. Integer mantissas reproduce MATLAB's bit-shift style scaling in floating point."
+    }
+  ],
+  "links": [
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "log2",
+      "url": "./log2"
+    },
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs"
+  },
+  "gpu_residency": "Explicit `gpuArray` calls are rarely needed. The acceleration planner keeps tensors on the GPU whenever providers handle `unary_pow2` / `pow2_scale`. When hooks are missing, the runtime gathers data, executes on the CPU, and continues seamlessly. You can still use `gpuArray` / `gather` to mirror MATLAB workflows or to interoperate with custom kernels.",
+  "gpu_behavior": [
+    "When tensors already reside on the GPU, RunMat Accelerate tries the following:\n\n1. **Unary form (`pow2(X)`):** Calls the provider hook `unary_pow2`. If the hook is unavailable, the runtime gathers `X`, computes on the host, and returns a CPU-resident tensor. 2. **Binary form (`pow2(F, E)`):** Calls `pow2_scale(F, E)` when both operands share identical shapes. Providers can implement a fused kernel (see the WGPU backend for an example). If the hook is missing or shapes require implicit expansion, RunMat gathers both tensors and performs the CPU implementation, guaranteeing MATLAB-compatible semantics.\n\nFuture providers can extend `pow2_scale` to support in-device broadcasting. Until then, fallbacks kick in transparently without user involvement."
+  ]
+}

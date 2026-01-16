@@ -1,0 +1,139 @@
+{
+  "title": "qr",
+  "category": "math/linalg/factor",
+  "keywords": [
+    "qr",
+    "factorization",
+    "decomposition",
+    "householder",
+    "pivoting"
+  ],
+  "summary": "QR factorization with optional column pivoting and economy-size outputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Bundled WGPU provider reuses the host QR and re-uploads outputs; other providers fall back to the same host path automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::factor::qr::tests",
+    "integration": "builtins::math::linalg::factor::qr::tests::qr_three_outputs_reconstructs_input"
+  },
+  "description": "`qr(A)` computes an orthogonal (or unitary)\u2013upper-triangular factorization of a real or complex matrix `A`. It matches MATLAB\u2019s dense semantics, supporting full-size, economy-size, and column-pivoted variants.",
+  "behaviors": [
+    "Single output: `R = qr(A)` returns the upper-triangular (or upper-trapezoidal) factor. Column pivoting is applied implicitly for numerical stability.",
+    "Two outputs: `[Q, R] = qr(A)` yields the orthonormal/unitary factor `Q` and the upper-triangular `R` such that `Q * R = A * E`, where `E` is the column permutation matrix selected during factorization. When you omit `E`, the columns of `R` already appear in that permuted order.",
+    "Three outputs: `[Q, R, E] = qr(A)` additionally returns the column permutation so that `A * E = Q * R`. Use the `'vector'` option to receive a pivot vector instead of a permutation matrix.",
+    "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors, mirroring MATLAB\u2019s behaviour: when `m \u2265 n`, `Q` is `m \u00d7 n` and `R` is `n \u00d7 n`. For wide matrices (`m < n`) the economy form equals the full form.",
+    "Logical inputs are promoted to double precision. Scalars and vectors are treated as 1-D or 2-D dense arrays."
+  ],
+  "examples": [
+    {
+      "description": "Computing the full QR factorization of a square matrix",
+      "input": "A = [12 -51 4; 6 167 -68; -4 24 -41];\n[Q, R] = qr(A);"
+    },
+    {
+      "description": "Obtaining orthonormal Q and upper-triangular R for a tall matrix",
+      "input": "A = [1 2; 3 4; 5 6];\n[Q, R] = qr(A);"
+    },
+    {
+      "description": "Working with column pivoting when requesting three outputs",
+      "input": "A = [1 1 0; 1 0 1; 0 1 1];\n[Q, R, E] = qr(A);"
+    },
+    {
+      "description": "Using economy-size QR to reduce memory footprint",
+      "input": "A = randn(1000, 20);\n[Q, R] = qr(A, 0);"
+    },
+    {
+      "description": "Receiving the permutation vector instead of a matrix",
+      "input": "A = magic(4);\n[Q, R, p] = qr(A, 'vector');"
+    },
+    {
+      "description": "Running QR on a gpuArray input (with automatic fallback)",
+      "input": "G = gpuArray(rand(256, 64));\n[Q, R] = qr(G, 'econ');\nclass(Q)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `qr(A)` always perform column pivoting?",
+      "answer": "Yes. MATLAB switched to pivoted QR for the single-output form many releases ago; RunMat mirrors that behaviour for improved numerical stability."
+    },
+    {
+      "question": "How do I request the reduced (economy) factors?",
+      "answer": "Pass `0`, `'0'`, or `'econ'` as the second argument. For example, `[Q,R] = qr(A,0)` or `[Q,R] = qr(A,'econ')`."
+    },
+    {
+      "question": "How can I obtain the permutation vector instead of a matrix?",
+      "answer": "Add the option `'vector'`, e.g., `[Q,R,p] = qr(A,'vector')`. When you also request economy size, use `[Q,R,p] = qr(A,'econ','vector')`."
+    },
+    {
+      "question": "Are complex matrices supported?",
+      "answer": "Yes. Inputs of type complex double produce complex orthonormal factors using complex Householder reflectors."
+    },
+    {
+      "question": "What precision do the returned factors use?",
+      "answer": "The builtin always produces double-precision (or complex double) outputs, matching MATLAB\u2019s dense QR behaviour."
+    },
+    {
+      "question": "Can I call `qr` on logical arrays?",
+      "answer": "Yes. Logical inputs are converted to double precision before factorisation."
+    },
+    {
+      "question": "What happens if I pass more than two option arguments?",
+      "answer": "The builtin raises a MATLAB-compatible error (`qr: too many option arguments`). Only one size option and one permutation option are accepted."
+    },
+    {
+      "question": "Do gpuArray outputs stay on the device?",
+      "answer": "Yes when an acceleration provider exposes the QR hook; the bundled WGPU backend does so by staging through the host implementation and re-uploading the factors. Otherwise RunMat gathers the data to the host, factors it there, and uploads the results back automatically."
+    },
+    {
+      "question": "How can I verify the factorisation?",
+      "answer": "Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `A*E`. For vector permutations, `A(:,p)` reproduces the pivoted columns."
+    }
+  ],
+  "links": [
+    {
+      "label": "lu",
+      "url": "./lu"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "det",
+      "url": "./det"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/factor/qr.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/qr.rs"
+  },
+  "gpu_behavior": [
+    "When the active acceleration provider exposes the dedicated QR hook (the bundled WGPU backend does), RunMat stages the input through the provider, performs the factorisation via the runtime implementation, and re-uploads all outputs so they remain resident as `gpuTensor` handles.",
+    "If no provider hook is present, RunMat gathers the input to the host, performs the CPU factorisation, and leaves the outputs on the host until an explicit `gpuArray` request."
+  ]
+}

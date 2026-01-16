@@ -17,169 +17,6 @@ use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
 const MESSAGE_ID_INVALID_ARGUMENT: &str = "MATLAB:close:InvalidArgument";
 const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:close:InvalidHandle";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "close",
-        builtin_path = "crate::builtins::io::net::close"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "close"
-category: "io/net"
-keywords: ["close", "tcpclient", "tcpserver", "socket", "networking"]
-summary: "Close TCP clients or servers that were created by tcpclient, tcpserver, or accept."
-references:
-  - https://www.mathworks.com/help/matlab/ref/tcpclient.html
-  - https://www.mathworks.com/help/matlab/ref/tcpserver.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Networking runs on the host CPU. GPU-resident structs are gathered automatically before the close operation executes."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 4
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::net::close::tests"
-  integration: "builtins::io::net::close::tests::close_tcpclient_releases_handle"
----
-
-# What does the `close` function do in MATLAB / RunMat?
-`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or
-`accept`. It mirrors MATLAB semantics for network connections while adopting the familiar
-`status = close(obj)` pattern used elsewhere in MATLAB: the function returns `1` when one or more
-handles are closed and `0` when nothing needed to be released.
-
-## How does the `close` function behave in MATLAB / RunMat?
-- `close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or
-  `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected”
-  diagnostics.
-- `close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were
-  accepted from that server are also disconnected to match MATLAB’s lifecycle rules.
-- `close('clients')` closes every registered TCP client (including those produced by `accept`).
-  Likewise, `close('servers')` closes every TCP server, and `close('all')` closes both clients and
-  servers.
-- Multiple inputs are processed from left to right. The return value is `1` when at least one handle
-  was closed and `0` otherwise.
-- Invalid arguments raise `MATLAB:close:InvalidArgument`. Structs that do not contain the hidden
-  RunMat networking identifiers raise `MATLAB:close:InvalidHandle`.
-- Networking happens on the CPU. If the arguments live on the GPU, RunMat gathers them
-  automatically before touching the host-side registries.
-- Arguments wrapped in cell arrays (possibly nested) or scalar string arrays are supported. `close`
-  walks each element in-order and applies the usual rules to every value it discovers.
-
-## Examples of using the `close` function in MATLAB / RunMat
-
-### Close a TCP client after finishing I/O
-```matlab
-client = tcpclient("127.0.0.1", 50000);
-status = close(client);
-```
-Expected output:
-```matlab
-status = 1
-```
-
-### Close a TCP server and any accepted clients
-```matlab
-srv = tcpserver("127.0.0.1", 0);
-client = accept(srv);             % accept a pending connection
-status = close(srv);              % closes the server and the accepted client
-```
-Expected output:
-```matlab
-status = 1
-```
-
-### Close every open TCP client
-```matlab
-tcpclient("localhost", 40000);
-tcpclient("localhost", 40001);
-status = close("clients");
-```
-Expected output:
-```matlab
-status = 1
-```
-
-### Close all networking resources at once
-```matlab
-client = tcpclient("localhost", 40000);
-srv = tcpserver("localhost", 0);
-status = close("all");
-```
-Expected output:
-```matlab
-status = 1
-```
-
-### Calling close on an already-closed client
-```matlab
-client = tcpclient("127.0.0.1", 50000);
-close(client);
-status = close(client);   % nothing left to close
-```
-Expected output:
-```matlab
-status = 0
-```
-
-### Close handles stored in a cell array
-```matlab
-client = tcpclient("localhost", 40000);
-srv = tcpserver("localhost", 0);
-handles = {client, srv};
-status = close(handles);
-```
-Expected output:
-```matlab
-status = 1
-```
-
-## `close` Function GPU Execution Behaviour
-`close` performs only CPU-side bookkeeping. When network structs or option strings reside on the
-GPU, RunMat gathers them to host memory before inspecting their hidden identifiers. No provider
-hooks participate, and GPU residency is irrelevant to the close operation.
-
-## FAQ
-
-### What does the return value represent?
-The return value is `1` when at least one client or server was closed and `0` otherwise. Use it to
-detect whether `close` released any networking resources.
-
-### Can I pass multiple clients or servers at once?
-Yes. Pass them as separate arguments (`close(client1, client2)`) or wrap them in a cell array. The
-function closes each handle in order and returns `1` when any of the handles required closing.
-
-### Does closing a server also close accepted clients?
-Yes. RunMat mirrors MATLAB by closing every client that originated from the server before releasing
-the listener itself.
-
-### What happens if I pass a non-network struct?
-The builtin raises `MATLAB:close:InvalidHandle`. Only structs produced by the RunMat networking
-builtins (`tcpclient`, `tcpserver`, `accept`) carry the hidden identifiers that `close` recognises.
-
-### Do GPU arrays require special handling?
-No. RunMat gathers GPU-resident values automatically before inspecting them, and networking always
-runs on the CPU.
-
-### Is it safe to call close twice?
-Yes. The second call simply returns `0`, indicating that nothing needed to be closed.
-
-## See Also
-[tcpclient](./tcpclient), [tcpserver](./tcpserver), [accept](./accept), [read](./read), [write](./write)
-
-## Source & Feedback
-- Implementation: `crates/runmat-runtime/src/builtins/io/net/close.rs`
-- Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::close")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "close",
@@ -350,7 +187,6 @@ fn runtime_error(id: &'static str, message: impl Into<String>) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use crate::builtins::io::net::accept::{accept_builtin, client_handle};
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
@@ -675,12 +511,5 @@ pub(crate) mod tests {
         let status = close_builtin(vec![client]).expect("close with provider active");
         assert_eq!(status, Value::Num(1.0));
         assert!(client_handle(cid).is_none());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

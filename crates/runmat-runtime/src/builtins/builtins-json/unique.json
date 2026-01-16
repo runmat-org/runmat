@@ -1,0 +1,162 @@
+{
+  "title": "unique",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "unique",
+    "set",
+    "distinct",
+    "stable",
+    "rows",
+    "indices",
+    "gpu",
+    "string",
+    "char"
+  ],
+  "summary": "Return the unique elements or rows of arrays with optional index outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/unique.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the provider `unique` hook when available; default providers download to host memory and reuse the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::unique::tests",
+    "integration": "builtins::array::sorting_sets::unique::tests::unique_gpu_roundtrip"
+  },
+  "description": "`unique` removes duplicates from its input while providing optional index outputs that map between the original data and the returned distinct values (or rows). By default results are sorted, but you can request stable order, operate on rows, and choose whether the first or last occurrence is retained.",
+  "behaviors": [
+    "`unique(A)` flattens numeric, logical, character, string, or complex arrays column-major into a vector of unique values sorted ascending.",
+    "`[C, IA] = unique(A)` also returns the indices of the selected occurrences (`IA`) so that `C = A(IA)`.",
+    "`[C, IA, IC] = unique(A)` provides `IC`, the mapping from each element of `A` to the corresponding index in `C`.",
+    "`unique(A, 'stable')` preserves the first appearance order rather than sorting.",
+    "`unique(A, 'rows')` treats each row as an observation and returns a matrix (or char/string array) whose rows are unique.",
+    "`unique(A, 'last')` or `'first'` controls which occurrence contributes to `IA` (defaults to `'first'`).",
+    "Combinations such as `unique(A, 'rows', 'stable', 'last')` follow MATLAB's precedence rules; mutually exclusive flags (e.g. `'sorted'` with `'stable'`) are rejected.",
+    "Empty inputs return empty outputs with consistent dimensions.",
+    "Legacy switches such as `'legacy'` or `'R2012a'` are not supported; RunMat always follows the modern MATLAB semantics."
+  ],
+  "examples": [
+    {
+      "description": "Getting Sorted Unique Values",
+      "input": "A = [3 1 3 2];\nC = unique(A);",
+      "output": "C =\n     1\n     2\n     3"
+    },
+    {
+      "description": "Preserving Input Order with `'stable'`",
+      "input": "A = [4 2 4 1 2];\nC = unique(A, 'stable');",
+      "output": "C =\n     4\n     2\n     1"
+    },
+    {
+      "description": "Returning Indices for Reconstruction",
+      "input": "A = [7 5 7 3];\n[C, IA, IC] = unique(A);\nreconstructed = C(IC);",
+      "output": "C =\n     3\n     5\n     7\nIA =\n     4\n     2\n     1\nIC =\n     3\n     2\n     3\n     1\nreconstructed =\n     7\n     5\n     7\n     3"
+    },
+    {
+      "description": "Finding Unique Rows in a Matrix",
+      "input": "A = [1 3; 1 3; 2 4; 1 2];\n[C, IA, IC] = unique(A, 'rows');",
+      "output": "C =\n     1     2\n     1     3\n     2     4\nIA =\n     4\n     1\n     3\nIC =\n     2\n     2\n     3\n     1"
+    },
+    {
+      "description": "Selecting Last Occurrences",
+      "input": "A = [9 8 9 7 8];\n[C, IA] = unique(A, 'last');",
+      "output": "C =\n     7\n     8\n     9\nIA =\n     4\n     5\n     3"
+    },
+    {
+      "description": "Working with Empty Arrays",
+      "input": "A = zeros(0, 3);\n[C, IA, IC] = unique(A, 'rows');",
+      "output": "C =\nIA =\nIC ="
+    },
+    {
+      "description": "Using `unique` on GPU Arrays",
+      "input": "G = gpuArray([5 3 5 1]);\n[C, IA, IC] = unique(G, 'stable');",
+      "output": "C =\n     5\n     3\n     1\nIA =\n     1\n     2\n     4\nIC =\n     1\n     2\n     1\n     3"
+    },
+    {
+      "description": "Unique Characters in a Char Array",
+      "input": "chars = ['m','z'; 'm','a'];\n[C, IA] = unique(chars);",
+      "output": "C =\n    a\n    m\n    z\nIA =\n    4\n    1\n    3"
+    },
+    {
+      "description": "Unique Strings with Row Deduplication",
+      "input": "S = [\"alpha\" \"beta\"; \"alpha\" \"beta\"; \"gamma\" \"beta\"];\n[C, IA, IC] = unique(S, 'rows', 'stable');",
+      "output": "C =\n  2x2 string array\n    \"alpha\"    \"beta\"\n    \"gamma\"    \"beta\"\nIA =\n     1\n     3\nIC =\n     1\n     1\n     2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which ordering does `unique` use by default?",
+      "answer": "Results are sorted in ascending order unless you pass `'stable'`, which preserves the first occurrence order."
+    },
+    {
+      "question": "How are the index outputs defined?",
+      "answer": "`IA` indexes into the original data (or rows). `IC` is a column vector mapping each element (or row) of the input to the position of the corresponding unique value in `C`."
+    },
+    {
+      "question": "What do `'first'` and `'last'` control?",
+      "answer": "They determine whether `IA` references the first or last occurrence of each distinct value/row. They do not affect `C` or `IC`."
+    },
+    {
+      "question": "Can I combine `'rows'` with `'stable'` or `'last'`?",
+      "answer": "Yes. All permutations of `'rows'`, `'stable'`/`'sorted'`, and `'first'`/`'last'` are accepted. The runtime enforces MATLAB's validation rules."
+    },
+    {
+      "question": "Does `unique` support complex numbers or characters?",
+      "answer": "Yes. Complex values use magnitude ordering for the sorted output, and character or string arrays produce results in their native container types (char arrays and string arrays respectively)."
+    },
+    {
+      "question": "How does `unique` treat NaN values?",
+      "answer": "All NaN values are considered equal. Sorted outputs place NaNs at the end; stable outputs keep their original relative order."
+    },
+    {
+      "question": "Are GPU arrays supported?",
+      "answer": "Yes. When a provider lacks a native kernel, RunMat gathers GPU arrays to host memory and executes the host implementation, guaranteeing MATLAB-compatible output."
+    },
+    {
+      "question": "Does `unique` preserve array shape?",
+      "answer": "Scalar outputs remain scalars. Otherwise, values are returned as column vectors (for element mode) or matrices with the same number of columns as the input (for `'rows'`)."
+    },
+    {
+      "question": "What happens with empty inputs?",
+      "answer": "Empty inputs (including empty matrices) return empty outputs with matching dimensions, and index outputs are empty column vectors."
+    },
+    {
+      "question": "Is `unique` stable?",
+      "answer": "Sorting is stable where applicable; ties preserve their relative order. You can also request `'stable'` explicitly."
+    }
+  ],
+  "links": [
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
+    },
+    {
+      "label": "argsort",
+      "url": "./argsort"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/unique.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/unique.rs"
+  },
+  "gpu_behavior": [
+    "`unique` is registered as a residency sink. When the provider exposes the custom `unique` hook, the runtime can execute the operation entirely on the device and keep results resident. If the active provider does not implement that hook, RunMat gathers the data to host memory, performs the CPU implementation, and returns host-resident outputs so subsequent MATLAB code observes the same values and ordering."
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "title": "ismember",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "ismember",
+    "membership",
+    "set",
+    "rows",
+    "indices",
+    "gpu"
+  ],
+  "summary": "Identify array elements or rows that appear in another array while returning first-match indices.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/ismember.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When providers lack a dedicated membership hook RunMat gathers GPU tensors and executes the host implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::ismember::tests",
+    "integration": "builtins::array::sorting_sets::ismember::tests::ismember_gpu_roundtrip"
+  },
+  "description": "`ismember(A, B)` compares the elements (or rows) of `A` against `B` and returns a logical array marking which members of `A` are present in `B`. The optional second output reports the index in `B` of the first matched element. RunMat follows MATLAB semantics for numeric, logical, complex, string, and character arrays.",
+  "behaviors": [
+    "The first output `tf` has the same shape as `A` (or `size(A,1) \u00d7 1` when using `'rows'`).",
+    "The optional second output `loc` contains one-based indices into `B`, with `0` for values that are not found.",
+    "Duplicate values in `A` return the index of the first occurrence in `B` every time they match.",
+    "`NaN` values are treated as identical so they match other `NaN` entries in `B`.",
+    "Character arrays follow column-major linear indexing, mirroring MATLAB.",
+    "The `'rows'` option compares complete rows; inputs must agree on the number of columns.",
+    "Legacy flags (`'legacy'`, `'R2012a'`) are deliberately unsupported in RunMat."
+  ],
+  "examples": [
+    {
+      "description": "Checking membership of numeric vectors",
+      "input": "A = [5 7 2 7];\nB = [7 9 5];\n[tf, loc] = ismember(A, B);",
+      "output": "tf =\n     1     1     0     1\nloc =\n     3     1     0     1"
+    },
+    {
+      "description": "Finding row membership in a matrix",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [3 4; 5 6; 1 2];\n[tf, loc] = ismember(A, B, 'rows');",
+      "output": "tf =\n     1\n     1\n     1\nloc =\n     3\n     1\n     3"
+    },
+    {
+      "description": "Locating values and retrieving the index",
+      "input": "values = [10 20 30];\nset = [30 10 40];\n[tf, loc] = ismember(values, set);",
+      "output": "tf =\n     1     0     1\nloc =\n     2     0     1"
+    },
+    {
+      "description": "Testing characters against a set",
+      "input": "chars = ['r','u'; 'n','m'];\nset = ['m','a'; 'r','u'];\n[tf, loc] = ismember(chars, set);",
+      "output": "tf =\n     1     1\n     0     0\nloc =\n     3     1\n     0     0"
+    },
+    {
+      "description": "Working with string arrays",
+      "input": "A = [\"apple\" \"pear\" \"banana\"];\nB = [\"pear\" \"orange\" \"apple\"];\n[tf, loc] = ismember(A, B);",
+      "output": "tf =\n  1\u00d73 logical array\n   1   1   0\nloc =\n  1\u00d73 double\n   3   1   0"
+    },
+    {
+      "description": "Using `ismember` with `gpuArray` inputs",
+      "input": "G = gpuArray([1 4 2 4]);\nH = gpuArray([4 5]);\n[tf, loc] = ismember(G, H);",
+      "output": "tf =\n     0     1     0     1\nloc =\n     0     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ismember` treat `NaN` values as equal?",
+      "answer": "Yes. `NaN` values compare equal for membership tests so every `NaN` in `A` matches any `NaN` in `B`."
+    },
+    {
+      "question": "What happens when an element of `A` is not found in `B`?",
+      "answer": "The corresponding logical entry is `false` and the index output stores `0`, matching MATLAB."
+    },
+    {
+      "question": "Can I use `ismember` with string arrays and character arrays?",
+      "answer": "Yes. String arrays, scalar strings, and character arrays are supported. Mixed string/char inputs should be normalised (for example, convert scalars with `string`)."
+    },
+    {
+      "question": "How does the `'rows'` option change the output shape?",
+      "answer": "`'rows'` compares entire rows and returns outputs of size `size(A,1) \u00d7 1`, regardless of how many columns the input matrices contain."
+    },
+    {
+      "question": "Are the legacy flags supported?",
+      "answer": "No. RunMat only implements modern MATLAB semantics. Passing `'legacy'` or `'R2012a'` raises an error, just like other set builtins in RunMat."
+    },
+    {
+      "question": "Will `ismember` run on the GPU automatically?",
+      "answer": "If the active provider advertises an `ismember` hook, the runtime can keep tensors on the device. Otherwise the data is gathered to the host with no behavioural differences."
+    }
+  ],
+  "links": [
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
+    },
+    {
+      "label": "union",
+      "url": "./union"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/ismember.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/ismember.rs"
+  },
+  "gpu_residency": "Most code does not need to call `gpuArray` explicitly. The native auto-offload planner keeps track of residency and recognises that `ismember` is a sink: the operation produces logical outputs and one-based indices that currently live on the host. If an acceleration provider exposes a full `ismember` hook in the future, the planner can keep data on the device automatically. Until then, manual `gpuArray` / `gather` calls only serve to mirror MATLAB workflows; RunMat already performs the necessary transfers when it detects that tensors reside on the GPU.",
+  "gpu_behavior": [
+    "When either input is a GPU tensor, RunMat first checks whether the active acceleration provider exposes a custom `ismember` hook. Until providers implement that hook, the runtime transparently gathers GPU operands to host memory, performs the membership lookup using the CPU implementation, and returns host-resident outputs so results exactly match MATLAB."
+  ]
+}

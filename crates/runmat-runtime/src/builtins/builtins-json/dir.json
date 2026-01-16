@@ -1,0 +1,142 @@
+{
+  "title": "dir",
+  "category": "io/repl_fs",
+  "keywords": [
+    "dir",
+    "list files",
+    "folder contents",
+    "metadata",
+    "wildcard",
+    "struct array"
+  ],
+  "summary": "Return file and folder information in a MATLAB-compatible struct array.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/dir.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. If an input argument resides on the GPU, RunMat gathers it before resolving the path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::dir::tests",
+    "integration": "builtins::io::repl_fs::dir::tests::dir_lists_current_directory"
+  },
+  "description": "`dir` returns metadata for files and folders. Without arguments, it lists the current working directory. With an argument, it can list a specific directory, match wildcard patterns, or report information about a single file. The result is a column vector of structs matching MATLAB's signature: each element contains `name`, `folder`, `date`, `bytes`, `isdir`, and `datenum` fields.",
+  "behaviors": [
+    "`dir` with no inputs returns the contents of the current folder (including `.` and `..`).",
+    "`dir(path)` accepts absolute or relative paths, character vectors, or string scalars. When the path names a directory, its contents are listed; when it names a file, metadata for that file alone is returned.",
+    "`dir(pattern)` and `dir(folder, pattern)` support wildcard expansion with `*` and `?`. Patterns are evaluated relative to the supplied folder or the current working directory.",
+    "The returned struct fields mirror MATLAB:",
+    "`name`: file or folder name.",
+    "`folder`: absolute path to the containing folder.",
+    "`date`: last-modified timestamp formatted as `dd-MMM-yyyy HH:mm:ss` in local time.",
+    "`bytes`: file size in bytes (`0` for directories and wildcard-only results).",
+    "`isdir`: logical flag indicating whether the entry is a directory.",
+    "`datenum`: serial date number compatible with MATLAB's `datenum`.",
+    "Results are sorted using MATLAB-style ordering (case-insensitive on Windows, case-sensitive on Unix-like systems).",
+    "Empty matches return a `0\u00d71` struct array so idioms like `isempty(dir(\"*.tmp\"))` continue working.",
+    "Invalid arguments (numeric, logical, non-scalar string arrays) raise MATLAB-compatible diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "List Files In The Current Folder",
+      "input": "listing = dir;\n{listing.name}",
+      "output": "    {'.'}    {'..'}    {'README.md'}    {'src'}"
+    },
+    {
+      "description": "List Only MATLAB Files Using Wildcards",
+      "input": "scripts = dir(\"*.m\");\ncellstr({scripts.name})",
+      "output": "    {'solver.m'}\n    {'test_helper.m'}"
+    },
+    {
+      "description": "Capture Metadata For A Specific File",
+      "input": "info = dir(\"data/results.csv\");\ninfo.bytes    % file size in bytes\ninfo.isdir    % false"
+    },
+    {
+      "description": "List The Contents Of A Specific Folder",
+      "input": "tmp = dir(fullfile(pwd, \"tmp\"));\n{tmp.name}'",
+      "output": "    '.'    '..'    'tmpfile.txt'    'subdir'"
+    },
+    {
+      "description": "Combine Folder And Pattern Arguments",
+      "input": "images = dir(\"assets\", \"*.png\");\n{images.name}",
+      "output": "    {'logo.png'}    {'splash.png'}"
+    },
+    {
+      "description": "Use Tilde Expansion For Home Directory",
+      "input": "home_listing = dir(\"~\");",
+      "output": "home_listing(1).folder\nans =\n    '/Users/example'"
+    },
+    {
+      "description": "Handle Missing Matches Gracefully",
+      "input": "if isempty(dir(\"*.cache\"))\n    disp(\"No cache files found.\");\nend",
+      "output": "No cache files found."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass to `dir`?",
+      "answer": "Character vectors or string scalars. Other types (numeric, logical, multi-element string arrays, or cells) raise an error."
+    },
+    {
+      "question": "Does `dir` support recursive wildcards?",
+      "answer": "Yes. Patterns such as `\"**/*.m\"` are honoured through the standard globbing rules."
+    },
+    {
+      "question": "Why do I see `.` and `..` entries?",
+      "answer": "MATLAB includes them for directory listings; RunMat mirrors this behaviour so scripts relying on their presence continue to work."
+    },
+    {
+      "question": "What is the `datenum` field?",
+      "answer": "A MATLAB serial date number representing the last modification time in local time. Use `datetime([entry.datenum])` to convert multiple entries."
+    },
+    {
+      "question": "Are symbolic links distinguished from folders?",
+      "answer": "Symlinks are reported using the metadata provided by the operating system. If the link targets a directory, `isdir` is `true`."
+    },
+    {
+      "question": "Can I pass GPU-resident strings?",
+      "answer": "Yes, but RunMat gathers them automatically before computing the directory listing."
+    },
+    {
+      "question": "How are errors reported?",
+      "answer": "Error messages are prefixed with `dir:` and match MATLAB's argument diagnostics wherever possible."
+    }
+  ],
+  "links": [
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/dir.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/dir.rs"
+  },
+  "gpu_residency": "No. `dir` is an I/O-bound builtin and always operates on host data. Passing GPU-resident strings is supported, but RunMat gathers them automatically and there is no benefit to manually calling `gpuArray`.",
+  "gpu_behavior": [
+    "Because `dir` interacts with the host filesystem, it is executed entirely on the CPU. If an input argument resides on the GPU (for example, a scalar string created by another accelerated builtin), RunMat gathers it to host memory before expanding patterns. Acceleration providers do not implement hooks for `dir`, and the result always lives on the host."
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "title": "roots",
+  "category": "math/poly",
+  "keywords": [
+    "roots",
+    "polynomial roots",
+    "companion matrix",
+    "eigenvalues",
+    "gpu"
+  ],
+  "summary": "Compute the roots of a polynomial specified by its coefficients, matching MATLAB semantics including complex output.",
+  "references": [
+    "title: \"MATLAB roots documentation\"",
+    "title: \"Golub & Van Loan \u2013 Matrix Computations, Chapter 7\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Roots builds a companion matrix and computes its eigenvalues on the CPU; GPU inputs are gathered automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::poly::roots::tests",
+    "integration": "builtins::math::poly::roots::tests::roots_gpu_input_gathers_to_host"
+  },
+  "description": "`roots(p)` returns the zeros of the polynomial whose coefficients are stored in `p`, with coefficients ordered from the highest power of `x` to the constant term. The result is always a column vector whose entries may be complex.",
+  "behaviors": [
+    "Leading zeros in the coefficient vector are discarded before solving. If all coefficients are zero, the result is an empty column vector.",
+    "Constant polynomials (degree 0) produce an empty output because they have no finite roots.",
+    "Linear polynomials return the single solution `-b/a`. Higher-degree polynomials are solved via the eigenvalues of the companion matrix.",
+    "Real coefficients can generate complex conjugate root pairs. Small imaginary round-off terms are rounded to zero to match MATLAB formatting.",
+    "Input vectors can be row or column vectors. Higher-dimensional arrays are rejected.",
+    "Inputs may be real or complex. Logical and integer types are converted to double precision automatically."
+  ],
+  "examples": [
+    {
+      "description": "Finding roots of a quadratic polynomial",
+      "input": "p = [1 -3 2];\nr = roots(p);",
+      "output": "r =\n     2\n     1"
+    },
+    {
+      "description": "Computing roots that include repeated factors",
+      "input": "p = [1 -2 1 0];   % (x - 1)^2 * x\nr = roots(p);",
+      "output": "r =\n     1\n     1\n     0"
+    },
+    {
+      "description": "Handling leading zeros in the coefficient vector",
+      "input": "p = [0 0 1 -4];\nr = roots(p);",
+      "output": "r =\n     4"
+    },
+    {
+      "description": "Calculating complex roots from real coefficients",
+      "input": "p = [1 0 1];\nr = roots(p);",
+      "output": "r =\n   0.0000 + 1.0000i\n   0.0000 - 1.0000i"
+    },
+    {
+      "description": "Solving roots of a polynomial stored on the GPU",
+      "input": "p = gpuArray([1 0 -9 0]);\nr = roots(p);",
+      "output": "r =\n    3.0000\n   -3.0000\n         0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What shape must the coefficient vector have?",
+      "answer": "`roots` accepts row vectors, column vectors, or 1-D arrays. Higher-dimensional tensors are rejected with an error."
+    },
+    {
+      "question": "How are leading zeros handled?",
+      "answer": "Leading zeros are removed before solving. If all coefficients are zero, `roots` returns an empty column vector."
+    },
+    {
+      "question": "Does `roots` preserve the data type of the coefficients?",
+      "answer": "Coefficients are promoted to double precision internally. The output is a double vector when all roots are real and a complex double vector otherwise."
+    },
+    {
+      "question": "Are the roots sorted?",
+      "answer": "Roots are returned in the order supplied by the eigenvalue computation (typically descending magnitude). MATLAB also does not sort the roots."
+    },
+    {
+      "question": "Can I run `roots` entirely on the GPU?",
+      "answer": "Not yet. RunMat gathers coefficients from the GPU, solves the companion matrix on the CPU, and returns a host-resident vector. When GPU providers add a polynomial root solver, this builtin will automatically route to it."
+    },
+    {
+      "question": "How does RunMat handle numerical round-off?",
+      "answer": "Small imaginary components (|imag| \u2264 1e-10\u00b7(1 + |real|)) are rounded to zero so that near-real roots are displayed as real numbers, matching MATLAB formatting."
+    }
+  ],
+  "links": [
+    {
+      "label": "polyval",
+      "url": "./polyval"
+    },
+    {
+      "label": "polyfit",
+      "url": "./polyfit"
+    },
+    {
+      "label": "residue",
+      "url": "./residue"
+    },
+    {
+      "label": "roots documentation (MathWorks)",
+      "url": "https://www.mathworks.com/help/matlab/ref/roots.html"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/poly/roots.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/roots.rs"
+  },
+  "gpu_behavior": [
+    "RunMat gathers GPU-resident coefficient vectors to the host because the companion matrix eigenvalue computation presently runs only on the CPU. The output is produced on the host as well. When future providers supply a dedicated polynomial root solver, the builtin can be updated to keep residency on-device transparently."
+  ]
+}

@@ -16,160 +16,6 @@ const ERR_UNSUPPORTED_ARGUMENT: &str = "gpuDevice: unsupported input argument";
 const ERR_RESET_NOT_SUPPORTED: &str = "gpuDevice: reset is not supported by the active provider";
 const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive integer";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "gpuDevice",
-        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "gpuDevice"
-category: "acceleration/gpu"
-keywords: ["gpuDevice", "gpu", "device info", "accelerate", "provider"]
-summary: "Query metadata about the active GPU provider and return it as a MATLAB struct."
-references:
-  - https://www.mathworks.com/help/parallel-computing/gpudevice.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Pure query builtin; it never enqueues GPU kernels. Providers that omit metadata simply leave the corresponding struct fields absent."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::acceleration::gpu::gpudevice::tests::gpu_device_returns_struct"
-  doc: "builtins::acceleration::gpu::gpudevice::tests::gpu_device_doc_examples_present"
-  integration: "tests::gpu::gpu_device_returns_struct"
-  wgpu: "builtins::acceleration::gpu::gpudevice::tests::gpu_device_wgpu_reports_metadata"
----
-
-# What does the `gpuDevice` function do in MATLAB / RunMat?
-`info = gpuDevice()` queries the active accelerator provider and returns a MATLAB struct that
-describes the GPU (or GPU-like backend) that RunMat is currently using. The struct mirrors
-MathWorks MATLAB's `gpuDevice` metadata, exposing identifiers, vendor information, memory hints,
-and precision support so you can adapt algorithms at runtime.
-
-The returned struct contains a subset of these fields (providers may omit ones they cannot
-populate):
-
-- `device_id` — zero-based identifier reported by the provider.
-- `index` — MATLAB-style one-based index derived from `device_id`.
-- `name` — human-readable adapter name.
-- `vendor` — provider-reported vendor or implementation name.
-- `backend` — backend identifier such as `inprocess` or `Vulkan` (optional).
-- `memory_bytes` — total device memory in bytes when known (optional).
-- `precision` — string describing the scalar precision used for kernels (`"double"` or `"single"`).
-- `supports_double` — logical flag that is `true` when double precision kernels are available.
-
-The builtin raises `gpuDevice: no acceleration provider registered` when no provider is active.
-
-## How does the `gpuDevice` function behave in MATLAB / RunMat?
-- Requires an acceleration provider that implements RunMat Accelerate's `AccelProvider` trait.
-- Returns a struct so you can access fields with dot notation: `gpuDevice().name`.
-- Does not mutate GPU state or enqueue kernels—it is safe to call frequently.
-- Accepts a scalar device index; `gpuDevice(1)` returns the active provider, while any other index
-  raises the MATLAB-style error `gpuDevice: GPU device with index N not available`.
-- Requests to reset the provider using `gpuDevice('reset')` or `gpuDevice([])` currently raise
-  `gpuDevice: reset is not supported by the active provider`.
-- Hooks into `gpuInfo` so the string-form summary stays in sync with the struct fields.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-`gpuDevice` purely reports metadata and does not change residency. Arrays remain on the GPU or CPU
-exactly as they were prior to the call. Use `gpuArray`, `gather`, and the planner-controlled
-automatic residency features to move data as needed.
-
-## Examples of using the `gpuDevice` function in MATLAB / RunMat
-
-### Inspecting the active GPU provider
-```matlab
-info = gpuDevice();
-disp(info.name);
-```
-Expected output (in-process provider):
-```matlab
-InProcess
-```
-
-### Displaying vendor and backend metadata
-```matlab
-info = gpuDevice();
-fprintf("Vendor: %s (backend: %s)\n", info.vendor, info.backend);
-```
-Expected output:
-```matlab
-Vendor: RunMat (backend: inprocess)
-```
-
-### Checking whether double precision is supported
-```matlab
-info = gpuDevice();
-if info.supports_double
-    disp("Double precision kernels are available.");
-else
-    disp("Provider only exposes single precision.");
-end
-```
-
-### Formatting a user-facing status message
-```matlab
-summary = gpuInfo();
-disp("Active GPU summary:");
-disp(summary);
-```
-Expected output:
-```matlab
-Active GPU summary:
-GPU[device_id=0, index=1, name='InProcess', vendor='RunMat', backend='inprocess', precision='double', supports_double=true]
-```
-
-### Handling missing providers gracefully
-```matlab
-try
-    info = gpuDevice();
-catch ex
-    warning("GPU unavailable: %s", ex.message);
-end
-```
-If no provider is registered:
-```matlab
-Warning: GPU unavailable: gpuDevice: no acceleration provider registered
-```
-
-## FAQ
-
-### Do I need to call `gpuDevice` before using other GPU builtins?
-No. RunMat initialises the active provider during startup. `gpuDevice` is purely informational and
-can be called at any time to inspect the current provider.
-
-### Why are some fields missing from the struct?
-Providers only fill metadata they can reliably supply. For example, the in-process test provider
-does not report `memory_bytes`. Real GPU backends typically populate additional fields.
-
-### What happens if there is no GPU provider?
-RunMat raises `gpuDevice: no acceleration provider registered`. You can catch this error and fall
-back to CPU code, as shown in the examples above.
-
-### Does `gpuDevice` support selecting or resetting devices?
-RunMat currently exposes a single provider. `gpuDevice(1)` returns that provider, matching MATLAB's
-first-device semantics, while any other index raises `gpuDevice: GPU device with index N not available`.
-Reset requests (`gpuDevice('reset')` or `gpuDevice([])`) are not implemented yet and return
-`gpuDevice: reset is not supported by the active provider`.
-
-### How can I get a quick string summary instead of a struct?
-Use `gpuInfo()`. It internally calls `gpuDevice` and formats the struct fields into a concise status
-string that is convenient for logging or display.
-
-## See Also
-[gpuArray](./gpuarray), [gather](./gather), [gpuInfo](./gpuinfo)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpudevice")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuDevice",
@@ -200,25 +46,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 /// Query the active provider and return a metadata struct describing the GPU device.
-#[cfg_attr(
-    feature = "doc_export",
-    runtime_builtin(
-        name = "gpuDevice",
-        category = "acceleration/gpu",
-        summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate",
-        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
-    )
-)]
-#[cfg_attr(
-    not(feature = "doc_export"),
-    runtime_builtin(
-        name = "gpuDevice",
-        category = "acceleration/gpu",
-        summary = "Return information about the active GPU device/provider.",
-        keywords = "gpu,device,info,accelerate",
-        builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
-    )
+#[runtime_builtin(
+    name = "gpuDevice",
+    category = "acceleration/gpu",
+    summary = "Query metadata about the active GPU provider and return it as a MATLAB struct.",
+    keywords = "gpu,gpuDevice,device,info,accelerate",
+    examples = "info = gpuDevice();",
+    builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
 fn gpu_device_builtin(args: Vec<Value>) -> Result<Value, String> {
     match args.as_slice() {
@@ -555,12 +389,5 @@ pub(crate) mod tests {
             }
             other => panic!("expected struct, got {other:?}"),
         }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn gpu_device_doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(blocks.len() >= 5, "expected at least five doc examples");
     }
 }

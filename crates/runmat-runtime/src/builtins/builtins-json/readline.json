@@ -1,0 +1,134 @@
+{
+  "title": "readline",
+  "category": "io/net",
+  "keywords": [
+    "readline",
+    "tcpclient",
+    "networking",
+    "terminator",
+    "text"
+  ],
+  "summary": "Read ASCII text until the terminator from a MATLAB-compatible tcpclient struct.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tcpclient.readline.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Socket reads execute on the host CPU. GPU-resident structs are gathered automatically before reading."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::net::readline::tests",
+    "integration": "builtins::io::net::readline::tests::readline_buffers_partial_data_across_timeouts"
+  },
+  "description": "`readline(t)` reads ASCII text from the remote host associated with the MATLAB-compatible `tcpclient` struct `t`. It consumes data until it encounters the line terminator (RunMat currently honours the MATLAB default line feed (LF, `\"\\n\"`)) and returns the characters **without** the terminator. If the terminator is not observed before the timeout elapses, the builtin returns a 0-by-0 double (`[]`) just like MATLAB and preserves the buffered bytes for the next call. When the peer closes the connection, any buffered characters are returned and the internal connection flag is cleared.",
+  "behaviors": [
+    "`readline(t)` waits for data and reads character bytes until the first line feed. The returned value is a MATLAB string scalar that excludes the terminator, mirroring MATLAB\u2019s `tcpclient.readline`.",
+    "If the peer uses carriage-return/line-feed pairs (`\"\\r\\n\"`), RunMat automatically strips both bytes so the returned string matches MATLAB\u2019s behaviour for default CR/LF terminators.",
+    "When the terminator is not encountered before the client\u2019s `Timeout` expires, the builtin returns a 0-by-0 double (`[]`). Any bytes that arrived remain buffered internally so the next `readline` call continues assembling the same logical line.",
+    "If the remote host closes the connection before a terminator is observed, the builtin returns the buffered characters (which might be empty) and marks the underlying client as disconnected so subsequent network calls can react accordingly.",
+    "Inputs passed from the GPU are gathered automatically. Networking always runs on the CPU and the returned string is CPU-resident.",
+    "Invalid structs, missing handles, or disconnected clients raise MATLAB-style diagnostics (for example, `MATLAB:readline:InvalidTcpClient`)."
+  ],
+  "examples": [
+    {
+      "description": "Reading a newline-terminated response from an echo server",
+      "input": "client = tcpclient(\"127.0.0.1\", 55000);\nwrite(client, \"ping\\n\");\nreply = readline(client);",
+      "output": "reply = \"ping\""
+    },
+    {
+      "description": "Handling CRLF-terminated lines from legacy services",
+      "input": "client = tcpclient(\"legacy.example.com\", 1600);\nwrite(client, \"HELLO\\r\\n\");\nline = readline(client);  % CRLF is removed automatically",
+      "output": "line = \"OK HELLO\""
+    },
+    {
+      "description": "Looping over streaming telemetry one line at a time",
+      "input": "client = tcpclient(\"telemetry.example.com\", 9000, \"Timeout\", 5);\nwhile true\n    payload = readline(client);\n    if isequal(payload, [])\n        continue   % timeout, try again once more data arrives\n    end\n    disp(payload)\nend"
+    },
+    {
+      "description": "Detecting closed connections without losing buffered text",
+      "input": "client = tcpclient(\"sensor.example.com\", 7000);\ntry\n    line = readline(client);        % returns partial line if peer closed without LF\n    disp(line)\n    readline(client);               % second call raises MATLAB:readline:NotConnected\ncatch err\n    if err.identifier == \"MATLAB:readline:NotConnected\"\n        disp(\"Sensor disconnected\")\n    else\n        rethrow(err)\n    end\nend"
+    },
+    {
+      "description": "Responding gracefully to quiet periods with finite timeouts",
+      "input": "client = tcpclient(\"chat.example.com\", 4040, \"Timeout\", 0.5);\nmsg = readline(client);    % returns [] when no line arrives within 0.5 s\nif isequal(msg, [])\n    disp(\"No complete chat messages yet.\")\nend"
+    },
+    {
+      "description": "Parsing numeric payloads that arrive as text lines",
+      "input": "client = tcpclient(\"metrics.example.com\", 5050);\nline = readline(client);\nvalues = str2double(split(line, \",\"));  % convert comma-separated numbers"
+    },
+    {
+      "description": "Logging line-delimited JSON messages from a service",
+      "input": "client = tcpclient(\"json.example.com\", 6000);\nwhile true\n    payload = readline(client);\n    if isequal(payload, [])\n        break\n    end\n    decoded = jsondecode(payload);\n    disp(decoded.status)\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which terminator does RunMat use?",
+      "answer": "RunMat currently honours MATLAB\u2019s default line feed (LF, `\"\\n\"`). Support for `configureTerminator` will allow other terminators in a future update."
+    },
+    {
+      "question": "Does `readline` return the terminator?",
+      "answer": "No. The terminator bytes are stripped and the MATLAB string contains only the payload characters."
+    },
+    {
+      "question": "What happens on timeout?",
+      "answer": "If the terminator is not observed before the configured `Timeout`, the builtin returns a 0-by-0 double (`[]`) and retains any buffered bytes so the next call can complete the line once the terminator arrives."
+    },
+    {
+      "question": "How are CR/LF pairs handled?",
+      "answer": "When the payload ends with `\"\\r\\n\"`, both bytes are removed so the result matches MATLAB\u2019s CR/LF behaviour."
+    },
+    {
+      "question": "What if the connection closes mid-line?",
+      "answer": "Any buffered text is returned and subsequent calls raise `MATLAB:readline:NotConnected`, signalling that the socket closed."
+    },
+    {
+      "question": "Does the builtin perform Unicode validation?",
+      "answer": "Bytes are decoded using UTF-8. Invalid sequences fall back to lossless byte-to-char mapping so no data is lost."
+    },
+    {
+      "question": "Can I call `readline` after gathering a GPU tensor?",
+      "answer": "Yes. `readline` gathers arguments automatically and always returns host values."
+    },
+    {
+      "question": "Will future GPU providers change the return type?",
+      "answer": "No. Networking results remain CPU strings even when GPUs are available."
+    }
+  ],
+  "links": [
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "write",
+      "url": "./write"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/net/readline.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/readline.rs"
+  },
+  "gpu_residency": "No. RunMat automatically gathers GPU-resident structs before reading from sockets. The returned string lives on the CPU and there is no benefit to calling `gpuArray` for networking builtins such as `readline`.",
+  "gpu_behavior": [
+    "Networking is exclusively a host-side activity. When a `tcpclient` struct resides on the GPU, RunMat gathers it back to the CPU before touching the socket. Acceleration providers are not consulted and no GPU buffers are produced. Future GPU-aware networking features will continue to gather metadata automatically so sockets remain purely CPU-bound."
+  ]
+}

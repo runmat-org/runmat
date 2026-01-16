@@ -41,25 +41,6 @@ pub(crate) mod wasm_registry {
             .clone()
             .into_iter()
     }
-
-    use super::DocTextInventory;
-    static DOC_TEXTS: Lazy<Mutex<Vec<&'static DocTextInventory>>> =
-        Lazy::new(|| Mutex::new(Vec::new()));
-
-    pub(crate) fn submit_doc_text(entry: &'static DocTextInventory) {
-        DOC_TEXTS
-            .lock()
-            .expect("doc text registry poisoned")
-            .push(entry);
-    }
-
-    pub(crate) fn doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
-        DOC_TEXTS
-            .lock()
-            .expect("doc text registry poisoned")
-            .clone()
-            .into_iter()
-    }
 }
 
 /// Supported scalar precisions that GPU kernels may target.
@@ -250,28 +231,4 @@ impl fmt::Debug for BuiltinFusionSpec {
             .field("emits_nan", &self.emits_nan)
             .finish()
     }
-}
-
-// Documentation text inventory (only populated when doc_export feature is enabled)
-pub struct DocTextInventory {
-    pub name: &'static str,
-    pub text: &'static str,
-}
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
-inventory::collect!(DocTextInventory);
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "doc_export"))]
-pub fn builtin_doc_texts() -> impl Iterator<Item = &'static DocTextInventory> {
-    inventory::iter::<DocTextInventory>()
-}
-
-#[cfg(all(target_arch = "wasm32", feature = "doc_export"))]
-pub fn builtin_doc_texts() -> std::vec::IntoIter<&'static DocTextInventory> {
-    wasm_registry::doc_texts()
-}
-
-#[cfg(not(feature = "doc_export"))]
-pub fn builtin_doc_texts() -> std::iter::Empty<&'static DocTextInventory> {
-    std::iter::empty()
 }

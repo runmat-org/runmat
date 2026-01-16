@@ -16,193 +16,6 @@ use crate::builtins::common::spec::{
 };
 use crate::gather_if_needed;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "readmatrix",
-        builtin_path = "crate::builtins::io::tabular::readmatrix"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "readmatrix"
-category: "io/tabular"
-keywords: ["readmatrix", "csv", "delimited text", "numeric import", "table", "range", "logical"]
-summary: "Import numeric data from delimited text files into a RunMat matrix."
-references:
-  - https://www.mathworks.com/help/matlab/ref/readmatrix.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Performs host-side file I/O and parsing. GPU providers are not involved; gathered results remain CPU-resident."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::tabular::readmatrix::tests"
-  integration: "builtins::io::tabular::readmatrix::tests::readmatrix_reads_csv_data"
----
-
-# What does the `readmatrix` function do in MATLAB / RunMat?
-`readmatrix(filename)` reads numeric data from text or delimited files and returns a dense double-precision matrix. RunMat mirrors MATLAB defaults: the function automatically detects common delimiters, skips leading header lines only when requested, infers a rectangular output, and treats empty fields as missing values.
-
-## How does the `readmatrix` function behave in MATLAB / RunMat?
-- Accepts character vectors or string scalars for the file name. String arrays must contain exactly one element.
-- Supports option structs (from `detectImportOptions`) as well as name/value arguments such as `'Delimiter'`, `'NumHeaderLines'`, `'TreatAsMissing'`, `'DecimalSeparator'`, `'ThousandsSeparator'`, and `'EmptyValue'`.
-- Accepts `'Range'` as either an Excel-style address (`"B2:E10"`) or a numeric vector `[rowStart colStart rowEnd colEnd]` to slice the imported data.
-- Automatically detects comma, tab, semicolon, pipe, or whitespace delimiters when none are specified. Detection is based on the first few non-empty data lines.
-- Parses numeric values using MATLAB-compatible rules, recognising `NaN`, `Inf`, `-Inf`, and locale-specific decimal/thousands separators.
-- Treats empty fields as `NaN` by default; specify `'EmptyValue', value` to inject a replacement scalar, or `'TreatAsMissing', tokens` to mark additional strings as missing.
-- `'OutputType','logical'` coalesces non-zero numeric values (including `NaN`) to logical true, mirroring MATLAB's casting behaviour.
-- `'Like', prototype` matches the output class and residency of an existing array. Supplying a GPU tensor keeps the parsed matrix on the device when an acceleration provider is active.
-- Tolerates ragged rows by padding trailing elements with the configured empty value (default `NaN`).
-- Raises descriptive errors when the file cannot be read or when a field cannot be parsed as a numeric value.
-
-## `readmatrix` Function GPU Execution Behaviour
-`readmatrix` always executes on the host CPU. If the file name or option arguments are GPU-resident scalars, RunMat gathers them automatically before accessing the filesystem. The resulting matrix is created in host memory unless you pass `'Like', gpuPrototype`, in which case the parsed tensor is uploaded to the same provider so subsequent operations remain on the device. Acceleration providers do not need bespoke hooks for this builtin.
-
-## Examples of using the `readmatrix` function in MATLAB / RunMat
-
-### Read Comma-Separated Values With Automatic Delimiter Detection
-```matlab
-M = readmatrix("data/scores.csv");
-```
-Expected output:
-```matlab
-% Returns a numeric matrix containing the CSV data.
-```
-
-### Skip Header Lines Before Reading Numeric Data
-```matlab
-M = readmatrix("data/sensor_log.txt", 'NumHeaderLines', 2);
-```
-Expected output:
-```matlab
-% The first two lines are skipped; the remaining numeric rows are returned.
-```
-
-### Import Tab-Delimited Text By Specifying The Delimiter
-```matlab
-M = readmatrix("data/report.tsv", 'Delimiter', 'tab');
-```
-Expected output:
-```matlab
-% Numeric matrix representing the tab-delimited values.
-```
-
-### Treat Custom Tokens As Missing Values
-```matlab
-M = readmatrix("data/results.csv", 'TreatAsMissing', ["NA", "missing"]);
-```
-Expected output:
-```matlab
-% Entries equal to "NA" or "missing" become NaN in the output matrix.
-```
-
-### Use European Decimal And Thousands Separators
-```matlab
-M = readmatrix("data/europe.csv", 'Delimiter', ';', 'DecimalSeparator', ',', 'ThousandsSeparator', '.');
-```
-Expected output:
-```matlab
-% Values like "1.234,56" are interpreted as 1234.56.
-```
-
-### Replace Empty Numeric Fields With A Custom Value
-```matlab
-M = readmatrix("data/with_blanks.csv", 'EmptyValue', 0);
-```
-Expected output:
-```matlab
-% Blank entries become 0 instead of NaN.
-```
-
-### Import A Specific Range Of Cells
-```matlab
-M = readmatrix("data/quarterly.csv", 'Range', 'B2:D5');
-```
-Expected output:
-```matlab
-% Returns only the rows and columns covered by the specified range.
-```
-
-### Convert The Result To A Logical Matrix
-```matlab
-flags = readmatrix("data/thresholds.csv", 'OutputType', 'logical');
-```
-Expected output:
-```matlab
-% Non-zero entries (including NaN) become logical true, zero stays false.
-```
-
-### Keep The Result On The GPU By Matching A Prototype
-```matlab
-proto = gpuArray.zeros(1);        % simple prototype to establish residency
-G = readmatrix("data/heavy.csv", 'Like', proto);
-```
-Expected output:
-```matlab
-% The parsed matrix is uploaded to the same GPU device as the prototype.
-```
-
-### Provide Options Using A Struct From detectImportOptions
-```matlab
-opts = struct('Delimiter', ',', 'NumHeaderLines', 1);
-M = readmatrix("data/measurements.csv", opts);
-```
-Expected output:
-```matlab
-% Reads the file using the supplied options struct.
-```
-
-## FAQ
-
-### What file encodings does `readmatrix` support?
-The builtin reads UTF-8 text files by default. If a file starts with a UTF-8 byte-order mark, it is ignored automatically. For other encodings, convert the file with `fileread`/`string` or external tools before calling `readmatrix`.
-
-### Does `readmatrix` support Excel or binary files?
-This implementation focuses on delimited text files. For MAT-files use `load`, and for spreadsheets use the `readtable` / `readcell` family (planned).
-
-### How are missing values represented?
-Empty fields become NaN unless `'EmptyValue'` is supplied. Additional tokens can be marked missing with `'TreatAsMissing'`, which also converts them to NaN.
-
-### What happens when rows have different numbers of columns?
-RunMat pads short rows with the empty value (default NaN) so the output remains rectangular.
-
-### Can I import only part of the file?
-Yes. Pass `'Range', 'B3:F20'` (Excel-style addresses) or `'Range', [3 2 10 6]` (row/column indices) to slice the data before it is materialised. Rows or columns outside the range are ignored entirely.
-
-### Are comment lines supported?
-Lines that are entirely blank are ignored. Use `'NumHeaderLines'` to skip introductory text or call `detectImportOptions` for more control.
-
-### How do I read files stored on the GPU?
-File paths are always gathered to the CPU before reading. By default the parsed matrix is created on the host; supply `'Like', gpuArray.zeros(1)` (or any GPU prototype) to upload the result automatically, or call `gpuArray` afterwards to move it manually.
-
-### Can I request single-precision output?
-`readmatrix` currently returns double-precision arrays, matching MATLAB defaults. Cast the result with `single(...)` when you need single precision.
-
-### How are delimiters detected automatically?
-The builtin inspects the first few non-empty data lines and chooses the candidate delimiter (comma, tab, semicolon, pipe, or whitespace) that produces the most columns consistently. Explicit `'Delimiter'` settings override detection.
-
-### How are thousands separators handled?
-Specify `'ThousandsSeparator'` to strip that character before parsing, e.g. `'.'` for European locales. The thousands and decimal separators must be different.
-
-### Does `readmatrix` modify the current directory?
-No. Relative paths are resolved against the current working directory, exactly like MATLAB.
-
-## See Also
-[fileread](./fileread), [load](./load), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `readmatrix` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs)
-- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readmatrix",
@@ -1190,10 +1003,9 @@ pub(crate) mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::fs;
 
+    use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
-
-    use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
@@ -1414,13 +1226,6 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
         let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

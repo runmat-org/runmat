@@ -1,0 +1,140 @@
+{
+  "title": "pad",
+  "category": "strings/transform",
+  "keywords": [
+    "pad",
+    "pad string",
+    "left pad",
+    "right pad",
+    "center text",
+    "character arrays"
+  ],
+  "summary": "Pad strings, character arrays, and cell arrays to a target length using MATLAB-compatible options.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/pad.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered before padding so behaviour matches MATLAB."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::pad::tests",
+    "integration": "builtins::strings::transform::pad::tests::pad_cell_array_mixed_content"
+  },
+  "description": "`pad` adds characters to the beginning, end, or both sides of strings so that each element reaches a specified length. It mirrors MATLAB semantics for string arrays, character arrays, and cell arrays of character vectors, including direction keywords, default space padding, and optional custom characters.",
+  "behaviors": [
+    "Without a target length, `pad` extends each element to match the longest text in the input.",
+    "Providing a numeric target guarantees a minimum length; existing text that already meets or exceeds the target is returned unchanged.",
+    "Direction keywords (`'left'`, `'right'`, `'both'`) are case-insensitive; `'right'` is the default. When an odd number of pad characters is required for `'both'`, the extra character is appended to the end.",
+    "`padChar` must be a single character (string scalar or 1\u00d71 char array). The default is a space.",
+    "Character arrays remain rectangular. Each row is padded independently and then widened with spaces so the array keeps MATLAB\u2019s column-major layout.",
+    "Cell arrays preserve their structure. Elements must be string scalars or 1\u00d7N character vectors and are padded while keeping their original type.",
+    "Missing strings (`string(missing)`) and empty character vectors pass through unchanged, preserving metadata."
+  ],
+  "examples": [
+    {
+      "description": "Pad Strings To A Common Width",
+      "input": "labels = [\"GPU\"; \"Accelerate\"; \"RunMat\"];\naligned = pad(labels);",
+      "output": "aligned =\n  3\u00d71 string\n    \"GPU       \"\n    \"Accelerate\"\n    \"RunMat    \""
+    },
+    {
+      "description": "Pad Strings On The Left With Zeros",
+      "input": "ids = [\"42\"; \"7\"; \"512\"];\nzero_padded = pad(ids, 4, 'left', '0');",
+      "output": "zero_padded =\n  3\u00d71 string\n    \"0042\"\n    \"0007\"\n    \"0512\""
+    },
+    {
+      "description": "Center Text With Both-Sided Padding",
+      "input": "titles = [\"core\"; \"planner\"];\ncentered = pad(titles, 10, 'both', '*');",
+      "output": "centered =\n  2\u00d71 string\n    \"***core***\"\n    \"*planner**\""
+    },
+    {
+      "description": "Pad Character Array Rows",
+      "input": "chars = char(\"GPU\", \"RunMat\");\nout = pad(chars, 8);",
+      "output": "out =\n\n  2\u00d78 char array\n\n    'GPU     '\n    'RunMat  '"
+    },
+    {
+      "description": "Pad A Cell Array Of Character Vectors",
+      "input": "C = {'solver', \"planner\", 'jit'};\ncell_out = pad(C, 'right', '.');",
+      "output": "cell_out = 1\u00d73 cell array\n    {'solver.'}    {\"planner\"}    {'jit....'}"
+    },
+    {
+      "description": "Leave Missing Strings Unchanged",
+      "input": "values = [\"RunMat\", \"<missing>\", \"GPU\"];\nkept = pad(values, 8);",
+      "output": "kept =\n  1\u00d73 string\n    \"RunMat  \"    <missing>    \"GPU     \""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What inputs does `pad` accept?",
+      "answer": "String scalars, string arrays, character arrays, and cell arrays containing string scalars or character vectors. Other types raise MATLAB-compatible errors."
+    },
+    {
+      "question": "How are direction keywords interpreted?",
+      "answer": "`'left'`, `'right'`, and `'both'` are supported (case-insensitive). `'right'` is the default. With `'both'`, extra characters are added to the end when an odd number of padding characters is required."
+    },
+    {
+      "question": "Can I shorten text with `pad`?",
+      "answer": "No. When the existing text is already longer than the requested target length, it is returned unchanged."
+    },
+    {
+      "question": "What happens when I supply a custom padding character?",
+      "answer": "The character must be length one. RunMat repeats it as many times as needed in the specified direction."
+    },
+    {
+      "question": "Do missing strings get padded?",
+      "answer": "Missing strings (`<missing>`) are passed through untouched so downstream code that checks for missing values continues to work."
+    },
+    {
+      "question": "How are cell array elements returned?",
+      "answer": "Each cell retains its type: string scalars remain strings and character vectors remain 1\u00d7N character arrays after padding."
+    },
+    {
+      "question": "Does `pad` change the orientation of row or column string arrays?",
+      "answer": "No. The shape of the input array is preserved exactly; only element lengths change."
+    },
+    {
+      "question": "Will `pad` run on the GPU in the future?",
+      "answer": "Possibly, but today it always gathers to the CPU. Providers may add device-side implementations later, and the behaviour documented here will remain the reference."
+    }
+  ],
+  "links": [
+    {
+      "label": "strip",
+      "url": "./strip"
+    },
+    {
+      "label": "strcat",
+      "url": "./strcat"
+    },
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
+    },
+    {
+      "label": "compose",
+      "url": "./compose"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/pad.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/pad.rs"
+  },
+  "gpu_residency": "No. Text data in RunMat lives on the host today. If text happens to originate from a GPU computation, `pad` automatically gathers it before padding, so you never have to manage residency manually for this builtin.",
+  "gpu_behavior": [
+    "`pad` always executes on the CPU. When an argument (or a value nested inside a cell array) lives on the GPU, RunMat gathers it, performs the padding step, and produces a host result or re-wraps the padded value inside the cell. No provider hooks exist yet for string padding, so providers and fusion planners treat `pad` as a sink that terminates device residency."
+  ]
+}

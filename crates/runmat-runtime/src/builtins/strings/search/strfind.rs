@@ -14,171 +14,6 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 
 use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strfind",
-        builtin_path = "crate::builtins::strings::search::strfind"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "strfind"
-category: "strings/search"
-keywords: ["strfind", "substring", "index", "positions", "forcecelloutput"]
-summary: "Locate the starting indices of pattern matches in text inputs, returning doubles or cell arrays like MATLAB."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strfind.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "matlab"
-  notes: "Executes on the CPU. When inputs reside on the GPU, RunMat gathers them automatically before searching."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::search::strfind::tests"
-  integration: "builtins::strings::search::strfind::tests::strfind_subject_cell_scalar_returns_cell"
----
-
-# What does the `strfind` function do in MATLAB / RunMat?
-`k = strfind(str, pattern)` returns the starting indices of every occurrence of `pattern`
-inside `str`. The builtin mirrors MATLAB semantics for character vectors, string scalars,
-string arrays, and cell arrays of character vectors.
-
-## How does the `strfind` function behave in MATLAB / RunMat?
-- Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of
-  character vectors. Mixed combinations are permitted.
-- Applies MATLAB-style implicit expansion when either argument is non-scalar.
-- Returns a numeric row vector when both inputs are scalar text (character vectors or string
-  scalars) and `'ForceCellOutput'` is `false`. If either input is a cell array or the broadcasted
-  result contains multiple elements, the output is a cell array with the broadcasted shape, and
-  each cell contains a row vector of double indices.
-- Pattern matches are case-sensitive and may overlap. For example, `strfind("aaaa","aa")`
-  yields `[1 2 3]`.
-- An empty pattern matches the boundaries between characters, producing indices
-  `1:length(str)+1`. Missing strings (`<missing>`) never match any pattern.
-- Specify `'ForceCellOutput', true` to always obtain a cell array, even for scalar inputs.
-
-## `strfind` Function GPU Execution Behaviour
-`strfind` performs substring searches on the host CPU. When its inputs currently live on the
-GPU (for example, after other accelerated operations), RunMat gathers them automatically before
-executing the search so the behaviour matches MATLAB exactly. No provider hooks are required.
-
-## Examples of using the `strfind` function in MATLAB / RunMat
-
-### Find substring positions in a character vector
-```matlab
-idx = strfind('abracadabra', 'abra');
-```
-Expected output:
-```matlab
-idx = [1 8];
-```
-
-### Locate overlapping matches
-```matlab
-idx = strfind("aaaa", "aa");
-```
-Expected output:
-```matlab
-idx = [1 2 3];
-```
-
-### Return matches for each element of a string array
-```matlab
-words = ["hydrogen"; "helium"; "lithium"];
-idx = strfind(words, "i");
-```
-Expected output:
-```matlab
-idx = 3×1 cell array
-    {[]}
-    {[4]}
-    {[2 5]}
-```
-
-### Search with multiple patterns against one subject
-```matlab
-idx = strfind("saturn", ["sat", "turn", "moon"]);
-```
-Expected output:
-```matlab
-idx = 1×3 cell array
-    {[1]}    {[3]}    {[]}
-```
-
-### Force cell output for scalar inputs
-```matlab
-idx = strfind('mission', 's', 'ForceCellOutput', true);
-```
-Expected output:
-```matlab
-idx = 1×1 cell array
-    {[3 4]}
-```
-
-### Handle empty patterns and missing strings
-```matlab
-idxEmpty = strfind("abc", "");
-idxMissing = strfind("<missing>", "abc");
-```
-Expected output:
-```matlab
-idxEmpty = [1 2 3 4];
-idxMissing = [];
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-
-You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).
-
-`strfind` always executes on the host, but if you pass in GPU-resident values RunMat gathers
-them automatically before performing the search. This keeps the results identical to MATLAB
-while still allowing upstream computations to benefit from acceleration.
-
-## FAQ
-
-### What types can I pass to `strfind`?
-Use string scalars/arrays, character vectors/arrays, or cell arrays of character vectors for
-either argument. Mixed combinations are allowed; MATLAB-style implicit expansion aligns the
-inputs automatically.
-
-### How are the results formatted?
-When both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'`
-is `false`, `strfind` returns a numeric row vector with the starting indices. In all other cases
-— for example, if either input is a cell array or the broadcasted size exceeds one element —
-the result is a cell array whose shape matches the broadcasted size, with each cell containing
-a row vector of doubles.
-
-### Do matches overlap?
-Yes. The builtin considers every occurrence of the pattern, including overlapping matches.
-
-### What happens with empty patterns?
-An empty pattern matches the gaps between characters, so the indices `1:length(str)+1` are
-returned for non-missing text. When the subject is missing, the result is an empty array.
-
-### How do I always get a cell array?
-Supply `'ForceCellOutput', true`. This mirrors MATLAB and is useful when you want consistent
-cell outputs regardless of input sizes.
-
-### Does `strfind` support case-insensitive matching?
-No. `strfind` is case-sensitive like MATLAB. Use `contains`, `startsWith`, or the regular
-expression functions when you need case-insensitive searches.
-
-## See Also
-[`contains`](./contains), [`startsWith`](./startswith), [`endsWith`](./endswith), [`regexp`](./regexp)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/search/strfind.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/strfind.rs)
-- Found a bug? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::strfind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strfind",
@@ -426,7 +261,6 @@ fn parse_bool_like(value: &Value) -> Result<bool, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -803,12 +637,5 @@ pub(crate) mod tests {
             err.contains("unknown option"),
             "unexpected error message: {err}"
         );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

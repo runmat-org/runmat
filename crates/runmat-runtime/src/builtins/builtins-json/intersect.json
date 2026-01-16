@@ -1,0 +1,121 @@
+{
+  "title": "intersect",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "intersect",
+    "set",
+    "stable",
+    "rows",
+    "indices",
+    "gpu"
+  ],
+  "summary": "Return common elements or rows across arrays with MATLAB-compatible ordering and index outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/intersect.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "When providers lack a dedicated `intersect` hook, RunMat gathers GPU tensors and executes the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::intersect::tests",
+    "integration": "builtins::array::sorting_sets::intersect::tests::intersect_gpu_roundtrip"
+  },
+  "description": "`intersect(A, B)` computes the set intersection of `A` and `B`. By default it returns the distinct common values sorted ascending, along with optional index outputs that map each result back to its originating position in the inputs.",
+  "behaviors": [
+    "`intersect(A, B)` flattens both inputs column-major, removes duplicates, and returns the sorted intersection.",
+    "`[C, IA, IB] = intersect(A, B)` also returns index vectors so that `C = A(IA)` and `C = B(IB)`.",
+    "`intersect(A, B, 'stable')` preserves the first appearance order from `A`.",
+    "`intersect(A, B, 'rows')` treats each row as an element. Inputs must share the same number of columns.",
+    "Character arrays, string arrays, logical arrays, complex values, and numerical types are fully supported. Mixed classes raise a descriptive error.",
+    "Legacy flags such as `'legacy'` or `'R2012a'` are not supported in RunMat."
+  ],
+  "examples": [
+    {
+      "description": "Finding common values in numeric vectors",
+      "input": "A = [5 7 5 1];\nB = [7 1 3];\n[C, IA, IB] = intersect(A, B);",
+      "output": "C =\n     1\n     7\nIA =\n     4\n     2\nIB =\n     2\n     1"
+    },
+    {
+      "description": "Preserving input order with `'stable'`",
+      "input": "A = [4 2 4 1 3];\nB = [3 4 5 1];\nC = intersect(A, B, 'stable');",
+      "output": "C =\n     4\n     1\n     3"
+    },
+    {
+      "description": "Intersecting matrix rows",
+      "input": "A = [1 2; 3 4; 1 2];\nB = [2 3; 1 2];\n[C, IA, IB] = intersect(A, B, 'rows');",
+      "output": "C =\n     1     2\nIA =\n     1\nIB =\n     2"
+    },
+    {
+      "description": "Working with strings and character arrays",
+      "input": "names1 = [\"apple\" \"orange\" \"pear\"];\nnames2 = [\"pear\" \"grape\" \"orange\"];\n[common, IA, IB] = intersect(names1, names2, 'stable');",
+      "output": "common =\n  1\u00d72 string array\n    \"orange\"    \"pear\"\nIA =\n     2\n     3\nIB =\n     3\n     1"
+    },
+    {
+      "description": "Using `intersect` on GPU arrays",
+      "input": "G = gpuArray([10 4 6 4]);\nH = gpuArray([6 4 2]);\nresult = intersect(G, H);",
+      "output": "result =\n     4\n     6"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `intersect` keep duplicate values?",
+      "answer": "No. MATLAB and RunMat return each common value at most once. Use other logic (such as logical indexing) if you need multiset behavior."
+    },
+    {
+      "question": "What is the default ordering?",
+      "answer": "`intersect` sorts results ascending by default. Specify `'stable'` to preserve the input order from `A`."
+    },
+    {
+      "question": "Can I intersect rows that contain strings?",
+      "answer": "Yes. String arrays support both element and row intersections. When using `'rows'`, the inputs must have the same number of columns."
+    },
+    {
+      "question": "Are NaN values considered equal?",
+      "answer": "Yes. `NaN` values are treated as equal for the purposes of intersection, matching MATLAB."
+    },
+    {
+      "question": "Is the `'legacy'` flag supported?",
+      "answer": "No. RunMat only implements the modern MATLAB semantics. Passing `'legacy'` or `'R2012a'` raises an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "union",
+      "url": "./union"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/intersect.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/intersect.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors resident on the GPU when profitable. If a provider lacks an `intersect` kernel the runtime gathers automatically, so explicit residency management is rarely needed. Explicit calls to `gpuArray` remain available for compatibility with MathWorks MATLAB workflows.",
+  "gpu_behavior": [
+    "`intersect` registers as a residency sink. When the active acceleration provider offers a dedicated `intersect` hook, the set logic can execute directly on the device and return GPU-resident results. Until such a hook lands, RunMat automatically gathers GPU tensors to host memory, runs the CPU implementation, and materializes host-side outputs so behavior matches MathWorks MATLAB exactly."
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "title": "flipud",
+  "category": "array/shape",
+  "keywords": [
+    "flipud",
+    "flip",
+    "vertical",
+    "matrix",
+    "gpu"
+  ],
+  "summary": "Flip an array up-to-down along the first dimension.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the generic flip provider hook with axis=0; falls back to gather\u2192flip\u2192upload when unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::flipud::tests",
+    "integration": "["
+  },
+  "description": "`flipud(A)` mirrors `A` across its horizontal axis, reversing the order of rows (dimension&nbsp;1). It works with scalars, vectors, matrices, N-D tensors, logical arrays, character arrays, string arrays, cell arrays, complex data, and gpuArray handles, matching MATLAB semantics.",
+  "behaviors": [
+    "Always reverses dimension&nbsp;1 (rows) and leaves all other dimensions untouched, even for rank > 2 data.",
+    "Inputs with a single row (row vectors, scalars) are returned unchanged because the first dimension is singleton.",
+    "Numeric, logical, complex, character, string, and cell arrays all retain their MATLAB types, layout, and metadata (including UTF-16 code units for char arrays).",
+    "gpuArray inputs execute on the device via the generic `flip` provider hook (axis = 0); when that hook is unavailable, RunMat gathers once, mirrors the data on the host, and uploads the result so the returned value is still a gpuArray.",
+    "Dimensions larger than `ndims(A)` are treated as singleton axes, so `flipud` never errors when `A` has rank < 1.",
+    "Behaviour matches `flip(A, 1)` exactly; `flipud` is provided for readability and compatibility with existing MATLAB code."
+  ],
+  "examples": [
+    {
+      "description": "Reverse Rows of a Matrix",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nB = flipud(A);",
+      "output": "B =\n     7     8     9\n     4     5     6\n     1     2     3"
+    },
+    {
+      "description": "Reverse a Column Vector",
+      "input": "col = (1:4)';\nrev = flipud(col);",
+      "output": "rev =\n     4\n     3\n     2\n     1"
+    },
+    {
+      "description": "Flip the First Dimension of a 3-D Tensor",
+      "input": "T = reshape(1:24, [3 4 2]);\nF = flipud(T);",
+      "output": "F(:,:,1) =\n     3     6     9    12\n     2     5     8    11\n     1     4     7    10\n\nF(:,:,2) =\n    15    18    21    24\n    14    17    20    23\n    13    16    19    22"
+    },
+    {
+      "description": "Flip Characters in a Char Array Vertically",
+      "input": "C = ['run'; 'mat'];\nCv = flipud(C);",
+      "output": "Cv =\n    'mat'\n    'run'"
+    },
+    {
+      "description": "Preserve Row Vector Orientation",
+      "input": "row = 1:5;\nsame = flipud(row);",
+      "output": "same = [1 2 3 4 5];"
+    },
+    {
+      "description": "Keep gpuArray Results on the Device While Flipping Rows",
+      "input": "G = gpuArray(rand(8, 8));\nH = flipud(G);\nisequal(gather(H), flipud(gather(G)))   % illustrative verification"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `flipud` change row vectors?",
+      "answer": "No. A row vector has a singleton first dimension, so reversing that axis leaves the data unchanged."
+    },
+    {
+      "question": "Is `flipud` the same as calling `flip(A, 1)`?",
+      "answer": "Yes. `flipud` is a convenience wrapper around `flip` that always targets dimension&nbsp;1 (rows)."
+    },
+    {
+      "question": "Can I apply `flipud` to N-D tensors?",
+      "answer": "Absolutely. Only dimension&nbsp;1 is reversed; all other axes keep their original order regardless of rank."
+    },
+    {
+      "question": "Does `flipud` support string, character, and cell arrays?",
+      "answer": "Yes. String arrays reorder their elements, character arrays mirror each column while preserving UTF-8 data, and cell arrays reverse their rows without copying contained values."
+    },
+    {
+      "question": "What happens on the GPU if there is no flip kernel?",
+      "answer": "RunMat gathers the tensor once, mirrors it on the CPU, and uploads the result so you still receive a gpuArray."
+    },
+    {
+      "question": "Does `flipud` allocate new GPU buffers?",
+      "answer": "Providers may reuse storage, but the builtin always returns a fresh handle. The simple provider uploads a new buffer."
+    },
+    {
+      "question": "Is `flipud` numerically stable?",
+      "answer": "Yes. The function only reorders elements; values are never modified, so it is numerically stable."
+    }
+  ],
+  "links": [
+    {
+      "label": "`flip`",
+      "url": "./flip"
+    },
+    {
+      "label": "`fliplr`",
+      "url": "./fliplr"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/flipud.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/flipud.rs"
+  },
+  "gpu_residency": "You typically do not need to call `gpuArray` directly. RunMat\u2019s auto-offload planner keeps tensors on the GPU when profitable and only gathers when a provider lacks the flip hook. Even in that fallback, `flipud` uploads the flipped result back to the device so subsequent operations remain gpu-resident.",
+  "gpu_behavior": [
+    "RunMat first tries to execute `flipud` on the GPU by delegating to the provider\u2019s generic `flip` implementation with axis `0` (zero-based). If the provider does not implement this hook, RunMat transparently gathers the tensor, performs the vertical flip on the host, and uploads the result back to the device so residency is preserved."
+  ]
+}

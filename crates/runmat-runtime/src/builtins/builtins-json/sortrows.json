@@ -1,0 +1,158 @@
+{
+  "title": "sortrows",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "sortrows",
+    "row sort",
+    "lexicographic",
+    "gpu"
+  ],
+  "summary": "Sort matrix rows lexicographically with optional column and direction control.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/sortrows.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Falls back to host memory when providers do not expose a dedicated row sort kernel."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::sortrows::tests",
+    "integration": "builtins::array::sorting_sets::sortrows::tests::sortrows_gpu_roundtrip"
+  },
+  "description": "`sortrows` reorders the rows of a matrix (or character array) so they appear in lexicographic order. You can control which columns participate in the comparison and whether each column uses ascending or descending order.",
+  "behaviors": [
+    "`sortrows(A)` sorts by column `1`, then column `2`, and so on, all in ascending order.",
+    "`sortrows(A, C)` treats the vector `C` as the column order. Positive entries sort ascending; negative entries sort descending.",
+    "`sortrows(A, 'descend')` sorts all columns in descending order. Combine this with a column vector to mix directions.",
+    "`[B, I] = sortrows(A, ...)` also returns `I`, the 1-based row permutation indices.",
+    "`sortrows` is stable: rows that compare equal keep their original order.",
+    "For complex inputs, `'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'`, matching MATLAB semantics.",
+    "NaN handling mirrors MATLAB: in ascending sorts rows containing NaN values move to the end; in descending sorts they move to the beginning.",
+    "`'MissingPlacement'` lets you choose whether NaN (and other missing) rows appear `'first'`, `'last'`, or follow MATLAB's `'auto'` default.",
+    "Character arrays are sorted lexicographically using their character codes."
+  ],
+  "examples": [
+    {
+      "description": "Sorting rows of a matrix in ascending order",
+      "input": "A = [3 2; 1 4; 2 1];\nB = sortrows(A);",
+      "output": "B =\n     1     4\n     2     1\n     3     2"
+    },
+    {
+      "description": "Sorting by a custom column order",
+      "input": "A = [1 4 2; 3 2 5; 3 2 1];\nB = sortrows(A, [2 3 1]);",
+      "output": "B =\n     3     2     1\n     3     2     5\n     1     4     2"
+    },
+    {
+      "description": "Sorting rows in descending order",
+      "input": "A = [2 8; 4 1; 3 5];\nB = sortrows(A, 'descend');",
+      "output": "B =\n     4     1\n     3     5\n     2     8"
+    },
+    {
+      "description": "Mixing ascending and descending directions",
+      "input": "A = [1 7 3; 1 2 9; 1 2 3];\nB = sortrows(A, [1 -2 3]);",
+      "output": "B =\n     1     7     3\n     1     2     3\n     1     2     9"
+    },
+    {
+      "description": "Sorting rows of a character array",
+      "input": "names = ['bob '; 'al  '; 'ally'];\nsorted = sortrows(names);",
+      "output": "sorted =\nal\nally\nbob"
+    },
+    {
+      "description": "Sorting rows of complex data by magnitude",
+      "input": "Z = [3+4i, 3; 1+2i, 4];\nB = sortrows(Z, 'ComparisonMethod', 'abs');",
+      "output": "B =\n    1.0000 + 2.0000i    4.0000\n    3.0000 + 4.0000i    3.0000"
+    },
+    {
+      "description": "Forcing NaN rows to the top",
+      "input": "A = [1 NaN; NaN 2];\nB = sortrows(A, 'MissingPlacement', 'first');",
+      "output": "B =\n   NaN     2\n     1   NaN"
+    },
+    {
+      "description": "Sorting GPU-resident data with automatic host fallback",
+      "input": "G = gpuArray([3 1; 2 4; 1 2]);\n[B, I] = sortrows(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I request the permutation indices?",
+      "answer": "Yes. Call `[B, I] = sortrows(A, ...)` to receive the 1-based row permutation indices in `I`."
+    },
+    {
+      "question": "How do I sort specific columns?",
+      "answer": "Provide a column vector, e.g. `sortrows(A, [2 -3])` sorts by column `2` ascending and column `3` descending."
+    },
+    {
+      "question": "What happens when rows contain NaN values?",
+      "answer": "Rows containing NaNs move to the bottom for ascending sorts and to the top for descending sorts when `'MissingPlacement'` is left at its `'auto'` default, matching MATLAB."
+    },
+    {
+      "question": "How can I force NaNs or missing values to the top or bottom?",
+      "answer": "Use the name-value pair `'MissingPlacement','first'` to place missing rows before finite ones, or `'MissingPlacement','last'` to move them to the end regardless of direction."
+    },
+    {
+      "question": "Does `sortrows` work with complex numbers?",
+      "answer": "Yes. Use `'ComparisonMethod','real'` to sort by the real component or `'abs'` to sort by magnitude (the default behaviour matches MATLAB's `'auto'` rules)."
+    },
+    {
+      "question": "Can I combine a direction string with a column vector?",
+      "answer": "Yes. `sortrows(A, [1 3], 'descend')` applies descending order to both columns after applying the specified column order."
+    },
+    {
+      "question": "Is the operation stable?",
+      "answer": "Yes. Rows that compare equal remain in their original order."
+    },
+    {
+      "question": "Does `sortrows` mutate its input?",
+      "answer": "No. It returns a sorted copy of the input. GPU inputs are gathered to host memory when required."
+    },
+    {
+      "question": "Are string arrays supported?",
+      "answer": "String arrays are not yet supported. Convert them to character matrices or use tables before sorting."
+    }
+  ],
+  "links": [
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/sortrows.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/sortrows.rs"
+  },
+  "gpu_behavior": [
+    "`sortrows` is registered as a sink builtin. When the input tensor already lives on the GPU and the active provider exposes a `sortrows` hook, the runtime delegates to that hook; the current provider contract returns host buffers, so the sorted rows and permutation indices are materialised on the CPU before being returned.",
+    "When the provider lacks the hook\u2014or cannot honour a specific combination of options such as `'MissingPlacement','first'` or `'MissingPlacement','last'`\u2014RunMat gathers the tensor and performs the sort on the host while preserving MATLAB semantics.",
+    "Name-value options that the provider does not advertize fall back automatically; callers do not need to special-case GPU vs CPU execution.",
+    "The permutation indices are emitted as double-precision column vectors so they can be reused directly for MATLAB-style indexing."
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "title": "feof",
+  "category": "io/filetext",
+  "keywords": [
+    "feof",
+    "end of file",
+    "io",
+    "file identifier"
+  ],
+  "summary": "Query whether the file position indicator of a file identifier is at end-of-file.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/feof.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. Arguments that live on the GPU are gathered automatically, and file handles remain host-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::feof::tests",
+    "integration": "builtins::io::filetext::feof::tests::feof_returns_true_after_reading_to_end"
+  },
+  "description": "`feof(fid)` reports whether the file position indicator associated with `fid` has reached the end of the file. It is most commonly used to terminate loops that repeatedly call `fread`, `fgets`, or `fscanf`.",
+  "behaviors": [
+    "`tf = feof(fid)` returns logical `1` when the file position indicator is at end-of-file and logical `0` otherwise.",
+    "`fid` must be a non-negative integer returned by `fopen`. Passing an invalid identifier raises the same error message as other file I/O builtins.",
+    "Standard input/output identifiers (`0`, `1`, `2`) always report `false` because RunMat does not yet expose end-of-file state for those streams.",
+    "`feof` preserves the file position indicator; checking the flag does not modify where subsequent reads continue.",
+    "When a file is empty, `feof` immediately returns `true` because the initial file position coincides with the end of the file."
+  ],
+  "examples": [
+    {
+      "description": "Check for end-of-file while reading line by line",
+      "input": "[fid, msg] = fopen('log.txt', 'r');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    line = fgets(fid);\n    disp(line);\nend\nfclose(fid);"
+    },
+    {
+      "description": "Detect the end of a binary stream read with fread",
+      "input": "[fid, msg] = fopen('payload.bin', 'rb');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    chunk = fread(fid, 1024, 'uint8');\n    process(chunk);\nend\nfclose(fid);"
+    },
+    {
+      "description": "Handle empty files gracefully",
+      "input": "[fid, msg] = fopen('empty.txt', 'r');\nassert(fid ~= -1, msg);\nisAtEnd = feof(fid);   % returns true immediately because the file is empty\nfclose(fid);"
+    },
+    {
+      "description": "Protect against invalid identifiers",
+      "input": "try\n    feof(9999);\ncatch err\n    disp(err.message);\nend"
+    },
+    {
+      "description": "Guard reads that rely on gpuArray identifiers",
+      "input": "fid = gpuArray(int32(fopen('samples.dat', 'rb')));\ntf = feof(fid);        % argument is gathered automatically before the check"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What kind of input does `feof` accept?",
+      "answer": "Pass a scalar numeric file identifier returned by `fopen`. The identifier must be non-negative and finite. Character vectors or strings are not accepted."
+    },
+    {
+      "question": "Does `feof` move the file position indicator?",
+      "answer": "No. The builtin queries the current position and restores it before returning, so subsequent reads resume where they left off."
+    },
+    {
+      "question": "How does `feof` behave for standard input/output?",
+      "answer": "RunMat currently reports `false` for identifiers `0`, `1`, and `2` because the standard streams are not integrated with the file registry. Use other platform APIs to detect end-of-file on those streams if necessary."
+    },
+    {
+      "question": "Does `feof` require a previous read attempt to return true?",
+      "answer": "No. RunMat compares the current position against the end of the file. As soon as the indicator reaches the end (for example after reading all bytes or when the file is empty), `feof` returns `true`."
+    },
+    {
+      "question": "Can I call `feof` on closed files?",
+      "answer": "No. Passing a closed or never-opened identifier raises `\"Invalid file identifier. Use fopen to generate a valid file ID.\"`"
+    },
+    {
+      "question": "How does `feof` interact with GPU execution?",
+      "answer": "`feof` itself never runs on the GPU. When the identifier is stored in a GPU array, the runtime gathers it before performing the host-only check."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU\u2014the runtime gathers the scalar before performing the lookup. This means you can freely mix host and GPU code when driving file I/O loops, and `feof` remains inexpensive regardless of execution tier.",
+  "gpu_behavior": [
+    "`feof` is a host-only query. If `fid` resides on the GPU (for example inside a `gpuArray`), RunMat gathers the scalar to host memory before consulting the file registry. File handles always remain on the CPU, so there are no provider hooks or fusion paths for this builtin. The result is produced on the host as a logical scalar that mirrors MATLAB behaviour."
+  ]
+}

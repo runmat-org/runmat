@@ -1,0 +1,123 @@
+{
+  "title": "ifftshift",
+  "category": "math/fft",
+  "keywords": [
+    "ifftshift",
+    "inverse fft shift",
+    "frequency alignment",
+    "gpu"
+  ],
+  "summary": "Undo fftshift by moving the zero-frequency component back to the origin.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider circshift hooks when available; otherwise gathers, reorders on the host, and uploads again."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::ifftshift::tests",
+    "integration": "builtins::math::fft::ifftshift::tests::ifftshift_gpu_roundtrip"
+  },
+  "description": "`ifftshift(X)` circularly shifts data so that the DC (zero-frequency) component returns to index 1 along each transformed dimension. It is the inverse of `fftshift` and is commonly used immediately before calling `ifft`.",
+  "behaviors": [
+    "When no dimensions are specified, every axis is shifted by `ceil(size(X, dim) / 2)`.",
+    "Passing a list of dimensions restricts shifting to those axes; zeros and ones are treated as no-ops.",
+    "Odd-length dimensions shift by one additional element compared with `fftshift`, matching MATLAB's `ifftshift` parity rules.",
+    "Works for real, complex, logical, and GPU-resident tensors.",
+    "Empty arrays and scalars are returned unchanged."
+  ],
+  "examples": [
+    {
+      "description": "Undoing fftshift on an even-length spectrum",
+      "input": "x = 0:7;\ny = ifftshift(x);",
+      "output": "y = [4 5 6 7 0 1 2 3];"
+    },
+    {
+      "description": "Undoing fftshift on an odd-length spectrum",
+      "input": "x = 1:5;\ny = ifftshift(x);",
+      "output": "y = [3 4 5 1 2];"
+    },
+    {
+      "description": "Preparing data for inverse FFT",
+      "input": "fx = fft(rand(1, 8));\ncentered = fftshift(fx);\nrestored = ifftshift(centered);\nsignal = ifft(restored);"
+    },
+    {
+      "description": "Shifting only selected dimensions",
+      "input": "A = reshape(1:12, 3, 4);\nrowsShifted = ifftshift(A, 1);   % shift rows only\ncolsShifted = ifftshift(A, 2);   % shift columns only",
+      "output": "rowsShifted =\n     2     5     8    11\n     3     6     9    12\n     1     4     7    10\n\ncolsShifted =\n     7    10     1     4\n     8    11     2     5\n     9    12     3     6"
+    },
+    {
+      "description": "Using ifftshift with gpuArray data",
+      "input": "G = gpuArray(0:7);\nshifted = ifftshift(G);\nhost = gather(shifted);",
+      "output": "host = [4 5 6 7 0 1 2 3];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I call `ifftshift`?",
+      "answer": "Call `ifftshift` right before `ifft` (or `ifftn`) after you have applied `fftshift`-based processing in the frequency domain. It restores the DC component to index 1."
+    },
+    {
+      "question": "Is `ifftshift` always the inverse of `fftshift`?",
+      "answer": "Yes. For any supported input, `ifftshift(fftshift(X))` returns `X`, including odd-length dimensions where the shift counts differ."
+    },
+    {
+      "question": "Does `ifftshift` modify data values?",
+      "answer": "No. It only reorders elements. Magnitudes, phases, and overall content stay the same."
+    },
+    {
+      "question": "Can I restrict `ifftshift` to specific axes?",
+      "answer": "Yes. Pass a dimension index, vector of indices, or logical mask exactly like in MATLAB."
+    },
+    {
+      "question": "Does `ifftshift` support gpuArray inputs?",
+      "answer": "Yes. RunMat keeps GPU data on-device whenever possible and falls back to a single gather/upload cycle otherwise."
+    }
+  ],
+  "links": [
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "circshift",
+      "url": "./circshift"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs"
+  },
+  "gpu_residency": "You can rely on RunMat's auto-offload to keep FFT data on the GPU. When a provider exposes `circshift`, `ifftshift` executes entirely on the device and the result remains GPU-resident. If no provider is registered\u2014or it lacks `circshift`\u2014RunMat gathers once, applies the host reorder, and uploads the result so the rest of the computation can still run accelerated. You can call `gpuArray` explicitly when you need MATLAB parity or to enforce a residency boundary.",
+  "gpu_behavior": [
+    "RunMat first attempts to execute the shift entirely on the GPU using the provider's `circshift` hook. If that is unavailable, RunMat gathers the data exactly once, performs the reorder on the host, and uploads the result so downstream computations can continue on the device. Scalars remain on their current device to avoid unnecessary transfers."
+  ]
+}

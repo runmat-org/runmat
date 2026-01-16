@@ -1,0 +1,129 @@
+{
+  "title": "imag",
+  "category": "math/elementwise",
+  "keywords": [
+    "imag",
+    "imaginary",
+    "complex",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Extract the imaginary component of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host when the active provider lacks unary_imag or when inputs require host-only conversions (complex tensors, characters)."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::imag::tests",
+    "integration": "builtins::math::elementwise::imag::tests::imag_gpu_provider_roundtrip"
+  },
+  "description": "`imag(x)` returns the imaginary component of every element in `x`. Complex inputs yield their imaginary part, while real inputs produce zero-valued results of matching shape.",
+  "behaviors": [
+    "Complex scalars, vectors, matrices, and higher-dimensional tensors return only their imaginary components.",
+    "Purely real inputs (double, single, logical) produce zeros of type double that match the input size.",
+    "Character arrays are converted to double and therefore produce zero-filled numeric arrays of the same size.",
+    "String arrays are unsupported and raise an error (`imag` expects numeric, logical, or character data).",
+    "Sparse arrays are currently densified; native sparse support is planned."
+  ],
+  "examples": [
+    {
+      "description": "Extracting the imaginary part of a complex scalar",
+      "input": "z = 3 + 4i;\nb = imag(z);",
+      "output": "b = 4;"
+    },
+    {
+      "description": "Retrieving imaginary components of a complex matrix",
+      "input": "Z = [1+2i 4-3i; -5+0i 7+8i];\nY = imag(Z);",
+      "output": "Y =\n     2    -3\n     0     8"
+    },
+    {
+      "description": "Verifying that real inputs yield zero",
+      "input": "data = [-2.5 0 9.75];\nvalues = imag(data);",
+      "output": "values = [0 0 0];"
+    },
+    {
+      "description": "Imaginary part of logical masks",
+      "input": "mask = logical([0 1 0; 1 0 1]);\nzerosOnly = imag(mask);",
+      "output": "zerosOnly =\n     0     0     0\n     0     0     0"
+    },
+    {
+      "description": "Working with GPU-resident tensors",
+      "input": "G = rand(2048, 256, \"gpuArray\");\nres = imag(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `imag` modify purely real inputs?",
+      "answer": "No. Purely real, logical, and character inputs become zero-valued doubles of the same size."
+    },
+    {
+      "question": "How does `imag` handle complex zeros?",
+      "answer": "`imag(0 + 0i)` returns exactly `0`. Imaginary zeros are preserved."
+    },
+    {
+      "question": "Can I call `imag` on string arrays?",
+      "answer": "No. Like MATLAB, `imag` only accepts numeric, logical, or character arrays. Convert strings with `double(string)` first if you require numeric codes."
+    },
+    {
+      "question": "Does `imag` allocate a new array?",
+      "answer": "Yes, in line with MATLAB semantics. Fusion may eliminate the allocation when the surrounding expression can be fused safely."
+    },
+    {
+      "question": "What happens on the GPU without `unary_imag`?",
+      "answer": "RunMat gathers the tensor to host memory, applies the CPU semantics (producing zeros or extracting complex components), and allows subsequent operations to re-upload the data if doing so is worthwhile."
+    },
+    {
+      "question": "Is GPU execution numerically identical to CPU?",
+      "answer": "Yes. For real tensors the result is exactly zero; for complex tensors the CPU path matches MATLAB's behaviour."
+    },
+    {
+      "question": "Does `imag` participate in fusion?",
+      "answer": "Yes. The fusion planner can fold `imag` into neighbouring elementwise kernels, letting providers keep tensors on the GPU whenever possible."
+    }
+  ],
+  "links": [
+    {
+      "label": "real",
+      "url": "./real"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/imag.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/imag.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is profitable. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (for example, when integrating with custom CUDA or OpenCL kernels).",
+  "gpu_behavior": [
+    "**Hook available:** The provider materialises a zero-filled tensor directly on the GPU without any host transfers.",
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including the conversions for logical and character inputs), and resumes execution. Downstream fusion can still re-upload the result when profitable.\n\nComplex GPU tensors are currently gathered to the host because GPU-side complex storage is not yet available; providers can add fused support later without changing this builtin."
+  ]
+}

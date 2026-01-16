@@ -10,170 +10,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{gather_if_needed, make_cell};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strtrim",
-        builtin_path = "crate::builtins::strings::transform::strtrim"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r###"---
-title: "strtrim"
-category: "strings/transform"
-keywords: ["strtrim", "trim whitespace", "leading spaces", "trailing spaces", "character arrays", "string arrays"]
-summary: "Remove leading and trailing whitespace from strings, character arrays, and cell arrays."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strtrim.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Executes on the CPU; GPU-resident inputs are gathered automatically before trimming."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::transform::strtrim::tests"
-  integration: "builtins::strings::transform::strtrim::tests::strtrim_cell_array_mixed_content"
----
-
-# What does the `strtrim` function do in MATLAB / RunMat?
-`strtrim(text)` removes leading and trailing whitespace characters from `text`. The input can be a
-string scalar, string array, character array, or a cell array of character vectors, mirroring MATLAB
-behaviour. Internal whitespace is preserved exactly as provided.
-
-## How does the `strtrim` function behave in MATLAB / RunMat?
-- Whitespace is defined via MATLAB's `isspace`, so spaces, tabs, newlines, and other Unicode
-  whitespace code points are removed from both ends of each element.
-- String scalars and arrays keep their type and shape. Missing string scalars (`<missing>`) remain
-  missing and are returned unchanged.
-- Character arrays are trimmed row by row. The result keeps the original number of rows and shrinks
-  the column count to the longest trimmed row, padding shorter rows with spaces so the output stays
-  rectangular.
-- Cell arrays must contain string scalars or character vectors. Results preserve the original cell
-  layout with each element trimmed.
-- Numeric, logical, or structured inputs raise MATLAB-compatible type errors.
-
-## `strtrim` Function GPU Execution Behaviour
-`strtrim` runs on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers
-it to host memory before trimming so the output matches MATLAB exactly. Providers do not need to
-implement device kernels for this builtin today.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You do not need to call `gpuArray` or `gather` manually. RunMat automatically gathers any GPU-resident
-text data before applying `strtrim`, so the builtin behaves the same regardless of where the data lives.
-
-## Examples of using the `strtrim` function in MATLAB / RunMat
-
-### Trim Leading And Trailing Spaces From A String Scalar
-```matlab
-name = "   RunMat   ";
-clean = strtrim(name);
-```
-Expected output:
-```matlab
-clean = "RunMat"
-```
-
-### Remove Extra Whitespace From Each Element Of A String Array
-```matlab
-labels = ["  Alpha  "; "Beta   "; "   Gamma"];
-trimmed = strtrim(labels);
-```
-Expected output:
-```matlab
-trimmed = 3×1 string
-    "Alpha"
-    "Beta"
-    "Gamma"
-```
-
-### Trim Character Array Rows While Preserving Shape
-```matlab
-animals = char('  cat   ', 'dog', ' cow ');
-result = strtrim(animals);
-```
-Expected output:
-```matlab
-result =
-
-  3×3 char array
-
-    'cat'
-    'dog'
-    'cow'
-```
-
-### Trim Tabs And Newlines Alongside Spaces
-```matlab
-text = "\tMetrics " + newline;
-clean = strtrim(text);
-```
-Expected output:
-```matlab
-clean = "Metrics"
-```
-
-### Trim Each Element Of A Cell Array Of Character Vectors
-```matlab
-pieces = {'  GPU  ', " Accelerate", 'RunMat   '};
-out = strtrim(pieces);
-```
-Expected output:
-```matlab
-out = 1×3 cell array
-    {'GPU'}    {"Accelerate"}    {'RunMat'}
-```
-
-### Preserve Missing String Scalars
-```matlab
-vals = [" ok "; "<missing>"; " trimmed "];
-trimmed = strtrim(vals);
-```
-Expected output:
-```matlab
-trimmed = 1×3 string
-    "ok"
-    <missing>
-    "trimmed"
-```
-
-## FAQ
-
-### Does `strtrim` modify internal whitespace?
-No. Only leading and trailing whitespace is removed; interior spacing remains intact.
-
-### Which characters count as whitespace?
-`strtrim` removes code points that MATLAB's `isspace` recognises, including spaces, tabs, newlines,
-carriage returns, and many Unicode space separators.
-
-### How are character arrays resized?
-Each row is trimmed independently. The output keeps the same number of rows and shrinks the width to
-match the longest trimmed row, padding shorter rows with spaces if necessary.
-
-### What happens to missing strings?
-Missing string scalars (`string(missing)`) remain `<missing>` exactly as in MATLAB.
-
-### Can I pass numeric or logical arrays to `strtrim`?
-No. Passing non-text inputs raises a MATLAB-compatible error indicating that text input is required.
-
-### How does `strtrim` differ from `strip`?
-`strtrim` always removes leading and trailing whitespace. `strip` is newer and adds options for custom
-characters and directional trimming; use it when you need finer control.
-
-## See Also
-[strip](./strip), [upper](./upper), [lower](./lower)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"###;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strtrim")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strtrim",
@@ -316,7 +152,6 @@ fn trim_whitespace(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -472,12 +307,5 @@ pub(crate) mod tests {
     fn strtrim_errors_on_invalid_input() {
         let err = strtrim_builtin(Value::Num(1.0)).unwrap_err();
         assert!(err.contains("strtrim"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

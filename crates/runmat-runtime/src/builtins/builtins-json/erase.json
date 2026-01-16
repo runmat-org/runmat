@@ -1,0 +1,130 @@
+{
+  "title": "erase",
+  "category": "strings/transform",
+  "keywords": [
+    "erase",
+    "remove substring",
+    "delete text",
+    "string manipulation",
+    "character array"
+  ],
+  "summary": "Remove substring occurrences from strings, character arrays, and cell arrays with MATLAB-compatible semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/erase.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU; RunMat gathers GPU-resident text before removing substrings."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::erase::tests::erase_string_array_shape_mismatch_applies_all_patterns",
+    "integration": "builtins::strings::transform::erase::tests::erase_cell_array_mixed_content"
+  },
+  "description": "`erase(text, pattern)` removes every occurrence of `pattern` from `text`. The builtin accepts string scalars, string arrays, character arrays, and cell arrays of character vectors or string scalars, mirroring MATLAB behaviour. When `pattern` is an array, `erase` removes every occurrence of each pattern entry; the `text` and `pattern` arguments do not need to be the same size.",
+  "behaviors": [
+    "String inputs stay as strings. Missing string scalars (`<missing>`) propagate unchanged.",
+    "String arrays preserve their size and orientation. Each element has every supplied pattern removed.",
+    "Character arrays are processed row by row. Rows shrink as characters are removed and are padded with spaces so the result remains a rectangular char array.",
+    "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same shape whose elements reflect the removed substrings.",
+    "The `pattern` input can be a string scalar, string array, character array, or cell array of character vectors/string scalars. Provide either a scalar pattern or a list; an empty list leaves `text` unchanged.",
+    "Pattern values are treated literally\u2014no regular expressions are used. Use [`replace`](./replace) or the regex builtins for pattern-based removal."
+  ],
+  "examples": [
+    {
+      "description": "Remove a single word from a string scalar",
+      "input": "txt = \"RunMat accelerates MATLAB code\";\nclean = erase(txt, \"accelerates \");",
+      "output": "clean = \"RunMat MATLAB code\""
+    },
+    {
+      "description": "Remove multiple substrings from each element of a string array",
+      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = erase(labels, [\"GPU \", \"CPU \"]);",
+      "output": "result = 2\u00d71 string\n    \"pipeline\"\n    \"pipeline\""
+    },
+    {
+      "description": "Erase characters from a character array while preserving padding",
+      "input": "chars = char(\"workspace\", \"snapshots\");\ntrimmed = erase(chars, \"s\");",
+      "output": "trimmed =\n\n  2\u00d78 char array\n\n    'workpace'\n    'napshot '"
+    },
+    {
+      "description": "Remove substrings from a cell array of text",
+      "input": "C = {'Kernel Planner', \"GPU Fusion\"};\nout = erase(C, [\"Kernel \", \"GPU \"]);",
+      "output": "out = 1\u00d72 cell array\n    {'Planner'}    {\"Fusion\"}"
+    },
+    {
+      "description": "Provide an empty pattern list to leave the text unchanged",
+      "input": "data = [\"alpha\", \"beta\"];\nunchanged = erase(data, string.empty);",
+      "output": "unchanged = 1\u00d72 string\n    \"alpha\"    \"beta\""
+    },
+    {
+      "description": "Remove delimiters before splitting text",
+      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\");\nparts = split(clean, \"runmat/\");",
+      "output": "clean = \"runmat/binrunmat/lib\"\nparts = 1\u00d73 string\n    \"\"    \"bin\"    \"lib\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I remove multiple patterns at once?",
+      "answer": "Yes. Supply `pattern` as a string array or cell array. Each pattern is removed in order from every element of the input text."
+    },
+    {
+      "question": "What happens if `pattern` is empty?",
+      "answer": "An empty pattern list leaves the input unchanged. Empty string patterns are ignored because removing empty text would have no effect."
+    },
+    {
+      "question": "Does `erase` modify the original data?",
+      "answer": "No. It returns a new value with substrings removed. The input variables remain unchanged."
+    },
+    {
+      "question": "How are missing string scalars handled?",
+      "answer": "They propagate unchanged. Calling `erase` on `<missing>` returns `<missing>`, matching MATLAB."
+    },
+    {
+      "question": "Can `erase` operate on GPU-resident data?",
+      "answer": "Indirectly. RunMat automatically gathers GPU values to the host, performs the removal, and returns a host result. No explicit `gpuArray` calls are required."
+    },
+    {
+      "question": "How do I remove substrings using patterns or regular expressions?",
+      "answer": "Use `replace` for literal substitution or `regexprep` for regular expressions when you need pattern-based removal rather than literal substring erasure."
+    }
+  ],
+  "links": [
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/erase.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erase.rs"
+  },
+  "gpu_residency": "No. `erase` automatically gathers GPU inputs and produces host results. You never need to move text to or from the GPU manually for this builtin, and `gpuArray` inputs are handled transparently.",
+  "gpu_behavior": [
+    "`erase` executes on the CPU. When any argument is GPU-resident, RunMat gathers it to host memory before removing substrings. Outputs are returned on the host as well. Providers do not need to implement device kernels for this builtin, and the fusion planner treats it as a sink to avoid keeping text on the GPU."
+  ]
+}

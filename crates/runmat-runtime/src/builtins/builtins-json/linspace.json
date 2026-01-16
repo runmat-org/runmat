@@ -1,0 +1,139 @@
+{
+  "title": "linspace",
+  "category": "array/creation",
+  "keywords": [
+    "linspace",
+    "range",
+    "vector",
+    "gpu",
+    "sequence"
+  ],
+  "summary": "Generate linearly spaced row vectors that match MATLAB behaviour.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider `linspace` hooks when available (implemented by the WGPU backend); otherwise falls back to uploading a host-generated sequence to keep residency intact."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::linspace::tests",
+    "integration": "builtins::array::creation::linspace::tests::linspace_gpu_roundtrip",
+    "wgpu": "builtins::array::creation::linspace::tests::linspace_wgpu_matches_cpu"
+  },
+  "description": "`linspace(a, b, n)` returns `n` linearly spaced points between the start point `a` and the end point `b`, inclusive. When `n` is omitted, MATLAB (and RunMat) default to 100 points. The result is always a row vector.",
+  "behaviors": [
+    "`linspace(a, b)` is equivalent to `linspace(a, b, 100)`.",
+    "`linspace(a, b, 0)` returns a `1\u00d70` empty double row vector.",
+    "`linspace(a, b, 1)` returns `b`.",
+    "`linspace(a, b, 2)` returns `[a b]`.",
+    "Complex end points are supported; the real and imaginary parts are interpolated independently.",
+    "Inputs may be scalars, `1\u00d71` tensors, or GPU scalars (`gpuArray` handles).",
+    "The third argument must be a finite, non-negative integer."
+  ],
+  "examples": [
+    {
+      "description": "Creating five points between zero and one",
+      "input": "x = linspace(0, 1, 5)",
+      "output": "% Row vector with five equally spaced points\nx = [0 0.25 0.5 0.75 1]"
+    },
+    {
+      "description": "Sampling 100 points when the third argument is omitted",
+      "input": "t = linspace(-pi, pi);",
+      "output": "% t is a 1x100 row vector spanning [-pi, pi]\ndisp(t(1));\ndisp(t(end));"
+    },
+    {
+      "description": "Constructing complex breakpoints",
+      "input": "z = linspace(1+1i, -3+2i, 4);",
+      "output": "z =\n   1.0000 + 1.0000i   -0.3333 + 1.3333i   -1.6667 + 1.6667i   -3.0000 + 2.0000i"
+    },
+    {
+      "description": "Staying on the GPU automatically",
+      "input": "a = gpuArray(0);\nb = gpuArray(2*pi);\ntheta = linspace(a, b, 1024);\nwave = sin(theta);",
+      "output": "% theta and wave remain on the GPU when an acceleration provider is active.\ndisp(gather(theta(1:5)));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the default number of points?",
+      "answer": "If you omit the third argument, RunMat uses 100 points, matching MATLAB."
+    },
+    {
+      "question": "Does `linspace` include the end points?",
+      "answer": "Yes. The first element is exactly the start point `a` and the final element is exactly the end point `b`."
+    },
+    {
+      "question": "Can I request zero points?",
+      "answer": "Yes. `linspace(a, b, 0)` returns a `1\u00d70` empty row vector."
+    },
+    {
+      "question": "Does the third argument need to be an integer?",
+      "answer": "Yes. Non-integer or negative counts raise an error, just like MATLAB."
+    },
+    {
+      "question": "Does `linspace` support complex inputs?",
+      "answer": "Yes. Real and imaginary components are interpolated independently. Mixed real and complex inputs return a complex row vector."
+    },
+    {
+      "question": "How accurate is the final point?",
+      "answer": "The implementation explicitly overwrites the final element with `b` to avoid floating-point drift, matching MATLAB behaviour."
+    },
+    {
+      "question": "Can I pass GPU scalars?",
+      "answer": "Yes. GPU endpoints are gathered once to compute the sequence. The result stays on the GPU as long as a provider is available and the endpoints are real."
+    },
+    {
+      "question": "What precision is used?",
+      "answer": "RunMat mirrors MATLAB and returns double-precision vectors. Providers may choose to specialise future hooks for other precisions."
+    },
+    {
+      "question": "How does `linspace` differ from the colon operator?",
+      "answer": "`linspace` lets you specify the number of points directly. The colon operator (`start:step:end`) fixes the spacing instead."
+    },
+    {
+      "question": "What happens when `a` equals `b`?",
+      "answer": "Every element equals `a` (and `b`). For example, `linspace(5, 5, 4)` returns `[5 5 5 5]`."
+    }
+  ],
+  "links": [
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/linspace.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/linspace.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. When either endpoint already resides on the GPU, RunMat keeps the generated sequence on the device to preserve residency for downstream operations. When the active provider implements the dedicated `linspace` hook (the WGPU backend does), the sequence is generated directly on-device. If no acceleration provider is registered, or if a provider lacks the hook, the runtime emits the values on the host and uploads them once, preserving correctness with a modest transfer.",
+  "gpu_behavior": [
+    "If either endpoint is already resident on the GPU, RunMat keeps the result on the device whenever the active acceleration provider supports uploading host buffers. Providers may additionally implement the optional `linspace` hook to generate the sequence entirely on device. Until then, RunMat generates the sequence on the host and performs a single upload so downstream kernels can consume the GPU data without extra gathers."
+  ]
+}

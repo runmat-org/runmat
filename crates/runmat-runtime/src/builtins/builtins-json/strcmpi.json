@@ -1,0 +1,131 @@
+{
+  "title": "strcmpi",
+  "category": "strings/core",
+  "keywords": [
+    "strcmpi",
+    "case insensitive compare",
+    "string compare",
+    "text equality",
+    "cell array"
+  ],
+  "summary": "Compare text inputs for equality without considering letter case, matching MATLAB's `strcmpi` semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strcmpi.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Runs on the host; GPU inputs are gathered automatically before comparison so results match MATLAB exactly."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::strcmpi::tests",
+    "integration": "builtins::strings::core::strcmpi::tests::strcmpi_cell_array_scalar_casefold"
+  },
+  "description": "`strcmpi(a, b)` compares text values without considering letter case. It returns logical `true` when inputs match case-insensitively and `false` otherwise. Supported text types mirror MATLAB: string scalars/arrays, character vectors and arrays, and cell arrays filled with character vectors.",
+  "behaviors": [
+    "**Case-insensitive**: Letter case is ignored. `\"RunMat\"`, `\"runmat\"`, and `\"RUNMAT\"` all compare equal.",
+    "**Accepted text types**: Works with string arrays, character vectors or matrices, and cell arrays of character vectors. Mixed combinations are normalised automatically.",
+    "**Implicit expansion**: Scalar operands expand against array operands so element-wise comparisons follow MATLAB broadcasting rules.",
+    "**Character arrays**: Rows are compared individually. Results are column vectors whose length equals the number of rows in the character array.",
+    "**Cell arrays**: Each cell is treated as a text scalar. Scalar cells expand across the other operand before comparison.",
+    "**Missing strings**: Elements whose value is `missing` (`\"<missing>\"`) always compare unequal, even to other missing values, matching MATLAB.",
+    "**Result form**: Scalar comparisons return logical scalars. Otherwise the result is a logical array that matches the broadcast shape."
+  ],
+  "examples": [
+    {
+      "description": "Compare Two Strings Ignoring Case",
+      "input": "tf = strcmpi(\"RunMat\", \"runmat\");",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Find Case-Insensitive Matches Inside a String Array",
+      "input": "colors = [\"Red\" \"GREEN\" \"blue\"];\nmask = strcmpi(colors, \"green\");",
+      "output": "mask = 1\u00d73 logical array\n   0   1   0"
+    },
+    {
+      "description": "Compare Character Array Rows Without Case Sensitivity",
+      "input": "animals = char(\"Cat\", \"DOG\", \"cat\");\ntf = strcmpi(animals, \"cAt\");",
+      "output": "tf = 3\u00d71 logical array\n   1\n   0\n   1"
+    },
+    {
+      "description": "Compare Cell Arrays Of Character Vectors Case-Insensitively",
+      "input": "C1 = {'north', 'East', 'SOUTH'};\nC2 = {'NORTH', 'east', 'west'};\ntf = strcmpi(C1, C2);",
+      "output": "tf = 1\u00d73 logical array\n   1   1   0"
+    },
+    {
+      "description": "Broadcast A String Scalar Against A Character Matrix",
+      "input": "patterns = char(\"alpha\", \"BETA\");\ntf = strcmpi(patterns, [\"ALPHA\" \"beta\"]);",
+      "output": "tf = 2\u00d72 logical array\n   1   0\n   0   1"
+    },
+    {
+      "description": "Handle Missing Strings In Case-Insensitive Comparisons",
+      "input": "values = [\"Active\" missing];\nmask = strcmpi(values, \"active\");",
+      "output": "mask = 1\u00d72 logical array\n   1   0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `strcmpi` support string arrays, character arrays, and cell arrays?",
+      "answer": "Yes. All MATLAB-supported text containers are accepted, and mixed combinations are handled automatically with implicit expansion."
+    },
+    {
+      "question": "Is whitespace significant when comparing character arrays?",
+      "answer": "Yes. Trailing spaces or different lengths make rows unequal, just like `strcmp`. Use `strtrim` or `strip` if you need to ignore whitespace."
+    },
+    {
+      "question": "Do missing strings compare equal?",
+      "answer": "No. The `missing` sentinel compares unequal to all values, including another missing string scalar."
+    },
+    {
+      "question": "Can I compare complex numbers or numeric arrays with `strcmpi`?",
+      "answer": "No. Both arguments must contain text. Numeric inputs produce a descriptive MATLAB-style error."
+    },
+    {
+      "question": "How are GPU inputs handled?",
+      "answer": "They are gathered to the CPU automatically before comparison. Providers do not need to implement additional kernels for `strcmpi`."
+    },
+    {
+      "question": "What is returned when both inputs are scalars?",
+      "answer": "A logical scalar is returned (`true` or `false`). For non-scalar shapes, a logical array that mirrors the broadcast dimensions is produced."
+    }
+  ],
+  "links": [
+    {
+      "label": "strcmp",
+      "url": "./strcmp"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    },
+    {
+      "label": "startswith",
+      "url": "./startswith"
+    },
+    {
+      "label": "endswith",
+      "url": "./endswith"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs"
+  },
+  "gpu_residency": "You rarely need to call `gpuArray` manually. When inputs already live on the GPU, RunMat gathers them before calling `strcmpi`, then returns a logical result on the host. This matches MATLAB\u2019s behaviour while keeping the runtime simple. Subsequent GPU-aware code can explicitly transfer results back if needed.",
+  "gpu_behavior": [
+    "`strcmpi` is registered as an acceleration sink. When either operand resides on the GPU, RunMat gathers both to host memory before comparing them. This keeps behaviour identical to MATLAB and avoids requiring backend-specific kernels. The logical result is produced on the CPU and never remains GPU-resident."
+  ]
+}

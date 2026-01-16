@@ -1,0 +1,135 @@
+{
+  "title": "isnumeric",
+  "category": "logical/tests",
+  "keywords": [
+    "isnumeric",
+    "numeric type",
+    "type predicate",
+    "gpuArray isnumeric",
+    "MATLAB isnumeric"
+  ],
+  "summary": "Return true when a value is stored as numeric data (real or complex).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Queries device metadata; falls back to runtime residency tracking when provider hooks are absent."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::isnumeric::tests",
+    "integration": "builtins::logical::tests::isnumeric::tests::gpu_numeric_and_logical_handles",
+    "gpu": "builtins::logical::tests::isnumeric::tests::isnumeric_wgpu_handles_respect_metadata"
+  },
+  "description": "`tf = isnumeric(x)` returns a logical scalar that is `true` when `x` stores numeric data and `false` otherwise. Numeric data includes doubles, singles, integers, and complex numbers, as well as dense numeric arrays that live on the CPU or GPU.",
+  "behaviors": [
+    "Every built-in numeric class (`double`, `single`, signed/unsigned integer types) returns `true`, including complex scalars.",
+    "Real and complex numeric arrays return `true` regardless of dimensionality or residency on the CPU or GPU.",
+    "`gpuArray` values rely on provider metadata: numeric handles return `true`, while logical masks constructed on the GPU return `false`.",
+    "Logical values, characters, strings, tables, cell arrays, structs, objects, and function handles return `false`.",
+    "The result is always a logical scalar."
+  ],
+  "examples": [
+    {
+      "description": "Checking if a scalar double is numeric",
+      "input": "tf = isnumeric(42);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Detecting numeric matrices",
+      "input": "A = [1 2 3; 4 5 6];\ntf = isnumeric(A);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Testing complex numbers for numeric storage",
+      "input": "z = 1 + 2i;\ntf = isnumeric(z);",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Logical arrays are not numeric",
+      "input": "mask = logical([1 0 1]);\ntf = isnumeric(mask);",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Character vectors and strings return false",
+      "input": "chars = ['R' 'u' 'n'];\nname = \"RunMat\";\ntf_chars = isnumeric(chars);\ntf_string = isnumeric(name);",
+      "output": "tf_chars =\n     0\n\ntf_string =\n     0"
+    },
+    {
+      "description": "Evaluating `gpuArray` inputs",
+      "input": "G = gpuArray(rand(4));\nmask = G > 0.5;\ntf_numeric = isnumeric(G);\ntf_mask = isnumeric(mask);",
+      "output": "tf_numeric =\n     1\n\ntf_mask =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isnumeric` ever return an array?",
+      "answer": "No. The builtin always returns a logical scalar, even when the input is an array."
+    },
+    {
+      "question": "Are complex tensors considered numeric?",
+      "answer": "Yes. Real and complex tensors both return `true`, matching MATLAB semantics."
+    },
+    {
+      "question": "Does `isnumeric` gather GPU data back to the host?",
+      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host↔device transfers."
+    },
+    {
+      "question": "Do logical masks return `true`?",
+      "answer": "No. Logical scalars and logical arrays return `false`. Use `islogical` if you need to detect logical storage explicitly."
+    },
+    {
+      "question": "What about character vectors or string arrays?",
+      "answer": "They return `false`, just like in MATLAB. Characters and strings are text types rather than numeric arrays."
+    },
+    {
+      "question": "Do cell arrays or structs ever count as numeric?",
+      "answer": "No. Containers and objects always return `false`."
+    },
+    {
+      "question": "Is there a difference between CPU and GPU numeric arrays?",
+      "answer": "No. Both host and device numeric arrays return `true`; only logical GPU handles report `false`."
+    }
+  ],
+  "links": [
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "isreal",
+      "url": "./isreal"
+    },
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/isnumeric.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isnumeric.rs"
+  },
+  "gpu_residency": "You generally do **not** need to call `gpuArray` manually. RunMat's auto-offload planner keeps numeric tensors on the GPU across fused expressions whenever that improves performance. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB scripts that manage residency themselves.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, `isnumeric` first checks provider metadata via the `logical_islogical` hook to determine whether a `gpuArray` handle was created as a logical mask. Providers that supply the hook can answer the query without copying data back to the host. When the hook is absent, RunMat consults its residency metadata and only gathers the value to host memory when the residency tag is missing, ensuring the builtin always succeeds."
+  ]
+}

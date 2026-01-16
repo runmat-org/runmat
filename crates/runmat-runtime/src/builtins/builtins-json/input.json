@@ -1,0 +1,68 @@
+{
+  "title": "input",
+  "category": "io",
+  "keywords": [
+    "input",
+    "prompt",
+    "stdin",
+    "interactive",
+    "pause",
+    "gather"
+  ],
+  "summary": "Prompt the user for input. Return either the typed text or a parsed numeric value.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/input.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Prompts are handled on the host. When `input` is called inside GPU-enabled workflows, only the textual arguments are gathered."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::input::tests",
+    "integration": null
+  },
+  "description": "`input(prompt)` displays `prompt`, waits for the user to type a line of text, and then returns the evaluated value. When you pass `'s'` as the second argument, `input` skips numeric parsing and returns the raw text as a character row vector. RunMat mirrors MATLAB\u2019s single-line prompt/response flow so scripts that rely on interactive questions continue to work.",
+  "behaviors": [
+    "Prompts accept character row vectors and string scalars. When omitted, RunMat uses `\"Input: \"`.",
+    "The function always blocks until the host supplies a line of text (via the REPL, CLI pipe, or wasm bindings). `stdinRequested` events surface the outstanding prompt to JS hosts so they can resume later.",
+    "When `'s'` (or `\"s\"`) is provided, the return value is a character array containing exactly what the user typed (without the trailing newline).",
+    "Without `'s'`, RunMat forwards the response through the same numeric parser that backs `str2double`. This covers scalar numbers, MATLAB-style vector/matrix literals, `Inf`, `NaN`, and complex tokens. Arbitrary expressions (for example `1+rand()`) are not evaluated automatically\u2014read the text with `'s'` and pass it to `eval` once that builtin lands.",
+    "Empty responses (just pressing Enter) return an empty `[]` double, consistent with MATLAB.",
+    "When the numeric parser rejects the text, RunMat raises `MATLAB:input:InvalidNumericExpression` so callers can present a friendly retry loop."
+  ],
+  "examples": [
+    {
+      "description": "",
+      "input": "value = input(\"Enter a scalar: \");"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat evaluate arbitrary MATLAB expressions?",
+      "answer": "Not yet. The numeric branch reuses the `str2double` parser, which supports MATLAB numeric literals (scalars, vectors, matrices, `Inf`, `NaN`, complex pairs) but does not run arbitrary code. When you need to evaluate expressions such as `1+sin(pi/4)`, capture the text via `input(..., 's')` and pass it to `eval` in a follow-up release."
+    },
+    {
+      "question": "What happens if the user just presses Enter?",
+      "answer": "RunMat returns the empty double `[]`, matching MATLAB\u2019s `input` behaviour."
+    },
+    {
+      "question": "Can I call `input` inside GPU workloads?",
+      "answer": "Yes. Prompts always flow through the host console/UI. GPU-resident prompt arguments are gathered once before display, and the response itself is always a host value."
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "",
+    "url": ""
+  }
+}

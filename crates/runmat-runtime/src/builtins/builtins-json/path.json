@@ -1,0 +1,120 @@
+{
+  "title": "path",
+  "category": "io/repl_fs",
+  "keywords": [
+    "path",
+    "search path",
+    "matlab path",
+    "addpath",
+    "rmpath"
+  ],
+  "summary": "Query or replace the MATLAB search path used by RunMat.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/path.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::path::tests",
+    "integration": "builtins::io::repl_fs::path::tests::path_updates_search_directories"
+  },
+  "description": "`path` reads or rewrites the MATLAB search path string that RunMat uses when resolving scripts, functions, and data files. The value mirrors MATLAB's notion of the path: a character row vector whose entries are separated by the platform-specific `pathsep` character.",
+  "behaviors": [
+    "`path()` (no inputs) returns the current search path as a character row vector. Each directory is separated by `pathsep` (`;` on Windows, `:` on Linux/macOS). The current working folder (`pwd`) is implicit and therefore is not included in the string.",
+    "`old = path(newPath)` replaces the stored path with `newPath` and returns the previous value so it can be restored later. `newPath` may be a character row vector, a string scalar, or a 1-by-N double array of character codes. Whitespace at the ends of entries is preserved, matching MATLAB.",
+    "`old = path(path1, path2)` sets the path to `path1` followed by `path2`. When both inputs are non-empty they are joined with `pathsep`; empty inputs are ignored so `path(\"\", path2)` simply applies `path2`.",
+    "All inputs must be character vectors or string scalars. Single-element string arrays are accepted. Multirow char arrays, multi-element string arrays, numeric arrays that cannot be interpreted as character codes, and other value types raise `path: arguments must be character vectors or string scalars`.",
+    "Calling `path(\"\")` clears the stored path while leaving `pwd` as the highest-priority location, just like MATLAB. The new value is stored in-process and mirrored to the `RUNMAT_PATH` environment variable, so `exist`, `which`, `dir`, and other filesystem-aware builtins observe the change immediately."
+  ],
+  "examples": [
+    {
+      "description": "Display the current MATLAB search path",
+      "input": "p = path();\ndisp(p);",
+      "output": "/Users/alex/runmat/toolbox:/Users/alex/runmat/user   % Actual directories vary by installation"
+    },
+    {
+      "description": "Temporarily replace the MATLAB path",
+      "input": "old = path(\"C:\\tools\\runmat-addons\");\n% ... run code that relies on the temporary path ...\npath(old);   % Restore the previous path",
+      "output": "old =\n    '/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
+    },
+    {
+      "description": "Append folders to the end of the search path",
+      "input": "extra = \"C:\\projects\\analysis\";\nold = path(path(), extra);",
+      "output": "path()\nans =\n    'C:\\tools\\runmat-addons;C:\\projects\\analysis'"
+    },
+    {
+      "description": "Prepend folders ahead of the existing path",
+      "input": "extra = \"/opt/runmat/toolbox\";\nold = path(extra, path());",
+      "output": "path()\nans =\n    '/opt/runmat/toolbox:/Users/alex/runmat/toolbox:/Users/alex/runmat/user'"
+    },
+    {
+      "description": "Combine generated folder lists",
+      "input": "tooling = genpath(\"submodules/tooling\");\nold = path(tooling, path());",
+      "output": "% The directories returned by genpath now appear ahead of the previous path entries."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `path` include the current folder?",
+      "answer": "MATLAB automatically searches the current folder (`pwd`) before consulting the stored path. RunMat follows this rule; the character vector returned by `path` reflects the explicit path entries, while `pwd` remains an implicit priority."
+    },
+    {
+      "question": "Can I clear the path completely?",
+      "answer": "Yes. Call `path(\"\")` to remove all explicit entries. The current folder is still searched first."
+    },
+    {
+      "question": "How do I append to the path without losing the existing value?",
+      "answer": "Use `path(path(), newEntry)` to append or `path(newEntry, path())` to prepend. Both return the previous value so you can restore it later."
+    },
+    {
+      "question": "Where is the path stored?",
+      "answer": "RunMat keeps the value in memory and updates the `RUNMAT_PATH` environment variable. External tooling that reads `RUNMAT_PATH` will therefore observe the latest configuration."
+    },
+    {
+      "question": "Do other builtins see the new path immediately?",
+      "answer": "Yes. `exist`, `which`, `run`, and other filesystem-aware builtins query the shared path state on each call."
+    }
+  ],
+  "links": [
+    {
+      "label": "addpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/addpath.html"
+    },
+    {
+      "label": "rmpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/rmpath.html"
+    },
+    {
+      "label": "genpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/genpath.html"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/path.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/path.rs"
+  },
+  "gpu_residency": "No. The MATLAB path is a host-only configuration. RunMat automatically gathers any `gpuArray` text inputs, applies the request on the CPU, and returns the result as a character array. Explicitly creating `gpuArray` strings provides no benefit.",
+  "gpu_behavior": [
+    "`path` operates entirely on host-side state. If an argument lives on the GPU, RunMat gathers it back to the CPU before validation. No acceleration provider hooks are required and no GPU kernels are launched."
+  ]
+}

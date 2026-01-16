@@ -14,184 +14,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::gather_if_needed;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "writematrix",
-        builtin_path = "crate::builtins::io::tabular::writematrix"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "writematrix"
-category: "io/tabular"
-keywords: ["writematrix", "csv", "delimited text", "write", "append", "quote strings", "decimal separator"]
-summary: "Write numeric or string matrices to delimited text files with MATLAB-compatible defaults."
-references:
-  - https://www.mathworks.com/help/matlab/ref/writematrix.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the CPU. gpuArray inputs are gathered automatically before serialisation."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::tabular::writematrix::tests"
-  integration:
-    - "builtins::io::tabular::writematrix::tests::writematrix_writes_space_delimited_txt"
-    - "builtins::io::tabular::writematrix::tests::writematrix_defaults_to_comma_for_csv"
-    - "builtins::io::tabular::writematrix::tests::writematrix_honours_write_mode_append"
-    - "builtins::io::tabular::writematrix::tests::writematrix_quotes_strings_by_default"
-    - "builtins::io::tabular::writematrix::tests::writematrix_accepts_gpu_tensor_inputs"
----
-
-# What does the `writematrix` function do in MATLAB / RunMat?
-`writematrix(A, filename)` serialises numeric or string matrices to a text file using
-MATLAB-compatible defaults. Column-major ordering is preserved, delimiters adjust to the
-filename extension, and optional name/value pairs customise quoting, decimal separators,
-line endings, and write mode. The builtin mirrors MATLAB behaviour for the supported options,
-raising descriptive errors for unsupported combinations like spreadsheet output.
-
-## How does the `writematrix` function behave in MATLAB / RunMat?
-- Accepts real numeric, logical, or string arrays with up to two dimensions (trailing singleton
-  dimensions are ignored). Heterogeneous data requires `writecell` instead.
-- Default delimiters follow MATLAB: comma for `.csv`, tab for `.tsv`, whitespace for `.txt` and
-  `.dat`, and comma for other extensions. Specify `'Delimiter', value` to override.
-- `'WriteMode'` supports `'overwrite'` (default) and `'append'`. Overwrite truncates existing
-  files; append writes new rows to the end without inserting extra delimiters.
-- `'QuoteStrings'` controls whether text fields are wrapped in double quotes. When enabled (the
-  default) embedded quotes are doubled (`"Alice"` becomes `""Alice""`).
-- `'DecimalSeparator'` swaps the decimal point for locales that require `','` or other
-  characters. Thousands separators are not inserted automatically, matching MATLAB.
-- `'LineEnding'` supports `'auto'` (normalized `\n` for cross-platform portability), `'unix'`,
-  `'pc'`/`'windows'`, and `'mac'`.
-- `'FileType'` accepts `'delimitedtext'` or `'text'`. Spreadsheet output (`'spreadsheet'`)
-  is not yet available and triggers a descriptive error consistent with MATLAB's messaging.
-- Unsupported options are ignored for forward compatibility. Errors indicate which argument was
-  invalid when the value cannot be interpreted.
-
-## `writematrix` Function GPU Execution Behaviour
-`writematrix` always executes on the host. When the input matrix resides on a GPU, RunMat gathers
-the array via the active acceleration provider before formatting. No provider-specific hooks or
-GPU kernels are required, and the result of the write remains a host-side side effect (file on
-disk). If no provider is registered, the builtin emits the same gather error reported by other
-residency sinks.
-
-## Examples of using the `writematrix` function in MATLAB / RunMat
-
-### Save a numeric matrix to a CSV file
-```matlab
-A = [1 2 3; 4 5 6];
-writematrix(A, "results.csv");
-```
-Expected contents of `results.csv`:
-```matlab
-1,2,3
-4,5,6
-```
-
-### Export data with a custom semicolon delimiter
-```matlab
-writematrix(A, "results.dat", 'Delimiter', ';');
-```
-Expected contents of `results.dat`:
-```matlab
-1;2;3
-4;5;6
-```
-
-### Append additional rows to an existing report
-```matlab
-writematrix([7 8 9], "report.txt");
-writematrix([10 11 12], "report.txt", 'WriteMode', 'append');
-```
-Expected contents of `report.txt`:
-```matlab
-7 8 9
-10 11 12
-```
-
-### Write string data with quoting disabled
-```matlab
-names = ["Alice" "Bob" "Charlie"];
-writematrix(names, "names.csv", 'QuoteStrings', false);
-```
-Expected contents of `names.csv`:
-```matlab
-Alice,Bob,Charlie
-```
-
-### Use a European decimal separator and explicit line ending
-```matlab
-vals = [12.34; 56.78];
-writematrix(vals, "eu.csv", 'DecimalSeparator', ',', 'LineEnding', 'unix');
-```
-Expected contents of `eu.csv`:
-```matlab
-12,34
-56,78
-```
-
-### Write GPU-resident data transparently
-```matlab
-G = gpuArray(rand(2, 3));
-writematrix(G, "gpu_output.csv");
-```
-Expected behaviour:
-```matlab
-% Data is gathered from the GPU automatically and written to disk as CSV.
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No additional steps are required. `writematrix` treats GPU arrays as residency sinks: the data is
-gathered before formatting, ensuring the file on disk reflects host memory. This mirrors MATLAB,
-where `writematrix` operates on numeric values regardless of their original residency.
-
-## FAQ
-
-### Which data types does `writematrix` support?
-Real numeric, logical, and string arrays up to two dimensions. For heterogenous content (mixed
-numbers and text) use `writecell` or `writetable`.
-
-### How are empty matrices handled?
-Zero-row or zero-column inputs produce either an empty file or blank line endings per MATLAB's
-behaviour. The file is still created or truncated according to `'WriteMode'`.
-
-### Can I write OTA spreadsheet formats like `.xlsx`?
-Not yet. Passing `'FileType','spreadsheet'` raises a descriptive error. Use MATLAB's table-based
-workflows or export delimited text instead.
-
-### How are embedded quotes in text fields escaped?
-When `'QuoteStrings'` is `true`, embedded double quotes are doubled (`"She said ""hi"""`),
-conforming to RFC 4180 and MATLAB's implementation. With quoting disabled, the characters are
-written verbatim.
-
-### What happens if I choose `','` as both delimiter and decimal separator?
-RunMat mirrors MATLAB by honouring your request without modification, even though the output may
-be ambiguous. Choose a different delimiter when writing locale-specific decimals.
-
-### Does `writematrix` change the working directory?
-No. Relative paths are resolved against the current MATLAB working directory, and only the target
-file is touched.
-
-### How do I include header rows or variable names?
-`writematrix` focuses on numeric/string matrices. For labelled data use `writetable` (planned) or
-prepend header lines manually with `fprintf` before calling `writematrix` in `'append'` mode.
-
-## See Also
-[readmatrix](./readmatrix), [writecell](./writecell), [fprintf](./fprintf), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `writematrix` function is available at: [`crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs)
-- Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "writematrix",
@@ -769,10 +591,9 @@ pub(crate) mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor};
-
-    use crate::builtins::common::test_support;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -882,12 +703,5 @@ pub(crate) mod tests {
             assert_eq!(contents, "1,2\n");
             let _ = fs::remove_file(path);
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

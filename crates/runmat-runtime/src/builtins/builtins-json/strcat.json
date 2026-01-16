@@ -1,0 +1,126 @@
+{
+  "title": "strcat",
+  "category": "strings/transform",
+  "keywords": [
+    "strcat",
+    "string concatenation",
+    "character arrays",
+    "cell arrays",
+    "trailing spaces"
+  ],
+  "summary": "Concatenate text inputs element-wise with MATLAB-compatible trimming and implicit expansion.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strcat.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered before concatenation so trimming semantics match MATLAB."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 8,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::strcat::tests",
+    "integration": "builtins::strings::transform::strcat::tests::strcat_cell_array_trims_trailing_spaces"
+  },
+  "description": "`strcat` horizontally concatenates text inputs element-wise. It accepts string arrays, character arrays, character vectors, and cell arrays of character vectors, applying MATLAB's implicit expansion rules to match array sizes.",
+  "behaviors": [
+    "Inputs are concatenated element-wise. Scalars expand across arrays of matching dimensions using MATLAB's implicit expansion rules.",
+    "When at least one input is a string array (or string scalar), the result is a string array. `<missing>` values propagate, so any missing operand yields a missing result for that element.",
+    "When no string arrays are present but any input is a cell array of character vectors, the result is a cell array whose elements are character vectors.",
+    "Otherwise, the result is a character array. For character inputs, `strcat` removes trailing space characters from each operand **before** concatenating.",
+    "Cell array elements must be character vectors (or string scalars). Mixing cell arrays with unsupported content raises a MATLAB-compatible error.",
+    "Empty inputs broadcast naturally: an operand with a zero-length dimension yields an empty output after broadcasting."
+  ],
+  "examples": [
+    {
+      "description": "Concatenate string scalars element-wise",
+      "input": "greeting = strcat(\"Run\", \"Mat\");",
+      "output": "greeting = \"RunMat\""
+    },
+    {
+      "description": "Concatenate a string scalar with a string array",
+      "input": "names = [\"Ignition\", \"Turbine\", \"Accelerate\"];\ntagged = strcat(\"runmat-\", names);",
+      "output": "tagged = 1\u00d73 string\n    \"runmat-Ignition\"    \"runmat-Turbine\"    \"runmat-Accelerate\""
+    },
+    {
+      "description": "Concatenate character arrays while trimming trailing spaces",
+      "input": "A = char(\"GPU \", \"Planner\");\nB = char(\"Accel\", \" Stage \");\nresult = strcat(A, B);",
+      "output": "result =\n\n  2\u00d711 char array\n\n    'GPUAccel'\n    'PlannerStage'"
+    },
+    {
+      "description": "Concatenate cell arrays of character vectors",
+      "input": "C = {'Run ', 'Plan '; 'Fuse ', 'Cache '};\nsuffix = {'Mat', 'Ops'; 'Kernels', 'Stats'};\ncombined = strcat(C, suffix);",
+      "output": "combined = 2\u00d72 cell\n    {'RunMat'}    {'PlanOps'}\n    {'FuseKernels'}    {'CacheStats'}"
+    },
+    {
+      "description": "Propagate missing strings during concatenation",
+      "input": "values = [string(missing) \"ready\"];\nout = strcat(\"job-\", values);",
+      "output": "out = 1\u00d72 string\n    <missing>    \"job-ready\""
+    },
+    {
+      "description": "Broadcast a scalar character vector across a character array",
+      "input": "labels = char(\"core\", \"runtime\", \"planner\");\nprefixed = strcat(\"runmat-\", labels);",
+      "output": "prefixed =\n\n  3\u00d711 char array\n\n    'runmat-core'\n    'runmat-runtime'\n    'runmat-planner'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `strcat` remove spaces between words?",
+      "answer": "No. `strcat` only strips trailing **space characters** from character inputs before concatenating. Spaces in the middle of a string remain untouched. To insert separators explicitly, concatenate the desired delimiter or use `join`."
+    },
+    {
+      "question": "How are missing strings handled?",
+      "answer": "Missing string scalars (`string(missing)`) propagate. If any operand is missing for a specific element, the resulting element is `<missing>`."
+    },
+    {
+      "question": "What happens when I mix strings and character arrays?",
+      "answer": "The output is a string array. Character inputs are converted to strings (after trimming trailing spaces) and combined element-wise with the string operands."
+    },
+    {
+      "question": "Can I concatenate cell arrays with string arrays?",
+      "answer": "Yes. Inputs are implicitly converted to strings when any operand is a string array, so the result is a string array. Cell array elements must still contain character vectors (or scalar strings)."
+    },
+    {
+      "question": "What if I pass numeric or logical inputs?",
+      "answer": "`strcat` only accepts strings, character arrays, character vectors, or cell arrays of character vectors. Passing unsupported types raises a MATLAB-compatible error."
+    },
+    {
+      "question": "How are empty inputs treated?",
+      "answer": "Dimensions with length zero propagate through implicit expansion. For example, concatenating with an empty string array returns an empty array with the broadcasted shape."
+    }
+  ],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/strcat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strcat.rs"
+  },
+  "gpu_residency": "No. String manipulation runs on the CPU. If intermediate values are on the GPU, RunMat gathers them automatically so you can call `strcat` without extra residency management.",
+  "gpu_behavior": [
+    "RunMat currently performs text concatenation on the CPU. When any operand resides on the GPU, the runtime gathers it to host memory before applying MATLAB-compatible trimming and concatenation rules. Providers do not need to implement device kernels for this builtin today."
+  ]
+}

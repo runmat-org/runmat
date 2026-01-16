@@ -1,0 +1,131 @@
+{
+  "title": "strip",
+  "category": "strings/transform",
+  "keywords": [
+    "strip",
+    "trim",
+    "whitespace",
+    "leading characters",
+    "trailing characters",
+    "character arrays"
+  ],
+  "summary": "Remove leading and trailing characters from strings, character arrays, and cell arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strip.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered before trimming to match MATLAB semantics."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::strip::tests",
+    "integration": "builtins::strings::transform::strip::tests::strip_cell_array_mixed_content"
+  },
+  "description": "`strip(text)` removes consecutive whitespace characters from the beginning and end of `text`. The input can be a string scalar, string array, character array, or a cell array of character vectors, mirroring MATLAB behaviour. Optional arguments let you control which side to trim (`'left'`, `'right'`, or `'both'`) and provide custom characters to remove instead of whitespace.",
+  "behaviors": [
+    "By default, `strip` removes leading and trailing whitespace determined by `isspace`.",
+    "Direction keywords are case-insensitive. `'left'`/`'leading'` trim the beginning, `'right'`/`'trailing'` trim the end, and `'both'` removes characters on both sides.",
+    "Provide a second argument containing characters to remove to strip those characters instead of whitespace. Supply a scalar string/char vector to apply the same rule to every element or a string / cell array matching the input size to specify element-wise character sets.",
+    "Missing string scalars remain `<missing>`.",
+    "Character arrays shrink or retain their width to match the longest stripped row; shorter rows are padded with spaces so the output stays rectangular.",
+    "Cell arrays must contain string scalars or character vectors. Results preserve the original cell layout with trimmed elements."
+  ],
+  "examples": [
+    {
+      "description": "Remove Leading And Trailing Spaces From A String Scalar",
+      "input": "name = \"   RunMat   \";\nclean = strip(name);",
+      "output": "clean = \"RunMat\""
+    },
+    {
+      "description": "Trim Only The Right Side Of Each String",
+      "input": "labels = [\"   Alpha   \"; \"   Beta     \"; \"   Gamma    \"];\nright_stripped = strip(labels, 'right');",
+      "output": "right_stripped = 3\u00d71 string\n    \"   Alpha\"\n    \"   Beta\"\n    \"   Gamma\""
+    },
+    {
+      "description": "Remove Leading Zeros While Preserving Trailing Digits",
+      "input": "codes = [\"00095\"; \"00137\"; \"00420\"];\nnumeric = strip(codes, 'left', '0');",
+      "output": "numeric = 3\u00d71 string\n    \"95\"\n    \"137\"\n    \"420\""
+    },
+    {
+      "description": "Strip Character Arrays And Preserve Rectangular Shape",
+      "input": "animals = char(\"   cat  \", \" dog\", \"cow   \");\ntrimmed = strip(animals);",
+      "output": "trimmed =\n\n  3\u00d74 char array\n\n    'cat '\n    'dog '\n    'cow '"
+    },
+    {
+      "description": "Supply Per-Element Characters To Remove",
+      "input": "metrics = [\"##pass##\", \"--warn--\", \"**fail**\"];\nper_char = [\"#\"; \"-\"; \"*\"];\nnormalized = strip(metrics, 'both', per_char);",
+      "output": "normalized = 3\u00d71 string\n    \"pass\"\n    \"warn\"\n    \"fail\""
+    },
+    {
+      "description": "Trim Cell Array Elements With Mixed Types",
+      "input": "pieces = {'  GPU  ', \"   Accelerate\", 'RunMat   '};\nout = strip(pieces);",
+      "output": "out = 1\u00d73 cell array\n    {'GPU'}    {\"Accelerate\"}    {'RunMat'}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which direction keywords are supported?",
+      "answer": "`'left'` and `'leading'` trim the beginning of the text, `'right'` and `'trailing'` trim the end, and `'both'` (the default) trims both sides."
+    },
+    {
+      "question": "How do I remove characters other than whitespace?",
+      "answer": "Provide a second argument containing the characters to remove, for example `strip(str, \"xyz\")` removes any leading or trailing `x`, `y`, or `z` characters. Combine it with a direction argument to control which side is affected."
+    },
+    {
+      "question": "Can I specify different characters for each element?",
+      "answer": "Yes. Pass a string array or cell array of character vectors that matches the size of the input. Each element is trimmed using the corresponding character set."
+    },
+    {
+      "question": "What happens to missing strings?",
+      "answer": "Missing string scalars (`string(missing)`) remain `<missing>` exactly as in MATLAB."
+    },
+    {
+      "question": "Does `strip` change the shape of character arrays?",
+      "answer": "Only the width can change. `strip` keeps the same number of rows and pads shorter rows with spaces so the array stays rectangular."
+    },
+    {
+      "question": "Will `strip` run on the GPU?",
+      "answer": "Not currently. RunMat gathers GPU-resident inputs automatically and performs trimming on the CPU to maintain MATLAB compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "compose",
+      "url": "./compose"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/strip.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strip.rs"
+  },
+  "gpu_residency": "Text data typically lives on the host. If you deliberately store text on the GPU (for example, by keeping character code points in device buffers), RunMat gathers them automatically when `strip` runs. You do not need to call `gpuArray` or `gather` manually for this builtin.",
+  "gpu_behavior": [
+    "`strip` executes on the CPU. When the input or any nested element resides on the GPU, RunMat gathers those values to host memory before trimming so the results match MATLAB exactly. Providers do not need to implement device kernels for this builtin today."
+  ]
+}

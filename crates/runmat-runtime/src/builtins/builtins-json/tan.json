@@ -1,0 +1,150 @@
+{
+  "title": "tan",
+  "category": "math/trigonometry",
+  "keywords": [
+    "tan",
+    "tangent",
+    "trigonometry",
+    "radians",
+    "gpu",
+    "like"
+  ],
+  "summary": "Element-wise tangent for scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Prefers provider unary_tan hooks; falls back to the host path when the hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::tan::tests",
+    "integration": "builtins::math::trigonometry::tan::tests::tan_gpu_provider_roundtrip"
+  },
+  "description": "`y = tan(x)` computes the tangent of every element in `x`, interpreting each input value in radians.",
+  "behaviors": [
+    "Operates on scalars, vectors, matrices, and N-D tensors while respecting MATLAB's implicit-expansion (broadcasting) rules.",
+    "Logical and integer inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before the tangent is applied so downstream arithmetic mirrors MATLAB.",
+    "Character arrays operate on their Unicode code points and return dense double arrays of identical shape.",
+    "Complex inputs follow MATLAB\u2019s analytic extension `tan(a + bi) = sin(2a)/(cos(2a) + cosh(2b)) + i\u00b7sinh(2b)/(cos(2a) + cosh(2b))`, propagating `NaN`/`Inf` components independently.",
+    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency for real numeric prototypes; complex prototypes currently raise a descriptive error so you can fall back to the default output rules.",
+    "`tan` accepts both host tensors and `gpuArray` inputs. GPU residency is preserved whenever the active provider exposes the `unary_tan` kernel or a fused elementwise implementation.",
+    "Strings and string arrays are rejected to match MATLAB\u2019s numeric-only contract for the trigonometric family.",
+    "Empty inputs, singleton dimensions, and already-reduced shapes pass through unchanged to avoid unnecessary allocations."
+  ],
+  "examples": [
+    {
+      "description": "Getting the tangent of 45 degrees expressed in radians",
+      "input": "y = tan(pi/4);",
+      "output": "y = 1"
+    },
+    {
+      "description": "Applying tangent to a vector of sample angles",
+      "input": "theta = linspace(-pi/2 + 0.1, pi/2 - 0.1, 5);\nwave = tan(theta);",
+      "output": "wave = [-9.9666   -0.9047         0    0.9047    9.9666]"
+    },
+    {
+      "description": "Evaluating the tangent of a matrix on the GPU",
+      "input": "G = gpuArray([0 pi/6; pi/4 pi/3]);\nT = tan(G);\nresult = gather(T);",
+      "output": "result =\n         0    0.5774\n    1.0000    1.7321"
+    },
+    {
+      "description": "Computing the tangent of complex angles",
+      "input": "z = 1 + 0.5i;\ntz = tan(z);",
+      "output": "tz = 0.9654 + 0.2718i"
+    },
+    {
+      "description": "Using tangent to linearise small-angle approximations",
+      "input": "eps = [-1e-6 0 1e-6];\napprox = tan(eps);",
+      "output": "approx = [-1.0000e-06         0    1.0000e-06]"
+    },
+    {
+      "description": "Converting degrees to radians before using `tan`",
+      "input": "angles_in_deg = [0 30 60 89];\nradians = deg2rad(angles_in_deg);\nresult = tan(radians);",
+      "output": "result = [0    0.5774    1.7321   57.2899]"
+    },
+    {
+      "description": "Keeping the result on the GPU with `'like'`",
+      "input": "proto = gpuArray.zeros(1, 1, 'single');\nangles = gpuArray([0 pi/6 pi/4]);\ndeviceResult = tan(angles, 'like', proto);\ngathered = gather(deviceResult);",
+      "output": "gathered =\n  1x3 single\n         0    0.5774    1.0000"
+    },
+    {
+      "description": "Inspecting character codes with tangent",
+      "input": "codes = tan('ABC');",
+      "output": "codes =\n   -1.4700    0.0266    1.6523"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `tan` function?",
+      "answer": "Use `tan` whenever you need the tangent of angles expressed in radians\u2014whether you are modelling waves, evaluating transfer functions, or analysing geometric relationships element-wise across large arrays."
+    },
+    {
+      "question": "What happens near odd multiples of `pi/2`?",
+      "answer": "Values that approach `(2k + 1)\u00b7pi/2` grow rapidly toward \u00b1Inf, just like in MATLAB. RunMat preserves IEEE semantics, so you may observe very large magnitudes or `Inf`/-`Inf` where poles occur."
+    },
+    {
+      "question": "Does `tan` support complex numbers?",
+      "answer": "Yes. RunMat evaluates the analytic extension described above, handling real and imaginary components independently and propagating `NaN`/`Inf` values exactly as MATLAB does."
+    },
+    {
+      "question": "Can I keep the result on the GPU?",
+      "answer": "Yes. When a provider implements `unary_tan`, the result never leaves the device. If a fallback is required, RunMat gathers to the host, computes the result, and reapplies residency requests\u2014including `'like'` outputs\u2014before handing the value back."
+    },
+    {
+      "question": "How do I control units?",
+      "answer": "`tan` operates in radians. Convert degrees with `deg2rad` (or multiply by `pi/180`) before calling `tan`, or use MATLAB\u2019s degree-specific builtins (`tand`, etc.) when available."
+    },
+    {
+      "question": "Does `tan` change the input type?",
+      "answer": "By default results are double precision. Passing `'like', prototype` preserves the prototype\u2019s real numeric type (host or GPU). Complex prototypes are currently unsupported and raise a clear error."
+    },
+    {
+      "question": "Are logical arrays supported?",
+      "answer": "Yes. Logical arrays are promoted to `0.0`/`1.0` doubles before evaluation so downstream workflows remain compatible with MATLAB semantics."
+    },
+    {
+      "question": "Can I fuse `tan` with other elementwise operations?",
+      "answer": "Definitely. The fusion planner emits WGSL `tan` calls for GPU execution, and providers may specialise fused kernels for additional throughput."
+    }
+  ],
+  "links": [
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/tan.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/tan.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_tan`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active and the selected provider implements `unary_tan`, the operation executes entirely on the GPU, keeping inputs and outputs resident in device memory.",
+    "If the provider declines the request, RunMat gathers the data to the host, evaluates the tangent with the reference implementation, and reapplies any residency requests (including `'like'` prototypes that expect GPU outputs) before returning.",
+    "Fusion planning groups neighbouring elementwise operators, so even when a fallback occurs, subsequent GPU-capable steps can resume on-device without redundant transfers."
+  ]
+}

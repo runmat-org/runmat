@@ -1,0 +1,135 @@
+{
+  "title": "cumsum",
+  "category": "math/reduction",
+  "keywords": [
+    "cumsum",
+    "cumulative sum",
+    "running total",
+    "reverse",
+    "omitnan",
+    "gpu"
+  ],
+  "summary": "Cumulative sum of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to host accumulation when the active provider lacks prefix-sum hooks. Result shape always matches the input."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::cumsum::tests",
+    "integration": "builtins::math::reduction::cumsum::tests::cumsum_gpu_provider_roundtrip"
+  },
+  "description": "`cumsum(X)` computes the cumulative sum of the elements in `X`. The result has the same size as `X` and each element stores the running total along a chosen dimension.",
+  "behaviors": [
+    "By default, the running total is taken along the first dimension whose length is greater than 1.",
+    "`cumsum(X, dim)` lets you pick the dimension explicitly; if `dim > ndims(X)`, the input is returned unchanged.",
+    "Passing `[]` for the dimension argument keeps the default dimension (MATLAB uses this as a placeholder).",
+    "`cumsum(..., \"reverse\")` works from the end toward the beginning, whereas `\"forward\"` (default) works from start to finish.",
+    "`cumsum(..., \"omitnan\")` treats `NaN` values as missing. Leading `NaN` values yield zeros until a valid number appears.",
+    "Synonyms such as `\"omitmissing\"` / `\"includemissing\"` are also accepted for MATLAB compatibility.",
+    "The function supports real or complex scalars and dense tensors. Logical inputs are promoted to double precision."
+  ],
+  "examples": [
+    {
+      "description": "Running totals down each column (default dimension)",
+      "input": "A = [1 2 3; 4 5 6];\ncolumnTotals = cumsum(A);",
+      "output": "columnTotals =\n     1     2     3\n     5     7     9"
+    },
+    {
+      "description": "Tracking cumulative sums across rows",
+      "input": "A = [1 2 3; 4 5 6];\nrowTotals = cumsum(A, 2);",
+      "output": "rowTotals =\n     1     3     6\n     4     9    15"
+    },
+    {
+      "description": "Reversing the direction of accumulation",
+      "input": "v = [1 3 5 7];\nreverseTotals = cumsum(v, \"reverse\");",
+      "output": "reverseTotals =\n    16    15    12     7"
+    },
+    {
+      "description": "Ignoring NaN values while accumulating",
+      "input": "v = [2 NaN 5 NaN 1];\nrunning = cumsum(v, \"omitnan\");",
+      "output": "running =\n     2     2     7     7     8"
+    },
+    {
+      "description": "Computing a cumulative sum inside a GPU workflow",
+      "input": "G = gpuArray(rand(1, 5));\ntotals = cumsum(G);\nhostResult = gather(totals);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cumsum` change the size of the input?",
+      "answer": "No. The output is always the same size as the input tensor."
+    },
+    {
+      "question": "What happens if I request a dimension larger than `ndims(X)`?",
+      "answer": "The function returns `X` unchanged, matching MATLAB behaviour."
+    },
+    {
+      "question": "How are complex numbers handled?",
+      "answer": "`cumsum` accumulates the real and imaginary parts independently. NaN checks treat a complex number as missing if either part is `NaN`."
+    },
+    {
+      "question": "What does `\"omitnan\"` do for leading `NaN` values?",
+      "answer": "Leading `NaN` values contribute zeros so the running total remains 0 until a non-NaN value appears."
+    },
+    {
+      "question": "Does `\"reverse\"` affect which dimension is used?",
+      "answer": "No. Direction only decides whether accumulation walks from the start or from the end along the selected dimension."
+    },
+    {
+      "question": "Can I combine `\"reverse\"` and `\"omitnan\"`?",
+      "answer": "Yes. You can specify both options (in any order) and RunMat mirrors MATLAB\u2019s results."
+    },
+    {
+      "question": "Does the GPU path respect `\"omitnan\"`?",
+      "answer": "If the active provider does not natively handle `\"omitnan\"`, RunMat gathers back to host and computes there to preserve MATLAB semantics."
+    }
+  ],
+  "links": [
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "cumprod",
+      "url": "./cumprod"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/cumsum.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumsum.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` calls are optional. RunMat promotes tensors automatically when the planner predicts a benefit, and it keeps fused expressions resident on the device. Explicit `gpuArray` is still supported for MATLAB compatibility or when you want to guarantee GPU residency before entering a critical loop.",
+  "gpu_behavior": [
+    "When a tensor already lives on the GPU, RunMat asks the active acceleration provider for a device-side prefix-sum implementation. The WGPU provider ships a native scan kernel; other providers may still fall back. If no hook is available, RunMat gathers the data to host memory, performs the cumulative sum on the CPU, and returns a dense tensor value. Residency metadata is cleared so later operations can re-promote the tensor when profitable."
+  ]
+}

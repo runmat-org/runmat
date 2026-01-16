@@ -8,6 +8,5 @@ use crate::builtin::metadata::BuiltinRecord;
 pub struct AuthoringContext {
     pub builtin: BuiltinRecord,
     pub prompt: String,
-    pub doc_markdown: Option<String>,
     pub source_paths: Vec<PathBuf>,
 }

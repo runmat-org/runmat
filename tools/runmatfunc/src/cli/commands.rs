@@ -16,15 +16,7 @@ pub fn handle_command(ctx: &mut AppContext, args: &CliArgs) -> Result<()> {
                 model,
                 codex,
                 diff,
-                show_doc,
-            } => ctx.run_builtin(
-                name,
-                category.as_deref(),
-                model.clone(),
-                *codex,
-                *diff,
-                *show_doc,
-            ),
+            } => ctx.run_builtin(name, category.as_deref(), model.clone(), *codex, *diff),
         },
         Some(Command::Queue { action }) => match action {
             QueueAction::Add {

@@ -1,0 +1,129 @@
+{
+  "title": "ifft",
+  "category": "math/fft",
+  "keywords": [
+    "ifft",
+    "inverse fft",
+    "inverse fourier transform",
+    "symmetric",
+    "gpu"
+  ],
+  "summary": "Compute the inverse discrete Fourier transform (IDFT) of vectors, matrices, or N-D tensors.",
+  "references": [
+    "title: \"MATLAB ifft documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to host execution when the acceleration provider does not expose an inverse FFT hook; even with a hook, the result is downloaded immediately to return a MATLAB-compatible host array."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::ifft::tests",
+    "integration": "builtins::math::fft::ifft::tests::ifft_gpu_roundtrip_matches_cpu"
+  },
+  "description": "`ifft(X)` performs the inverse discrete Fourier transform (IDFT) of the data in `X`. For vectors, the result is a time-domain sequence whose FFT equals the original input. For matrices and higher-rank tensors, the transform is applied along the first non-singleton dimension unless a different dimension is specified.",
+  "behaviors": [
+    "`ifft(X)` transforms along the first dimension whose size is greater than 1.",
+    "`ifft(X, N)` zero-pads or truncates `X` to length `N` before applying the transform.",
+    "`ifft(X, N, DIM)` applies the transform along dimension `DIM`.",
+    "`ifft(X, [], DIM)` keeps the existing length and transforms along dimension `DIM`.",
+    "`ifft(..., 'symmetric')` forces the output to be real-valued, mirroring MATLAB's handling of conjugate-symmetric spectra.",
+    "`ifft(..., 'nonsymmetric')` keeps the default complex result; it is equivalent to omitting the symmetry flag but is accepted for MATLAB compatibility.",
+    "Empty inputs and dimensions larger than the rank of `X` mirror MATLAB behaviour."
+  ],
+  "examples": [
+    {
+      "description": "Reconstructing a time-domain signal from FFT bins",
+      "input": "Y = [10  -2+2i  -2  -2-2i];\nx = ifft(Y);",
+      "output": "x =\n  Columns 1 through 4\n       1     2     3     4"
+    },
+    {
+      "description": "Computing `ifft` along a specific dimension",
+      "input": "F = [10  14  18;\n     -3+3i  -3+3i  -3+3i];\nX = ifft(F, [], 1);"
+    },
+    {
+      "description": "Zero-padding the inverse transform",
+      "input": "F = [4 0 0 0];\nx = ifft(F, 8);"
+    },
+    {
+      "description": "Enforcing a real result with `'symmetric'`",
+      "input": "F = fft([1 2 3 4]);\nx = ifft(F, 'symmetric');"
+    },
+    {
+      "description": "Running `ifft` on `gpuArray` inputs",
+      "input": "G = gpuArray(fft([1 0 0 0]));\nX = ifft(G);\nresult = gather(X);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ifft` always return complex values?",
+      "answer": "By default, yes. The `'symmetric'` flag converts the result to a real array when the spectrum is conjugate-symmetric. You can also pass `'nonsymmetric'` to state this default explicitly while keeping the complex result."
+    },
+    {
+      "question": "How does `ifft` scale the result?",
+      "answer": "RunMat divides by the transform length so that `ifft(fft(x))` reproduces `x`, matching MATLAB."
+    },
+    {
+      "question": "Can I omit the length but specify a dimension?",
+      "answer": "Yes. Use an empty array for the length: `ifft(X, [], DIM)`."
+    },
+    {
+      "question": "What happens if I request a zero length?",
+      "answer": "You receive an empty array along the selected dimension, mirroring MATLAB behaviour."
+    },
+    {
+      "question": "Does `'symmetric'` validate conjugate symmetry?",
+      "answer": "No. Like MATLAB, RunMat assumes the spectrum is conjugate-symmetric and simply discards imaginary components."
+    },
+    {
+      "question": "Will RunMat run the inverse FFT on the GPU automatically?",
+      "answer": "Only when the provider exposes an inverse FFT kernel (`ifft_dim`). Otherwise, the runtime gathers to the host transparently."
+    },
+    {
+      "question": "How do I perform multi-dimensional inverse transforms?",
+      "answer": "Apply `ifft` sequentially along each dimension (e.g., `ifft(ifft(X, [], 1), [], 2)`)."
+    }
+  ],
+  "links": [
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "ifftshift",
+      "url": "./ifftshift"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "RunMat's auto-offload system keeps tensors on the GPU when profitable, so explicit `gpuArray` calls are rarely required. They remain available to mirror MATLAB workflows. When the provider lacks an inverse FFT hook, RunMat automatically gathers once, evaluates the transform on the host, and returns the result, so manual residency management is unnecessary.",
+  "gpu_behavior": [
+    "RunMat keeps `gpuArray` inputs on the device long enough to query the active acceleration provider for the `ifft_dim` hook. When the hook is present, the inverse transform executes on the device, after which RunMat immediately downloads the result to return the standard MATLAB host types. If the provider lacks that hook\u2014or if the requested length is zero\u2014the runtime gathers the data once, evaluates the inverse transform on the CPU via `rustfft`, and returns a MATLAB-compatible result."
+  ]
+}

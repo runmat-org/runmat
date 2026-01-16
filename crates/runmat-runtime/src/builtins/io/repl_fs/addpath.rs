@@ -26,155 +26,6 @@ const ERROR_TOO_FEW_ARGS: &str = "addpath: at least one folder must be specified
 const ERROR_POSITION_REPEATED: &str =
     "addpath: position option must be '-begin' or '-end' and may only appear once";
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "addpath",
-        builtin_path = "crate::builtins::io::repl_fs::addpath"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "addpath"
-category: "io/repl_fs"
-keywords: ["addpath", "search path", "matlab path", "-begin", "-end", "-frozen"]
-summary: "Add folders to the MATLAB search path used by RunMat."
-references:
-  - https://www.mathworks.com/help/matlab/ref/addpath.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 8
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::repl_fs::addpath::tests"
-  integration: "builtins::io::repl_fs::addpath::tests::addpath_accepts_string_containers"
----
-
-# What does the `addpath` function do in MATLAB / RunMat?
-`addpath` prepends or appends folders to the MATLAB search path that RunMat consults when resolving functions, scripts, classes, and data files. The change affects the current session immediately, and the resulting ordering matches MATLAB semantics.
-
-## How does the `addpath` function behave in MATLAB / RunMat?
-- Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).
-- Multiple folders can be passed in a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath`.
-- By default, folders are added to the top of the search path. Use `'-end'` to append or `'-begin'` to force prepending explicitly. Only one position flag is permitted.
-- The `'-frozen'` flag is accepted for MATLAB compatibility. RunMat does not currently track frozen entries separately; the flag simply suppresses incompatibility warnings.
-- Duplicate entries are removed automatically so each folder appears at most once. On Windows, comparisons are case-insensitive.
-- Inputs are resolved to absolute, canonicalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user’s home directory.
-- Folders must exist. RunMat raises `addpath: folder '<name>' not found` when a directory is missing or `addpath: '<name>' is not a folder` when the target is not a directory.
-
-## `addpath` Function GPU Execution Behaviour
-`addpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `addpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit—RunMat gathers them automatically.
-
-## Examples of using the `addpath` function in MATLAB / RunMat
-
-### Add a single folder to the top of the search path
-```matlab
-old = addpath("util/toolbox");
-path()
-```
-Expected behaviour:
-```matlab
-old          % Previous search path as a character vector
-% The folder util/toolbox now appears before the old entries.
-```
-
-### Append folders to the end of the search path
-```matlab
-dirs = ["shared/filters", "shared/signal"];
-addpath(dirs, "-end");
-```
-Expected behaviour:
-```matlab
-% The specified folders are appended to the end of the search path.
-```
-
-### Use `genpath` output to add a folder tree
-```matlab
-toolchain = genpath("third_party/toolchain");
-addpath(toolchain);
-```
-Expected behaviour:
-```matlab
-% Every directory produced by genpath is inserted at the top of the search path.
-```
-
-### Add folders from a cell array
-```matlab
-folders = {'src/algorithms', 'src/visualization'};
-addpath(folders{:}, "-begin");
-```
-Expected output:
-```matlab
-% Both folders appear at the beginning of the MATLAB search path.
-```
-
-### Move an existing folder to the top of the search path
-```matlab
-addpath("src/algorithms");
-```
-Expected behaviour:
-```matlab
-% The folder is removed from its previous position and reinserted at the front.
-```
-
-### Accept the MATLAB `-frozen` flag
-```matlab
-addpath("vendor/hardware", "-frozen");
-```
-Expected behaviour:
-```matlab
-% The folder is added; RunMat currently treats '-frozen' as an informational hint.
-```
-
-### Retrieve the previous path and restore it later
-```matlab
-old = addpath("analysis/utilities");
-% ... run experiments ...
-path(old);
-```
-Expected behaviour:
-```matlab
-% The original search path is restored when you call path(old).
-```
-
-### Combine multiple options
-```matlab
-addpath("contrib", "docs/examples", "-end", "-frozen");
-```
-Expected behaviour:
-```matlab
-% Both folders are appended to the end of the search path.
-```
-
-## FAQ
-- **Does `addpath` insist on absolute paths?** No. Relative inputs are resolved against the current working directory and stored as absolute paths.
-- **What happens with duplicate folders?** Existing occurrences are removed before the new ordering is applied, so each folder appears only once.
-- **How do I append instead of prepend?** Supply `'-end'` as the final argument. Use `'-begin'` to force prepending explicitly.
-- **Is `-frozen` supported?** The flag is accepted for MATLAB compatibility. RunMat currently treats it as a no-op but plans to integrate tighter tooling once savepath support lands.
-- **Can I load `pathdef.m` directly?** Not yet. RunMat will add parity support in a future release. For now, evaluate the file manually and pass the resulting character vector to `path`.
-- **Do folders need to exist?** Yes. RunMat validates that every entry exists and is a directory before updating the search path.
-- **Will `addpath` accept GPU strings?** Yes. Inputs are gathered automatically, then processed on the CPU.
-- **Does `addpath` return the new path?** Like MATLAB, `addpath` returns the previous path so it can be restored later with `path(old)`.
-
-## See Also
-[path](./path), [rmpath](https://www.mathworks.com/help/matlab/ref/rmpath.html), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](./which), [exist](./exist)
-
-## Source & Feedback
-- Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs)
-- Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "addpath",
@@ -523,7 +374,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
-    use crate::builtins::common::test_support;
     use std::convert::TryFrom;
     use std::env;
     use std::fs;
@@ -808,12 +658,5 @@ pub(crate) mod tests {
         addpath_builtin(vec![Value::StringArray(string_array)]).expect("addpath");
         let current = current_path_string();
         assert_eq!(current, canonical(&cwd));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn addpath_doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

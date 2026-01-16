@@ -1,0 +1,150 @@
+{
+  "title": "addpath",
+  "category": "io/repl_fs",
+  "keywords": [
+    "addpath",
+    "search path",
+    "matlab path",
+    "-begin",
+    "-end",
+    "-frozen"
+  ],
+  "summary": "Add folders to the MATLAB search path used by RunMat.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/addpath.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 8,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::addpath::tests",
+    "integration": "builtins::io::repl_fs::addpath::tests::addpath_accepts_string_containers"
+  },
+  "description": "`addpath` prepends or appends folders to the MATLAB search path that RunMat consults when resolving functions, scripts, classes, and data files. The change affects the current session immediately, and the resulting ordering matches MATLAB semantics.",
+  "behaviors": [
+    "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
+    "Multiple folders can be passed in a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath`.",
+    "By default, folders are added to the top of the search path. Use `'-end'` to append or `'-begin'` to force prepending explicitly. Only one position flag is permitted.",
+    "The `'-frozen'` flag is accepted for MATLAB compatibility. RunMat does not currently track frozen entries separately; the flag simply suppresses incompatibility warnings.",
+    "Duplicate entries are removed automatically so each folder appears at most once. On Windows, comparisons are case-insensitive.",
+    "Inputs are resolved to absolute, canonicalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user\u2019s home directory.",
+    "Folders must exist. RunMat raises `addpath: folder '<name>' not found` when a directory is missing or `addpath: '<name>' is not a folder` when the target is not a directory."
+  ],
+  "examples": [
+    {
+      "description": "Add a single folder to the top of the search path",
+      "input": "old = addpath(\"util/toolbox\");\npath()",
+      "output": "old          % Previous search path as a character vector\n% The folder util/toolbox now appears before the old entries."
+    },
+    {
+      "description": "Append folders to the end of the search path",
+      "input": "dirs = [\"shared/filters\", \"shared/signal\"];\naddpath(dirs, \"-end\");",
+      "output": "% The specified folders are appended to the end of the search path."
+    },
+    {
+      "description": "Use `genpath` output to add a folder tree",
+      "input": "toolchain = genpath(\"third_party/toolchain\");\naddpath(toolchain);",
+      "output": "% Every directory produced by genpath is inserted at the top of the search path."
+    },
+    {
+      "description": "Add folders from a cell array",
+      "input": "folders = {'src/algorithms', 'src/visualization'};\naddpath(folders{:}, \"-begin\");",
+      "output": "% Both folders appear at the beginning of the MATLAB search path."
+    },
+    {
+      "description": "Move an existing folder to the top of the search path",
+      "input": "addpath(\"src/algorithms\");",
+      "output": "% The folder is removed from its previous position and reinserted at the front."
+    },
+    {
+      "description": "Accept the MATLAB `-frozen` flag",
+      "input": "addpath(\"vendor/hardware\", \"-frozen\");",
+      "output": "% The folder is added; RunMat currently treats '-frozen' as an informational hint."
+    },
+    {
+      "description": "Retrieve the previous path and restore it later",
+      "input": "old = addpath(\"analysis/utilities\");\n% ... run experiments ...\npath(old);",
+      "output": "% The original search path is restored when you call path(old)."
+    },
+    {
+      "description": "Combine multiple options",
+      "input": "addpath(\"contrib\", \"docs/examples\", \"-end\", \"-frozen\");",
+      "output": "% Both folders are appended to the end of the search path."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addpath` insist on absolute paths?",
+      "answer": "No. Relative inputs are resolved against the current working directory and stored as absolute paths."
+    },
+    {
+      "question": "What happens with duplicate folders?",
+      "answer": "Existing occurrences are removed before the new ordering is applied, so each folder appears only once."
+    },
+    {
+      "question": "How do I append instead of prepend?",
+      "answer": "Supply `'-end'` as the final argument. Use `'-begin'` to force prepending explicitly."
+    },
+    {
+      "question": "Is `-frozen` supported?",
+      "answer": "The flag is accepted for MATLAB compatibility. RunMat currently treats it as a no-op but plans to integrate tighter tooling once savepath support lands."
+    },
+    {
+      "question": "Can I load `pathdef.m` directly?",
+      "answer": "Not yet. RunMat will add parity support in a future release. For now, evaluate the file manually and pass the resulting character vector to `path`."
+    },
+    {
+      "question": "Do folders need to exist?",
+      "answer": "Yes. RunMat validates that every entry exists and is a directory before updating the search path."
+    },
+    {
+      "question": "Will `addpath` accept GPU strings?",
+      "answer": "Yes. Inputs are gathered automatically, then processed on the CPU."
+    },
+    {
+      "question": "Does `addpath` return the new path?",
+      "answer": "Like MATLAB, `addpath` returns the previous path so it can be restored later with `path(old)`."
+    }
+  ],
+  "links": [
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/rmpath.html"
+    },
+    {
+      "label": "genpath",
+      "url": "https://www.mathworks.com/help/matlab/ref/genpath.html"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs"
+  },
+  "gpu_residency": "No. `addpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit\u2014RunMat gathers them automatically.",
+  "gpu_behavior": [
+    "`addpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
+  ]
+}

@@ -346,11 +346,6 @@ fn render_context_detail(ctx: &AuthoringContext, config: &AppConfig) -> String {
         }
     ));
     out.push_str(&format!("Prompt:\n{}\n", ctx.prompt));
-    if ctx.doc_markdown.is_some() {
-        out.push_str(
-            "\nDocumentation excerpt hidden (use CLI `runmatfunc builtin <name> --show-doc`).\n",
-        );
-    }
     if !ctx.source_paths.is_empty() {
         out.push_str("\nSource Hints:\n");
         for path in &ctx.source_paths {

@@ -1,0 +1,142 @@
+{
+  "title": "rot90",
+  "category": "array/shape",
+  "keywords": [
+    "rot90",
+    "rotate",
+    "90 degrees",
+    "matrix",
+    "gpu",
+    "clockwise",
+    "counterclockwise"
+  ],
+  "summary": "Rotate matrices and N-D arrays by multiples of 90 degrees.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider permute + flip hooks when available; otherwise gathers once, rotates on the host, and re-uploads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::rot90::tests",
+    "integration": "builtins::array::shape::rot90::tests::rot90_gpu_roundtrip"
+  },
+  "description": "`rot90(A)` rotates the matrix `A` by 90 degrees counterclockwise. A second argument specifies additional 90-degree turns (positive values rotate counterclockwise, negative values clockwise). For N-D arrays, only the first two dimensions participate in the rotation; trailing dimensions remain unchanged.",
+  "behaviors": [
+    "Default behaviour rotates 90 degrees counterclockwise (`k = 1`).",
+    "`rot90(A, K)` rotates by `K * 90\u00b0`; the rotation count can be positive, negative, or zero. Any integer multiple of four leaves the input unchanged.",
+    "The direction keywords `'clockwise'` and `'counterclockwise'` are accepted as an alternative to the numeric argument (case-insensitive).",
+    "Works for numeric tensors, logical masks, complex arrays, string arrays, and character matrices. Scalars are unchanged.",
+    "For empty dimensions the function still swaps the first two extents, so `rot90(zeros(0, 3))` returns a `3\u00d70` array."
+  ],
+  "examples": [
+    {
+      "description": "Rotating a matrix 90 degrees counterclockwise",
+      "input": "A = [1 2 3; 4 5 6];\nB = rot90(A);",
+      "output": "B =\n     3     6\n     2     5\n     1     4"
+    },
+    {
+      "description": "Rotating a matrix clockwise using a direction keyword",
+      "input": "A = magic(3);\nC = rot90(A, 'clockwise');",
+      "output": "C =\n     6     1     8\n     7     5     3\n     2     9     4"
+    },
+    {
+      "description": "Applying multiple 90-degree turns with a numeric count",
+      "input": "A = reshape(1:9, [3 3]);\nB = rot90(A, 2);    % 180-degree rotation",
+      "output": "B =\n     9     8     7\n     6     5     4\n     3     2     1"
+    },
+    {
+      "description": "Rotating 3-D data while preserving trailing dimensions",
+      "input": "T = reshape(1:12, [2 3 2]);\nR = rot90(T);\nsize(R)",
+      "output": "ans =\n     3     2     2"
+    },
+    {
+      "description": "Rotating character data to reorganise text",
+      "input": "C = ['r','u','n'; 'm','a','t'; ' ','A','I'];\nR = rot90(C);",
+      "output": "R =\n    'ntI'\n    'uaA'\n    'rm '"
+    },
+    {
+      "description": "Rotating gpuArray data and keeping it on the device",
+      "input": "G = gpuArray(reshape(1:9, [3 3]));\nH = rot90(G, -1);     % rotate clockwise\nisgpuarray(H)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What directions does `rot90` support?",
+      "answer": "Numeric rotation counts (integers) and the strings `'clockwise'` / `'counterclockwise'` are recognised. Any other strings raise an error."
+    },
+    {
+      "question": "Does `rot90` modify dimensions beyond the first two?",
+      "answer": "No. Only the first two axes participate in the rotation. Other dimensions keep their order and extents unchanged."
+    },
+    {
+      "question": "What happens for empty matrices?",
+      "answer": "Empty inputs still swap the first two dimension sizes. For example, a `0\u00d75` matrix becomes `5\u00d70` after a single counterclockwise rotation."
+    },
+    {
+      "question": "Can I rotate logical, string, or character arrays?",
+      "answer": "Yes. Logical results remain logical, string arrays preserve their elements, and character matrices rotate their characters exactly like numeric data."
+    },
+    {
+      "question": "How do large rotation counts behave?",
+      "answer": "The rotation count is reduced modulo 4. Values such as `rot90(A, 37)` behave the same as `rot90(A, 1)`."
+    },
+    {
+      "question": "Is `rot90` compatible with complex numbers?",
+      "answer": "Absolutely. Complex tensors rotate without altering the real or imaginary parts; only the element positions change."
+    },
+    {
+      "question": "Can providers implement a custom kernel?",
+      "answer": "Yes. Providers may implement a specialised `rot90` kernel. When unavailable, the runtime composes the operation using the `permute` and `flip` hooks or falls back to the host implementation."
+    }
+  ],
+  "links": [
+    {
+      "label": "`flip`",
+      "url": "./flip"
+    },
+    {
+      "label": "`permute`",
+      "url": "./permute"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`kron`",
+      "url": "./kron"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/rot90.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/rot90.rs"
+  },
+  "gpu_residency": "Not usually. The auto-offload planner keeps tensors on the GPU whenever it is profitable. Explicitly creating a `gpuArray` matches MATLAB syntax, but RunMat will also auto-promote host tensors when the planner determines that rotating them on the device avoids unnecessary transfers. When the active provider lacks native support the runtime downloads the tensor once, rotates on the host, and uploads the rotated tensor back to the GPU so downstream operations continue to benefit from residency information.",
+  "gpu_behavior": [
+    "Providers that implement both `permute` and `flip` can realise the rotation without leaving the GPU, preserving residency for downstream operations.",
+    "If a dedicated `rot90` kernel is exposed the provider may call it instead of composing lower-level hooks.",
+    "When no compatible hooks are available, RunMat gathers the tensor once, rotates it on the host, and re-uploads the rotated tensor so subsequent GPU work continues without surprises."
+  ]
+}

@@ -12,49 +12,6 @@ use super::contour::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "contourf",
-        builtin_path = "crate::builtins::plotting::contourf"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "contourf"
-category: "plotting"
-keywords: ["contourf", "contour", "filled", "gpuArray"]
-summary: "Render MATLAB-compatible filled contour plots."
-references:
-  - https://www.mathworks.com/help/matlab/ref/contourf.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single", "double"]
-  broadcasting: "none"
-  notes: "Single/double-precision gpuArray grids stay on the device; CPU fallbacks mirror MATLAB semantics."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 3
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::contourf::tests"
----
-
-# What does `contourf` do?
-`contourf(X, Y, Z)` fills the regions between contour levels with solid colors. When the axes are
-omitted, RunMat assumes `1:m` and `1:n` just like MATLAB. The default level count matches MATLAB's
-behaviour (10).
-
-## GPU behaviour
-- Single/double-precision gpuArrays feed a compute shader that emits renderer-ready triangles on the
-  shared WebGPU device.
-- When GPU support is unavailable, tensors gather to host memory and rendering proceeds on the CPU
-  path with identical results.
-"#;
-
 #[runtime_builtin(
     name = "contourf",
     category = "plotting",

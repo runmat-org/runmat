@@ -1,0 +1,136 @@
+{
+  "title": "sqrt",
+  "category": "math/elementwise",
+  "keywords": [
+    "sqrt",
+    "square root",
+    "elementwise",
+    "gpu",
+    "complex"
+  ],
+  "summary": "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the provider lacks unary_sqrt or when the result requires complex values."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::sqrt::tests",
+    "integration": "builtins::math::elementwise::sqrt::tests::sqrt_gpu_provider_roundtrip",
+    "gpu": "builtins::math::elementwise::sqrt::tests::sqrt_wgpu_matches_cpu_elementwise"
+  },
+  "description": "`Y = sqrt(X)` computes the principal square root of every element in `X`. Results follow MATLAB semantics for scalars, vectors, matrices, logical arrays, character arrays, and complex inputs. Negative real values automatically promote to complex results so that the output remains exact.",
+  "behaviors": [
+    "`sqrt(X)` applies the operation element-wise with MATLAB broadcasting rules.",
+    "Logical values convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the square root is taken.",
+    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Negative real inputs yield purely imaginary outputs: `sqrt([-1 4])` returns `[0 + 1i, 2]`.",
+    "Complex inputs follow MATLAB's definition and stay on the principal branch of the complex square root, ensuring continuity across the negative real axis.",
+    "Zeros (including `-0`) remain zero in the output; infinities and NaNs propagate according to IEEE arithmetic."
+  ],
+  "examples": [
+    {
+      "description": "Taking the square root of a positive scalar",
+      "input": "y = sqrt(9);",
+      "output": "y = 3;"
+    },
+    {
+      "description": "Square roots of a matrix",
+      "input": "A = [1 4 9; 16 25 36];\nR = sqrt(A);",
+      "output": "R = [1 2 3; 4 5 6];"
+    },
+    {
+      "description": "Square roots of negative inputs produce complex results",
+      "input": "values = [-1 -4 9];\nroots = sqrt(values);",
+      "output": "roots = [0.0000 + 1.0000i, 0.0000 + 2.0000i, 3.0000 + 0.0000i];"
+    },
+    {
+      "description": "Element-wise square root on GPU data",
+      "input": "G = gpuArray([0 1; 4 9]);\nout = sqrt(G);\nresult = gather(out);",
+      "output": "result = [0 1; 2 3];"
+    },
+    {
+      "description": "Square root of complex numbers",
+      "input": "z = [3 + 4i, -1 + 2i];\nw = sqrt(z);",
+      "output": "w = [2 + 1i, 0.7862 + 1.2720i];"
+    },
+    {
+      "description": "Square root of character codes",
+      "input": "C = 'AB';\nnumericRoots = sqrt(C);",
+      "output": "numericRoots = [8.0623 8.2462];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `sqrt` return complex results for negative inputs?",
+      "answer": "Yes. Negative real numbers produce purely imaginary outputs that match MATLAB. Mixed-sign tensors automatically promote to complex tensors."
+    },
+    {
+      "question": "How are logical inputs handled?",
+      "answer": "Logical arrays convert to doubles before the square root is applied, so `sqrt([true false])` returns `[1 0]`."
+    },
+    {
+      "question": "Can the GPU handle negative inputs?",
+      "answer": "Providers currently operate on real buffers. When negative values are present, RunMat gathers the tensor to the host to compute the correct complex result before continuing execution."
+    },
+    {
+      "question": "Does `sqrt` preserve the input shape?",
+      "answer": "Yes. The output has the same shape as the input, with element-wise results."
+    },
+    {
+      "question": "How are NaNs and infinities treated?",
+      "answer": "They follow IEEE rules: `sqrt(NaN)` is `NaN`, `sqrt(Inf)` is `Inf`, and `sqrt(-Inf)` is `0 + Inf\u00b7i`."
+    },
+    {
+      "question": "What about complex inputs with small imaginary parts?",
+      "answer": "The implementation uses the principal square root branch and rounds very small real or imaginary components to zero to avoid `-0` artefacts."
+    },
+    {
+      "question": "Will future providers support complex tensors directly?",
+      "answer": "Yes. The current design promotes to host computation when complex results are needed. Future providers may expose complex buffers, and the builtin will automatically benefit from those hooks."
+    }
+  ],
+  "links": [
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "log",
+      "url": "./log"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The acceleration planner and fusion engine keep tensors on the GPU when profitable. If your data contains negative values, RunMat automatically gathers the tensor, produces the complex result on the host, and keeps residency metadata in sync. You can still use `gpuArray`/`gather` to mirror MathWorks MATLAB workflows.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps tensors on the GPU when the active provider implements both `unary_sqrt` and `reduce_min`, allowing the runtime to prove that every element is non-negative before launching the kernel. When the dataset contains negative values (and therefore requires complex promotion) or when either hook is missing, RunMat gathers the data to the host, computes the MATLAB-compatible result, and updates residency metadata so subsequent operations see the correct value."
+  ]
+}

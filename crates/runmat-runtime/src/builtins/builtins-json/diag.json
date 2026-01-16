@@ -1,0 +1,168 @@
+{
+  "title": "diag",
+  "category": "array/shape",
+  "keywords": [
+    "diag",
+    "diagonal",
+    "matrix",
+    "extraction",
+    "gpu"
+  ],
+  "summary": "Create diagonal matrices from vectors or extract diagonals from matrices.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Keeps results on the GPU when providers implement custom diag hooks; otherwise gathers to the host, materialises the result once, and uploads it back to the device."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::diag::tests",
+    "integration": "builtins::array::shape::diag::tests::diag_gpu_roundtrip"
+  },
+  "description": "`diag` either constructs a diagonal matrix from a vector (placing the vector on a specified diagonal) or extracts a diagonal from a matrix. The behaviour matches MATLAB, including support for offsets, logical inputs, complex values, and character arrays.",
+  "behaviors": [
+    "`diag(v)` with a vector `v` returns a square matrix whose main diagonal is `v`.",
+    "`diag(v, k)` places `v` on the `k`-th diagonal: super-diagonals for `k > 0`, sub-diagonals for `k < 0`. The output size grows by `abs(k)`.",
+    "`diag(A)` with a matrix `A` returns a column vector containing the main diagonal of `A`.",
+    "`diag(A, k)` extracts the `k`-th diagonal. When the requested diagonal does not exist, an empty column vector is returned.",
+    "`diag(v, 'vector')` always returns a column vector copy of `v`, even when `v` is already a vector.",
+    "`diag(v, m)` forces an `m \u00d7 m` square result, while `diag(v, [m n])` creates an explicit rectangular size. You can combine both with offsets (e.g. `diag(v, k, [m n])`) when you need a wider diagonal band.",
+    "`diag(___, 'logical')` converts the result to a logical array. `diag(___, 'double')` forces a double-precision result when inputs are logical.",
+    "`diag(___, 'like', prototype)` matches the numeric flavour and residency of `prototype` (including GPU handles).",
+    "Logical inputs stay logical; complex inputs stay complex; character arrays preserve padding with spaces off the diagonal.",
+    "Higher-dimensional inputs are accepted when trailing dimensions are singleton\u2014only the leading 2-D slice participates in the diagonal operation."
+  ],
+  "examples": [
+    {
+      "description": "Creating a diagonal matrix from a vector",
+      "input": "v = [4 5 6];\nD = diag(v);",
+      "output": "D =\n     4     0     0\n     0     5     0\n     0     0     6"
+    },
+    {
+      "description": "Placing a vector on an upper diagonal",
+      "input": "v = [1 2 3];\nU = diag(v, 1);",
+      "output": "U =\n     0     1     0     0\n     0     0     2     0\n     0     0     0     3\n     0     0     0     0"
+    },
+    {
+      "description": "Extracting a subdiagonal as a column vector",
+      "input": "A = [1 2 3; 4 5 6; 7 8 9];\nd = diag(A, -1);",
+      "output": "d =\n     4\n     8"
+    },
+    {
+      "description": "Building a diagonal matrix from a logical mask",
+      "input": "mask = logical([1 0 1 0]);\nM = diag(mask);",
+      "output": "M =\n     1     0     0     0\n     0     0     0     0\n     0     0     1     0\n     0     0     0     0"
+    },
+    {
+      "description": "Keeping diagonal results on the GPU",
+      "input": "G = gpuArray([2; 4; 8]);\nD = diag(G);\nfirstTwo = gather(D(1:2, 1:2));",
+      "output": "firstTwo =\n     2     0\n     0     4"
+    },
+    {
+      "description": "Returning a vector without creating a matrix",
+      "input": "v = [10 20 30];\nd = diag(v, 'vector');",
+      "output": "d =\n    10\n    20\n    30"
+    },
+    {
+      "description": "Creating a rectangular diagonal matrix with `sz`",
+      "input": "v = [1 2];\nR = diag(v, [2 4]);",
+      "output": "R =\n     1     0     0     0\n     0     2     0     0"
+    },
+    {
+      "description": "Matching residency and type with `'like'`",
+      "input": "G = gpuArray([1 3 5]');\nD = diag([1 2 3], 'like', G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `diag` always return a square matrix?",
+      "answer": "Only when the input is a vector and you do not request otherwise. Use `'vector'` to keep the result as a column vector, or pass a size vector (e.g. `diag(v, [m n])`) to create rectangular matrices."
+    },
+    {
+      "question": "What happens if I request a diagonal outside the matrix bounds?",
+      "answer": "You receive an empty column vector (size `0 \u00d7 0`), matching MATLAB's behaviour."
+    },
+    {
+      "question": "Can I use `diag` with logical or character arrays?",
+      "answer": "Yes. Logical inputs produce logical outputs, and character inputs produce padded character arrays with spaces away from the diagonal."
+    },
+    {
+      "question": "Does `diag` support complex numbers?",
+      "answer": "Complex inputs are supported. The output keeps the real and imaginary parts intact."
+    },
+    {
+      "question": "How do offsets work with vectors?",
+      "answer": "`diag(v, k)` grows the matrix by `abs(k)` and shifts the diagonal up (`k > 0`) or down (`k < 0`)."
+    },
+    {
+      "question": "Can I place a diagonal inside a non-square matrix?",
+      "answer": "No. MATLAB (and RunMat) always produces a square matrix when building from a vector."
+    },
+    {
+      "question": "What if the vector is empty?",
+      "answer": "`diag([])` returns a `0 \u00d7 0` matrix. `diag([], k)` returns a square matrix of size `abs(k)` filled with zeros."
+    },
+    {
+      "question": "Do GPU results stay on the device?",
+      "answer": "Yes\u2014providers with diag hooks operate entirely on the GPU. Providers without hooks perform a single host gather and upload, so downstream fused expressions still see a GPU handle. When you request `'like'` with a GPU prototype, the result is uploaded back to the device even if a host fallback was required."
+    },
+    {
+      "question": "Is the offset argument required to be an integer?",
+      "answer": "Yes. Non-integer or non-finite offsets raise an error."
+    },
+    {
+      "question": "Does `diag` modify the original input?",
+      "answer": "No. It always returns a new array, leaving the input unchanged."
+    },
+    {
+      "question": "How do I match another array's type or residency?",
+      "answer": "Use the `'like'` syntax: `diag(v, 'like', prototype)`. Logical, complex, and GPU prototypes are respected even when the computation falls back to the CPU path."
+    },
+    {
+      "question": "Is single precision supported?",
+      "answer": "Not yet. Requesting `'single'` currently raises an error. Use `'like'` with an appropriate prototype once single-precision support lands."
+    }
+  ],
+  "links": [
+    {
+      "label": "eye",
+      "url": "./eye"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/diag.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/diag.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the auto-offload planner keeps residency on the GPU when expressions make use of GPU providers. Even when the provider lacks `diag_from_vector` / `diag_extract`, the builtin gathers once on the host, performs the diagonal operation, and re-uploads the result so later GPU-friendly ops can continue without intervention.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` to move data to the GPU. That mirrors MATLAB's behaviour while still allowing RunMat's planner to decide whether the GPU offers an advantage for the surrounding computation.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "When the input lives on the GPU, RunMat calls the acceleration provider's `diag_from_vector` or `diag_extract` hook (see the GPU spec). Providers that do not expose these hooks fall back to a host round-trip: the input is gathered once, the diagonal computation runs on the CPU, and the result is uploaded back to the device. Size overrides or the `'vector'` option also trigger the host path because they are not yet exposed through provider hooks. `'like'` requests are honoured regardless of the path: GPU prototypes stay on the device, while logical or complex prototypes adjust the element type accordingly."
+  ]
+}

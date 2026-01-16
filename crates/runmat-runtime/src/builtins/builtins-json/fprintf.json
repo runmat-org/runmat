@@ -1,0 +1,151 @@
+{
+  "title": "fprintf",
+  "category": "io/filetext",
+  "keywords": [
+    "fprintf",
+    "format",
+    "printf",
+    "write file",
+    "stdout",
+    "stderr",
+    "encoding"
+  ],
+  "summary": "Write formatted text to files or standard output/error using MATLAB-compatible semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fprintf.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Formatting and I/O execute on the CPU. GPU tensors are gathered automatically before substitution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fprintf::tests",
+    "integration": [
+      "builtins::io::filetext::fprintf::tests::fprintf_matrix_column_major",
+      "builtins::io::filetext::fprintf::tests::fprintf_ascii_encoding_errors",
+      "builtins::io::filetext::fprintf::tests::fprintf_gpu_gathers_values"
+    ]
+  },
+  "description": "`fprintf` formats data according to a printf-style template and writes the result to a file, standard output (`stdout`), or standard error (`stderr`). The builtin mirrors MATLAB behaviour, including repetition of the format string, column-major traversal of matrix inputs, support for the special stream names `'stdout'`/`'stderr'`, and the same set of numeric and text conversions available to `sprintf`.",
+  "behaviors": [
+    "`fprintf(formatSpec, A, ...)` writes to standard output. The format repeats automatically until every element from the argument list has been consumed, traversing arrays in column-major order.",
+    "`fprintf(fid, formatSpec, A, ...)` writes to a file identifier returned by `fopen`. Identifiers `1`/`\"stdout\"` and `2`/`\"stderr\"` refer to the process streams. Identifiers must be finite, non-negative integers.",
+    "The return value is the number of bytes written as a double scalar. Omitting the output argument discards it without affecting the write.",
+    "Text arguments (character vectors, string scalars, string arrays, cell arrays of text) are expanded in column-major order, matching MATLAB's behaviour.",
+    "Numeric arrays (double, integer, logical, or gpuArray) are flattened column-first and substituted element-by-element into the format string. Star (`*`) width and precision arguments are also drawn from the flattened stream.",
+    "The text encoding recorded by `fopen` is honoured. ASCII and Latin-1 encodings raise descriptive errors when characters cannot be represented. Binary/RAW encodings treat the output as UTF-8, mirroring MATLAB's default on modern systems.",
+    "Arguments that reside on the GPU are gathered to the host before formatting. Formatting itself is always executed on the CPU."
+  ],
+  "examples": [
+    {
+      "description": "Write Formatted Text To A File",
+      "input": "[fid, msg] = fopen('report.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, 'Total: %d (%.2f%%)\\n', 42, 87.5);\nfclose(fid);"
+    },
+    {
+      "description": "Use Standard Output Without An Explicit File Identifier",
+      "input": "fprintf('Processing %s ...\\n', datestr(now, 0));"
+    },
+    {
+      "description": "Write To Standard Error Using The Stream Name",
+      "input": "fprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter);"
+    },
+    {
+      "description": "Format A Matrix In Column-Major Order",
+      "input": "A = [1 2 3; 4 5 6];\nfprintf('%d %d\\n', A);"
+    },
+    {
+      "description": "Respect File Encoding Constraints",
+      "input": "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nif fid == -1, error(msg); end\ntry\n    fprintf(fid, 'caf\u00e9\\n');\ncatch err\n    disp(err.message);\nend\nfclose(fid);"
+    },
+    {
+      "description": "Format GPU-Resident Data Transparently",
+      "input": "G = gpuArray([1.2 3.4 5.6]);\n[fid, msg] = fopen('gpu.txt', 'w');\nassert(fid ~= -1, msg);\nfprintf(fid, '%.1f,', G);\nfclose(fid);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fprintf` return the number of characters or bytes?",
+      "answer": "It returns the number of bytes written. This may differ from the number of characters when using multi-byte encodings such as UTF-8."
+    },
+    {
+      "question": "Can I use `'stdout'` or `'stderr'` instead of numeric identifiers?",
+      "answer": "Yes. The strings `'stdout'` and `'stderr'` (any case) map to identifiers `1` and `2` respectively, matching MATLAB."
+    },
+    {
+      "question": "What happens if the file was opened read-only?",
+      "answer": "`fprintf` raises `fprintf: file is not open for writing`. Ensure the permission string passed to `fopen` includes `'w'`, `'a'`, or `'+'`."
+    },
+    {
+      "question": "Which encodings are supported?",
+      "answer": "`fprintf` honours the encoding recorded by `fopen`. UTF-8 (default), ASCII, and Latin-1 are supported explicitly. Other labels fall back to UTF-8 behaviour."
+    },
+    {
+      "question": "How are multi-dimensional arrays handled?",
+      "answer": "Arguments are flattened in column-major order. The format string repeats until every element has been consumed, just like MATLAB."
+    },
+    {
+      "question": "Does `fprintf` flush the stream?",
+      "answer": "The builtin delegates to Rust's buffered writers. Files are flushed when closed; standard streams inherit the host buffering policy."
+    },
+    {
+      "question": "What if the format string contains no conversions?",
+      "answer": "Literal format strings are written once. Supplying additional arguments raises `fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied`."
+    },
+    {
+      "question": "Are cell arrays supported?",
+      "answer": "Yes. Cell arrays containing supported scalar or text values are flattened in column-major order before formatting."
+    },
+    {
+      "question": "Can I mix numeric and text arguments?",
+      "answer": "Absolutely. Numeric, logical, and text inputs can be interleaved. Star width/precision arguments use the same flattened stream."
+    },
+    {
+      "question": "How do I suppress the return value?",
+      "answer": "Ignore it, just as in MATLAB. Omitting the output argument does not change the write behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    },
+    {
+      "label": "compose",
+      "url": "./compose"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs"
+  },
+  "gpu_residency": "You can pass `gpuArray` inputs directly\u2014`fprintf` gathers them back to host memory before formatting. No provider-specific hooks are required and outputs always reside on the CPU. This mirrors MATLAB, where explicit `gather` calls are unnecessary when writing to files or console streams.",
+  "gpu_behavior": [
+    "`fprintf` is a residency sink. Any argument containing `gpuArray` data is gathered via the active acceleration provider before formatting. No GPU kernels are launched. When no provider is registered, the builtin raises the same descriptive error used by other sinks (`gather: no acceleration provider registered`)."
+  ]
+}

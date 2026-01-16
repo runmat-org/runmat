@@ -1,0 +1,123 @@
+{
+  "title": "setfield",
+  "category": "structs/core",
+  "keywords": [
+    "setfield",
+    "struct",
+    "assignment",
+    "struct array",
+    "object property"
+  ],
+  "summary": "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Assignments run on the host. GPU tensors or handles embedded in structs are gathered to host memory before mutation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::structs::core::setfield::tests",
+    "integration": "runmat_ignition::tests::functions::member_get_set_and_method_call_skeleton"
+  },
+  "description": "`S = setfield(S, field, value)` returns a copy of the struct (or object) with `field` assigned to `value`. Additional field names and index cells let you update nested structures, struct arrays, and array elements contained within fields.",
+  "behaviors": [
+    "Field names must be character vectors or string scalars. Provide as many field names as needed; each additional name drills deeper into nested structs, so `setfield(S,\"outer\",\"inner\",value)` mirrors `S.outer.inner = value`.",
+    "Missing struct fields are created automatically. If intermediary structs do not exist, RunMat allocates them so that the assignment completes successfully.",
+    "Struct arrays require a leading cell array of one-based indices, e.g. `setfield(S,{2},\"field\",value)` or `setfield(S,{1,3},\"field\",value)`, and accept the keyword `end`.",
+    "You can index into a field's contents before traversing deeper by placing a cell array of indices immediately after the field name: `setfield(S,\"values\",{1,2},\"leaf\",x)` matches `S.values{1,2}.leaf = x`.",
+    "MATLAB-style objects honour property metadata: private setters raise access errors, static properties cannot be written through instances, and dependent properties forward to `set.<name>` methods when available.",
+    "The function returns the updated struct or object. For value types the result is a new copy; handle objects still point at the same instance, and the handle is returned for chaining."
+  ],
+  "examples": [
+    {
+      "description": "Assigning a new field in a scalar struct",
+      "input": "s = struct();\ns = setfield(s, \"answer\", 42);\ndisp(s.answer);",
+      "output": "    42"
+    },
+    {
+      "description": "Creating nested structs automatically",
+      "input": "cfg = struct();\ncfg = setfield(cfg, \"solver\", \"name\", \"cg\");\ncfg = setfield(cfg, \"solver\", \"tolerance\", 1e-6);\ndisp(cfg.solver.tolerance);",
+      "output": "  1.0000e-06"
+    },
+    {
+      "description": "Updating an element of a struct array",
+      "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\npeople = setfield(people, {2}, \"id\", 999);\ndisp(people(2).id);",
+      "output": "   999"
+    },
+    {
+      "description": "Assigning through a field that contains a cell array",
+      "input": "data = struct(\"samples\", {{struct(\"value\", 1), struct(\"value\", 2)}} );\ndata = setfield(data, \"samples\", {2}, \"value\", 10);\ndisp(data.samples{2}.value);",
+      "output": "    10"
+    },
+    {
+      "description": "Setting an object property that honours access attributes",
+      "input": "classdef Point\n    properties\n        x double = 0;\n    end\nend",
+      "output": "    3"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `setfield` modify the input in-place?",
+      "answer": "No. Like MATLAB, it returns a new struct (or object) with the requested update. In Rust this entails cloning the source value and mutating the clone."
+    },
+    {
+      "question": "Can I create nested structs in a single call?",
+      "answer": "Yes. Missing intermediate structs are created automatically when you provide multiple field names, e.g. `setfield(S,\"outer\",\"inner\",value)` builds `outer` when needed."
+    },
+    {
+      "question": "How do I update a specific element of a struct array?",
+      "answer": "Supply an index cell before the first field name: `setfield(S,{row,col},\"field\",value)` is the same as `S(row,col).field = value`."
+    },
+    {
+      "question": "Does `setfield` work with handle objects?",
+      "answer": "Yes. Valid handle objects forward the assignment to the underlying instance. Deleted or invalid handles raise the standard MATLAB-style error."
+    },
+    {
+      "question": "Can I index into field contents before continuing?",
+      "answer": "Yes. Place a cell array of indices immediately after the field name. Each set of indices uses MATLAB's one-based semantics and supports the keyword `end`."
+    },
+    {
+      "question": "Why are GPU tensors gathered to the host?",
+      "answer": "Assignments require host-side mutation. Providers can re-upload the updated tensor on subsequent GPU-aware operations; `setfield` itself never launches kernels."
+    }
+  ],
+  "links": [
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "struct",
+      "url": "./struct"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "You do not have to move data explicitly when assigning into structs. If a field contains a GPU tensor, `setfield` gathers it to host memory so the mutation can be performed safely. Subsequent operations decide whether to migrate it back to the GPU.",
+  "gpu_behavior": [
+    "`setfield` executes entirely on the host. When fields contain GPU-resident tensors, RunMat gathers those tensors to host memory before mutating them and stores the resulting host tensor back into the struct or object. No GPU kernels are launched for these assignments."
+  ]
+}

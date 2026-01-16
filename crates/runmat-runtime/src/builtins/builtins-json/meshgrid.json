@@ -1,0 +1,148 @@
+{
+  "title": "meshgrid",
+  "category": "array/creation",
+  "keywords": [
+    "meshgrid",
+    "grid",
+    "surface",
+    "gpu",
+    "like",
+    "3d"
+  ],
+  "summary": "Generate MATLAB mesh grids for 2-D and 3-D coordinate vectors with optional GPU residency.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "RunMat materialises grids on the host and uploads them when GPU residency is requested. Providers may supply dedicated meshgrid hooks to avoid the round-trip."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::meshgrid::tests",
+    "integration": "builtins::array::creation::meshgrid::tests::meshgrid_gpu_inputs_roundtrip"
+  },
+  "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour exactly. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
+  "behaviors": [
+    "`meshgrid(x)` is shorthand for `[X, Y] = meshgrid(x, x)`. It produces square 2-D grids.",
+    "`meshgrid(x, y)` yields `X` of size `length(y) \u00d7 length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",
+    "`meshgrid(x, y, z)` returns three outputs sized `length(y) \u00d7 length(x) \u00d7 length(z)`, enabling 3-D volume visualisation.",
+    "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
+    "Complex inputs produce complex grids where each output shares the input\u2019s complex values.",
+    "Supplying GPU vectors (or a `'like', gpuArray(...)` prototype) keeps the outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
+    "`'like', prototype` matches both the residency (host or GPU) and numeric class (real or complex) of the prototype. Integer prototypes are promoted to double precision, consistent with MATLAB."
+  ],
+  "examples": [
+    {
+      "description": "Generating a square 2-D grid from one vector",
+      "input": "x = -2:2;\n[X, Y] = meshgrid(x);",
+      "output": "X =\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2\n    -2    -1     0     1     2"
+    },
+    {
+      "description": "Building a rectangular grid from two different vectors",
+      "input": "x = [0 0.5 1.0];\ny = [10 20];\n[X, Y] = meshgrid(x, y);",
+      "output": "X =\n         0    0.5000    1.0000\n         0    0.5000    1.0000\n\nY =\n    10    10    10\n    20    20    20"
+    },
+    {
+      "description": "Creating a volumetric grid for 3-D plotting",
+      "input": "u = -1:1;\nv = 2:4;\nw = linspace(0, 1, 5);\n[U, V, W] = meshgrid(u, v, w);",
+      "output": "size(U) == [3 3 5]\nsize(V) == [3 3 5]\nsize(W) == [3 3 5]"
+    },
+    {
+      "description": "Matching an existing GPU prototype",
+      "input": "gx = gpuArray(single(linspace(-pi, pi, 4)));\ngy = gpuArray(single([-1 0 1]));\n[Xg, Yg] = meshgrid(gx, gy);"
+    },
+    {
+      "description": "Using `'like'` to copy residency from another array",
+      "input": "proto = gpuArray.zeros(1, 1, 'double');\nangles = linspace(0, 2*pi, 8);\nradius = [0 1 2];\n[X, Y] = meshgrid(angles, radius, 'like', proto);"
+    },
+    {
+      "description": "Complex inputs produce complex grids automatically",
+      "input": "z = [1+1i, 2+4i];\n[Zx, Zy] = meshgrid(z);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How many inputs can `meshgrid` accept?",
+      "answer": "One, two, or three numeric vectors. Use three inputs when you need volumetric (3-D) grids."
+    },
+    {
+      "question": "Can I request three outputs with only one or two inputs?",
+      "answer": "No. RunMat follows MATLAB and requires three input vectors when three outputs are requested."
+    },
+    {
+      "question": "Do row or column vectors behave differently?",
+      "answer": "No. Any vector shape (row, column, or scalar) is accepted. RunMat treats the linearised data identically and replicates it along the appropriate axes."
+    },
+    {
+      "question": "What happens with empty vectors?",
+      "answer": "Empty inputs propagate to empty outputs. For example, `meshgrid([], 1:3)` returns `0\u00d73` grids for both outputs."
+    },
+    {
+      "question": "Can I use integer vectors?",
+      "answer": "Yes. Inputs are promoted to double precision internally so the outputs represent the exact same values as MATLAB."
+    },
+    {
+      "question": "Does `meshgrid` support complex numbers?",
+      "answer": "Absolutely. Any imaginary components propagate into the outputs. Complex grids currently stay on the host even if GPU residency is requested."
+    },
+    {
+      "question": "What does `'like'` do?",
+      "answer": "It matches the numeric class and residency (host or GPU) of the prototype array. Supply a `gpuArray` prototype to keep the resulting grids on the GPU."
+    },
+    {
+      "question": "How can providers avoid the host fall-back?",
+      "answer": "Implement the `meshgrid` custom hook in the acceleration provider. RunMat will automatically dispatch to it once available."
+    },
+    {
+      "question": "Is the output always dense?",
+      "answer": "Yes. `meshgrid` produces dense arrays. Use `ndgrid` when you need permuted axes or higher-dimensional grids beyond three inputs."
+    },
+    {
+      "question": "What error do I get if I omit all inputs?",
+      "answer": "RunMat raises the MATLAB-compatible error `meshgrid: at least one input vector is required`."
+    }
+  ],
+  "links": [
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs"
+  },
+  "gpu_residency": "You usually do **not** need to wrap vectors with `gpuArray` manually. When the active acceleration provider supports uploads, RunMat automatically constructs the grid on the host and keeps the outputs on the GPU. Supplying a `'like', gpuArray(...)` prototype produces GPU outputs even when all inputs are host arrays. Until native provider hooks land, complex-valued grids remain host-side and emit a warning when GPU residency is requested.",
+  "gpu_behavior": [
+    "When the active acceleration provider implements the custom `meshgrid` hook, RunMat allocates every coordinate tensor directly on the device so large grids avoid host round-trips entirely.",
+    "If the hook is missing (or errors), RunMat gathers the 1-D axes, materialises the grids once on the host, and uploads the outputs whenever GPU residency is requested, preserving observable semantics.",
+    "Complex-valued grids always materialise on the host today; when GPU residency is requested the runtime logs a trace warning and returns host complex tensors so callers still receive correct MATLAB-compatible results."
+  ]
+}

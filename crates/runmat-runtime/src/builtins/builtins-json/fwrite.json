@@ -1,0 +1,150 @@
+{
+  "title": "fwrite",
+  "category": "io/filetext",
+  "keywords": [
+    "fwrite",
+    "binary write",
+    "io",
+    "precision",
+    "machine format",
+    "skip"
+  ],
+  "summary": "Write binary data to a file identifier with MATLAB-compatible precision, skip, and machine-format semantics.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fwrite.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When data or arguments live on the GPU, RunMat gathers them first; providers do not expose file-I/O hooks."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fwrite::tests",
+    "integration": [
+      "builtins::io::filetext::fwrite::tests::fwrite_double_precision_writes_native_endian",
+      "builtins::io::filetext::fwrite::tests::fwrite_gpu_tensor_gathers_before_write",
+      "builtins::io::filetext::fwrite::tests::fwrite_wgpu_tensor_roundtrip",
+      "builtins::io::filetext::fwrite::tests::fwrite_invalid_precision_errors",
+      "builtins::io::filetext::fwrite::tests::fwrite_negative_skip_errors"
+    ]
+  },
+  "description": "`fwrite` writes binary data to a file identifier obtained from `fopen`. It mirrors MATLAB's handling of precision strings, skip values, and machine-format overrides so existing MATLAB scripts can save data without modification. The builtin accepts numeric tensors, logical data, and character arrays; the bytes are emitted in column-major order to match MATLAB storage.",
+  "behaviors": [
+    "`count = fwrite(fid, A)` converts `A` to unsigned 8-bit integers and writes one byte per element.",
+    "`count = fwrite(fid, A, precision)` converts `A` to the requested precision before writing. Supported precisions are `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`. Shorthand aliases such as `uchar`, `byte`, and `real*8` are also recognised.",
+    "`count = fwrite(fid, A, precision, skip)` skips `skip` bytes after writing each element. RunMat applies the skip with a file seek, which produces sparse regions when the target position moves beyond the current end.",
+    "`count = fwrite(fid, A, precision, skip, machinefmt)` overrides the byte ordering used for the conversion. Supported machine formats are `'native'`, `'ieee-le'`, and `'ieee-be'`. When omitted, the builtin honours the format recorded by `fopen`.",
+    "Column-major ordering matches MATLAB semantics: tensors and character arrays write their first column completely before advancing to the next column. Scalars and vectors behave as 1-by-N matrices.",
+    "The return value `count` is the number of elements written, not the number of bytes. A zero-length input produces `count == 0`.",
+    "RunMat executes `fwrite` entirely on the host. When the data resides on a GPU (`gpuArray`), RunMat gathers the tensor to host memory before writing; providers do not currently implement device-side file I/O."
+  ],
+  "examples": [
+    {
+      "description": "Write unsigned bytes with the default precision",
+      "input": "fid = fopen('bytes.bin', 'w+b');\ncount = fwrite(fid, [1 2 3 255]);\nfclose(fid);",
+      "output": "count = 4"
+    },
+    {
+      "description": "Write double-precision values",
+      "input": "fid = fopen('values.bin', 'w+b');\ndata = [1.5 -2.25 42.0];\ncount = fwrite(fid, data, 'double');\nfclose(fid);",
+      "output": "count = 3"
+    },
+    {
+      "description": "Write 16-bit integers using big-endian byte ordering",
+      "input": "fid = fopen('sensor.be', 'w+b', 'ieee-be');\nfwrite(fid, [258 772], 'uint16');\nfclose(fid);",
+      "output": "count = 2"
+    },
+    {
+      "description": "Insert padding bytes between samples",
+      "input": "fid = fopen('spaced.bin', 'w+b');\nfwrite(fid, [10 20 30], 'uint8', 1);   % skip one byte between elements\nfclose(fid);",
+      "output": "count = 3"
+    },
+    {
+      "description": "Write character data without manual conversions",
+      "input": "fid = fopen('greeting.txt', 'w+b');\nfwrite(fid, 'RunMat!', 'char');\nfclose(fid);",
+      "output": "count = 7"
+    },
+    {
+      "description": "Gather GPU data before writing",
+      "input": "fid = fopen('gpu.bin', 'w+b');\nG = gpuArray([1 2 3 4]);\ncount = fwrite(fid, G, 'uint16');\nfclose(fid);",
+      "output": "count = 4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What precisions does `fwrite` support?",
+      "answer": "RunMat recognises the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`, along with their documented aliases (`real*8`, `uchar`, etc.). The `precision => output` forms are accepted when both sides match; differing output classes are not implemented yet."
+    },
+    {
+      "question": "How are values converted before writing?",
+      "answer": "Numeric inputs are converted to the requested precision using MATLAB-style rounding (to the nearest integer) with saturation to the target range. Logical inputs map `true` to 1 and `false` to 0. Character inputs use their Unicode scalar values."
+    },
+    {
+      "question": "What does the return value represent?",
+      "answer": "`fwrite` returns the number of elements successfully written, not the total number of bytes. Multiply by the element size when you need to know the byte count."
+    },
+    {
+      "question": "Does `skip` insert bytes into the file?",
+      "answer": "`skip` seeks forward after each element is written. When the seek lands beyond the current end of file, the OS creates a sparse region (holes are zero-filled on most platforms). Use `skip = 0` (the default) to write densely."
+    },
+    {
+      "question": "How do machine formats affect the output?",
+      "answer": "The machine format controls byte ordering for multi-byte precisions. `'native'` uses the host endianness, `'ieee-le'` forces little-endian ordering, and `'ieee-be'` forces big-endian ordering regardless of the host."
+    },
+    {
+      "question": "Can I write directly to standard output?",
+      "answer": "Not yet. File identifiers 0, 1, and 2 (stdin, stdout, stderr) are reserved and raise a descriptive error. Use `fopen` to create a file handle before calling `fwrite`."
+    },
+    {
+      "question": "Are GPU tensors supported?",
+      "answer": "Yes. RunMat gathers GPU tensors to host memory before writing. The gather relies on the active provider; if no provider is registered, an informative error is raised."
+    },
+    {
+      "question": "Do string arrays insert newline characters?",
+      "answer": "RunMat joins string-array elements using newline (`'\\n'`) separators before writing. This mirrors how MATLAB flattens string arrays to character data for binary I/O."
+    },
+    {
+      "question": "What happens with `NaN` or infinite values?",
+      "answer": "`NaN` values map to zero for integer precisions and remain `NaN` for floating-point precisions. Infinite values saturate to the min/max integer representable by the target precision."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs"
+  },
+  "gpu_residency": "You rarely need to move data with `gpuArray` purely for `fwrite`. RunMat keeps tensors on the GPU while compute stays in fused expressions, but explicit file I/O always happens on the host. If your data already lives on the device, `fwrite` performs an automatic gather, writes the bytes, and leaves residency unchanged for the rest of the program. You can still call `gpuArray` manually when porting MATLAB code verbatim\u2014the builtin will gather it for you automatically.",
+  "gpu_behavior": [
+    "`fwrite` never launches GPU kernels. If any input value (file identifier, data, or optional arguments) is backed by a GPU tensor, RunMat gathers the value to host memory before performing the write. This mirrors MATLAB's own behaviour when working with `gpuArray` objects: data is moved to the CPU for I/O. When a provider is available, the gather occurs via the provider's `download` path; otherwise the builtin emits an informative error."
+  ]
+}

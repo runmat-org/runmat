@@ -34,7 +34,7 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
-pub use runmat_macros::{register_doc_text, register_fusion_spec, register_gpu_spec};
+pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers

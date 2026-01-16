@@ -1,0 +1,140 @@
+{
+  "title": "ishermitian",
+  "category": "math/linalg/structure",
+  "keywords": [
+    "ishermitian",
+    "hermitian",
+    "skew-hermitian",
+    "matrix structure",
+    "gpu"
+  ],
+  "summary": "Determine whether a matrix is Hermitian or skew-Hermitian.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Falls back to gathering GPU operands when providers lack a device-side Hermitian predicate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::structure::ishermitian::tests",
+    "integration": "builtins::math::linalg::structure::ishermitian::tests::ishermitian_gpu_roundtrip"
+  },
+  "description": "`ishermitian(A)` returns logical `true` when `A` equals its conjugate transpose (`A == A'`). The builtin works with real and complex matrices, logical arrays, and scalars.",
+  "behaviors": [
+    "`ishermitian(A)` tests for Hermitian structure (`A == conj(A').`).",
+    "Pass `'skew'` (or `'skewhermitian'`) to test for skew-Hermitian structure (`A == -conj(A')`).",
+    "Non-square matrices immediately return `false`.",
+    "Diagonal entries must be real for Hermitian matrices and purely imaginary (within tolerance) for skew-Hermitian matrices.",
+    "Logical inputs are promoted to double precision before testing.",
+    "NaN values anywhere in the matrix cause the predicate to return `false`.",
+    "Additional singleton trailing dimensions are allowed; higher-dimensional inputs with more than two non-singleton axes raise an error."
+  ],
+  "examples": [
+    {
+      "description": "How to check if a complex matrix is Hermitian",
+      "input": "A = [2   1-3i; 1+3i   5];\ntf = ishermitian(A);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "How to determine that a real matrix is Hermitian",
+      "input": "B = [4 2 2; 2 7 3; 2 3 9];\ntf = ishermitian(B);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "How to spot a matrix that is not Hermitian",
+      "input": "C = [1 2+i; 2-i 1+0.02i];\ntf = ishermitian(C);",
+      "output": "tf = logical\n   0"
+    },
+    {
+      "description": "How to allow numerical noise with a tolerance",
+      "input": "D = [1 1+1e-12; 1-1e-12 1];\ntf = ishermitian(D, 1e-9);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "How to test for skew-Hermitian structure",
+      "input": "S = [0 2+3i; -2+3i 0];\ntf = ishermitian(S, 'skew');",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "How to inspect a GPU-resident matrix",
+      "input": "G = gpuArray([3 4-2i; 4+2i 6]);\ntf = ishermitian(G);",
+      "output": "tf = logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ishermitian` work with complex matrices?",
+      "answer": "Yes. Off-diagonal elements are compared against the conjugate transpose, and diagonal elements must be real (for Hermitian) or purely imaginary (for skew-Hermitian) within the supplied tolerance."
+    },
+    {
+      "question": "What tolerance values are supported?",
+      "answer": "Pass a finite, non-negative scalar tolerance. The comparison uses the tolerance on the magnitude of the element-wise difference between the matrix and its (signed) conjugate transpose."
+    },
+    {
+      "question": "Can I test for skew-Hermitian matrices?",
+      "answer": "Yes. Provide `'skew'` or `'skewhermitian'` (optionally along with a tolerance) to require `A == -conj(A')`."
+    },
+    {
+      "question": "How are diagonal elements handled?",
+      "answer": "For Hermitian matrices the diagonal entries must be real. For skew-Hermitian matrices the diagonal entries must have zero real part. Imaginary parts are unconstrained in skew mode."
+    },
+    {
+      "question": "How does the builtin treat NaN values?",
+      "answer": "If any element of the matrix is NaN the predicate returns `false`, matching MATLAB behaviour."
+    },
+    {
+      "question": "Do I need to reshape vectors before calling `ishermitian`?",
+      "answer": "Vectors are treated as matrices; column vectors are `n\u00d71` matrices and row vectors are `1\u00d7n` matrices. Non-square shapes always return `false`."
+    },
+    {
+      "question": "What happens with empty matrices?",
+      "answer": "Empty square matrices (`0\u00d70`) return `true`, whereas empty rectangular matrices return `false`."
+    },
+    {
+      "question": "Do I need to call `gpuArray` to use `ishermitian` on the GPU?",
+      "answer": "No. RunMat automatically keeps tensors resident on the GPU when it is profitable. Explicit `gpuArray` calls remain available for MATLAB compatibility."
+    }
+  ],
+  "links": [
+    {
+      "label": "issymmetric",
+      "url": "./issymmetric"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/ishermitian.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/ishermitian.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` / `gather` calls are optional. When a provider implements the Hermitian predicate the computation runs entirely on the GPU and only the boolean result is read back. Otherwise the runtime gathers the tensor automatically and evaluates the predicate on the host.",
+  "gpu_behavior": [
+    "RunMat keeps GPU tensors resident whenever possible. When the active acceleration provider exposes an `ishermitian` predicate hook the comparison runs entirely on the device and only a logical scalar is transferred back. Providers without a dedicated hook fall back to gathering the matrix and running the CPU implementation transparently, so correctness is preserved even without GPU specialisation."
+  ]
+}

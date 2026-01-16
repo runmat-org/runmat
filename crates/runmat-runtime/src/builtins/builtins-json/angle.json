@@ -1,0 +1,140 @@
+{
+  "title": "angle",
+  "category": "math/elementwise",
+  "keywords": [
+    "angle",
+    "phase",
+    "argument",
+    "complex",
+    "gpu"
+  ],
+  "summary": "Phase angle of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the active provider lacks unary_angle or when complex tensors require host-side conversion."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::angle::tests",
+    "integration": "builtins::math::elementwise::angle::tests::angle_gpu_provider_roundtrip"
+  },
+  "description": "`angle(x)` returns the phase angle (argument) of each element in `x`. The values are reported in radians and match MATLAB semantics exactly.",
+  "behaviors": [
+    "Complex inputs use `atan2(imag(x), real(x))`, yielding values in `[-\u03c0, \u03c0]`.",
+    "Real inputs are treated as complex numbers with zero imaginary part. Positive numbers map to `0`, negative numbers map to `\u03c0`, and zeros return `0`.",
+    "Logical inputs are promoted to doubles (`true \u2192 1`, `false \u2192 0`) before computing the angle.",
+    "Results are always returned as dense double-precision arrays that preserve the shape of the input.",
+    "Character arrays are interpreted as their numeric code points and produce double arrays of the same size.",
+    "String arrays are unsupported and raise an error, mirroring MATLAB.",
+    "NaN propagation follows IEEE rules: `angle(NaN)` returns `NaN`."
+  ],
+  "examples": [
+    {
+      "description": "Computing the phase of a complex scalar",
+      "input": "z = 3 + 4i;\ntheta = angle(z);\ndisp(theta);",
+      "output": "theta = 0.9273;"
+    },
+    {
+      "description": "Extracting angles from a complex vector",
+      "input": "Z = [1+1i, -1+1i, -1-1i, 1-1i];\nphases = angle(Z);\ndisp(phases);",
+      "output": "phases = [0.7854 2.3562 -2.3562 -0.7854];"
+    },
+    {
+      "description": "Determining angles of negative real numbers",
+      "input": "vals = [-2 -1 0 1 2];\nphi = angle(vals);\ndisp(phi);",
+      "output": "phi = [3.1416 3.1416 0 0 0];"
+    },
+    {
+      "description": "Working with GPU-resident arrays",
+      "input": "G = gpuArray([1+1i, -1-1i; -1+1i, 1-1i]);\nthetaGPU = angle(G);\ntheta = gather(thetaGPU);\ndisp(theta);",
+      "output": "theta =\n\n     0.7854   -2.3562\n     2.3562    0.7854"
+    },
+    {
+      "description": "Angles of character code arrays",
+      "input": "C = ['A' 'B'; 'C' 'D'];\ncodes = angle(C);\ndisp(codes);",
+      "output": "codes = [0 0; 0 0];"
+    },
+    {
+      "description": "Angles from logical masks",
+      "input": "mask = logical([0 1; 1 0]);\nphaseMask = angle(mask);\ndisp(phaseMask);",
+      "output": "phaseMask = [0 0; 0 0];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `angle` return values in radians?",
+      "answer": "Yes. Results are reported in radians within the interval `[-\u03c0, \u03c0]`, matching MATLAB's definition."
+    },
+    {
+      "question": "What happens with zeros?",
+      "answer": "`angle(0)` returns `0`. Complex zeros (`0 + 0i`) also yield `0`."
+    },
+    {
+      "question": "How does `angle` handle NaN inputs?",
+      "answer": "NaNs propagate. `angle(NaN)` evaluates to `NaN`, honoring IEEE arithmetic."
+    },
+    {
+      "question": "Can I pass string arrays to `angle`?",
+      "answer": "No. Like MATLAB, `angle` supports numeric, logical, or character data. Convert strings with `double(string)` if you need numeric codes first."
+    },
+    {
+      "question": "Does `angle` allocate a new array?",
+      "answer": "Yes. The builtin produces a dense double array. Fusion may eliminate the allocation when the surrounding expression can be fused safely."
+    },
+    {
+      "question": "What about GPU execution for complex tensors?",
+      "answer": "Complex runtime tensors currently live on the host. RunMat gathers them automatically, computes the phase angle, and resumes execution. Future providers may add native complex kernels without changing this builtin."
+    },
+    {
+      "question": "Will GPU results match CPU results exactly?",
+      "answer": "Yes for double-precision providers. Single-precision backends may exhibit minor rounding differences, but they remain within typical IEEE tolerance."
+    }
+  ],
+  "links": [
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "imag",
+      "url": "./imag"
+    },
+    {
+      "label": "real",
+      "url": "./real"
+    },
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/angle.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/angle.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer manage residency automatically, keeping tensors on the GPU whenever device execution is advantageous. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active, tensors that already reside on the GPU remain on the device. Providers that implement the `unary_angle` hook execute the phase computation directly on the GPU, using the same `atan2(imag, real)` logic as the host path. If the hook is missing\u2014or if the input requires host-side conversions such as complex tensors\u2014RunMat gathers the data, evaluates the phase angle on the CPU, and then honors any downstream fusion or residency decisions automatically."
+  ]
+}

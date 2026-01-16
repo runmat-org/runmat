@@ -28,7 +28,6 @@ pub fn build_authoring_context(
     let source_paths = snippets::source_paths(&record, config)?;
 
     Ok(AuthoringContext {
-        doc_markdown: record.doc_markdown.clone(),
         builtin: record,
         prompt,
         source_paths,
@@ -43,7 +42,6 @@ fn placeholder_record(name: &str, category: Option<&str>) -> BuiltinRecord {
         keywords: Vec::new(),
         accel_tags: Vec::new(),
         is_sink: false,
-        doc_markdown: None,
         param_types: Vec::new(),
         return_type: "Value".to_string(),
     }

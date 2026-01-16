@@ -1,0 +1,146 @@
+{
+  "title": "disp",
+  "category": "io",
+  "keywords": [
+    "disp",
+    "display",
+    "print",
+    "console",
+    "gpu"
+  ],
+  "summary": "Display scalars, arrays, structs, cells, and gpuArray values in the Command Window without returning output.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/disp.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Always formats on the host. GPU values are gathered through the active acceleration provider before rendering."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::disp::tests",
+    "integration": null
+  },
+  "description": "`disp` prints the contents of a variable to the Command Window without including the variable name. RunMat mirrors MATLAB behaviour for numeric, logical, string, character, struct, cell, and gpuArray inputs so scripts and diagnostic utilities behave identically.",
+  "behaviors": [
+    "Accepts exactly one input argument; additional arguments raise a MATLAB-compatible error.",
+    "Numeric, logical, and complex arrays respect MATLAB\u2019s column-major layout with right-aligned columns that honour the active numeric format.",
+    "N-D arrays (with three or more dimensions) display one 2-D slice at a time with MATLAB-style `(:,:,[...]) =` headers so each page mirrors the Command Window output.",
+    "Text inputs follow MATLAB conventions:",
+    "Character arrays print each row as plain text without surrounding quotes.",
+    "String scalars and arrays emit their contents (empty strings produce blank lines, missing strings render as `<missing>`).",
+    "Structures display one field per line using four-space indentation; nested arrays collapse to size/type summaries just like MATLAB.",
+    "Cell arrays print a compact grid using four-space indentation. Elements summarise their contents (e.g., `[2x2 double]`, `'hello'`, `\"world\"`).",
+    "gpuArray values are gathered to host memory before formatting so the output matches MATLAB.",
+    "Empty arrays display as `[]`, while empty string arrays report their size (e.g., `0x2 string`)."
+  ],
+  "examples": [
+    {
+      "description": "Printing a message in the Command Window",
+      "input": "disp(\"Simulation complete.\");",
+      "output": "Simulation complete."
+    },
+    {
+      "description": "Displaying numeric vectors with MATLAB spacing",
+      "input": "angles = [0 pi/6 pi/4 pi/3];\ndisp(angles);",
+      "output": "         0    0.5236    0.7854    1.0472"
+    },
+    {
+      "description": "Showing a matrix without variable names",
+      "input": "A = [1 23 456; 78 9 10];\ndisp(A);",
+      "output": "     1    23   456\n    78     9    10"
+    },
+    {
+      "description": "Printing struct fields in the Command Window",
+      "input": "cfg = struct(\"solver\", \"bicgstab\", \"tolerance\", 1e-8);\ndisp(cfg);",
+      "output": "    solver: \"bicgstab\"\n  tolerance: 1e-08"
+    },
+    {
+      "description": "Displaying gpuArray data without manual gather",
+      "input": "G = gpuArray([1 2; 3 4]);\ndisp(G);             % RunMat gathers and prints host-formatted output automatically",
+      "output": "     1     2\n     3     4"
+    },
+    {
+      "description": "Showing string and character arrays",
+      "input": "names = [\"alpha\" \"beta\"; \"gamma\" \"delta\"];\ndisp(names);\ndisp('RunMat');",
+      "output": "\"alpha\"    \"beta\"\n\"gamma\"    \"delta\"\nRunMat"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `disp` change the result of my computation?",
+      "answer": "No. `disp` produces no output argument. Its return value is unused and exists only for internal compliance with the builtin registry."
+    },
+    {
+      "question": "Can I pass multiple arguments to `disp`?",
+      "answer": "No. Like MATLAB, RunMat accepts exactly one input argument. Use `fprintf` or `sprintf` for formatted output with multiple values."
+    },
+    {
+      "question": "How are structs displayed?",
+      "answer": "Each field appears on its own line with a four-space indent, followed by the formatted value. Nested values collapse to MATLAB-style summaries (for example, `[3x3 double]`), so even large structures remain readable."
+    },
+    {
+      "question": "What happens with empty arrays?",
+      "answer": "Numeric and logical empties print as `[]`. Empty string arrays display their shape (e.g., `0x0 string`) so you can distinguish them from scalar empty strings."
+    },
+    {
+      "question": "Can `disp` print GPU data directly?",
+      "answer": "Yes. You do not need to call `gather` yourself. RunMat gathers GPU-resident values internally, prints the MATLAB-compatible representation, and leaves residency decisions to the auto-offload planner."
+    },
+    {
+      "question": "How are missing strings shown?",
+      "answer": "Missing string scalars are rendered as `<missing>`, mirroring MATLAB output."
+    },
+    {
+      "question": "Does `disp` honour the current numeric format (e.g., `format long`)?",
+      "answer": "Yes. `disp` reuses the same formatting primitives as the Command Window, so global format settings (`format short`, `format long`, etc.) apply automatically."
+    },
+    {
+      "question": "Does `disp` add a blank line after printing?",
+      "answer": "It prints each line followed by a newline. Empty strings result in a blank line, consistent with MATLAB."
+    },
+    {
+      "question": "What if the input is a cell array?",
+      "answer": "RunMat prints a compact cell view using four-space indentation and MATLAB-style summaries (`[2x2 double]`, `'text'`, `\"string\"`). Nested cell arrays appear as `[mxn cell]`."
+    },
+    {
+      "question": "How do I print without a trailing newline?",
+      "answer": "Use `fprintf` instead. `disp` always terminates the output with a newline."
+    }
+  ],
+  "links": [
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output.",
+  "gpu_behavior": [
+    "`disp` is a side-effecting sink. When the input (or nested values) reside on the GPU, RunMat gathers them to host memory using the active acceleration provider. Providers do not need to implement special hooks\u2014the builtin always renders on the CPU before writing to standard output."
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "title": "filewrite",
+  "category": "io/filetext",
+  "keywords": [
+    "filewrite",
+    "io",
+    "write file",
+    "text file",
+    "append",
+    "encoding"
+  ],
+  "summary": "Write text or raw bytes to a file with optional encoding and write-mode control.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/filewrite.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes entirely on the host CPU. When either the file path or data reside on the GPU they are gathered before the write; providers are not involved."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::filewrite::tests",
+    "integration": "builtins::io::filetext::filewrite::tests::filewrite_writes_text_content"
+  },
+  "description": "`filewrite(filename, data)` writes text or raw byte content to a file, returning the number of bytes written. The builtin honours MATLAB semantics for overwrite versus append behaviour and supports the same encoding keywords that `fileread` recognises.",
+  "behaviors": [
+    "Accepts file names supplied as character vectors, string scalars, or scalar string arrays.",
+    "Accepts data supplied as character vectors, string scalars, string arrays, or numeric arrays of bytes (`uint8`/`double` values in the range 0\u2013255). Logical arrays map to bytes `0` and `1`.",
+    "By default the file is truncated (overwrite mode). Pass `'WriteMode','append'` to add to an existing file.",
+    "Encoding is optional. Provide either a positional encoding argument or the `'Encoding', value` keyword pair. Supported encodings mirror `fileread`: `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
+    "When writing text data with `filewrite` and `Encoding` set to `ascii` or `latin1`, an error is raised if any characters fall outside the permitted code page.",
+    "When writing raw numeric bytes, encoding is ignored except to validate ASCII requests.",
+    "Returns the number of bytes written as a double scalar. Ignoring the output behaves like MATLAB (data is still written)."
+  ],
+  "examples": [
+    {
+      "description": "Write Text To A New File",
+      "input": "bytes = filewrite(\"notes.txt\", \"Hello, RunMat!\");",
+      "output": "bytes = 15   % Number of UTF-8 bytes written"
+    },
+    {
+      "description": "Append Text Without Overwriting",
+      "input": "filewrite(\"log.txt\", \"First line\\n\");\nfilewrite(\"log.txt\", \"Second line\\n\", 'WriteMode', 'append');",
+      "output": "% log.txt now contains two lines of text"
+    },
+    {
+      "description": "Specify A Particular Encoding",
+      "input": "filewrite(\"latin1.txt\", \"Espa\\u00F1a\", 'Encoding', 'latin1');",
+      "output": "% File encoded in ISO-8859-1 with the \u00f1 preserved"
+    },
+    {
+      "description": "Write Raw Bytes From A Numeric Array",
+      "input": "payload = uint8([1 2 3 255]);\nfilewrite(\"data.bin\", payload, 'Encoding', 'raw');",
+      "output": "% Binary file containing four bytes: 01 02 03 FF"
+    },
+    {
+      "description": "Export A String Array As Newline-Separated Text",
+      "input": "lines = [\"alpha\", \"beta\", \"gamma\"];\nfilewrite(\"items.txt\", lines);",
+      "output": "% items.txt contains the three entries, each on its own line"
+    },
+    {
+      "description": "Handle Invalid ASCII Characters",
+      "input": "try\n    filewrite(\"ascii.txt\", \"caf\u00e9\", 'Encoding', 'ascii');\ncatch err\n    disp(err.message);\nend",
+      "output": "% Prints:\n%   filewrite: character '\u00e9' (U+00E9) cannot be encoded as ASCII"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `filewrite` return?",
+      "answer": "It returns the number of bytes written as a double scalar. Omit the output argument when you do not need this information."
+    },
+    {
+      "question": "How are string arrays written?",
+      "answer": "Each element of the string array is written sequentially (column-major order), separated by newline characters. This mirrors MATLAB\u2019s `filewrite` behaviour and matches what most users expect when exporting string arrays."
+    },
+    {
+      "question": "Does `filewrite` add a newline automatically?",
+      "answer": "No. Provide explicit newline characters (`\\n`) when you want line breaks. Appending mode (`'WriteMode','append'`) does not insert separators automatically."
+    },
+    {
+      "question": "How can I write binary data?",
+      "answer": "Provide a numeric array with values in the range 0\u2013255 (for example `uint8`). Use `'Encoding','raw'` (or rely on the default) to bypass text encoding."
+    },
+    {
+      "question": "What happens if the file cannot be opened?",
+      "answer": "`filewrite` throws a descriptive error containing the system message (for example, permissions or directory-not-found issues)."
+    },
+    {
+      "question": "Does the builtin create directories?",
+      "answer": "No. The parent directory must already exist. Use `mkdir` before calling `filewrite` if you need to create folders."
+    }
+  ],
+  "links": [
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs"
+  },
+  "gpu_behavior": [
+    "`filewrite` performs synchronous host file I/O. If either the path or data reside on the GPU (for example through lazy residency), RunMat gathers those values before performing the write. No GPU kernels are launched and providers do not need to implement specialised hooks for this builtin."
+  ]
+}

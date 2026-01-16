@@ -12,144 +12,6 @@ use crate::builtins::common::spec::{
 use crate::gather_if_needed;
 use runmat_filesystem as fs;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "fileread",
-        builtin_path = "crate::builtins::io::filetext::fileread"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "fileread"
-category: "io/filetext"
-keywords: ["fileread", "io", "read file", "text file", "character vector"]
-summary: "Read the entire contents of a text file into a 1-by-N character vector."
-references:
-  - https://www.mathworks.com/help/matlab/ref/fileread.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the host CPU. When the file path lives on the GPU, RunMat gathers it first; the file contents remain host-resident."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::filetext::fileread::tests"
-  integration: "builtins::io::filetext::fileread::tests::fileread_reads_text_file"
----
-
-# What does the `fileread` function do in MATLAB / RunMat?
-`fileread(filename)` loads the complete contents of a text file into memory and returns a row vector of characters that mirrors MATLAB's behaviour. The builtin preserves all bytes, including newlines and extended ASCII characters, so downstream code can parse, split, or convert the text as needed.
-
-## How does the `fileread` function behave in MATLAB / RunMat?
-- Accepts paths provided as character vectors or string scalars. String arrays must contain exactly one element.
-- Supports an optional encoding argument: `fileread(filename, encoding)` or `fileread(filename, 'Encoding', encoding)`. Recognised values include `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.
-- Resolves relative paths with respect to the current working directory of the RunMat process, just like MATLAB.
-- Returns a `1×N` character array. Empty files yield a `1×0` character vector.
-- Leaves line endings untouched (`\r`, `\n`, or `\r\n`) so scripts can inspect original formatting.
-- When `auto` decoding detects invalid UTF-8 sequences, RunMat maps each byte to the corresponding extended-ASCII code point so that callers can recover the raw data.
-- Throws a descriptive error when the file cannot be opened or read.
-
-## `fileread` Function GPU Execution Behaviour
-`fileread` performs synchronous host I/O and never dispatches GPU work. If the provided file name lives on the GPU (for example, produced by a GPU array that was gathered lazily), RunMat gathers that scalar first. File contents are returned as an ordinary character array that resides on the CPU. Providers do not need to implement any hooks for this builtin.
-
-## Examples of using the `fileread` function in MATLAB / RunMat
-
-### Read Entire File Into A Character Vector
-```matlab
-text = fileread("LICENSE.md");
-```
-Expected output:
-```matlab
-% Character vector containing the full license text
-```
-
-### Read A File Using A Relative Path
-```matlab
-text = fileread("data/config.json");
-```
-Expected output:
-```matlab
-% Returns the JSON file contents as a character vector
-```
-
-### Preserve Extended ASCII Bytes
-```matlab
-bytes = fileread("fixtures/high_ascii.txt");
-double_values = double(bytes);
-```
-Expected output:
-```matlab
-% double_values contains the numeric codes for every byte in the file
-```
-
-### Convert File Contents To A String Scalar
-```matlab
-raw = fileread("README.md");
-doc = string(raw);
-```
-Expected output:
-```matlab
-% doc is a string scalar ready for further processing
-```
-
-### Read A File With UTF-8 Decoding Explicitly
-```matlab
-text = fileread("data/report.txt", 'Encoding', 'utf-8');
-```
-Expected output:
-```matlab
-% Character vector decoded using UTF-8. An error is thrown if the bytes are not valid UTF-8.
-```
-
-### Handle Missing Files With Try/Catch
-```matlab
-try
-    fileread("missing.txt");
-catch err
-    disp(err.message);
-end
-```
-Expected output:
-```matlab
-% Prints a descriptive error such as:
-% "fileread: unable to read 'missing.txt' (No such file or directory)"
-```
-
-## FAQ
-
-### What does `fileread` return?
-It returns a `1×N` character vector containing every byte from the file. Convert it to a string with `string(...)` when you prefer string scalars.
-
-### Does `fileread` change line endings?
-No. The builtin preserves whatever newline sequence the file uses so downstream tools can handle formatting explicitly.
-
-### Can `fileread` read binary data?
-While designed for text, `fileread` will happily return any bytes. The result is a character vector whose numeric codes match the file's bytes.
-
-### How are encodings handled?
-The default `auto` mode attempts UTF-8 decoding and, if the data is not valid UTF-8, falls back to mapping each byte to its extended-ASCII code point (`latin1`). Provide an explicit encoding such as `'utf-8'`, `'latin1'`, `'ascii'`, or `'raw'` to control the conversion. Explicit encodings raise descriptive errors when the bytes are incompatible with the requested format.
-
-### Can I force raw byte behaviour?
-Yes. Specify `'raw'` (or `'bytes'`) as the encoding argument to receive a character vector whose code points equal the file's bytes.
-
-### How do relative paths resolve?
-Relative paths are evaluated against the current working directory of the RunMat process. Use `pwd` or `cd` to control where `fileread` looks.
-
-## See Also
-[fopen](./fopen), [fread](./fread), [string](./string), [strlength](./strlength)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/io/filetext/fileread.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fileread.rs)
-- Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "fileread",
@@ -382,8 +244,6 @@ pub(crate) mod tests {
     use runmat_filesystem as fs;
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
-
-    use crate::builtins::common::test_support;
 
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
@@ -643,15 +503,5 @@ pub(crate) mod tests {
         );
 
         let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(
-            !blocks.is_empty(),
-            "expected matlab code blocks in documentation"
-        );
     }
 }

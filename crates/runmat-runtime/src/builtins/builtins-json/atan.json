@@ -1,0 +1,132 @@
+{
+  "title": "atan",
+  "category": "math/trigonometry",
+  "keywords": [
+    "atan",
+    "arctangent",
+    "inverse tangent",
+    "trigonometry",
+    "gpu"
+  ],
+  "summary": "Element-wise inverse tangent matching MATLAB semantics for real, logical, character, and complex inputs with GPU fallbacks.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses the provider's unary_atan hook when available; otherwise gathers to the host to stay MATLAB-compatible."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::atan::tests",
+    "integration": "builtins::math::trigonometry::atan::tests::atan_gpu_provider_roundtrip"
+  },
+  "description": "`Y = atan(X)` computes the inverse tangent (in radians) of every element of `X`. The operation runs element-wise, supports real and complex numbers, and honors MATLAB's broadcasting semantics.",
+  "behaviors": [
+    "Works on scalars, vectors, matrices, and N-D tensors, including logical and integer inputs (which are promoted to double precision before evaluation).",
+    "Character arrays are interpreted as their Unicode code points and return dense double arrays of identical shape.",
+    "Complex inputs follow MATLAB's analytic extension `atan(z) = (1/(2i)) * (log(1 + i z) - log(1 - i z))`, ensuring identical branch behavior and NaN/Inf propagation.",
+    "Returns results in radians for real inputs and complex numbers for complex inputs.",
+    "Empty arrays and already scalar values pass straight through while preserving shape."
+  ],
+  "examples": [
+    {
+      "description": "Arctangent of a scalar",
+      "input": "y = atan(1);",
+      "output": "y = 0.7854"
+    },
+    {
+      "description": "Element-wise arctangent of a vector",
+      "input": "x = linspace(-2, 2, 5);\nangles = atan(x);",
+      "output": "angles = [-1.1071  -0.5880         0    0.5880    1.1071]"
+    },
+    {
+      "description": "Computing inverse tangent of every entry in a matrix",
+      "input": "A = [-2 -1 0; 1 2 3];\nY = atan(A);",
+      "output": "Y =\n   -1.1071   -0.7854         0\n    0.7854    1.1071    1.2490"
+    },
+    {
+      "description": "Evaluating `atan` on a complex number",
+      "input": "z = 1 + 2i;\nw = atan(z);",
+      "output": "w = 1.3389 + 0.4024i"
+    },
+    {
+      "description": "Keeping the result on the GPU with `'like'`",
+      "input": "proto = gpuArray.zeros(1, 1);\nG = gpuArray([-3 -1 0 1 3]);\ndeviceResult = atan(G, 'like', proto);\nresult = gather(deviceResult);",
+      "output": "result =\n   -1.2490   -0.7854         0    0.7854    1.2490"
+    },
+    {
+      "description": "Inspecting character codes via inverse tangent",
+      "input": "codes = atan('RUN');",
+      "output": "codes =\n    1.5625    1.5648    1.5691"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use `atan`?",
+      "answer": "Use `atan` whenever you need the element-wise inverse tangent of data expressed in radians\u2014common in signal processing, control systems, and geometric computations."
+    },
+    {
+      "question": "How is `atan` different from `atan2`?",
+      "answer": "`atan` accepts a single input and returns results in `(-\u03c0/2, \u03c0/2)`. `atan2(y, x)` takes two inputs, uses the signs of both arguments to determine the correct quadrant, and returns values in `(-\u03c0, \u03c0]`."
+    },
+    {
+      "question": "Does `atan` support complex numbers?",
+      "answer": "Yes. Results match MATLAB's analytic continuation of the inverse tangent and may return complex values even for real inputs when the computation requires it."
+    },
+    {
+      "question": "Can I keep results on the GPU?",
+      "answer": "Yes. Passing `'like', prototype` with a GPU tensor keeps outputs on-device whenever a provider is registered. When the provider lacks `unary_atan`, RunMat computes on the host and returns host data unless you explicitly request GPU residency via `'like'`."
+    },
+    {
+      "question": "What happens with NaN or Inf inputs?",
+      "answer": "NaNs propagate, and infinities map to the appropriate asymptotic limits (`atan(\u00b1Inf) = \u00b1\u03c0/2`), matching MATLAB's IEEE behavior."
+    }
+  ],
+  "links": [
+    {
+      "label": "atan2",
+      "url": "./atan2"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "asin",
+      "url": "./asin"
+    },
+    {
+      "label": "acos",
+      "url": "./acos"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atan.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan.rs"
+  },
+  "gpu_residency": "Usually you do **not** need to call `gpuArray`. When a provider exposes `unary_atan`, the runtime keeps data on the GPU automatically. If the hook is missing (or if you supply a host `'like'` prototype), RunMat gathers and computes on the CPU, then honors the requested residency so you do not have to manage transfers manually.",
+  "gpu_behavior": [
+    "When RunMat Accelerate is active and the selected provider implements `unary_atan`, the runtime keeps tensors on the GPU and executes the kernel entirely on-device.",
+    "If the provider lacks `unary_atan` (or declines the request), RunMat gathers the data to the host, computes the result with the reference implementation, and then reapplies residency requests such as `'like'` prototypes automatically.",
+    "Fusion planning groups neighboring elementwise operations so downstream kernels can stay on the GPU even if `atan` itself fell back to the CPU."
+  ]
+}

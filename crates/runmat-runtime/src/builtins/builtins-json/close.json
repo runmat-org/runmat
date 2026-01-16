@@ -1,0 +1,131 @@
+{
+  "title": "close",
+  "category": "io/net",
+  "keywords": [
+    "close",
+    "tcpclient",
+    "tcpserver",
+    "socket",
+    "networking"
+  ],
+  "summary": "Close TCP clients or servers that were created by tcpclient, tcpserver, or accept.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tcpclient.html",
+    "https://www.mathworks.com/help/matlab/ref/tcpserver.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Networking runs on the host CPU. GPU-resident structs are gathered automatically before the close operation executes."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::net::close::tests",
+    "integration": "builtins::io::net::close::tests::close_tcpclient_releases_handle"
+  },
+  "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in MATLAB: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
+  "behaviors": [
+    "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style \u201cnot connected\u201d diagnostics.",
+    "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB\u2019s lifecycle rules.",
+    "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server, and `close('all')` closes both clients and servers.",
+    "Multiple inputs are processed from left to right. The return value is `1` when at least one handle was closed and `0` otherwise.",
+    "Invalid arguments raise `MATLAB:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `MATLAB:close:InvalidHandle`.",
+    "Networking happens on the CPU. If the arguments live on the GPU, RunMat gathers them automatically before touching the host-side registries.",
+    "Arguments wrapped in cell arrays (possibly nested) or scalar string arrays are supported. `close` walks each element in-order and applies the usual rules to every value it discovers."
+  ],
+  "examples": [
+    {
+      "description": "Close a TCP client after finishing I/O",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nstatus = close(client);",
+      "output": "status = 1"
+    },
+    {
+      "description": "Close a TCP server and any accepted clients",
+      "input": "srv = tcpserver(\"127.0.0.1\", 0);\nclient = accept(srv);             % accept a pending connection\nstatus = close(srv);              % closes the server and the accepted client",
+      "output": "status = 1"
+    },
+    {
+      "description": "Close every open TCP client",
+      "input": "tcpclient(\"localhost\", 40000);\ntcpclient(\"localhost\", 40001);\nstatus = close(\"clients\");",
+      "output": "status = 1"
+    },
+    {
+      "description": "Close all networking resources at once",
+      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nstatus = close(\"all\");",
+      "output": "status = 1"
+    },
+    {
+      "description": "Calling close on an already-closed client",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nclose(client);\nstatus = close(client);   % nothing left to close",
+      "output": "status = 0"
+    },
+    {
+      "description": "Close handles stored in a cell array",
+      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nhandles = {client, srv};\nstatus = close(handles);",
+      "output": "status = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does the return value represent?",
+      "answer": "The return value is `1` when at least one client or server was closed and `0` otherwise. Use it to detect whether `close` released any networking resources."
+    },
+    {
+      "question": "Can I pass multiple clients or servers at once?",
+      "answer": "Yes. Pass them as separate arguments (`close(client1, client2)`) or wrap them in a cell array. The function closes each handle in order and returns `1` when any of the handles required closing."
+    },
+    {
+      "question": "Does closing a server also close accepted clients?",
+      "answer": "Yes. RunMat mirrors MATLAB by closing every client that originated from the server before releasing the listener itself."
+    },
+    {
+      "question": "What happens if I pass a non-network struct?",
+      "answer": "The builtin raises `MATLAB:close:InvalidHandle`. Only structs produced by the RunMat networking builtins (`tcpclient`, `tcpserver`, `accept`) carry the hidden identifiers that `close` recognises."
+    },
+    {
+      "question": "Do GPU arrays require special handling?",
+      "answer": "No. RunMat gathers GPU-resident values automatically before inspecting them, and networking always runs on the CPU."
+    },
+    {
+      "question": "Is it safe to call close twice?",
+      "answer": "Yes. The second call simply returns `0`, indicating that nothing needed to be closed."
+    }
+  ],
+  "links": [
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "write",
+      "url": "./write"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/net/close.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/net/close.rs"
+  },
+  "gpu_behavior": [
+    "`close` performs only CPU-side bookkeeping. When network structs or option strings reside on the GPU, RunMat gathers them to host memory before inspecting their hidden identifiers. No provider hooks participate, and GPU residency is irrelevant to the close operation."
+  ]
+}

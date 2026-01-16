@@ -1,0 +1,139 @@
+{
+  "title": "abs",
+  "category": "math/elementwise",
+  "keywords": [
+    "abs",
+    "absolute value",
+    "magnitude",
+    "complex",
+    "gpu"
+  ],
+  "summary": "Absolute value or magnitude of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host when the active provider lacks unary_abs or when complex tensors must be gathered."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::abs::tests",
+    "integration": "builtins::math::elementwise::abs::tests::abs_gpu_provider_roundtrip"
+  },
+  "description": "`y = abs(x)` returns the absolute value of real inputs and the magnitude (modulus) of complex inputs. For tensors, the operation is applied element-wise following MATLAB's broadcasting rules.",
+  "behaviors": [
+    "Real scalars, vectors, matrices, and N-D tensors are mapped to their element-wise absolute values.",
+    "Complex inputs return the magnitude `sqrt(real(x).^2 + imag(x).^2)`, matching MATLAB semantics.",
+    "Logical inputs are promoted to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before taking the absolute value.",
+    "Character arrays are converted to double arrays of code point magnitudes, just like MATLAB.",
+    "String arrays are not supported and raise an error (`abs` only accepts numeric, logical, or char inputs).",
+    "NaN values remain NaN; the function does not change IEEE NaN propagation rules."
+  ],
+  "examples": [
+    {
+      "description": "Getting the absolute value of a scalar",
+      "input": "y = abs(-42);",
+      "output": "y = 42;"
+    },
+    {
+      "description": "Taking the absolute value of a vector",
+      "input": "v = [-2 -1 0 1 2];\nresult = abs(v);",
+      "output": "result = [2 1 0 1 2];"
+    },
+    {
+      "description": "Measuring complex magnitudes",
+      "input": "z = [3+4i, 1-1i];\nmagnitudes = abs(z);",
+      "output": "magnitudes = [5 1.4142];"
+    },
+    {
+      "description": "Working with matrices on the GPU",
+      "input": "G = randn(2048, 2048, \"gpuArray\");\npositive = abs(G);"
+    },
+    {
+      "description": "Using `abs` with logical arrays",
+      "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask);",
+      "output": "numeric = [0 1 0; 1 0 1];"
+    },
+    {
+      "description": "Converting characters to numeric codes",
+      "input": "c = 'ABC';\ncodes = abs(c);",
+      "output": "codes = [65 66 67];"
+    },
+    {
+      "description": "Chaining `abs` inside fused expressions",
+      "input": "x = linspace(-2, 2, 5);\ny = abs(x) + x.^2;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `abs` change NaN values?",
+      "answer": "No. `abs(NaN)` returns `NaN`, consistent with IEEE arithmetic and MATLAB behaviour."
+    },
+    {
+      "question": "What happens to complex numbers?",
+      "answer": "RunMat returns the magnitude `sqrt(real(x).^2 + imag(x).^2)`, identical to MATLAB."
+    },
+    {
+      "question": "Can I call `abs` on string arrays?",
+      "answer": "No. Like MATLAB, `abs` only accepts numeric, logical, or character inputs. Use `double(string)` if you need code points."
+    },
+    {
+      "question": "Does `abs` work with sparse arrays?",
+      "answer": "Sparse support is planned but not yet implemented; inputs are densified today."
+    },
+    {
+      "question": "Is GPU execution exact?",
+      "answer": "Device execution follows IEEE semantics for the provider's precision (`single` or `double`). F32 backends may incur small rounding differences compared to CPU double."
+    },
+    {
+      "question": "How do I keep results on the GPU?",
+      "answer": "Avoid calling `gather` unless you need host data. The planner keeps device tensors resident whenever possible."
+    },
+    {
+      "question": "Does `abs` allocate new memory?",
+      "answer": "Yes. The builtin returns a new tensor; fusion may in-place combine kernels to reduce allocations when safe."
+    },
+    {
+      "question": "Can I use `abs` with logical masks?",
+      "answer": "Yes. Logical inputs are promoted to doubles (0 or 1) before applying `abs`, just like MATLAB."
+    }
+  ],
+  "links": [
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/abs.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/abs.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray`/`gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (e.g., integrating with third-party GPU kernels).",
+  "gpu_behavior": [
+    "**Hook available:** The absolute value is computed directly on the device with no host transfers.",
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, performs the CPU absolute value logic (including complex magnitudes), and optionally re-uploads downstream.\n\nComplex tensors are currently handled on the host because the in-process and WGPU providers emit real-valued magnitudes. Device providers are encouraged to add fused complex support."
+  ]
+}

@@ -23,194 +23,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::gather_if_needed;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "dlmwrite",
-        builtin_path = "crate::builtins::io::tabular::dlmwrite"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "dlmwrite"
-category: "io/tabular"
-keywords: ["dlmwrite", "delimiter", "precision", "newline", "append", "roffset", "coffset"]
-summary: "Write numeric matrices to delimiter-separated text files with MATLAB-compatible precision and offset controls."
-references:
-  - https://www.mathworks.com/help/matlab/ref/dlmwrite.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the CPU. gpuArray inputs are gathered before serialisation following MATLAB semantics."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::tabular::dlmwrite::tests"
-  integration:
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_writes_default_comma"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_accepts_positional_delimiter_and_offsets"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_supports_append_and_offsets"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_precision_digits"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_precision_format_string"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_newline_pc"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_coffset_inserts_empty_fields"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_handles_gpu_tensors"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_interprets_control_sequence_delimiters"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_handles_wgpu_provider_gather"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_rejects_negative_offsets"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_rejects_empty_delimiter"
-    - "builtins::io::tabular::dlmwrite::tests::dlmwrite_precision_zero_error"
----
-
-# What does the `dlmwrite` function do in MATLAB / RunMat?
-`dlmwrite(filename, M)` writes the numeric contents of `M` to a plain text file using a configurable delimiter.
-It is MATLAB's legacy companion to `csvwrite`, adding support for custom delimiters, per-call precision, line endings,
-and zero-based row/column offsets. RunMat mirrors these semantics so that existing MATLAB scripts continue to behave
-identically.
-
-## How does the `dlmwrite` function behave in MATLAB / RunMat?
-- Accepts real numeric or logical arrays up to two dimensions (trailing singleton dimensions are ignored). Complex inputs
-  raise an error. Logical values are converted to `0`/`1`.
-- The default delimiter is a comma. Supply a character vector, string scalar, or control sequence (`"\t"`, `"\n"`, `"\r"`)
-  to change it. Delimiters must not be empty.
-- Positional syntax matches MATLAB: `dlmwrite(filename, M, delimiter)` and
-  `dlmwrite(filename, M, delimiter, row, col)` provide quick overrides. Row/column offsets are zero-based and insert
-  blank rows/columns filled with the delimiter before the numeric data.
-- Name-value pairs extend any syntax: `'-append'` appends to an existing file, `'delimiter'` overrides the separator,
-  `'precision'` accepts either a scalar (significant digits) or a C-style printf format such as `'%.6f'`,
-  `'newline'` chooses between `'pc'` (`CRLF`), `'unix'` (`LF`), or `'mac'` (`CR`), and `'roffset'`/`'coffset'` mirror the positional
-  offsets.
-- Empty fields created by offsets are emitted as empty tokens separated by the delimiter, matching MATLAB's behaviour.
-- Files are opened in text mode. When appending, RunMat preserves the existing newline convention and honours offsets
-  relative to the end of the file.
-- Paths beginning with `~` expand to the user's home directory before writing, matching other RunMat I/O builtins.
-
-## `dlmwrite` Function GPU Execution Behaviour
-`dlmwrite` performs all formatting on the CPU. When the input array lives on a GPU, RunMat gathers it through the active
-acceleration provider before serialisation. No provider hooks are required, and the builtin returns once the host-side
-write completes. If no provider is registered, the same gather error surface as other residency sinks appears.
-
-## Examples of using the `dlmwrite` function in MATLAB / RunMat
-
-### Writing a numeric matrix with the default comma delimiter
-```matlab
-A = [1 2 3; 4 5 6];
-dlmwrite("scores.csv", A);
-```
-Expected contents of `scores.csv`:
-```matlab
-1,2,3
-4,5,6
-```
-
-### Using a semicolon delimiter and positional offsets
-```matlab
-B = magic(3);
-dlmwrite("offset.txt", B, ";", 1, 2);
-```
-Expected contents of `offset.txt`:
-```matlab
-;;
-;;8;1;6
-;;3;5;7
-;;4;9;2
-```
-
-### Appending data with explicit row and column offsets
-```matlab
-dlmwrite("log.txt", 1:3);
-dlmwrite("log.txt", 10:12, "-append", "roffset", 1, "coffset", 1);
-```
-Expected contents of `log.txt`:
-```matlab
-1,2,3
-
-,10,11,12
-```
-
-### Controlling precision with significant digits
-```matlab
-vals = [12.34567, pi];
-dlmwrite("precision3.csv", vals, "precision", 3);
-```
-Expected contents of `precision3.csv`:
-```matlab
-12.3,3.14
-```
-
-### Emitting fixed-point values with a printf-style format string
-```matlab
-dlmwrite("fixed.txt", rand(2, 2), "precision", "%.6f", "delimiter", "\t");
-```
-Example contents (values vary):
-```matlab
-0.814724	0.135477
-0.905792	0.835009
-```
-
-### Selecting the Windows line ending while writing GPU data
-```matlab
-G = gpuArray(single([1.5; 2.5; 3.5]));
-dlmwrite("gpu_pc.txt", G, "newline", "pc");
-```
-Expected behaviour:
-```matlab
-% Data is gathered from the GPU and written using CR/LF line endings.
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `dlmwrite` gathers GPU-resident tensors automatically before writing. This mirrors MATLAB's behaviour, where
-`dlmwrite` always operates on host-resident values.
-
-## FAQ
-
-### Which data types does `dlmwrite` support?
-Real numeric and logical arrays up to two dimensions. Use `writematrix`/`writecell` for text or heterogeneous data.
-
-### How does the `'-append'` flag interact with offsets?
-Offsets are applied relative to the end of the existing file. `'-append','roffset',2` inserts two blank delimiter-filled
-rows before writing the new data.
-
-### What happens if I request both positional and name-value offsets?
-RunMat follows MATLAB by allowing both; the last specification wins. For clarity, prefer one style per call.
-
-### Can I combine `'-append'` with positional delimiter arguments?
-Yes. For example `dlmwrite(fname, M, ';', '-append')` uses the semicolon delimiter and appends to the file.
-
-### Does `'precision', N` control decimal places or significant digits?
-It controls significant digits (like MATLAB's `%.*g`). For fixed decimal places, pass a printf-style format such as
-`'%.6f'`.
-
-### Which line endings are supported?
-`'newline','pc'` emits `\r\n` (Windows). `'newline','unix'` emits `\n`, and `'newline','mac'` emits `\r`. The default matches the current platform.
-
-### How are NaN and Inf values written?
-They are emitted verbatim as `NaN`, `Inf`, or `-Inf`, independent of the precision setting, matching MATLAB.
-
-### How are offsets represented in the file?
-`roffset` produces blank delimiter-separated rows, while `coffset` inserts empty fields before each data row. Downstream
-tools will see empty strings for the offset cells.
-
-### Does `dlmwrite` normalise path separators?
-No. Paths are passed directly to the OS after optional `~` expansion, exactly like MATLAB.
-
-### Should new code use `dlmwrite`?
-Prefer `writematrix` for new code. Use `dlmwrite` only when maintaining legacy scripts that rely on its exact output.
-
-## See Also
-[dlmread](./dlmread), [csvwrite](./csvwrite), [writematrix](./writematrix), [fprintf](./fprintf), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- Source: [`crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs)
-- Found a behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmwrite",
@@ -1251,6 +1063,7 @@ fn normalize_exponent_notation(s: &mut String) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1261,7 +1074,6 @@ pub(crate) mod tests {
     use runmat_builtins::IntValue;
 
     use crate::builtins::common::fs as fs_helpers;
-    use crate::builtins::common::test_support;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1626,12 +1438,5 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(err.contains("dlmwrite"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

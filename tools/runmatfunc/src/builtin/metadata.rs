@@ -13,7 +13,6 @@ pub struct BuiltinRecord {
     pub keywords: Vec<String>,
     pub accel_tags: Vec<String>,
     pub is_sink: bool,
-    pub doc_markdown: Option<String>,
     pub param_types: Vec<String>,
     pub return_type: String,
 }

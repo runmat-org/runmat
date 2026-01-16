@@ -1,0 +1,138 @@
+{
+  "title": "setenv",
+  "category": "io/repl_fs",
+  "keywords": [
+    "setenv",
+    "environment variable",
+    "status",
+    "message",
+    "unset"
+  ],
+  "summary": "Set or clear environment variables with MATLAB-compatible status outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/setenv.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-only operation. RunMat gathers GPU-resident inputs before mutating the process environment; providers do not expose hooks for this builtin."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::setenv::tests",
+    "integration": "builtins::io::repl_fs::setenv::tests::setenv_reports_failure_for_illegal_name"
+  },
+  "description": "`setenv` updates the process environment. Provide a variable name and value to create or modify an entry, or pass an empty value to remove the variable. The builtin mirrors MATLAB by returning a status code and optional diagnostic message instead of throwing for platform-defined failures.",
+  "behaviors": [
+    "`status = setenv(name, value)` returns `0` when the update succeeds and `1` when the operating system rejects the request. The status output is a double scalar, matching MATLAB.",
+    "`[status, message] = setenv(name, value)` returns the status plus a character vector describing failures. On success, `message` is an empty `1\u00d70` character array.",
+    "Set `value` to an empty string (`\"\"`) or empty character vector (`''`) to remove the variable from the current process environment.",
+    "Names must be string scalars or character vectors containing only valid environment variable characters. MATLAB raises an error when `name` is not text; RunMat mirrors this check.",
+    "Character vector inputs trim trailing padding spaces (common with MATLAB character matrices). To retain trailing spaces, pass a string scalar instead.",
+    "Environment updates apply to the RunMat process and any child processes it spawns. They do not modify the parent shell."
+  ],
+  "examples": [
+    {
+      "description": "Set a new environment variable for the current session",
+      "input": "status = setenv(\"RUNMAT_MODE\", \"development\")",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Update an existing environment variable",
+      "input": "status = setenv(\"PATH\", string(getenv(\"PATH\")) + \":~/runmat/bin\")",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Remove an environment variable with an empty value",
+      "input": "[status, message] = setenv(\"OLD_SETTING\", \"\")",
+      "output": "status =\n     0\n\nmessage ="
+    },
+    {
+      "description": "Capture diagnostic messages when a name is invalid",
+      "input": "[status, message] = setenv(\"INVALID=NAME\", \"value\")",
+      "output": "status =\n     1\n\nmessage =\nEnvironment variable names must not contain '='."
+    },
+    {
+      "description": "Use character vectors from legacy code",
+      "input": "status = setenv('RUNMAT_LEGACY', 'enabled')",
+      "output": "status =\n     0"
+    },
+    {
+      "description": "Combine `setenv` with child process launches",
+      "input": "setenv(\"RUNMAT_DATASET\", \"demo\");\nstatus = system(\"runmat-cli process-data\")",
+      "output": "status =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What status codes does `setenv` return?",
+      "answer": "`0` means success; `1` means the operating system rejected the request (for example, due to an invalid name or an oversized value on Windows)."
+    },
+    {
+      "question": "Does `setenv` throw errors?",
+      "answer": "Only when the inputs are the wrong type (non-text). Platform failures are reported through the status and message outputs so scripts can handle them programmatically."
+    },
+    {
+      "question": "How do I remove a variable?",
+      "answer": "Pass an empty string or empty character vector as the value."
+    },
+    {
+      "question": "Are names case-sensitive?",
+      "answer": "RunMat defers to the operating system: case-sensitive on Unix-like systems and case-insensitive on Windows."
+    },
+    {
+      "question": "Can I include trailing spaces in the value?",
+      "answer": "Use string scalars to preserve trailing spaces. Character vector inputs trim trailing padding spaces by design."
+    },
+    {
+      "question": "Does `setenv` affect the parent shell?",
+      "answer": "No. Changes are limited to the current RunMat process and any child processes launched afterwards."
+    },
+    {
+      "question": "What characters are disallowed in names?",
+      "answer": "`setenv` rejects names containing `=` or null characters. Additional platform-specific restrictions are enforced by the operating system and reported through the status/message outputs."
+    },
+    {
+      "question": "Can I call `setenv` from GPU-enabled code?",
+      "answer": "Yes. Arguments are gathered from the GPU before updating the environment; the operation itself always runs on the CPU."
+    },
+    {
+      "question": "How can I check whether the update succeeded?",
+      "answer": "Inspect the returned `status`. When it is `1`, read the accompanying message to determine why the operation failed."
+    },
+    {
+      "question": "Will the variable persist after I exit RunMat?",
+      "answer": "No. Environment modifications are scoped to the current process."
+    }
+  ],
+  "links": [
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/setenv.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/setenv.rs"
+  },
+  "gpu_residency": "No. `setenv` is a host-side operation. GPU residency offers no benefit, and RunMat gathers GPU-backed values automatically if they appear as inputs.",
+  "gpu_behavior": [
+    "`setenv` always runs on the CPU. If a caller stores the arguments on the GPU\u2014for instance via an accelerated string builtin\u2014RunMat gathers them to host memory automatically before mutating the environment. Acceleration providers do not implement hooks for this builtin."
+  ]
+}

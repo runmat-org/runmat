@@ -1,0 +1,127 @@
+{
+  "title": "gt",
+  "category": "logical/rel",
+  "keywords": [
+    "gt",
+    ">",
+    "greater than",
+    "logical comparison",
+    "gpuArray greater-than"
+  ],
+  "summary": "Element-wise greater-than comparison for scalars, arrays, strings, and gpuArray inputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_gt kernels when available; otherwise inputs gather back to host memory transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::rel::gt::tests",
+    "integration": "builtins::logical::rel::gt::tests::gt_gpu_provider_roundtrip",
+    "gpu": "builtins::logical::rel::gt::tests::gt_wgpu_matches_host"
+  },
+  "description": "`gt(A, B)` (or the infix `A > B`) performs an element-wise greater-than comparison. The result is a logical scalar when the broadcasted shape contains one element, or a logical array otherwise.",
+  "behaviors": [
+    "Numeric, logical, and character inputs compare element-wise using MATLAB's implicit expansion rules.",
+    "Character arrays compare by Unicode code point; mixing them with numeric arrays behaves like comparing numeric codes (`'A' > 60`).",
+    "String scalars and string arrays compare lexically; implicit expansion works across string dimensions.",
+    "Complex inputs are not supported, matching MATLAB's behaviour.",
+    "Mixed numeric/string inputs raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Determine Whether One Scalar Exceeds Another",
+      "input": "flag = gt(42, 17);",
+      "output": "flag =\n     1"
+    },
+    {
+      "description": "Filter Matrix Elements Greater Than a Threshold",
+      "input": "M = [1 2 3; 4 5 6];\nmask = gt(M, 3);",
+      "output": "mask =\n  2\u00d73 logical array\n     0     0     0\n     1     1     1"
+    },
+    {
+      "description": "Apply Greater-Than With Implicit Expansion",
+      "input": "v = [1 3 5 7];\nmask = gt(v, [2 6]);",
+      "output": "mask =\n  1\u00d74 logical array\n     0     0     1     1"
+    },
+    {
+      "description": "Compare Character Data to Numeric Codes",
+      "input": "letters = ['A' 'B' 'C'];\nisAfterB = gt(letters, 66);",
+      "output": "isAfterB =\n  1\u00d73 logical array\n     0     0     1"
+    },
+    {
+      "description": "Compare String Arrays Lexicographically",
+      "input": "names = [\"alice\" \"charlie\" \"bob\"];\nlater = gt(names, \"bob\");",
+      "output": "later =\n  1\u00d73 logical array\n     0     1     0"
+    },
+    {
+      "description": "Run `gt` Directly On `gpuArray` Inputs",
+      "input": "G1 = gpuArray([1 4 7]);\nG2 = gpuArray([0 5 6]);\ndeviceResult = gt(G1, G2);\nhostResult = gather(deviceResult);",
+      "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     0     1\nhostResult =\n  1\u00d73 logical array\n     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `gt` return logical values?",
+      "answer": "Yes. Scalars return `true` or `false`. Arrays return logical arrays, and `gpuArray` inputs return `gpuArray` logical outputs."
+    },
+    {
+      "question": "How are NaN values treated?",
+      "answer": "Any comparison involving `NaN` returns `false`, matching MATLAB behaviour."
+    },
+    {
+      "question": "Can I compare complex numbers with `gt`?",
+      "answer": "No. MATLAB does not define relational ordering for complex numbers, so RunMat raises a MATLAB-compatible error when complex inputs are supplied."
+    },
+    {
+      "question": "How are strings compared?",
+      "answer": "String scalars and arrays compare lexicographically using Unicode code points, with full support for implicit expansion against scalar strings."
+    },
+    {
+      "question": "Are character vectors treated as numbers or text?",
+      "answer": "Character arrays participate as numeric code points when compared to numeric inputs, and they are converted to strings when compared against string scalars or arrays."
+    },
+    {
+      "question": "Do I need to gather results manually after a GPU comparison?",
+      "answer": "No. When both inputs are `gpuArray` values and the provider supports `elem_gt`, the result stays on the GPU. Otherwise, RunMat gathers inputs transparently and returns a host logical array."
+    },
+    {
+      "question": "Does implicit expansion apply to string arrays?",
+      "answer": "Yes. String arrays support MATLAB-style implicit expansion, so you can compare against scalar strings without manual replication."
+    },
+    {
+      "question": "Can I fuse `gt` inside GPU expressions?",
+      "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations."
+    }
+  ],
+  "links": [
+    {
+      "label": "eq",
+      "url": "./eq"
+    },
+    {
+      "label": "ne",
+      "url": "./ne"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/rel/gt.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/gt.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_behavior": [
+    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_gt` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+  ]
+}

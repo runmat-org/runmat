@@ -1,0 +1,120 @@
+{
+  "title": "tcpclient",
+  "category": "io/net",
+  "keywords": [
+    "tcpclient",
+    "tcp",
+    "socket",
+    "networking",
+    "client"
+  ],
+  "summary": "Open a TCP client socket that connects to MATLAB-compatible servers.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tcpclient.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "All networking executes on the host CPU. GPU-resident scalars are gathered automatically before connecting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::net::tcpclient::tests",
+    "integration": "builtins::io::net::tcpclient::tests::tcpclient_connects_to_loopback_server"
+  },
+  "description": "`tcpclient(host, port)` opens a TCP/IP connection to a remote server and returns a MATLAB-compatible struct that mirrors the `tcpclient` object. The struct tracks connection metadata (remote address and port, byte order, timeouts, and callback configuration) and carries an opaque identifier that other RunMat networking builtins use to operate on the live socket.",
+  "behaviors": [
+    "`tcpclient(host, port)` resolves the hostname (IPv4, IPv6, or DNS) and connects using the default 10 second `ConnectTimeout`. Ports must lie in the range `0\u201365535`.",
+    "Name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, determines read/write timeouts), `ConnectTimeout` (non-negative seconds, controls how long connection establishment waits), `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`), `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Unknown options raise `MATLAB:tcpclient:InvalidNameValue`.",
+    "Successful calls return a struct whose fields match MATLAB\u2019s `tcpclient` object, including callback placeholders (`BytesAvailableFcn`, `BytesAvailableFcnMode`, `BytesAvailableFcnCount`), connection metadata (`Address`, `Port`, `ServerAddress`, `ServerPort`, `LocalAddress`, `LocalPort`), and configuration (`Timeout`, `ConnectTimeout`, buffer sizes, `ByteOrder`). Hidden fields `__tcpclient_id` and `__tcpserver_id` retain the live socket handle for companion networking builtins.",
+    "Read and write timeouts are enforced using the `Timeout` value. Passing `inf` keeps operations blocking. The returned struct reports the configured timeout verbatim.",
+    "Connection failures raise `MATLAB:tcpclient:ConnectionFailed` with the OS error message. Invalid addresses, ports, or name-value arguments raise the corresponding MATLAB-style diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "Connecting to a loopback server for local testing",
+      "input": "client = tcpclient(\"127.0.0.1\", 55000);\ndisp(client.Address)\ndisp(client.Port)",
+      "output": "127.0.0.1\n55000"
+    },
+    {
+      "description": "Customizing tcpclient timeouts and byte order",
+      "input": "client = tcpclient(\"localhost\", 60000, \"Timeout\", 5, \"ConnectTimeout\", 2, \"ByteOrder\", \"big-endian\");\ndisp(client.Timeout)\ndisp(client.ConnectTimeout)\ndisp(client.ByteOrder)",
+      "output": "5\n2\nbig-endian"
+    },
+    {
+      "description": "Storing session metadata in `UserData`",
+      "input": "meta = struct(\"session\", \"demo\", \"started\", \"2024-01-01T00:00:00Z\");\nclient = tcpclient(\"example.com\", 80, \"UserData\", meta);\ndisp(client.UserData.session)",
+      "output": "demo"
+    },
+    {
+      "description": "Detecting connection failures with a shorter connect timeout",
+      "input": "try\n    client = tcpclient(\"192.0.2.20\", 65530, \"ConnectTimeout\", 0.2);\ncatch err\n    disp(err.identifier)\nend",
+      "output": "MATLAB:tcpclient:ConnectionFailed"
+    },
+    {
+      "description": "Keeping a streaming connection open with infinite timeouts",
+      "input": "client = tcpclient(\"data.example.com\", 50000, \"Timeout\", inf, \"ConnectTimeout\", inf);\ndisp(client.Timeout)\ndisp(client.ConnectTimeout)",
+      "output": "Inf\nInf"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which byte orders are supported?",
+      "answer": "`\"little-endian\"` (default) and `\"big-endian\"`. Any other string raises `MATLAB:tcpclient:InvalidNameValue`."
+    },
+    {
+      "question": "Can I pass `inf` for `Timeout` or `ConnectTimeout`?",
+      "answer": "Yes. `Timeout = inf` keeps I/O blocking, and `ConnectTimeout = inf` waits indefinitely for a connection."
+    },
+    {
+      "question": "How do I close the client?",
+      "answer": "A companion builtin will release the socket. Until then, tests can use internal helpers to drop clients when finished."
+    },
+    {
+      "question": "Where do buffer sizes apply?",
+      "answer": "`InputBufferSize` and `OutputBufferSize` store the desired limits for future buffered I/O builtins. The current implementation records the values for compatibility."
+    },
+    {
+      "question": "Does the builtin support IPv6?",
+      "answer": "Yes. Pass an IPv6 literal (for example `\"::1\"`) or a hostname that resolves to IPv6. The returned struct reports the chosen address family."
+    },
+    {
+      "question": "What happens when the server rejects the connection?",
+      "answer": "`tcpclient` raises `MATLAB:tcpclient:ConnectionFailed` with the OS error (such as \u201cconnection refused\u201d)."
+    }
+  ],
+  "links": [
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/net/tcpclient.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/net/tcpclient.rs"
+  },
+  "gpu_residency": "No. RunMat automatically gathers GPU scalars before opening sockets. The returned struct\u2014and all networking operations\u2014run on the CPU, so `gpuArray` offers no benefit for `tcpclient`.",
+  "gpu_behavior": [
+    "Networking always happens on the host CPU. If `host`, `port`, or name-value arguments reside on the GPU, RunMat gathers them automatically before the socket is created. The returned struct is CPU-resident, and no acceleration-provider hooks are required."
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "title": "rem",
+  "category": "math/rounding",
+  "keywords": [
+    "rem",
+    "remainder",
+    "truncate",
+    "rounding",
+    "gpu"
+  ],
+  "summary": "Compute the MATLAB remainder a - b .* fix(./b) for scalars, matrices, N-D tensors, and complex values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rem.html"
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Composed from elem_div \u2192 unary_fix \u2192 elem_mul \u2192 elem_sub when GPU operands share a shape; otherwise RunMat gathers to the host."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::rounding::rem::tests",
+    "integration": "builtins::math::rounding::rem::tests::rem_gpu_pair_roundtrip"
+  },
+  "description": "`C = rem(A, B)` returns the remainder after division with the quotient rounded toward zero: `C = A - B .* fix(A ./ B)`. The result has the same sign as the dividend (`A`) and a magnitude strictly smaller than `abs(B)` when `B` is finite.",
+  "behaviors": [
+    "Supports scalars, vectors, matrices, and higher-dimensional tensors with MATLAB-style implicit expansion (broadcasting).",
+    "Returns `NaN` when the divisor is zero or when the dividend is non-finite while the divisor is finite.",
+    "Infinite divisors leave finite dividends unchanged (because the quotient is zero).",
+    "Logical and integer inputs promote to double precision; character arrays operate on their Unicode code points.",
+    "Complex inputs follow MATLAB semantics: `rem(z, w) = z - w .* fix(z ./ w)` with `fix` applied component-wise to the complex quotient.",
+    "Empty inputs propagate emptiness while preserving shape."
+  ],
+  "examples": [
+    {
+      "description": "Remainder of positive integers",
+      "input": "r = rem(17, 5);",
+      "output": "r = 2;"
+    },
+    {
+      "description": "Remainder keeps dividend sign for negatives",
+      "input": "values = [-7 -3 4 9];\nremainders = rem(values, 4);",
+      "output": "remainders = [-3 -3 0 1];"
+    },
+    {
+      "description": "Remainder with a negative divisor",
+      "input": "r = rem(7, -4);",
+      "output": "r = 3;"
+    },
+    {
+      "description": "Applying remainder across arrays with broadcasting",
+      "input": "A = [4.5 7.1; -2.3 0.4];\nB = rem(A, 2);",
+      "output": "B = [0.5 1.1;\n     -0.3 0.4];"
+    },
+    {
+      "description": "Complex remainders follow fix-based quotient",
+      "input": "z = [3 + 4i, -2 + 5i];\nw = 2 + 1i;\nres = rem(z, w);",
+      "output": "res = [0.0 + 0.0i  0.0 + 1.0i];"
+    },
+    {
+      "description": "Keeping `rem` on the GPU when kernels are available",
+      "input": "G = gpuArray(-5:5);\nH = rem(G, 4);\nhostCopy = gather(H);",
+      "output": "hostCopy = [-1 0 -3 -2 -1 0 1 2 3 0 1];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `rem` different from `mod`?",
+      "answer": "`rem` rounds the quotient with `fix`, so the remainder inherits the dividend's sign. `mod` rounds with `floor`, which ties the remainder to the divisor's sign. Both functions share broadcasting rules, but they differ whenever negative values are involved."
+    },
+    {
+      "question": "What happens when the divisor is zero?",
+      "answer": "MATLAB defines `rem(A, 0)` as `NaN` (and `NaN + NaNi` for complex operands). RunMat mirrors this behaviour so error handling and edge cases match scripts written for MATLAB."
+    },
+    {
+      "question": "Does `rem` support infinite inputs?",
+      "answer": "Yes. When `B` is infinite and `A` is finite, the quotient truncates to zero and the result is exactly `A`. If the dividend is infinite while the divisor is finite, the remainder is `NaN`, preserving MATLAB's rules for indeterminate operations."
+    },
+    {
+      "question": "Can `rem` operate on complex numbers?",
+      "answer": "Absolutely. Both operands may be complex; RunMat computes `rem(z, w)` as `z - w .* fix(z ./ w)`, applying `fix` to the real and imaginary components independently so the result matches MATLAB's complex arithmetic."
+    },
+    {
+      "question": "Does `rem` change integer or logical inputs?",
+      "answer": "Internally, inputs promote to double precision before the remainder is computed. The result is returned as doubles, aligning with MATLAB's numeric tower while still supporting logical, integer, and character array arguments."
+    },
+    {
+      "question": "Will `rem` stay on the GPU?",
+      "answer": "It stays on-device when the provider implements `elem_div`, `unary_fix`, `elem_mul`, and `elem_sub`; fusion-aware planners can keep intermediates resident for downstream kernels. Otherwise the runtime gathers the operands, executes the CPU fallback, and returns a host tensor so correctness is unaffected."
+    }
+  ],
+  "links": [
+    {
+      "label": "mod",
+      "url": "./mod"
+    },
+    {
+      "label": "fix",
+      "url": "./fix"
+    },
+    {
+      "label": "floor",
+      "url": "./floor"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/rounding/rem.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/rem.rs"
+  },
+  "gpu_residency": "Typically no. The native auto-offload planner keeps tensors on the GPU whenever the provider implements the chained kernels described above or when `rem` participates in a larger fused expression. If any hook is missing\u2014or when inputs start on the host\u2014RunMat gathers automatically, executes the CPU fallback, and returns the result. You can still call `gpuArray` and `gather` explicitly for compatibility with MathWorks MATLAB scripts or to control residency manually.",
+  "gpu_behavior": [
+    "When both operands are GPU tensors with identical shapes and the active provider exposes `elem_div`, `unary_fix`, `elem_mul`, and `elem_sub`, RunMat evaluates `rem` fully on the device by chaining those kernels. Intermediate buffers stay device-side, fusion-aware planners can inline the sequence, and the final remainder handle remains on the GPU for downstream work. If residency is mixed, shapes differ, or any hook is unavailable, RunMat automatically gathers to the host, executes the MATLAB-compatible fallback, and returns a CPU tensor while preserving observable semantics."
+  ]
+}

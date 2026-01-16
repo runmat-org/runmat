@@ -11,160 +11,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "sin",
-        builtin_path = "crate::builtins::math::trigonometry::sin"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "sin"
-category: "math/trigonometry"
-keywords: ["sin", "sine", "trigonometry", "gpu", "elementwise", "like"]
-summary: "Sine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration."
-references: []
-gpu_support:
-  elementwise: true
-  reduction: false
-  precisions: ["f32", "f64"]
-  broadcasting: "matlab"
-  notes: "Prefers provider unary_sin hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
-fusion:
-  elementwise: true
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::math::trigonometry::sin::tests"
-  integration: "builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip"
----
-
-# What does the `sin` function do in MATLAB / RunMat?
-`y = sin(x)` evaluates the sine of each element in `x`, using radians and preserving MATLAB’s column-major layout and broadcasting rules.
-
-## How does the `sin` function behave in MATLAB / RunMat?
-- Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.
-- Logical and integer inputs are promoted to double precision before evaluation so that downstream arithmetic matches MATLAB’s numeric tower.
-- Complex values use the analytic extension `sin(a + bi) = sin(a)cosh(b) + i·cos(a)sinh(b)` while propagating `NaN`/`Inf` components independently.
-- Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.
-- Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.
-- Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.
-
-## `sin` Function GPU Execution Behaviour
-- With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_sin` hook (or fused elementwise kernels) without leaving GPU memory.
-- If the provider declines the operation—for example, when only CPU precision is available or the operand type is unsupported—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).
-- Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs.
-
-## Examples of using the `sin` function in MATLAB / RunMat
-
-### Computing the sine of a scalar
-
-```matlab
-y = sin(pi/2);
-```
-
-Expected output:
-
-```matlab
-y = 1
-```
-
-### Computing the sine of a vector
-
-```matlab
-angles = [0 pi/6 pi/4 pi/3];
-values = sin(angles);
-```
-
-Expected output:
-
-```matlab
-values = [0 0.5 0.7071 0.8660]
-```
-
-### Computing the sine of a complex number
-
-```matlab
-z = sin(1 + 2i);
-```
-
-Expected output:
-
-```matlab
-z = 3.1658 + 1.9596i
-```
-
-### Computing the sine of a matrix on a GPU
-
-```matlab
-A = reshape(0:5, [3 2]);
-G = gpuArray(A);
-R = sin(G);
-result = gather(R);
-```
-
-Expected output:
-
-```matlab
-result =
-         0    0.1411
-    0.8415   -0.7568
-    0.9093   -0.9589
-```
-
-### Keeping results on the GPU with a `'like'` prototype
-
-```matlab
-proto = gpuArray.zeros(1, 1, 'single');
-angles = [0 pi/2];
-deviceResult = sin(angles, 'like', proto);
-gathered = gather(deviceResult);
-```
-
-Expected output:
-
-```matlab
-gathered =
-  1x2 single
-     0     1
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_sin`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.
-
-## FAQ
-
-### When should I use the `sin` function?
-Whenever you need the elementwise sine for signals, control systems, geometry, or any workflow that depends on periodic functions across scalars, vectors, or higher-dimensional tensors.
-
-### Does `sin` expect radians or degrees?
-Radians are required, just like in MATLAB. Use `sin(deg2rad(theta))` or the `sind` builtin if you want to work in degrees.
-
-### How are logical, integer, or character inputs handled?
-Logical and integer inputs are promoted to double precision before evaluation, and character arrays are converted to their Unicode code points. The result is always floating-point, matching MATLAB’s behaviour.
-
-### Can the result stay on the GPU automatically?
-Yes. If your inputs are already on the GPU—or you pass `'like', gpuArray(…)`—RunMat keeps the output on the device. When a fallback is required, the runtime re-uploads the result so downstream consumers still see a GPU tensor.
-
-### What happens if the provider does not implement `unary_sin`?
-RunMat gathers the tensor to the host, computes `sin` with the reference implementation, and applies the requested residency rules (including `'like'` re-uploads) before returning.
-
-### Does `sin` support complex numbers?
-Absolutely. Real and imaginary parts are handled according to the analytic extension, and NaNs/Infs propagate component-wise exactly as in MATLAB.
-
-### Can I use complex prototypes with `'like'`?
-Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; complex prototypes raise a descriptive error so you can fall back to the default output rules.
-
-## See Also
-[cos](./cos), [tan](./tan), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `sin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs)
-- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -367,10 +213,9 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
-
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -574,13 +419,6 @@ pub(crate) mod tests {
             Value::Num(v) => assert!(v.abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

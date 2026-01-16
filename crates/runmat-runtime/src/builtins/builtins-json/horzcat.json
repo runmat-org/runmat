@@ -1,0 +1,102 @@
+{
+  "title": "horzcat",
+  "category": "array/shape",
+  "keywords": [
+    "horzcat",
+    "horizontal concatenation",
+    "square brackets",
+    "array building",
+    "gpu"
+  ],
+  "summary": "Concatenate inputs side-by-side (dimension 2) just like MATLAB's square-bracket syntax.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Delegates to the cat builtin with dim=2; providers that expose cat run entirely on the GPU, otherwise RunMat gathers to the host and re-uploads the result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::horzcat::tests",
+    "integration": "builtins::array::shape::horzcat::tests::{horzcat_gpu_roundtrip,horzcat_like_gpu_from_host_inputs}"
+  },
+  "description": "`horzcat(A1, A2, \u2026)` horizontally concatenates its inputs, matching the behaviour of MATLAB's square-bracket syntax `[A1 A2 \u2026]`. It is the building block for row-wise array construction in RunMat.",
+  "behaviors": [
+    "Operates on numeric, logical, complex, character, string, and cell arrays with MATLAB-compatible type checking.",
+    "All inputs must have the same number of rows (dimension 1). Higher dimensions are padded with singleton sizes where necessary.",
+    "Scalars act as `1\u00d71` building blocks, so `horzcat(1, 2, 3)` produces the row vector `[1 2 3]`.",
+    "Empty inputs participate naturally. If every operand is empty, the result is the canonical `0\u00d70` double.",
+    "When the trailing `'like', prototype` pair is supplied, the output matches the prototype's residency (host or GPU) and numeric category.",
+    "Mixing `gpuArray` operands with host operands is an error\u2014convert explicitly using `gpuArray` or `gather`."
+  ],
+  "examples": [
+    {
+      "description": "Concatenating matrices by columns",
+      "input": "A = [1 2; 3 4];\nB = [10 20; 30 40];\nC = horzcat(A, B);",
+      "output": "C =\n     1     2    10    20\n     3     4    30    40"
+    },
+    {
+      "description": "Building a row vector from scalars",
+      "input": "row = horzcat(1, 2, 3, 4);",
+      "output": "row = [1 2 3 4];"
+    },
+    {
+      "description": "Extending character arrays into words",
+      "input": "lhs = ['Run' ; 'GPU'];\nrhs = ['Mat' ; 'Fun'];\nwords = horzcat(lhs, rhs);",
+      "output": "words =\n    RunMat\n    GPUFun"
+    },
+    {
+      "description": "Keeping gpuArray inputs resident on the device",
+      "input": "G1 = gpuArray(rand(256, 128));\nG2 = gpuArray(rand(256, 64));\nwide = horzcat(G1, G2);"
+    },
+    {
+      "description": "Preserving empties when all inputs are empty",
+      "input": "emptyBlock = zeros(0, 3);\nresult = horzcat(emptyBlock, emptyBlock);"
+    },
+    {
+      "description": "Matching an output prototype with the `'like'` syntax",
+      "input": "proto = gpuArray.zeros(5, 1);\ncombo = horzcat(ones(5, 1), zeros(5, 1), \"like\", proto);"
+    }
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "`cat`",
+      "url": "./cat"
+    },
+    {
+      "label": "`vertcat`",
+      "url": "./vertcat"
+    },
+    {
+      "label": "`reshape`",
+      "url": "./reshape"
+    },
+    {
+      "label": "`gpuArray`",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "`gather`",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/horzcat.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/horzcat.rs"
+  },
+  "gpu_behavior": [
+    "`horzcat` delegates to `cat(dim = 2, \u2026)`. When the active acceleration provider implements the `cat` hook, the concatenation is executed directly on the GPU without staging data back to the CPU. Providers that lack this hook fall back to gathering the operands, concatenating on the host, and uploading the result so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflow while keeping RunMat's auto-offload planner informed."
+  ]
+}

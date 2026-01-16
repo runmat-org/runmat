@@ -10,163 +10,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "cosh",
-        builtin_path = "crate::builtins::math::trigonometry::cosh"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "cosh"
-category: "math/trigonometry"
-keywords: ["cosh", "hyperbolic cosine", "trigonometry", "elementwise", "gpu"]
-summary: "Hyperbolic cosine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration."
-references: []
-gpu_support:
-  elementwise: true
-  reduction: false
-  precisions: ["f32", "f64"]
-  broadcasting: "matlab"
-  notes: "Prefers provider unary_cosh hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
-fusion:
-  elementwise: true
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::math::trigonometry::cosh::tests"
-  integration: "builtins::math::trigonometry::cosh::tests::cosh_gpu_provider_roundtrip"
----
-
-# What does the `cosh` function do in MATLAB / RunMat?
-`Y = cosh(X)` computes the hyperbolic cosine of every element in `X`, extending naturally to complex values.
-
-## How does the `cosh` function behave in MATLAB / RunMat?
-- Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics for scalar expansion.
-- Logical inputs are converted to double precision (`true → 1.0`, `false → 0.0`) before applying `cosh`.
-- Complex inputs follow the analytic rule `cosh(a + bi) = cosh(a)cos(b) + i·sinh(a)sin(b)`, propagating `NaN`/`Inf` components independently.
-- Character arrays are converted to their numeric code points prior to evaluation, with double-precision outputs that preserve the input shape.
-- Empty arrays return empty results that respect MATLAB’s shape semantics.
-
-## `cosh` Function GPU Execution Behaviour
-When RunMat Accelerate is active, tensors that already reside on the GPU stay there. Providers implementing the optional `unary_cosh` hook execute the operation entirely on the device (and fused elementwise kernels can inline `cosh` alongside other operations). If the active provider lacks this hook, RunMat gathers the data back to the host, computes the reference result, and only re-uploads when downstream operations demand GPU residency.
-
-## Examples of using the `cosh` function in MATLAB / RunMat
-
-### Hyperbolic cosine of a scalar
-
-```matlab
-y = cosh(2);
-```
-
-Expected output:
-
-```matlab
-y = 3.7622;
-```
-
-### Applying `cosh` elementwise to a vector
-
-```matlab
-x = linspace(-2, 2, 5);
-y = cosh(x);
-```
-
-Expected output:
-
-```matlab
-y = [3.7622 1.5431 1.0000 1.5431 3.7622];
-```
-
-### Evaluating `cosh` on a matrix
-
-```matlab
-A = [0 0.5; 1.0 1.5];
-B = cosh(A);
-```
-
-Expected output:
-
-```matlab
-B = [1.0000 1.1276; 1.5431 2.3524];
-```
-
-### Executing `cosh` on a GPU tensor
-
-```matlab
-G = gpuArray([0.25 0.75; 1.25 1.75]);
-result_gpu = cosh(G);
-result = gather(result_gpu);
-```
-
-Expected output:
-
-```matlab
-result = [1.0310 1.2947; 1.8890 2.9510];
-```
-
-### Working with complex inputs
-
-```matlab
-z = 1 + 2i;
-w = cosh(z);
-```
-
-Expected output:
-
-```matlab
-w = -0.6421 + 1.0686i;
-```
-
-### Hyperbolic cosine for character codes
-
-```matlab
-chars = 'AZ';
-codes = cosh(chars);
-```
-
-Expected output:
-
-```matlab
-codes = [4.3771e18 9.1487e18];
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the required kernels (such as `unary_cosh`). Manual `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you must control residency before interoperating with external code.
-
-## FAQ
-
-### When should I use `cosh`?
-Use `cosh` for hyperbolic modelling, solving differential equations, or transforming signals where the hyperbolic cosine naturally appears.
-
-### Does `cosh` work with complex inputs?
-Yes. Real and imaginary components are evaluated using the analytic continuation, matching MATLAB’s `cosh` semantics.
-
-### What happens if the GPU provider lacks `unary_cosh`?
-RunMat falls back to the host implementation. Tensors are gathered to the CPU, evaluated, and left on the host unless later operations request GPU residency (`'like'`, planner decisions, etc.).
-
-### Can `cosh` participate in fusion?
-Yes. The fusion planner can inline `cosh` inside elementwise groups, generating WGSL kernels that execute directly on the GPU when supported.
-
-### Are integers preserved?
-Inputs are promoted to double precision before evaluation, matching MATLAB behaviour. Cast back explicitly if you need integer outputs.
-
-### How does `cosh` handle NaN or Inf values?
-`cosh` propagates `NaN` and `Inf` in the same way as MATLAB: each component is treated independently, and results mirror IEEE-754 expectations.
-
-### Is there a warmup penalty on first GPU use?
-Providers may compile elementwise pipelines during initialization. If `unary_cosh` is unavailable, the CPU fallback avoids the warmup altogether.
-
-## See Also
-[cos](./cos), [sinh](./sinh), [tanh](./tanh), [gpuArray](./gpuarray), [gather](./gather)
-
-## Source & Feedback
-- The full source code for the implementation of the `cosh` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/cosh.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cosh.rs)
-- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
-"#;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -277,9 +120,8 @@ fn cosh_complex_im(re: f64, im: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
-
     use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -390,13 +232,6 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, expected);
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

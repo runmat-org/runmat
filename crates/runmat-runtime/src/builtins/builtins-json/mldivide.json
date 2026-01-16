@@ -1,0 +1,125 @@
+{
+  "title": "mldivide",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "mldivide",
+    "matrix left division",
+    "linear systems",
+    "least squares",
+    "gpu"
+  ],
+  "summary": "Solve A * X = B using MATLAB's left-division operator (`\\`).",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/double.mldivide.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Prefers the accel provider's mldivide hook; providers without a native solve gather to host, run the shared SVD solver, then re-upload the result to preserve GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::mldivide::tests",
+    "gpu": "builtins::math::linalg::ops::mldivide::tests::gpu_round_trip_matches_cpu",
+    "wgpu": "builtins::math::linalg::ops::mldivide::tests::wgpu_round_trip_matches_cpu"
+  },
+  "description": "`X = A \\ B` (or `mldivide(A, B)`) solves the left-sided linear system `A * X = B`. When `A` is square and nonsingular the solution matches `inv(A) * B`. Rectangular or rank-deficient matrices are handled via a minimum-norm least-squares solve, mirroring MATLAB's SVD-based semantics.",
+  "behaviors": [
+    "Scalars divide exactly: `s \\ B` scales `B` by `1/s`, while `A \\ s` requires `A` to be scalar.",
+    "Logical and integer inputs are promoted to double precision before solving.",
+    "Purely real operands return real outputs; any complex operand promotes the computation (and result) to complex arithmetic.",
+    "Inputs must behave like 2-D matrices; trailing singleton dimensions are allowed.",
+    "The number of rows must agree (`size(A, 1) == size(B, 1)`), otherwise RunMat raises the MATLAB error `\"Matrix dimensions must agree.\"`",
+    "Underdetermined and overdetermined systems return the minimum-norm least-squares solution."
+  ],
+  "examples": [
+    {
+      "description": "Solving a square linear system with backslash",
+      "input": "A = [1 2; 3 4];\nb = [5; 6];\nx = A \\ b;",
+      "output": "x =\n    -4.0000\n     4.5000"
+    },
+    {
+      "description": "Computing a least-squares solution with backslash",
+      "input": "A = [1 2; 3 4; 5 6];\nb = [7; 8; 9];\nx = A \\ b;",
+      "output": "x =\n    -6.0000\n     6.5000"
+    },
+    {
+      "description": "Scaling by a scalar using backslash",
+      "input": "s = 2;\nB = [2 4 6];\nscaled = s \\ B;",
+      "output": "scaled = [1 2 3];"
+    },
+    {
+      "description": "Solving multiple right-hand sides at once",
+      "input": "A = [4 1; 2 3];\nB = [1 0; 0 1];\nX = A \\ B;",
+      "output": "X =\n     0.3   -0.1\n    -0.2    0.4"
+    },
+    {
+      "description": "Left division with complex matrices",
+      "input": "A = [2+i 1; -1 3-2i];\nB = [1; 4+i];\nX = A \\ B;",
+      "output": "X =\n   -0.0732 - 0.3415i\n    0.8049 + 0.7561i"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why must `A` and `B` share the number of rows?",
+      "answer": "Left division solves `A * X = B`, which requires `size(A, 1) == size(B, 1)` for matrix multiplication to be defined."
+    },
+    {
+      "question": "What happens if `A` is singular or rectangular?",
+      "answer": "RunMat mirrors MATLAB by computing the minimum-norm least-squares solution using singular-value decomposition—no explicit pseudoinverse is necessary."
+    },
+    {
+      "question": "Does `mldivide` work with higher-dimensional arrays?",
+      "answer": "Inputs must behave like matrices. Trailing singleton dimensions are allowed, but higher-rank arrays should be reshaped before calling `mldivide`."
+    },
+    {
+      "question": "How are logical or integer arrays treated?",
+      "answer": "They are promoted to double precision (`true → 1`, `false → 0`) before solving, matching MATLAB semantics."
+    },
+    {
+      "question": "How does RunMat handle NaN or Inf values?",
+      "answer": "NaNs and Infs propagate through the least-squares solver exactly as MATLAB does—any slice containing NaNs will typically produce NaNs in the corresponding output entries."
+    }
+  ],
+  "links": [
+    {
+      "label": "mrdivide",
+      "url": "./mrdivide"
+    },
+    {
+      "label": "mtimes",
+      "url": "./mtimes"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs"
+  },
+  "gpu_residency": "No manual residency management is required. If both operands already live on the GPU and the active provider implements `mldivide`, the solve stays on the device. When the provider falls back to the host (as the current WGPU backend does), RunMat gathers data, executes the same SVD solver used by the CPU implementation, and re-uploads the result so subsequent GPU work continues seamlessly.",
+  "gpu_behavior": [
+    "When a gpuArray provider is active, RunMat first offers the solve to its `mldivide` hook. The current WGPU provider downloads the operands to the host, executes the shared SVD-based solver, then uploads the result back to the device so downstream GPU pipelines keep their residency. If no provider is available—or a provider declines the request—RunMat gathers gpuArray inputs to the host, performs the solve there, and returns a host tensor."
+  ]
+}

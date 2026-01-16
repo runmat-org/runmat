@@ -1,0 +1,136 @@
+{
+  "title": "extractBetween",
+  "category": "strings/transform",
+  "keywords": [
+    "extractBetween",
+    "substring",
+    "boundaries",
+    "inclusive",
+    "exclusive",
+    "string array"
+  ],
+  "summary": "Extract text that lies between two boundary markers using string or position inputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/extractbetween.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Runs on the CPU. GPU-resident inputs are gathered before processing, results stay on the host, and the builtin is registered as an Accelerate sink."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::extractbetween::tests",
+    "integration": "builtins::strings::transform::extractbetween::tests::extractBetween_cell_array_preserves_types"
+  },
+  "description": "`extractBetween(text, start, stop)` locates the substring that appears between two boundary markers. Markers can be text (string scalars, character vectors, or cells that contain them) or numeric positions. The builtin mirrors MATLAB semantics for broadcasting, missing values, and the optional `'Boundaries'` name-value argument.",
+  "behaviors": [
+    "Accepts **string scalars**, **string arrays**, **character arrays** (interpreted row-by-row), and **cell arrays** that contain string scalars or character vectors. Cell outputs preserve the element type (string vs. char) of each cell.",
+    "Boundary inputs can be text or numeric positions. Both boundaries in a call must use the same kind of input; mixing text and numeric markers raises a size/type error.",
+    "Scalar text markers follow MATLAB implicit expansion, applying to every element of the text input. Character-array and cell inputs must exactly match the text shape.",
+    "The `'Boundaries'` name-value pair controls inclusivity. Text markers default to **exclusive** extraction, while numeric positions default to **inclusive** behaviour. Values are case-insensitive and must be `'exclusive'` or `'inclusive'`.",
+    "Missing string scalars propagate: if the text, start marker, or end marker is `<missing>`, the result is also `<missing>`.",
+    "When the start or end boundary cannot be located, `extractBetween` returns an empty string (or an appropriately padded empty row for character arrays).",
+    "Numeric positions use 1-based indexing. Inputs are validated as positive integers, clamped to string length, and honour inclusivity rules exactly as MATLAB does."
+  ],
+  "examples": [
+    {
+      "description": "Extract text between words in a string",
+      "input": "txt = \"RunMat accelerates MATLAB workloads\";\nsegment = extractBetween(txt, \"RunMat \", \" workloads\");",
+      "output": "segment = \"accelerates MATLAB\""
+    },
+    {
+      "description": "Include boundary markers with the `'Boundaries'` option",
+      "input": "path = \"snapshots/run/fusion.mat\";\nwithMarkers = extractBetween(path, \"snapshots/\", \".mat\", \"Boundaries\", \"inclusive\");",
+      "output": "withMarkers = \"snapshots/run/fusion.mat\""
+    },
+    {
+      "description": "Use numeric positions for 1-based indexing",
+      "input": "name = \"Accelerator\";\nmiddle = extractBetween(name, 3, 7);",
+      "output": "middle = \"celer\""
+    },
+    {
+      "description": "Apply scalar text markers to each element of a string array",
+      "input": "files = [\"runmat_accel.rs\", \"runmat_gc.rs\"; \"runmat_plot.rs\", \"runmat_cli.rs\"];\nstems = extractBetween(files, \"runmat_\", \".rs\");",
+      "output": "stems = 2\u00d72 string\n    \"accel\"    \"gc\"\n    \"plot\"     \"cli\""
+    },
+    {
+      "description": "Work with character arrays while preserving row padding",
+      "input": "chars = char(\"Device<GPU>\", \"Planner<Fusion>\");\ntokens = extractBetween(chars, \"<\", \">\");",
+      "output": "tokens =\n\n  2\u00d76 char array\n\n    \"GPU   \"\n    \"Fusion\""
+    },
+    {
+      "description": "Preserve element types in cell arrays",
+      "input": "C = {'<missing>', 'A[B]C'; \"Planner <Fusion>\", \"Device<GPU>\"};\nout = extractBetween(C, \"<\", \">\");",
+      "output": "out =\n  2\u00d72 cell array\n    {'<missing>'}    {'B'}\n    {\"Fusion\"}       {\"GPU\"}"
+    },
+    {
+      "description": "Handle missing strings without throwing errors",
+      "input": "txt = [\"<missing>\", \"Planner<GPU>\"];\ntokens = extractBetween(txt, \"<\", \">\");",
+      "output": "tokens = 1\u00d72 string\n    \"<missing>\"    \"GPU\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which argument types does `extractBetween` accept?",
+      "answer": "The first argument can be a string scalar, string array, character array, or cell array of character vectors / string scalars. Boundary arguments can be text (string, character array, or cell) or numeric positions supplied as scalars, vectors, or arrays."
+    },
+    {
+      "question": "Can the start and end arguments mix text and numeric positions?",
+      "answer": "No. Both boundaries must be text markers or both must be numeric positions. Mixing types raises a size/type error, mirroring MATLAB."
+    },
+    {
+      "question": "What happens when a boundary is not found?",
+      "answer": "`extractBetween` returns the empty string (`\"\"`). Character-array outputs contain space padded rows of the appropriate length."
+    },
+    {
+      "question": "How does `'Boundaries','inclusive'` behave with numeric positions?",
+      "answer": "Inclusive mode returns the substring that includes both indices. Exclusive mode removes the characters at the specified start and end positions, yielding the text strictly between the two indices."
+    },
+    {
+      "question": "Does `extractBetween` support implicit expansion?",
+      "answer": "Yes. Scalar boundaries expand against array inputs following MATLAB implicit expansion rules. Cell and character array inputs must retain their original shape; attempting to expand them produces a size mismatch error."
+    },
+    {
+      "question": "Are GPU inputs supported?",
+      "answer": "Yes. Inputs stored on a GPU are gathered automatically. The function executes on the CPU, returns host-side results, and fusion planning treats the builtin as a residency sink."
+    }
+  ],
+  "links": [
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    },
+    {
+      "label": "strfind",
+      "url": "./strfind"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/extractbetween.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/extractbetween.rs"
+  },
+  "gpu_behavior": [
+    "Text manipulation executes on the CPU. When any argument resides on the GPU, RunMat gathers the values to host memory, performs extraction, and leaves the results on the host. No Accelerate provider hooks are required, and the builtin is registered as an Accelerate sink so fusion plans never attempt to keep data on the device for this operation."
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "title": "issymmetric",
+  "category": "math/linalg/structure",
+  "keywords": [
+    "issymmetric",
+    "symmetric matrix",
+    "skew-symmetric",
+    "matrix structure",
+    "gpu"
+  ],
+  "summary": "Test whether a matrix is symmetric or skew-symmetric, optionally within a tolerance.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Falls back to gathering GPU operands when providers lack a device-side symmetry predicate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::structure::issymmetric::tests",
+    "integration": "builtins::math::linalg::structure::issymmetric::tests::issymmetric_gpu_roundtrip"
+  },
+  "description": "`issymmetric(A)` returns logical `true` when a numeric or logical matrix `A` is symmetric about its main diagonal (`A == A.'`) and `false` otherwise.",
+  "behaviors": [
+    "Works with scalars, vectors (treated as matrices), and higher-rank arrays whose trailing dimensions are singleton (MATLAB-compatible matrix semantics). An error is raised when the input has more than two non-singleton dimensions.",
+    "Non-square matrices immediately return `false`.",
+    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before testing.",
+    "Complex inputs are compared without conjugation; use `ishermitian` for conjugate symmetry.",
+    "Floating-point tolerance can be supplied to account for numerical noise.",
+    "Pass `'skew'` to test skew-symmetry (`A == -A.'`). Diagonal entries must be zero (within the tolerance) when `skew` mode is active."
+  ],
+  "examples": [
+    {
+      "description": "Checking whether a matrix is symmetric",
+      "input": "A = [2 1 1; 1 3 4; 1 4 5];\ntf = issymmetric(A);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Allowing numerical noise with a tolerance",
+      "input": "A = [1 1+1e-12; 1-1e-12 1];\ntf = issymmetric(A, 1e-9);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Detecting a skew-symmetric matrix",
+      "input": "B = [0 -2 4; 2 0 -3; -4 3 0];\ntf = issymmetric(B, 'skew');",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Handling non-square matrices",
+      "input": "C = [1 2 3; 4 5 6];\ntf = issymmetric(C);",
+      "output": "tf = logical\n   0"
+    },
+    {
+      "description": "Working with complex-valued matrices",
+      "input": "Z = [1+2i 3-4i; 3-4i 5+6i];\ntf = issymmetric(Z);",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Inspecting a GPU-resident matrix",
+      "input": "G = gpuArray([0 5; 5 9]);\ntf = issymmetric(G);",
+      "output": "tf = logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `issymmetric` accept tolerance arguments?",
+      "answer": "Yes. Pass a non-negative scalar tolerance as the second or third argument. The comparison uses an absolute tolerance on the element-wise difference (or sum for skew tests)."
+    },
+    {
+      "question": "What strings are accepted for the skew flag?",
+      "answer": "Use `'skew'` to test skew-symmetry and `'nonskew'` (or omit the flag) for the default symmetry test."
+    },
+    {
+      "question": "How are diagonal elements handled in skew mode?",
+      "answer": "Diagonal elements must be zero (within the tolerance) because a skew-symmetric matrix satisfies `A(i,i) = -A(i,i)`."
+    },
+    {
+      "question": "Are NaN values considered symmetric?",
+      "answer": "No. Any NaN encountered off or on the diagonal causes the test to return `false`, matching MATLAB behaviour."
+    },
+    {
+      "question": "Do logical matrices work?",
+      "answer": "Yes. Logical inputs are promoted to double precision and checked using the same rules as numeric matrices."
+    },
+    {
+      "question": "Does `issymmetric` conjugate complex inputs?",
+      "answer": "No. The builtin compares complex entries without conjugation. Use `ishermitian` if you need conjugate symmetry."
+    },
+    {
+      "question": "What happens with higher-dimensional arrays?",
+      "answer": "`issymmetric` raises an error when the input has more than two non-singleton dimensions. Reshape the data to a 2-D matrix before calling it."
+    },
+    {
+      "question": "Can I combine the skew flag and tolerance?",
+      "answer": "Yes. You can call `issymmetric(A, 'skew', tol)` or `issymmetric(A, tol, 'skew')`. The order of the optional arguments does not matter."
+    },
+    {
+      "question": "Is an empty matrix symmetric?",
+      "answer": "Yes. Empty square matrices (`0x0`) return logical `true`, while non-square empty matrices return `false`."
+    },
+    {
+      "question": "Does the result depend on GPU availability?",
+      "answer": "No. You receive the same logical answer regardless of whether a GPU provider is registered. Only the execution strategy changes (device-side predicate vs. host fallback)."
+    }
+  ],
+  "links": [
+    {
+      "label": "bandwidth",
+      "url": "./bandwidth"
+    },
+    {
+      "label": "chol",
+      "url": "./chol"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/issymmetric.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/issymmetric.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` / `gather` calls are optional. When a provider implements the symmetry hook, RunMat executes the predicate in-place on the GPU and only transfers the scalar result. Otherwise the runtime gathers the tensor transparently and reuses the CPU path, preserving correctness with a minor residency cost.",
+  "gpu_behavior": [
+    "RunMat keeps GPU tensors resident whenever feasible. When the active acceleration provider exposes a symmetry predicate hook (`issymmetric`), the test runs entirely on the device and returns a host logical scalar. Providers without that hook gracefully fall back to downloading the matrix, so results remain correct even without GPU specialisation."
+  ]
+}

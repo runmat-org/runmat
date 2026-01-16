@@ -1,14 +1,11 @@
 import type { Metadata } from 'next';
-import builtinsData from '@/content/builtins.json';
-import type { Builtin } from '@/lib/builtins';
+import { getBuiltinDocBySlug } from '@/lib/builtins';
 import { resolveOgFields } from '@/lib/og';
 
-const BUILTINS: Builtin[] = builtinsData as Builtin[];
-const BUILTIN_MAP: Map<string, Builtin> = new Map(BUILTINS.map(b => [b.slug, b]));
 const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
 
 export function builtinMetadataForSlug(slug: string): Metadata {
-    const builtin = BUILTIN_MAP.get(slug);
+    const builtin = getBuiltinDocBySlug(slug);
     if (!builtin) {
         const title = `${slug} | MATLAB Language Function Reference`;
         return {
@@ -27,22 +24,18 @@ export function builtinMetadataForSlug(slug: string): Metadata {
         } satisfies Metadata;
     }
 
-    const description = (
-        builtin.description ||
-        builtin.summary ||
-        FALLBACK_DESCRIPTION
-    ).trim();
+    const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
 
     return {
-        title: `${builtin.name} | MATLAB Language Function Reference`,
+        title: { absolute: `${builtin.title} in MATLAB - runnable examples online + source | RunMat docs` },
         description,
         openGraph: {
-            title: builtin.name,
+            title: builtin.title,
             description,
         },
         twitter: {
             card: 'summary_large_image',
-            title: builtin.name,
+            title: builtin.title,
             description,
         },
         alternates: { canonical: `/docs/reference/builtins/${slug}` },

@@ -29,7 +29,6 @@ export interface BuiltinRecord {
   keywords: string[];
   accel_tags: string[];
   is_sink: boolean;
-  doc_markdown: string | null;
   param_types: string[];
   return_type: string;
 }

@@ -15,166 +15,6 @@ use crate::gather_if_needed;
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "num2str",
-        builtin_path = "crate::builtins::strings::core::num2str"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "num2str"
-category: "strings/core"
-keywords: ["num2str", "number to string", "format", "precision", "gpu"]
-summary: "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats."
-references:
-  - https://www.mathworks.com/help/matlab/ref/num2str.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Always formats on the CPU. GPU tensors are gathered to host memory before conversion."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::core::num2str::tests"
-  integration: "builtins::strings::core::num2str::tests::num2str_gpu_tensor_roundtrip"
----
-
-# What does the `num2str` function do in MATLAB / RunMat?
-`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each
-row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can
-provide a precision or an explicit format specifier to control the output. Complex inputs produce
-`a ± bi` strings, and logical data is converted to `0` or `1`.
-
-## How does the `num2str` function behave in MATLAB / RunMat?
-- Default formatting uses up to 15 significant digits with MATLAB-style `g` behaviour (switching to
-  scientific notation when needed).
-- `num2str(x, p)` formats using `p` significant digits (`0 ≤ p ≤ 52`).
-- `num2str(x, fmt)` accepts a single-number `printf`-style format such as `'%0.3f'`, `'%10.4e'`, or
-  `'%.5g'`. Width, `+`, `-`, and `0` flags are supported.
-- A trailing `'local'` argument switches the decimal separator to the one inferred from the active
-  locale (or the `RUNMAT_DECIMAL_SEPARATOR` environment variable).
-- Vector inputs return single-row character arrays; matrices return one textual row per numeric row.
-- Empty matrices return empty character arrays that match MATLAB's dimension rules.
-- Non-numeric types raise MATLAB-compatible errors.
-
-## `num2str` Function GPU Execution Behaviour
-When the input resides on the GPU, RunMat gathers the data back to host memory using the active
-RunMat Accelerate provider before applying the formatting logic. The formatted character array
-always lives on the CPU, so providers do not need to implement specialised kernels.
-
-## Examples of using the `num2str` function in MATLAB / RunMat
-
-### Converting A Scalar With Default Precision
-```matlab
-label = num2str(pi);
-```
-Expected output:
-```matlab
-label =
-    '3.14159265358979'
-```
-
-### Formatting With A Specific Number Of Significant Digits
-```matlab
-digits = num2str(pi, 4);
-```
-Expected output:
-```matlab
-digits =
-    '3.142'
-```
-
-### Using A Custom Format String
-```matlab
-row = num2str([1.234 5.678], '%.2f');
-```
-Expected output:
-```matlab
-row =
-    '1.23  5.68'
-```
-
-### Displaying A Matrix With Column Alignment
-```matlab
-block = num2str([1 23 456; 78 9 10]);
-```
-Expected output:
-```matlab
-block =
-    ' 1  23  456'
-    '78   9   10'
-```
-
-### Formatting Complex Numbers
-```matlab
-z = num2str([3+4i 5-6i]);
-```
-Expected output:
-```matlab
-z =
-    '3 + 4i  5 - 6i'
-```
-
-### Respecting Locale-Specific Decimal Separators
-```matlab
-text = num2str(0.125, 'local');
-```
-On locales that use a comma for decimals:
-```matlab
-text =
-    '0,125'
-```
-
-### Converting GPU-Resident Data
-```matlab
-G = gpuArray([10.5 20.5]);
-txt = num2str(G, '%.1f');
-```
-Expected output:
-```matlab
-txt =
-    '10.5  20.5'
-```
-RunMat gathers the tensor to host memory before formatting.
-
-## FAQ
-
-### Can I request more than 15 digits?
-Yes. Pass a precision between 0 and 52 to control the number of significant digits, e.g.
-`num2str(x, 20)`.
-
-### What format strings are supported?
-RunMat supports single-value `printf` conversions using `%f`, `%e`, `%E`, `%g`, and `%G`, including
-optional width, `+`, `-`, and `0` flags. Unsupported flags raise descriptive errors.
-
-### Does `num2str` alter the size of my array?
-No. The textual result has the same number of rows as the input and aligns each column with spaces.
-
-### How are complex numbers rendered?
-Real and imaginary components are formatted separately using the selected precision. The result is
-`a + bi` or `a - bi`, with zero real parts simplifying to `bi`.
-
-### How does the `'local'` flag work?
-`num2str(..., 'local')` replaces the decimal point with the separator inferred from the active
-locale. You can override the detected character with `RUNMAT_DECIMAL_SEPARATOR`, e.g.
-`RUNMAT_DECIMAL_SEPARATOR=,`.
-
-### What happens with non-numeric inputs?
-Passing structs, objects, handles, or text raises a MATLAB-compatible error. Convert the data to
-numeric form first or use `string` for rich text conversions.
-
-## See Also
-`sprintf`, `string`, `mat2str`, `str2double`
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::num2str")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "num2str",
@@ -203,27 +43,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Conversion builtin; not eligible for fusion and always materialises host character arrays.",
 };
 
-#[cfg_attr(
-    feature = "doc_export",
-    runtime_builtin(
-        name = "num2str",
-        category = "strings/core",
-        summary = "Format numeric scalars, vectors, and matrices as character arrays.",
-        keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink",
-        builtin_path = "crate::builtins::strings::core::num2str"
-    )
-)]
-#[cfg_attr(
-    not(feature = "doc_export"),
-    runtime_builtin(
-        name = "num2str",
-        category = "strings/core",
-        summary = "Format numeric scalars, vectors, and matrices as character arrays.",
-        keywords = "num2str,number,string,format,precision,gpu",
-        accel = "sink",
-        builtin_path = "crate::builtins::strings::core::num2str"
-    )
+#[runtime_builtin(
+    name = "num2str",
+    category = "strings/core",
+    summary = "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats.",
+    keywords = "num2str,number to string,format,precision",
+    examples = "txt = num2str([1 2 3]);",
+    builtin_path = "crate::builtins::strings::core::num2str"
 )]
 fn num2str_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered = gather_if_needed(&value).map_err(|e| format!("num2str: {e}"))?;
@@ -1105,12 +931,5 @@ pub(crate) mod tests {
     fn num2str_invalid_format_string() {
         let err = num2str_builtin(Value::Num(1.0), vec![Value::String("%q".into())]).unwrap_err();
         assert!(err.contains("unsupported format string"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = crate::builtins::common::test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

@@ -1,0 +1,115 @@
+{
+  "title": "read",
+  "category": "io/net",
+  "keywords": [
+    "read",
+    "tcpclient",
+    "networking",
+    "socket",
+    "binary data"
+  ],
+  "summary": "Read numeric or text data from a remote host through a MATLAB-compatible tcpclient struct.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tcpclient.read.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "All TCP reads run on the host CPU. GPU-resident arguments are gathered before any socket I/O; providers do not expose networking hooks."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::net::read::tests"
+  },
+  "description": "`read(t)` consumes data waiting on the TCP/IP client returned by `tcpclient` (or `accept`). The builtin mimics MATLAB\u2019s behaviour for `read` so existing code that exchanges bytes with remote services behaves identically. It honours the client\u2019s configured `Timeout`, respects the `ByteOrder` property when materialising multi-byte numeric types, and interprets the optional `datatype` argument just like MATLAB.",
+  "behaviors": [
+    "`data = read(t)` waits until at least one byte becomes available (subject to the client timeout) and then drains the socket buffer, returning a **row vector of doubles** whose values come from the received bytes. If the peer closes the connection without sending data, the result is an empty row vector.",
+    "`data = read(t, count)` blocks until exactly `count` values are available (again honouring `Timeout`). When the peer closes the socket before satisfying the request the builtin raises `MATLAB:read:ConnectionClosed`.",
+    "`data = read(t, count, datatype)` interprets the values using the requested MATLAB datatype. Supported tokens mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric outputs are returned as doubles; `\"char\"` produces a MATLAB-style character row vector and `\"string\"` returns a scalar string.",
+    "Every call honours the client\u2019s `ByteOrder` property when decoding multi-byte numbers. Little-endian is the default, but `\"big-endian\"` is respected for data written in network byte order.",
+    "The builtin gathers GPU-resident arguments automatically, executes the socket read on the CPU, and returns host values.",
+    "Errors are raised with MATLAB-compatible identifiers: invalid client structs trigger `MATLAB:read:InvalidTcpClient`, timeouts emit `MATLAB:read:Timeout`, and connection closures before a requested count is met raise `MATLAB:read:ConnectionClosed`."
+  ],
+  "examples": [
+    {
+      "description": "Reading a fixed number of bytes from a TCP echo service",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\nwrite(client, uint8(1:6));\npayload = read(client, 6);",
+      "output": "payload =\n     1     2     3     4     5     6"
+    },
+    {
+      "description": "Reading ASCII text as characters",
+      "input": "client = tcpclient(\"127.0.0.1\", 50001);\nwrite(client, \"RunMat TCP\");\nchars = read(client, 10, \"char\");",
+      "output": "chars =\n    'RunMat TCP'"
+    },
+    {
+      "description": "Reading doubles written in big-endian byte order",
+      "input": "client = tcpclient(\"localhost\", 50002, \"ByteOrder\", \"big-endian\");\nwrite(client, swapbytes([1 2 3], \"double\"));\nvalues = read(client, 3, \"double\");",
+      "output": "values =\n     1     2     3"
+    },
+    {
+      "description": "Reading all available data without specifying a count",
+      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, uint8([10 20 30]));\nburst = read(client);",
+      "output": "burst =\n    10    20    30"
+    },
+    {
+      "description": "Handling read timeouts gracefully",
+      "input": "client = tcpclient(\"example.com\", 12345, \"Timeout\", 0.5);\ntry\n    data = read(client, 64);\ncatch err\n    disp(err.identifier)\nend",
+      "output": "MATLAB:read:Timeout"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `read` modify the client struct?",
+      "answer": "No. The builtin interacts with the socket stored in RunMat\u2019s internal registry. The visible struct returned from `tcpclient` is passed by value and is not mutated in place."
+    },
+    {
+      "question": "What happens when the remote host closes the connection?",
+      "answer": "If the peer closes the connection before the requested count is satisfied, `read` raises `MATLAB:read:ConnectionClosed`. When no specific count is requested (`read(t)`), the builtin returns whatever data was available before the closure (possibly an empty vector)."
+    },
+    {
+      "question": "Does `read` support infinite timeouts?",
+      "answer": "Yes. Setting `t.Timeout = Inf` (or passing `\"Timeout\", inf` when constructing the client) leaves the socket in blocking mode. The builtin waits indefinitely until enough data arrives or the peer closes the connection."
+    },
+    {
+      "question": "How are multibyte integers decoded?",
+      "answer": "RunMat honours the client\u2019s `ByteOrder` property (`\"little-endian\"` or `\"big-endian\"`). For example, `read(t, 4, \"uint16\")` consumes eight bytes and interprets each pair in the configured byte order."
+    },
+    {
+      "question": "Can I read UTF-8 strings directly?",
+      "answer": "Use the `\"string\"` datatype. The builtin converts each received byte directly into a MATLAB string scalar assuming UTF-8 (non-UTF-8 sequences fall back to byte-wise decoding)."
+    }
+  ],
+  "links": [
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "write",
+      "url": "./write"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/net/read.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/read.rs"
+  },
+  "gpu_behavior": [
+    "Networking is a host-only subsystem. When a client struct or argument arrives from the GPU, RunMat gathers the value back to the CPU before reading from the socket. No acceleration-provider hooks participate in the operation, and the result is always a host value (double tensor, char array, or string). Future GPU providers continue to gather metadata automatically so networking remains CPU-bound."
+  ]
+}

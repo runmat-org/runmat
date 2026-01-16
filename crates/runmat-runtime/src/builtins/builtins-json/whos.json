@@ -1,0 +1,146 @@
+{
+  "title": "whos",
+  "category": "introspection",
+  "keywords": [
+    "whos",
+    "workspace variables",
+    "memory usage",
+    "struct array",
+    "introspection"
+  ],
+  "summary": "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/whos.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. GPU arrays stay on the device; RunMat inspects residency metadata and provider precision to compute bytes without gathering the data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::whos::tests",
+    "integration": null
+  },
+  "description": "`whos` reports a MATLAB-style table describing each variable in the current workspace (or in a MAT-file when you pass `-file`). The result is a struct array with the traditional `name`, `size`, `bytes`, `class`, `global`, `sparse`, `complex`, `nesting`, and `persistent` fields.",
+  "behaviors": [
+    "`whos` with no arguments lists every variable in the active workspace, using MATLAB's default alphabetical ordering.",
+    "`whos pattern1 pattern2 ...` accepts character vectors or string scalars containing wildcard expressions (`*`, `?`, `[abc]`). Any variable whose name matches at least one pattern is reported.",
+    "`whos('-regexp', expr1, expr2, ...)` keeps variables whose names match any of the supplied regular expressions.",
+    "`whos global` lists only the variables that are marked as global within the active workspace.",
+    "`whos('-file', filename, ...)` inspects a MAT-file without loading it. You can combine `-file` with explicit names or `-regexp` selectors, mirroring MATLAB.",
+    "The returned struct array uses string scalars for textual fields (`name`, `class`, `nesting`) and MATLAB-style numeric row vectors for the `size` field.",
+    "`bytes` reports the amount of memory consumed by the value using RunMat's host representation. GPU arrays stay on the device; RunMat estimates bytes from the device-resident shape and provider precision."
+  ],
+  "examples": [
+    {
+      "description": "List All Workspace Variables",
+      "input": "a = 42;\nb = rand(3, 2);\ninfo = whos;\n{info.name}",
+      "output": "    {\"a\"}    {\"b\"}"
+    },
+    {
+      "description": "Filter Variables With Wildcards",
+      "input": "alpha = 1;\nbeta = 2;\nresults = whos(\"a*\");\n{results.name}",
+      "output": "    {\"alpha\"}"
+    },
+    {
+      "description": "Use Regular Expressions To Match Names",
+      "input": "x1 = rand;\nx2 = rand;\nmatches = whos('-regexp', '^x\\\\d$');\ncellstr({matches.name})",
+      "output": "    {'x1'}\n    {'x2'}"
+    },
+    {
+      "description": "Inspect Variables Stored In A MAT-File",
+      "input": "save('snapshot.mat', 'alpha', 'beta')\nfile_info = whos('-file', 'snapshot.mat');\n{file_info.name}",
+      "output": "    {\"alpha\"}    {\"beta\"}"
+    },
+    {
+      "description": "Check GPU Arrays Without Gathering",
+      "input": "G = gpuArray(rand(1024));\nmeta = whos('G');\nmeta.bytes    % estimated bytes on device",
+      "output": "meta.bytes\nans =\n    8.3886e+06"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What fields does `whos` return?",
+      "answer": "Each entry exposes `name`, `size`, `bytes`, `class`, `global`, `sparse`, `complex`, `nesting`, and `persistent`, matching MATLAB semantics."
+    },
+    {
+      "question": "Does `whos` mutate the workspace?",
+      "answer": "No. It is a pure query that never creates, deletes, or modifies variables."
+    },
+    {
+      "question": "Are bytes identical to MATLAB?",
+      "answer": "RunMat reports the size of its own representations. Numeric and logical arrays match MATLAB's byte counts; other types (such as structs or objects) may differ slightly because RunMat records their data differently."
+    },
+    {
+      "question": "How are global variables handled?",
+      "answer": "Variables declared with `global` are marked with `global = true`. Use `whos global` to list only globals."
+    },
+    {
+      "question": "Can I combine wildcard filters and `-regexp`?",
+      "answer": "Yes. `whos('data*', '-regexp', '^(cfg|state)')` reports the union of both selections."
+    },
+    {
+      "question": "What happens when no variables match?",
+      "answer": "A `0\u00d71` struct array is returned, just like MATLAB, so idioms such as `isempty(whos('foo'))` work."
+    },
+    {
+      "question": "Does `whos('-file', ...)` read the entire MAT-file?",
+      "answer": "It parses only enough metadata to reconstruct variable values. Large arrays are streamed once; no workspace variables are modified."
+    },
+    {
+      "question": "How are persistent variables reported?",
+      "answer": "RunMat currently marks all entries as `persistent = false` in the base workspace. Future releases will surface persistent metadata from function scopes."
+    },
+    {
+      "question": "Will GPU arrays be gathered?",
+      "answer": "No. `whos` inspects device handles and leaves residency untouched."
+    }
+  ],
+  "links": [
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "load",
+      "url": "./load"
+    },
+    {
+      "label": "save",
+      "url": "./save"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/whos.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/whos.rs"
+  },
+  "gpu_residency": "You do not need to move data to or from the GPU to call `whos`. The builtin gathers scalar arguments if they happen to live on the device, but the workspace variables themselves remain where they are. Use `gather` separately if you need host copies of the data for further processing.",
+  "gpu_behavior": [
+    "`whos` is an introspection builtin that runs entirely on the CPU. When a variable is a `gpuArray`, RunMat leaves it on the device and derives metadata (element count, precision, and total bytes) from the handle and active provider. No kernels are launched and no device buffers are gathered. Auto-offload heuristics remain untouched."
+  ]
+}

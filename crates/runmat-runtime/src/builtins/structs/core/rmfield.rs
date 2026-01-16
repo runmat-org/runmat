@@ -8,169 +8,6 @@ use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "rmfield",
-        builtin_path = "crate::builtins::structs::core::rmfield"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "rmfield"
-category: "structs/core"
-keywords: ["rmfield", "remove field", "struct", "struct array", "metadata"]
-summary: "Remove one or more fields from scalar structs or struct arrays."
-references: []
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "Runs entirely on the host; values that already live on the GPU remain device-resident."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::structs::core::rmfield::tests"
-  integration: "builtins::structs::core::rmfield::tests::rmfield_struct_array_roundtrip"
----
-
-# What does the `rmfield` function do in MATLAB / RunMat?
-`S2 = rmfield(S, name)` returns a copy of `S` with the field `name` removed. The builtin accepts
-additional field names, string arrays, or cell arrays of names to delete several fields in one call.
-
-## How does the `rmfield` function behave in MATLAB / RunMat?
-- Works with scalar structs and struct arrays created by `struct`, `load`, or other builtins.
-- Accepts character vectors, string scalars, string arrays, and cell arrays containing those types
-  to identify the fields that should be removed.
-- Every listed field must already exist. Attempting to remove a missing field raises the standard
-  MATLAB-style error `Reference to non-existent field '<name>'`.
-- Removing multiple fields applies to every element in a struct array; the operation fails if any
-  element is missing one of the requested fields.
-- The input `S` is not mutated in place. `rmfield` returns a new struct (or struct array) while the
-  original remains unchanged.
-
-## `rmfield` Function GPU Execution Behaviour
-`rmfield` performs metadata updates on the host. Values that already reside on the GPU—such as
-`gpuArray` tensors stored in other fields—stay on the device. Because this builtin only rewrites
-struct metadata it does not require or invoke acceleration provider hooks.
-
-## Examples of using the `rmfield` function in MATLAB / RunMat
-
-### Removing a single field from a scalar struct
-```matlab
-s = struct("name", "Ada", "score", 42);
-t = rmfield(s, "score");
-isfield(t, "score")
-```
-
-Expected output:
-```matlab
-ans =
-  logical
-   0
-```
-
-### Removing several fields with a cell array of names
-```matlab
-cfg = struct("mode", "fast", "rate", 60, "debug", true);
-cfg = rmfield(cfg, {"rate", "debug"});
-fieldnames(cfg)
-```
-
-Expected output:
-```matlab
-ans =
-  1×1 cell array
-    {'mode'}
-```
-
-### Removing a field from every element of a struct array
-```matlab
-people = struct("name", {"Ada", "Grace"}, "id", {101, 102}, "email", {"ada@example.com", "grace@example.com"});
-trimmed = rmfield(people, "email");
-fieldnames(trimmed)
-```
-
-Expected output:
-```matlab
-ans =
-  2×1 cell array
-    {'id'}
-    {'name'}
-```
-
-### Supplying a string array of field names to delete
-```matlab
-stats = struct("mean", 10, "median", 9, "stdev", 2);
-names = ["mean", "median"];
-reduced = rmfield(stats, names);
-fieldnames(reduced)
-```
-
-Expected output:
-```matlab
-ans =
-  1×1 cell array
-    {'stdev'}
-```
-
-### Conditionally removing optional fields
-```matlab
-record = struct("id", 7, "notes", "draft");
-if isfield(record, "notes")
-    record = rmfield(record, "notes");
-end
-fieldnames(record)
-```
-
-Expected output:
-```matlab
-ans =
-  1×1 cell array
-    {'id'}
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No additional residency management is required. `rmfield` leaves existing GPU tensors untouched and
-never gathers or uploads buffers. Subsequent GPU-aware builtins decide whether to keep values on the
-device.
-
-## FAQ
-
-### Does `rmfield` modify the input in place?
-No. The function returns a new struct (or struct array) with the specified fields removed. The input
-value remains unchanged, mirroring MATLAB's copy-on-write semantics.
-
-### What argument types can I use for the field names?
-You can pass character vectors, string scalars, string arrays, or cell arrays whose elements are
-strings or character vectors. Mixing these forms in a single call is supported—`rmfield`
-concatenates all supplied names into one list.
-
-### What happens if a field is missing?
-RunMat raises the MATLAB-compatible error `Reference to non-existent field '<name>'.` and leaves the
-struct unchanged.
-
-### Can I remove nested fields with `rmfield`?
-No. `rmfield` only removes top-level fields. Use `setfield` with nested assignments or restructure
-your data if you need to manipulate nested content.
-
-### Does `rmfield` work with MATLAB-style objects or handle classes?
-No. The builtin is restricted to structs and struct arrays. Use class-specific helpers (such as
-`rmprop`) for objects.
-
-### Does removing a field move GPU tensors back to the CPU?
-No. The builtin merely rewrites metadata. Any GPU-resident values stored in remaining fields stay on
-the device until another operation decides otherwise.
-
-## See Also
-[fieldnames](./fieldnames), [isfield](./isfield), [setfield](./setfield), [struct](./struct), [orderfields](./orderfields)
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::rmfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "rmfield",
@@ -390,7 +227,6 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 
-    use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
@@ -640,12 +476,5 @@ pub(crate) mod tests {
             Some(Value::GpuTensor(h)) if h == &handle
         ));
         assert!(!updated.fields.contains_key("remove"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

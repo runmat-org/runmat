@@ -1,0 +1,145 @@
+{
+  "title": "replace",
+  "category": "strings/transform",
+  "keywords": [
+    "replace",
+    "substring replace",
+    "string replace",
+    "strrep",
+    "text replace",
+    "character array replace"
+  ],
+  "summary": "Replace substring occurrences in strings, character arrays, and cell arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/replace.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. RunMat gathers GPU-resident text before performing replacements."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::replace::tests",
+    "integration": "builtins::strings::transform::replace::tests::replace_cell_array_mixed_content"
+  },
+  "description": "`replace(str, old, new)` substitutes every occurrence of `old` found in `str` with `new`. The builtin accepts string scalars, string arrays, character arrays, and cell arrays of character vectors or strings, matching MATLAB semantics. Multiple search terms are supported\u2014each matched entry is replaced by its corresponding replacement text.",
+  "behaviors": [
+    "String scalars remain strings. Missing string scalars (`<missing>`) propagate unchanged.",
+    "String arrays are processed element wise while preserving shape.",
+    "Character arrays are handled row by row. Rows expand or shrink as needed and are padded with spaces so the result remains a rectangular char array, just like MATLAB.",
+    "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same size and element types mirrored after replacement.",
+    "The `old` and `new` inputs can be string scalars, string arrays, character arrays, or cell arrays of character vectors / strings. `new` must be a scalar or match the number of search terms in `old`.",
+    "Non-text inputs (numeric, logical, structs, GPU tensors, etc.) produce MATLAB-compatible errors."
+  ],
+  "examples": [
+    {
+      "description": "Replace all instances of a word in a string",
+      "input": "txt = \"RunMat accelerates MATLAB code\";\nresult = replace(txt, \"RunMat\", \"RunMat Accelerate\");",
+      "output": "result = \"RunMat Accelerate accelerates MATLAB code\""
+    },
+    {
+      "description": "Replace multiple terms in a string array",
+      "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = replace(labels, [\"GPU\", \"CPU\"], [\"Device\", \"Host\"]);",
+      "output": "result = 2\u00d71 string\n    \"Device pipeline\"\n    \"Host pipeline\""
+    },
+    {
+      "description": "Replace substrings in a character array while preserving padding",
+      "input": "chars = char(\"alpha\", \"beta \");\nout = replace(chars, \"a\", \"A\");",
+      "output": "out =\n\n  2\u00d75 char array\n\n    'AlphA'\n    'betA '"
+    },
+    {
+      "description": "Replace text within a cell array of character vectors",
+      "input": "C = {'Kernel Fusion', 'GPU Planner'};\nupdated = replace(C, {'Kernel', 'GPU'}, {'Shader', 'Device'});",
+      "output": "updated = 1\u00d72 cell array\n    {'Shader Fusion'}    {'Device Planner'}"
+    },
+    {
+      "description": "Remove substrings by replacing with empty text",
+      "input": "paths = [\"runmat/bin\", \"runmat/lib\"];\nclean = replace(paths, \"runmat/\", \"\");",
+      "output": "clean = 1\u00d72 string\n    \"bin\"    \"lib\""
+    },
+    {
+      "description": "Replace using scalar replacement for multiple search terms",
+      "input": "message = \"OpenCL or CUDA or Vulkan\";\nunified = replace(message, [\"OpenCL\", \"CUDA\", \"Vulkan\"], \"GPU backend\");",
+      "output": "unified = \"GPU backend or GPU backend or GPU backend\""
+    },
+    {
+      "description": "Replace text stored inside a cell array of strings",
+      "input": "cells = { \"Snapshot\", \"Ignition Interpreter\" };\nrenamed = replace(cells, \" \", \"_\");",
+      "output": "renamed = 1\u00d72 cell array\n    {\"Snapshot\"}    {\"Ignition_Interpreter\"}"
+    },
+    {
+      "description": "Preserve missing strings during replacement",
+      "input": "vals = [\"runmat\", \"<missing>\", \"accelerate\"];\nout = replace(vals, \"runmat\", \"RunMat\");",
+      "output": "out = 1\u00d73 string\n    \"RunMat\"    <missing>    \"accelerate\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What sizes are allowed for `old` and `new` inputs?",
+      "answer": "`old` must contain at least one search term. `new` may be a scalar or contain the same number of elements as `old`. Otherwise, `replace` raises a size-mismatch error matching MATLAB behaviour."
+    },
+    {
+      "question": "Does `replace` modify the original input?",
+      "answer": "No. The builtin returns a new value with substitutions applied. The original inputs are left untouched."
+    },
+    {
+      "question": "How are character arrays padded after replacement?",
+      "answer": "Each row is expanded or truncated according to the longest resulting row. Shorter rows are padded with space characters so the output remains a proper char matrix."
+    },
+    {
+      "question": "How are missing strings handled?",
+      "answer": "Missing string scalars (`<missing>`) propagate unchanged. Replacements never convert a missing value into a non-missing string."
+    },
+    {
+      "question": "Can I replace with an empty string?",
+      "answer": "Yes. Provide `\"\"` (empty string) or `''` as the replacement to remove matched substrings entirely."
+    },
+    {
+      "question": "Does `replace` support overlapping matches?",
+      "answer": "Replacements are non-overlapping and proceed from left to right, matching MATLAB\u2019s behaviour for `replace`."
+    },
+    {
+      "question": "How does `replace` behave with GPU data?",
+      "answer": "RunMat gathers GPU-resident inputs to host memory before performing replacements. The resulting value is returned on the host. Providers do not need to implement a GPU kernel for this builtin."
+    }
+  ],
+  "links": [
+    {
+      "label": "regexprep",
+      "url": "./regexprep"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "strtrim",
+      "url": "./strtrim"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/replace.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/replace.rs"
+  },
+  "gpu_residency": "No. `replace` automatically gathers GPU inputs back to the host when necessary. Because it is marked with a gather-immediately residency policy, both inputs and outputs live on the CPU, so you never have to move text values manually. This mirrors MATLAB behaviour where string manipulation runs on the CPU.",
+  "gpu_behavior": [
+    "`replace` executes on the CPU. The builtin registers as an Accelerate sink, so the fusion planner never attempts to keep results on the device. When any argument is GPU-resident, RunMat gathers it to host memory before performing replacements. Providers do not need special kernels for this builtin, and GPU-resident results are returned on the host."
+  ]
+}

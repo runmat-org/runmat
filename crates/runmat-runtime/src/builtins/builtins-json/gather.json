@@ -1,0 +1,140 @@
+{
+  "title": "gather",
+  "category": "acceleration/gpu",
+  "keywords": [
+    "gather",
+    "gpuArray",
+    "download",
+    "host copy",
+    "accelerate",
+    "residency"
+  ],
+  "summary": "Transfer gpuArray data back to host memory, recursively handling cells, structs, and objects.",
+  "references": [
+    "https://www.mathworks.com/help/parallel-computing/gather.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; gpuArray inputs are downloaded through the provider's `download` hook and residency metadata is cleared so planners know the value now lives on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::acceleration::gpu::gather::tests",
+    "integration": "builtins::acceleration::gpu::gather::tests::gather_downloads_gpu_tensor",
+    "wgpu": "builtins::acceleration::gpu::gather::tests::gather_wgpu_provider_roundtrip"
+  },
+  "description": "`gather(X)` copies data that resides on the GPU or in another distributed storage back into host memory. In RunMat, this means turning `gpuArray` handles into dense MATLAB values while leaving input values that are already on the CPU unchanged.",
+  "behaviors": [
+    "Accepts any MATLAB value. Non-GPU inputs (numbers, logicals, structs, strings, etc.) pass through untouched, so `gather` is safe to call unconditionally at API boundaries.",
+    "Downloads gpuArray tensors via the active acceleration provider, producing dense double-precision matrices. Logical gpuArray inputs return logical arrays with MATLAB-compatible 0/1 encoding.",
+    "Recursively descends into cells, structs, and objects, gathering every nested gpuArray handle. This mirrors MATLAB's behaviour when you gather composite data structures.",
+    "Clears residency metadata so the auto-offload planner treats the gathered value as host-resident.",
+    "Supports multiple inputs: in a single-output context it returns a `1\u00d7N` cell array preserving the original order; in a multi-output assignment the number of inputs and outputs must match, mirroring MATLAB's requirement.",
+    "Raises `gather: no acceleration provider registered` when you attempt to download gpuArray data without an active provider, and propagates provider-specific download errors verbatim."
+  ],
+  "examples": [
+    {
+      "description": "Converting a gpuArray back to host memory",
+      "input": "G = gpuArray([1 2 3; 4 5 6]);\nH = gather(G);",
+      "output": "H =\n     1     2     3\n     4     5     6"
+    },
+    {
+      "description": "Gathering data that is already on the CPU",
+      "input": "x = [10 20 30];\ny = gather(x);",
+      "output": "y =\n    10    20    30"
+    },
+    {
+      "description": "Preserving logical values when gathering",
+      "input": "mask = gpuArray(logical([1 0 1 0]));\nhostMask = gather(mask);",
+      "output": "hostMask =\n  1\u00d74 logical array\n   1   0   1   0"
+    },
+    {
+      "description": "Gathering gpuArray values stored inside a cell array",
+      "input": "C = {gpuArray([1 2]), 42};\nhostC = gather(C);",
+      "output": "hostC =\n  1\u00d72 cell array\n    {[1 2]}    {[42]}"
+    },
+    {
+      "description": "Gathering struct fields that live on the GPU",
+      "input": "S.data = gpuArray(magic(3));\nS.label = \"gpu result\";\nS_host = gather(S);",
+      "output": "S_host =\n  struct with fields:\n     data: [3\u00d73 double]\n    label: \"gpu result\""
+    },
+    {
+      "description": "Gathering multiple gpuArrays into one cell result",
+      "input": "A = gpuArray(eye(3));\nB = gpuArray(ones(3));\ncellOut = gather(A, B);",
+      "output": "cellOut =\n  1\u00d72 cell array\n    {[3\u00d73 double]}    {[3\u00d73 double]}"
+    },
+    {
+      "description": "Gathering results at the end of a GPU pipeline",
+      "input": "A = gpuArray(rand(1024, 1));\nB = sin(A) .* 5;\nresult = gather(B);",
+      "output": "result(1:3) =\n    4.1377\n    2.4884\n    0.1003"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `gather` modify the original gpuArray?",
+      "answer": "No. `gather` returns a host-side copy. The original gpuArray value remains valid and continues to reside on the GPU until it goes out of scope."
+    },
+    {
+      "question": "What happens if the input does not live on the GPU?",
+      "answer": "Nothing changes\u2014the value is returned as-is. This makes `gather` safe to sprinkle into code paths that may or may not run on the GPU."
+    },
+    {
+      "question": "How are logical gpuArray values represented after gathering?",
+      "answer": "Logical handles are tagged during `gpuArray` creation. `gather` reads that metadata and produces a MATLAB logical array with the same shape, ensuring comparisons like `isa(result, 'logical')` behave as expected."
+    },
+    {
+      "question": "Does `gather` recurse into cells, structs, and objects?",
+      "answer": "Yes. Every nested gpuArray handle inside a cell array, struct field, or object property is downloaded and replaced with host data."
+    },
+    {
+      "question": "What happens when I pass multiple inputs but capture a single output?",
+      "answer": "RunMat follows MATLAB: it gathers each input and returns a `1\u00d7N` cell array so you can unpack values later. In multi-output assignments you must request the same number of outputs as inputs."
+    },
+    {
+      "question": "What if no acceleration provider is registered?",
+      "answer": "RunMat raises `gather: no acceleration provider registered` when you attempt to gather a gpuArray without an active provider. Register a provider (for example, via `runmat-accelerate`) before calling `gather`."
+    },
+    {
+      "question": "Does `gather` free GPU memory automatically?",
+      "answer": "No. The gpuArray remains on the device. Free the handle explicitly (by clearing the variable) if you no longer need it."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gpuDevice",
+      "url": "./gpudevice"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/acceleration/gpu/gather.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/gather.rs"
+  },
+  "gpu_residency": "RunMat's auto-offload planner keeps tensors on the GPU until a builtin marked as a sink (such as `gather`, plotting functions, or I/O) requests host access. You usually call `gather` at API boundaries, for example to log results or hand them to CPU-only libraries. If the upstream computation never leaves the GPU, you can omit `gather` and keep chaining gpu-aware builtins.",
+  "gpu_behavior": [
+    "`gather` itself runs on the CPU. When the input contains gpuArray handles, the builtin calls the provider's `download` hook to retrieve a `HostTensorOwned` view, converts the result into MATLAB data, and clears residency via `runmat_accelerate_api::clear_residency`. If the provider does not implement `download`, the builtin surfaces the provider error so you know the backend must be extended. When the input is already on the host, no provider work is required."
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "title": "bar",
+  "category": "plotting",
+  "keywords": [
+    "bar",
+    "bar chart",
+    "categories",
+    "gpuArray"
+  ],
+  "summary": "Render MATLAB-compatible bar charts.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/bar.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single"
+    ],
+    "broadcasting": "none",
+    "notes": "Single-precision gpuArray vectors stay on the device and feed the shared WebGPU renderer; other inputs gather automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::bar::tests"
+  },
+  "description": "`bar(y)` plots the values of `y` as vertical bars with MATLAB-compatible defaults. RunMat matches MATLAB's behaviour for 1-D inputs: categories are labelled `1,2,...,n`, grid lines are enabled, and the current figure receives a descriptive title and axis labels.",
+  "behaviors": [
+    "Inputs must be numeric vectors. Scalars produce a single bar; empty inputs raise MATLAB-style errors.",
+    "Single-precision gpuArray inputs stay on the device and stream directly into the shared renderer for zero-copy plotting when WebGPU is available. Other data gathers automatically.",
+    "Future work will add grouped/stacked variants; this initial builtin focuses on the common `bar(y)` form used throughout the standard library tests."
+  ],
+  "examples": [
+    {
+      "description": "",
+      "input": "values = [3 5 2 9];\nbar(values);"
+    }
+  ],
+  "faqs": [],
+  "links": [],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "`bar` terminates fusion graphs. Single-precision gpuArray vectors reuse provider buffers via the shared WebGPU context; other precisions gather to the host before plotting."
+}

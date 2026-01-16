@@ -96,9 +96,6 @@ blas-only = ["blas", "accelerate-src", "openblas-src"]
 # Internal testing utilities (class registry seeders)
 test-classes = []
 
-# Documentation/export utilities
-doc_export = ["serde", "serde_yaml", "clap"]
-
 # Enable WGPU-backed tests (tests enable runmat-accelerate's feature through dev-dependencies)
 wgpu = []
 
@@ -120,24 +117,5 @@ wasm-bindgen-test = "0.3"
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 
-[dependencies.serde]
-version = "1.0"
-features = ["derive"]
-optional = true
-
 [dependencies.serde_json]
 version = "1.0"
-
-[dependencies.serde_yaml]
-version = "0.9"
-optional = true
-
-[dependencies.clap]
-version = "4.5"
-features = ["derive"]
-optional = true
-
-[[bin]]
-name = "export_builtins"
-path = "src/bin/export_builtins.rs"
-required-features = ["doc_export"]

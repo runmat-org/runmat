@@ -1,0 +1,130 @@
+{
+  "title": "exp",
+  "category": "math/elementwise",
+  "keywords": [
+    "exp",
+    "exponential",
+    "elementwise",
+    "gpu",
+    "complex"
+  ],
+  "summary": "Element-wise exponential of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host implementation when the active provider lacks unary_exp."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::exp::tests",
+    "integration": "builtins::math::elementwise::exp::tests::exp_gpu_provider_roundtrip"
+  },
+  "description": "`Y = exp(X)` raises *e* to the power of every element in `X`. Results follow MATLAB semantics for scalars, vectors, matrices, logical arrays, character arrays, and complex inputs.",
+  "behaviors": [
+    "`exp(X)` applies the exponential element-by-element with MATLAB broadcasting rules.",
+    "Logical inputs convert to double (`true \u2192 1.0`, `false \u2192 0.0`) before exponentiation.",
+    "Character arrays are treated as their numeric code points and return dense double tensors.",
+    "Complex values follow MATLAB's definition: `exp(a + bi) = exp(a) * (cos(b) + i\u00b7sin(b))`.",
+    "Inputs already living on the GPU stay there when the provider implements `unary_exp`; otherwise RunMat gathers the data, computes on the host, and returns the correct residency."
+  ],
+  "examples": [
+    {
+      "description": "Calculate the exponential of a scalar value",
+      "input": "y = exp(1);",
+      "output": "y = 2.7183;"
+    },
+    {
+      "description": "Apply the exponential function to a vector of growth rates",
+      "input": "rates = [-1 -0.5 0 0.5 1];\nfactor = exp(rates);",
+      "output": "factor = [0.3679 0.6065 1 1.6487 2.7183];"
+    },
+    {
+      "description": "Exponentiate every element of a matrix",
+      "input": "A = [0 1 2; 3 4 5];\nB = exp(A);",
+      "output": "B = [1.0000 2.7183 7.3891; 20.0855 54.5982 148.4132];"
+    },
+    {
+      "description": "Compute the exponential of complex numbers",
+      "input": "z = [1+2i, -1+pi*i];\nw = exp(z);",
+      "output": "w = [-1.1312 + 2.4717i, -0.3679 + 0.0000i];"
+    },
+    {
+      "description": "Run element-wise exponential on GPU data",
+      "input": "G = gpuArray([0 1; 2 3]);\nout = exp(G);\nresult = gather(out);",
+      "output": "result = [1.0000 2.7183; 7.3891 20.0855];"
+    },
+    {
+      "description": "Convert character codes to exponentials",
+      "input": "C = 'ABC';\nY = exp(C);",
+      "output": "Y = [5.9874e+41 1.2946e+42 2.7992e+42];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `exp` function?",
+      "answer": "Use `exp` whenever you need the natural exponential of a value or array, such as modelling growth, discounting continuous compounding, or preparing inputs for activation functions."
+    },
+    {
+      "question": "Does `exp` preserve tensor shapes?",
+      "answer": "Yes. `exp` returns a tensor with the same shape as the input, applying broadcasting rules where applicable."
+    },
+    {
+      "question": "How are logical arrays handled?",
+      "answer": "Logical arrays convert to doubles before exponentiation, matching MATLAB behavior: `exp([true false])` returns `[e 1]`."
+    },
+    {
+      "question": "What about complex inputs?",
+      "answer": "Complex scalars and tensors use MATLAB's complex exponential formula, producing complex outputs."
+    },
+    {
+      "question": "What happens when the GPU provider lacks `unary_exp`?",
+      "answer": "RunMat automatically gathers the data to the host, computes the result, and returns a dense tensor. Future GPU operations can still fuse because residency metadata is updated accordingly."
+    },
+    {
+      "question": "Can I expect double precision?",
+      "answer": "Yes. RunMat stores dense numeric tensors as double precision (`f64`). Providers may internally use single precision when configured, but results are converted back to double."
+    }
+  ],
+  "links": [
+    {
+      "label": "logspace",
+      "url": "./logspace"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/exp.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/exp.rs"
+  },
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually in RunMat. The acceleration planner and fusion engine keep tensors on the GPU automatically when profitable. Users can still call `gpuArray` for explicit residency or to mirror MathWorks MATLAB workflows.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps GPU tensors resident whenever the selected provider implements `unary_exp`. When the hook is missing or returns an error, RunMat automatically gathers the tensor, computes on the CPU, and re-wraps the result, ensuring correctness without surprising users."
+  ]
+}

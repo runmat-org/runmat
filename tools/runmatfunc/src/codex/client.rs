@@ -31,7 +31,6 @@ use anyhow::Result;
 pub struct CodexRequest {
     pub model: Option<String>,
     pub prompt: String,
-    pub doc_markdown: Option<String>,
     pub sources: Vec<PathBuf>,
 }
 
@@ -87,12 +86,7 @@ fn run_via_cli(
     context: &RuntimeContext,
     request: &CodexRequest,
 ) -> Result<CodexResponse> {
-    let mut prompt = request.prompt.clone();
-    if let Some(doc) = &request.doc_markdown {
-        prompt.push_str("\n\nDOC_MD:\n");
-        prompt.push_str(doc);
-    }
-
+    let prompt = request.prompt.clone();
     let model = request
         .model
         .as_deref()
@@ -625,7 +619,6 @@ mod embedded_tests {
         let request = CodexRequest {
             model: None,
             prompt: "apply fixture patch".to_string(),
-            doc_markdown: None,
             sources: vec![],
         };
         let response = match client.run(&request) {

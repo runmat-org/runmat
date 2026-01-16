@@ -1,0 +1,123 @@
+{
+  "title": "cumprod",
+  "category": "math/reduction",
+  "keywords": [
+    "cumprod",
+    "cumulative product",
+    "running product",
+    "reverse",
+    "omitnan",
+    "gpu"
+  ],
+  "summary": "Cumulative product of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to host multiplication when the active provider lacks prefix-product hooks. The output always matches the input shape."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::cumprod::tests",
+    "integration": "builtins::math::reduction::cumprod::tests::cumprod_gpu_provider_roundtrip"
+  },
+  "description": "`cumprod(X)` multiplies elements cumulatively along a chosen dimension. The result has the same size as `X`, and each element stores the running product.",
+  "behaviors": [
+    "By default, the running product is taken along the first dimension whose length is greater than `1`.",
+    "`cumprod(X, dim)` lets you choose the dimension explicitly; if `dim > ndims(X)`, the input is returned unchanged.",
+    "Passing `[]` for the dimension argument keeps the default dimension (MATLAB treats it as a placeholder).",
+    "`cumprod(..., \"reverse\")` accumulates from the end toward the beginning; `\"forward\"` (default) works from start to finish.",
+    "`cumprod(..., \"omitnan\")` treats `NaN` values as missing. Empty prefixes yield `1`, the multiplicative identity.",
+    "Synonyms such as `\"omitmissing\"` / `\"includemissing\"` are accepted for MATLAB compatibility.",
+    "The function supports real or complex scalars and dense tensors. Logical inputs are promoted to double precision."
+  ],
+  "examples": [
+    {
+      "description": "Running products down each column (default dimension)",
+      "input": "A = [1 2 3; 4 5 6];\ncolumnProducts = cumprod(A);",
+      "output": "columnProducts =\n     1     2     3\n     4    10    18"
+    },
+    {
+      "description": "Tracking cumulative products across rows",
+      "input": "A = [1 2 3; 4 5 6];\nrowProducts = cumprod(A, 2);",
+      "output": "rowProducts =\n     1     2     6\n     4    20   120"
+    },
+    {
+      "description": "Reversing the accumulation direction",
+      "input": "v = [2 3 4 5];\nreverseProducts = cumprod(v, \"reverse\");",
+      "output": "reverseProducts =\n   120    60    20     5"
+    },
+    {
+      "description": "Ignoring NaN values while multiplying",
+      "input": "v = [2 NaN 4 NaN 3];\nrunning = cumprod(v, \"omitnan\");",
+      "output": "running =\n     2     2     8     8    24"
+    },
+    {
+      "description": "Computing a cumulative product inside a GPU workflow",
+      "input": "G = gpuArray(1 + 0.1*rand(1, 5));\ntotals = cumprod(G);\nhostResult = gather(totals);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cumprod` change the size of the input?",
+      "answer": "No. The output always equals the input shape."
+    },
+    {
+      "question": "What happens if I request a dimension larger than `ndims(X)`?",
+      "answer": "The input is returned unchanged, matching MATLAB behaviour."
+    },
+    {
+      "question": "How does `\"omitnan\"` treat leading NaN values?",
+      "answer": "They are ignored, so the cumulative product uses the multiplicative identity `1` until a finite value appears."
+    },
+    {
+      "question": "Can I combine `\"reverse\"` and `\"omitnan\"`?",
+      "answer": "Yes. The options can be specified in any order and RunMat mirrors MATLAB\u2019s results."
+    },
+    {
+      "question": "Does the GPU path respect `\"omitnan\"`?",
+      "answer": "Only when the active provider offers a native prefix-product kernel with missing-value support. Otherwise the runtime gathers to the host to preserve MATLAB semantics."
+    }
+  ],
+  "links": [
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "cumsum",
+      "url": "./cumsum"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/cumprod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumprod.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` calls are optional. RunMat promotes tensors automatically when the planner predicts a benefit, keeping fused expressions resident on the device. Explicit `gpuArray` is still supported for MATLAB compatibility or when you want to guarantee GPU residency before entering a critical loop.",
+  "gpu_behavior": [
+    "When data already lives on the GPU, RunMat asks the active acceleration provider for a device-side prefix-product implementation. The runtime calls the `cumprod_scan` hook with the chosen dimension, direction, and NaN mode. Providers that lack this hook\u2014or that report an error for the requested options\u2014trigger a gather to host memory, perform the cumulative product on the CPU, and return the dense tensor result. Residency metadata is cleared so downstream operations can re-promote the tensor when profitable."
+  ]
+}

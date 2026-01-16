@@ -13,7 +13,6 @@ pub fn run_authoring(
     let request = CodexRequest {
         model,
         prompt: ctx.prompt.clone(),
-        doc_markdown: ctx.doc_markdown.clone(),
         sources: ctx.source_paths.clone(),
     };
 
@@ -49,7 +48,6 @@ pub fn run_authoring_with_extra(
     let request = CodexRequest {
         model,
         prompt,
-        doc_markdown: ctx.doc_markdown.clone(),
         sources: ctx.source_paths.clone(),
     };
 
@@ -82,7 +80,6 @@ mod embedded_tests {
             keywords: Vec::new(),
             accel_tags: Vec::new(),
             is_sink: false,
-            doc_markdown: Some("RunMat Codex fixture documentation".to_string()),
             param_types: Vec::new(),
             return_type: "Value".to_string(),
         };
@@ -90,7 +87,6 @@ mod embedded_tests {
         let ctx = AuthoringContext {
             builtin: record,
             prompt: "Summarize the RunMat fixture".to_string(),
-            doc_markdown: Some("RunMat Codex fixture documentation".to_string()),
             source_paths: Vec::new(),
         };
 
@@ -127,7 +123,6 @@ mod stub_tests {
             keywords: Vec::new(),
             accel_tags: Vec::new(),
             is_sink: false,
-            doc_markdown: None,
             param_types: Vec::new(),
             return_type: "Value".to_string(),
         };
@@ -135,7 +130,6 @@ mod stub_tests {
         let ctx = AuthoringContext {
             builtin: record,
             prompt: "Test".to_string(),
-            doc_markdown: None,
             source_paths: Vec::new(),
         };
 

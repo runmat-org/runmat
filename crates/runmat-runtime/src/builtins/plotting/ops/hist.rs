@@ -25,62 +25,6 @@ use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "hist",
-        builtin_path = "crate::builtins::plotting::hist"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "hist"
-category: "plotting"
-keywords: ["hist", "histogram", "frequency", "gpuArray"]
-summary: "Render MATLAB-compatible histograms using automatic or user-specified bin counts."
-references:
-  - https://www.mathworks.com/help/matlab/ref/hist.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: ["single"]
-  broadcasting: "none"
-  notes: "Single-precision gpuArray inputs stay on the device and feed the shared WebGPU renderer; other data gathers automatically."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 2
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::plotting::hist::tests"
----
-
-# What does `hist` do?
-`hist(data, nbins)` counts the number of observations that fall into equally spaced bins spanning
-the data range. When `nbins` is omitted, MATLAB (and RunMat) default to `floor(sqrt(numel(data)))`
-bins. The resulting frequencies are displayed as a bar chart.
-
-## Behaviour highlights
-- Inputs must be numeric vectors. Empty inputs return a figure with zero-height bins.
-- `nbins` may be provided as a numeric scalar or a vector of equally spaced bin centers. Non-positive
-  or non-finite values raise MATLAB-style errors.
-- A `'BinEdges'` name-value pair accepts a strictly increasing vector of edges (uniform or
-  non-uniform). When the edges are evenly spaced the gpuArray path remains zero-copy; other cases
-  fall back to the CPU implementation automatically.
-- Normalization can be supplied either as the second positional argument or via the
-  `'Normalization'` name-value pair. Supported values are `"count"`, `"probability"`, and `"pdf"`.
-- Single-precision gpuArray inputs stay on the device: bin counts are computed by a compute shader and
-  bar vertices are emitted directly into the shared WebGPU context whenever the bins are uniform.
-  Other cases gather automatically (full normalization semantics still apply in either path).
-
-## Examples
-```matlab
-data = randn(1, 1000);
-hist(data, 20);
-```
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::hist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "hist",

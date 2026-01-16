@@ -1,0 +1,140 @@
+{
+  "title": "pinv",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "pinv",
+    "pseudoinverse",
+    "least squares",
+    "svd",
+    "gpu"
+  ],
+  "summary": "Compute the Moore–Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/pinv.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Invokes the acceleration provider's pinv hook when available; the current WGPU backend gathers to the host, runs the shared SVD implementation, and re-uploads the result to keep downstream residency intact."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::pinv::tests",
+    "gpu": "builtins::math::linalg::solve::pinv::tests::pinv_gpu_round_trip_matches_cpu"
+  },
+  "description": "`X = pinv(A)` returns the Moore–Penrose pseudoinverse of `A`. For full-rank square matrices this matches `inv(A)`, while rank-deficient or rectangular inputs produce the minimum-norm solution that satisfies the four Moore–Penrose conditions. RunMat mirrors MATLAB's tolerance logic: `tol = max(size(A)) * eps(max(s))`, where `s` are the singular values returned by the internal SVD.",
+  "behaviors": [
+    "Supports scalars, vectors, and higher-dimensional inputs that behave like matrices (trailing singleton dimensions are allowed; other higher ranks must be reshaped first).",
+    "Logical and integer inputs are promoted to `double` before the SVD, matching MATLAB semantics.",
+    "Optional second argument `pinv(A, tol)` treats values in `tol` as the user-specified cutoff for singular values. Entries ≤ `tol` contribute zeros in the diagonal of `Σ⁺`.",
+    "Complex matrices are handled in full complex arithmetic via `A = U * Σ * Vᴴ`.",
+    "Empty matrices return the appropriately sized zero matrix (`size(pinv(A)) == fliplr(size(A))`).",
+    "The result always has size `n × m` if the input is `m × n`."
+  ],
+  "examples": [
+    {
+      "description": "Finding the pseudoinverse of a tall matrix",
+      "input": "A = [1 0; 0 0; 0 1];\nX = pinv(A);",
+      "output": "X =\n     1     0     0\n     0     0     1"
+    },
+    {
+      "description": "Solving an overdetermined least-squares problem",
+      "input": "A = [1 1; 1 2; 1 3];\nb = [1; 0; 0];\nx = pinv(A) * b;",
+      "output": "x =\n    1.1667\n   -0.5000"
+    },
+    {
+      "description": "Suppressing small singular values with a custom tolerance",
+      "input": "A = diag([1, 1e-10]);\nX = pinv(A, 1e-6);",
+      "output": "X =\n     1     0\n     0     0"
+    },
+    {
+      "description": "Pseudoinverse of a rank-deficient square matrix",
+      "input": "A = [1 2; 2 4];\nX = pinv(A);",
+      "output": "X =\n    0.0400    0.0800\n    0.0800    0.1600"
+    },
+    {
+      "description": "Pseudoinverse of a complex diagonal matrix",
+      "input": "A = diag([2+1i, 3-2i]);\nX = pinv(A);",
+      "output": "X =\n   0.4000 - 0.2000i         0\n         0   0.2308 + 0.1538i"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `pinv` different from `inv`?",
+      "answer": "`inv(A)` requires `A` to be square and full rank. `pinv(A)` works for any matrix shape and produces the minimum-norm solution even when `A` is singular or rectangular."
+    },
+    {
+      "question": "What tolerance does `pinv` use by default?",
+      "answer": "RunMat matches MATLAB: `max(size(A)) * eps(max(s))`, where `s` are the singular values. Values below this threshold are treated as zero when forming `Σ⁺`."
+    },
+    {
+      "question": "Can I recover the rank from the pseudoinverse?",
+      "answer": "Yes. Count the singular values greater than the effective tolerance (`rank` returns this directly). The same tolerance drives both `pinv` and `rank`."
+    },
+    {
+      "question": "Does `pinv` support complex inputs?",
+      "answer": "Absolutely. Complex matrices use a full complex SVD with conjugate transposes, matching MATLAB's definition."
+    },
+    {
+      "question": "Will calling `pinv` move my data off the GPU?",
+      "answer": "Only if the active provider lacks a native implementation. In that case RunMat gathers, computes, and re-uploads for you. Providers may expose native kernels to keep the entire computation on the device."
+    },
+    {
+      "question": "Is `pinv(A) * b` equivalent to `A \\\\ b`?",
+      "answer": "For full-rank systems, yes. `A \\\\ b` is typically faster and more numerically stable, but `pinv` remains useful for ill-conditioned or rank-deficient problems where the pseudoinverse is desired."
+    }
+  ],
+  "links": [
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "mrdivide",
+      "url": "./mrdivide"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "Explicit residency management is rarely required. When inputs already live on the GPU and the provider implements `pinv`, the builtin executes entirely on the device. Providers without a native kernel (including the current WGPU backend) transparently download the matrix, run the shared CPU path, and re-upload the result so the caller continues working with a GPU tensor. `gpuArray` remains available for MATLAB compatibility or to seed GPU residency explicitly.",
+  "gpu_behavior": [
+    "When a GPU acceleration provider is active, RunMat offers the operation through its `pinv` hook, passing along any explicit tolerance. Providers may implement a native GPU kernel; otherwise, they can gather to the host, invoke the shared SVD routine, and re-upload the result. The shipping WGPU backend follows this gather/compute/upload pattern today, so downstream GPU work retains residency without MATLAB-level changes."
+  ]
+}

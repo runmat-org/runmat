@@ -133,152 +133,6 @@ pub(super) fn clear_registry_for_test() {
 #[cfg(test)]
 static TCP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "tcpserver",
-        builtin_path = "crate::builtins::io::net::tcpserver"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "tcpserver"
-category: "io/net"
-keywords: ["tcpserver", "tcp", "socket", "networking", "server", "loopback"]
-summary: "Create a TCP server that listens for MATLAB-compatible client connections."
-references:
-  - https://www.mathworks.com/help/matlab/ref/tcpserver.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "none"
-  notes: "TCP sockets run on the host CPU. GPU-resident inputs are gathered automatically before binding sockets."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 1
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::io::net::tcpserver::tests"
-  integration: "builtins::io::net::tcpserver::tests::tcpserver_accepts_loopback_connection"
----
-
-# What does `tcpserver` do in MATLAB / RunMat?
-`tcpserver(address, port)` creates a TCP/IP listener that waits for clients and exposes MATLAB-compatible properties describing the socket. RunMat mirrors this behaviour: addresses may be IPv4, IPv6, or hostnames, and the function returns a handle-like struct whose fields match MATLAB’s `tcpserver` object (including `ServerAddress`, `ServerPort`, `Timeout`, `UserData`, and `BytesAvailableFcn` metadata). The builtin validates inputs, binds the socket, records configuration, and raises MATLAB-style diagnostics on failure.
-
-## How does `tcpserver` behave in MATLAB / RunMat?
-- `tcpserver(address, port)` binds to the requested interface; pass `"0.0.0.0"` or `"::"` to listen on every IPv4 or IPv6 adapter respectively.
-- Ports must be in the range `0–65535`. Passing `0` requests an ephemeral OS-assigned port that RunMat reports in the returned struct.
-- Supported name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, default `10`), `UserData` (stored verbatim), `Name` (defaults to `"tcpserver:<address>:<port>"`), and `ByteOrder` (`"little-endian"` or `"big-endian"`). Unsupported options raise `MATLAB:tcpserver:InvalidNameValue`.
-- The returned struct mirrors MATLAB properties, including connection state, callback metadata, and an internal `__tcpserver_id` identifier that future networking builtins use to locate the listener.
-- GPU-resident scalars are gathered automatically before binding so that socket setup always executes on the host CPU.
-- Bind failures raise `MATLAB:tcpserver:BindFailed` with the OS-provided error message, preserving MATLAB-style diagnostics.
-
-## `tcpserver` Function GPU Execution Behaviour
-Networking occurs entirely on the host CPU. If the address or port arguments originate on the GPU, RunMat gathers them before binding the socket. The struct returned by `tcpserver` is always CPU-resident, and acceleration providers do not need to implement any hooks for this builtin.
-
-## Examples of using the `tcpserver` function in MATLAB / RunMat
-
-### Creating a loopback TCP server on a fixed port
-```matlab
-srv = tcpserver("127.0.0.1", 55000);
-disp(srv.ServerAddress)
-disp(srv.ServerPort)
-```
-
-Expected output:
-```matlab
-127.0.0.1
-55000
-```
-
-### Requesting an ephemeral port and inspecting the assigned value
-```matlab
-srv = tcpserver("0.0.0.0", 0);
-fprintf("Listening on %s:%d\n", srv.ServerAddress, srv.ServerPort);
-```
-
-Expected output:
-```matlab
-Listening on 0.0.0.0:54873   % actual port varies by run
-```
-
-### Configuring the timeout and storing metadata in UserData
-```matlab
-srv = tcpserver("localhost", 60000, "Timeout", 5, "UserData", struct("name", "demo"));
-disp(srv.Timeout)
-disp(srv.UserData.name)
-```
-
-Expected output:
-```matlab
-5
-demo
-```
-
-### Assigning a custom server name
-```matlab
-srv = tcpserver("::1", 45000, "Name", "LoopbackServer");
-disp(srv.Name)
-```
-
-Expected output:
-```matlab
-LoopbackServer
-```
-
-### Selecting big-endian byte order for binary protocols
-```matlab
-srv = tcpserver("127.0.0.1", 45001, "ByteOrder", "big-endian");
-disp(srv.ByteOrder)
-```
-
-Expected output:
-```matlab
-big-endian
-```
-
-### Handling invalid ports with MATLAB-style diagnostics
-```matlab
-try
-    srv = tcpserver("127.0.0.1", 99999);
-catch err
-    disp(err.identifier)
-    disp(err.message)
-end
-```
-
-Expected output:
-```matlab
-MATLAB:tcpserver:InvalidPort
-MATLAB:tcpserver:InvalidPort: tcpserver: port 99999 is outside the valid range 0–65535
-```
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. `tcpserver` is a host-side operation. RunMat transparently gathers GPU scalars before binding the socket, so keeping address or port values on the GPU provides no performance benefit.
-
-## FAQ
-- **What range of ports can I use?** Valid ports are `0–65535`. Port `0` lets the OS choose an available ephemeral port, which RunMat reports in the returned struct.
-- **How do I discover which clients are connected?** The returned struct exposes MATLAB-compatible fields (`Connected`, `ClientAddress`, `ClientPort`). Future networking builtins will use the internal `__tcpserver_id` to inspect active connections.
-- **Does RunMat support IPv6?** Yes. Pass an IPv6 literal (e.g., `"::1"`) or hostname that resolves to IPv6. The returned `ServerAddress` reflects the bound address.
-- **Can I change the timeout after creating the server?** Not yet. The current builtin records the timeout value for future builtins. A forthcoming setter will update the listener configuration.
-- **Does `tcpserver` fire callbacks like MATLAB’s `BytesAvailableFcn`?** Callback-related properties are present for compatibility, and future updates will allow callers to configure them. They currently act as placeholders while connection management matures.
-- **How do I close the server?** A companion builtin (planned) will accept the returned struct and release the underlying listener. Tests can invoke internal helpers until that builtin lands.
-- **Can I use GPU arrays for address or port?** Yes—RunMat gathers them automatically before binding.
-- **What happens if the port is already in use?** `tcpserver` raises `MATLAB:tcpserver:BindFailed` with the OS error message.
-- **How do I pass additional socket options?** Current support covers `Timeout`, `Name`, `UserData`, and `ByteOrder`. Additional name-value options (broadcast, reuse, keep-alive) will land alongside their corresponding provider hooks.
-- **Is TLS supported?** Not directly. Combine `tcpserver` with application-layer protocol helpers or custom TLS wrappers until dedicated support lands.
-
-## See also
-[fopen](./fopen), [fread](./fread), [fwrite](./fwrite), [fprintf](./fprintf)
-
-## Source & feedback
-- Source: `crates/runmat-runtime/src/builtins/io/net/tcpserver.rs`
-- Bugs & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
@@ -600,7 +454,6 @@ fn runtime_error(message_id: &'static str, message: String) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use runmat_builtins::{Tensor, Value};
     use std::net::TcpStream;
     use std::time::Duration;
@@ -808,13 +661,6 @@ pub(crate) mod tests {
 
         let id = server_id(&result);
         remove_server_for_test(id);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_present() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

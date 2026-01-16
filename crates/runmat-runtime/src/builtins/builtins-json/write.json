@@ -1,0 +1,112 @@
+{
+  "title": "write",
+  "category": "io/net",
+  "keywords": [
+    "write",
+    "tcpclient",
+    "networking",
+    "socket",
+    "binary data",
+    "text"
+  ],
+  "summary": "Write numeric or text data to a remote host through a MATLAB-compatible tcpclient struct.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/tcpclient.write.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "All TCP writes execute on the host CPU. GPU-resident arguments are gathered automatically before socket I/O."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::net::write::tests"
+  },
+  "description": "`write(t, data)` transmits binary or textual data over the TCP/IP client returned by `tcpclient` (or `accept`). The builtin mirrors MATLAB\u2019s `write` behaviour so existing socket code continues working without modification. It honours the client\u2019s configured `Timeout`, applies the `ByteOrder` property when encoding multi-byte values, and accepts the optional `datatype` argument used throughout MATLAB\u2019s I/O APIs.",
+  "behaviors": [
+    "`write(t, data)` converts `data` to unsigned 8-bit integers (the MATLAB default) and sends the bytes to the peer. The return value is the number of elements written when the caller requests an output argument.",
+    "`write(t, data, datatype)` encodes the payload using the supplied MATLAB datatype token. Supported values mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric conversions saturate to the destination range just like MATLAB cast operations. `\"char\"` treats values as single-byte character codes and `\"string\"` encodes UTF-8 text.",
+    "The client\u2019s `ByteOrder` property controls how multi-byte numeric values are serialised. `\"little-endian\"` is the default, while `\"big-endian\"` matches the traditional network byte order.",
+    "When the socket cannot send the entire payload before the timeout expires, `write` raises `MATLAB:write:Timeout`. If the peer closes the connection before or during the transfer the builtin raises `MATLAB:write:ConnectionClosed` and marks the client as disconnected.",
+    "Inputs that originate on the GPU are gathered back to the host automatically before any bytes are written."
+  ],
+  "examples": [
+    {
+      "description": "Sending an array of bytes to an echo service",
+      "input": "client = tcpclient(\"127.0.0.1\", 50000);\ncount = write(client, uint8(1:4));",
+      "output": "count =\n     4"
+    },
+    {
+      "description": "Writing doubles with explicit byte order",
+      "input": "client = tcpclient(\"localhost\", 50001, \"ByteOrder\", \"big-endian\");\nvalues = [1.5 2.5 3.5];\nwrite(client, values, \"double\");"
+    },
+    {
+      "description": "Transmitting ASCII text",
+      "input": "client = tcpclient(\"127.0.0.1\", 50002);\nwrite(client, \"RunMat TCP\", \"char\");"
+    },
+    {
+      "description": "Sending UTF-8 encoded strings",
+      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"\u0394\u03b9\u03b1\u03ba\u03c1\u03b9\u03c4\u03cc\", \"string\");"
+    },
+    {
+      "description": "Handling connection closures",
+      "input": "client = tcpclient(\"example.com\", 12345, \"Timeout\", 0.25);\ntry\n    write(client, uint8([1 2 3 4]));\ncatch err\n    disp(err.identifier)\nend",
+      "output": "MATLAB:write:ConnectionClosed"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How many output values does `write` return?",
+      "answer": "When the caller requests an output, the builtin returns the number of elements written (after datatype conversion). This mirrors the behaviour of MATLAB\u2019s numeric I/O routines. If no output is requested, the value is discarded."
+    },
+    {
+      "question": "Does `write` support complex numbers?",
+      "answer": "No. The input must be real. Pass separate real and imaginary parts or convert to a byte representation manually."
+    },
+    {
+      "question": "How are values rounded when converting to integer datatypes?",
+      "answer": "Floating-point inputs are rounded to the nearest integer and then saturated to the target range, matching MATLAB casts (for example `uint8(255.7)` becomes `256 \u2192 255`, `int8(-128.2)` becomes `-128`)."
+    },
+    {
+      "question": "What happens to GPU-resident tensors?",
+      "answer": "They are gathered automatically before the write. Networking is a CPU-only subsystem, so the resulting data is sent from host memory and any temporary handles are released after the transfer."
+    },
+    {
+      "question": "Can I stream large payloads?",
+      "answer": "Yes. `write` loops until the entire payload has been sent or an error occurs. Large payloads honour the client\u2019s timeout and byte-order settings."
+    }
+  ],
+  "links": [
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/net/write.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/write.rs"
+  },
+  "gpu_behavior": [
+    "Networking occurs on the host CPU. If `data` or the tcpclient struct resides on the GPU, RunMat gathers the values to host memory before converting them to bytes. Acceleration providers are not involved and the resulting payload remains on the CPU. Providers that support residency tracking automatically mark any gathered tensors as released."
+  ]
+}

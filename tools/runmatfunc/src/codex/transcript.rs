@@ -20,7 +20,6 @@ pub struct Transcript {
     pub builtin: String,
     pub model: Option<String>,
     pub prompt: String,
-    pub doc_markdown: Option<String>,
     pub source_paths: Vec<String>,
     pub codex_summary: Option<String>,
     pub passes: Vec<PassRecord>,
@@ -57,7 +56,6 @@ impl Transcript {
             builtin: ctx.builtin.name.clone(),
             model,
             prompt: ctx.prompt.clone(),
-            doc_markdown: ctx.doc_markdown.clone(),
             source_paths: ctx
                 .source_paths
                 .iter()

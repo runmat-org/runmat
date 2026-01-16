@@ -1,0 +1,134 @@
+{
+  "title": "real",
+  "category": "math/elementwise",
+  "keywords": [
+    "real",
+    "real part",
+    "complex",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Extract the real part of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Falls back to the host when the active provider lacks unary_real or when inputs require host-side conversions (complex tensors, characters)."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::real::tests",
+    "integration": "builtins::math::elementwise::real::tests::real_gpu_provider_roundtrip"
+  },
+  "description": "`real(x)` returns the real component of each element in `x`. Real inputs are passed through unchanged, while complex inputs discard their imaginary component.",
+  "behaviors": [
+    "Complex scalars, vectors, matrices, and higher-dimensional tensors return only their real parts.",
+    "Real inputs (double, single, logical) are preserved exactly, but results are materialised as double precision when necessary (e.g., logical masks become doubles).",
+    "Character arrays are converted to their numeric code points and returned as doubles, matching MATLAB semantics.",
+    "String arrays are not supported and raise an error (`real` expects numeric, logical, or character data).",
+    "Sparse arrays are currently densified (sparse support is planned)."
+  ],
+  "examples": [
+    {
+      "description": "Extract the real part of a complex scalar",
+      "input": "z = 3 + 4i;\nr = real(z);",
+      "output": "r = 3;"
+    },
+    {
+      "description": "Take the real part of a complex matrix",
+      "input": "Z = [1+2i, 4-3i; -5+0i, 7+8i];\nR = real(Z);",
+      "output": "R =\n     1     4\n    -5     7"
+    },
+    {
+      "description": "Confirm that real inputs remain unchanged",
+      "input": "data = [-2.5 0 9.75];\nresult = real(data);",
+      "output": "result = [-2.5 0 9.75];"
+    },
+    {
+      "description": "Convert logical masks to doubles",
+      "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = real(mask);",
+      "output": "numeric =\n     0     1     0\n     1     1     0"
+    },
+    {
+      "description": "Convert characters to numeric codes",
+      "input": "chars = 'RunMat';\ncodes = real(chars);",
+      "output": "codes = [82 117 110 77 97 116];"
+    },
+    {
+      "description": "Keep GPU tensors device-resident when possible",
+      "input": "G = rand(4096, 512, \"gpuArray\");\nR = real(G);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `real` change purely real inputs?",
+      "answer": "No. Real, logical, and character inputs are preserved numerically, though logical and character values are returned as doubles to match MATLAB."
+    },
+    {
+      "question": "How does `real` handle complex zeros?",
+      "answer": "`real(0 + 0i)` returns exactly `0`. Imaginary zeros are simply discarded."
+    },
+    {
+      "question": "Can I call `real` on string arrays?",
+      "answer": "No. Like MATLAB, `real` only accepts numeric, logical, or character arrays. Converting strings with `double(string)` first will produce numeric codes if required."
+    },
+    {
+      "question": "Does `real` allocate a new array?",
+      "answer": "Yes. The builtin returns a new tensor (or scalar). Fusion may combine kernels to avoid materialising intermediates when safe."
+    },
+    {
+      "question": "What happens on the GPU without `unary_real`?",
+      "answer": "RunMat gathers the tensor to host memory, applies the CPU semantics, and allows subsequent operations to re-upload if profitable. Providers are encouraged to implement `unary_real` for zero-copy behaviour."
+    },
+    {
+      "question": "Is GPU execution numerically identical to CPU?",
+      "answer": "Yes\u2014`real` is an identity for real tensors. Results match within the provider's precision (`single` or `double`)."
+    },
+    {
+      "question": "Does `real` participate in fusion?",
+      "answer": "Yes. The fusion planner can fold `real` into neighbouring elementwise kernels, keeping data on the GPU when possible."
+    }
+  ],
+  "links": [
+    {
+      "label": "imag",
+      "url": "./imag"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/real.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/real.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (e.g., integrating with third-party GPU kernels).",
+  "gpu_behavior": [
+    "**Hook available:** The real part is taken directly on the device with no host transfers (the WGPU provider and the in-process provider both implement this hook).",
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including logical and character promotion), and hands control back to the caller. Downstream fusion can still re-upload if the planner decides it is profitable.\n\nComplex GPU tensors are currently gathered because device-side complex storage is not yet available; providers can add fused support later without changing this builtin."
+  ]
+}

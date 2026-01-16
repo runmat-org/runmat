@@ -1,0 +1,119 @@
+{
+  "title": "eq",
+  "category": "logical/rel",
+  "keywords": [
+    "eq",
+    "==",
+    "equality",
+    "logical comparison",
+    "gpuArray equality"
+  ],
+  "summary": "Element-wise equality comparison for scalars, arrays, strings, and gpuArray inputs.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses provider elem_eq kernels when available; otherwise inputs gather back to host memory transparently."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": "wgpu",
+  "tested": {
+    "unit": "builtins::logical::rel::eq::tests",
+    "integration": "builtins::logical::rel::eq::tests::eq_gpu_provider_roundtrip",
+    "gpu": "builtins::logical::rel::eq::tests::eq_wgpu_matches_host"
+  },
+  "description": "`eq(A, B)` (or the infix `A == B`) performs an element-wise equality comparison. The result is a logical scalar when the broadcasted shape contains one element, or a logical array otherwise.",
+  "behaviors": [
+    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules.",
+    "Complex numbers are equal only when both their real and imaginary parts match.",
+    "Character arrays compare by Unicode code point; you can mix them with numeric arrays (`'A' == 65`) or strings.",
+    "String scalars and string arrays compare lexically; implicit expansion works across the string dimensions.",
+    "Handle objects compare by identity rather than by structural equality.",
+    "Mixed numeric/string inputs raise MATLAB-compatible type errors."
+  ],
+  "examples": [
+    {
+      "description": "Check If Two Scalars Are Equal",
+      "input": "flag = eq(42, 42);",
+      "output": "flag =\n     1"
+    },
+    {
+      "description": "Compare Two Vectors Element-Wise",
+      "input": "A = [1 2 3 4];\nB = [1 0 3 5];\nmask = eq(A, B);",
+      "output": "mask =\n  1\u00d74 logical array\n     1     0     1     0"
+    },
+    {
+      "description": "Apply Equality With Implicit Expansion",
+      "input": "M = [1 2 3; 4 5 6];\nsel = eq(M, 2);",
+      "output": "sel =\n  2\u00d73 logical array\n     0     1     0\n     0     0     0"
+    },
+    {
+      "description": "Compare Character Data To Numeric Codes",
+      "input": "letters = ['A' 'B' 'C'];\nisA = eq(letters, 65);",
+      "output": "isA =\n  1\u00d73 logical array\n     1     0     0"
+    },
+    {
+      "description": "Compare String Arrays To A Scalar String",
+      "input": "names = [\"alice\" \"bob\" \"alice\"];\nmatches = eq(names, \"alice\");",
+      "output": "matches =\n  1\u00d73 logical array\n     1     0     1"
+    },
+    {
+      "description": "Run `eq` Directly On `gpuArray` Inputs",
+      "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([1 0 3]);\ndeviceResult = eq(G1, G2);\nhostResult = gather(deviceResult);",
+      "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     0     1\nhostResult =\n  1\u00d73 logical array\n     1     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `eq` return logical values?",
+      "answer": "Yes. Scalars return `true` or `false`. Arrays return logical arrays, and `gpuArray` inputs return `gpuArray` logical outputs."
+    },
+    {
+      "question": "How are NaN values treated?",
+      "answer": "`NaN == NaN` evaluates to `false`, matching MATLAB's behaviour."
+    },
+    {
+      "question": "Can I compare complex numbers with `eq`?",
+      "answer": "Yes. Both the real and imaginary parts must match for the comparison to return `true`."
+    },
+    {
+      "question": "Are character vectors treated as numbers or text?",
+      "answer": "Both: they compare numerically (character code) against numeric inputs, and textually when compared to strings or other character arrays."
+    },
+    {
+      "question": "What happens when I mix numeric and string inputs?",
+      "answer": "RunMat raises a MATLAB-compatible error describing the unsupported type combination."
+    },
+    {
+      "question": "Do handle objects compare by value?",
+      "answer": "No. Handles compare by identity: two handles are equal only when they reference the same underlying object."
+    },
+    {
+      "question": "Does implicit expansion apply to string arrays?",
+      "answer": "Yes. String arrays support MATLAB-style implicit expansion, so you can compare against scalar strings without manual replication."
+    },
+    {
+      "question": "Can I chain `eq` inside fused GPU expressions?",
+      "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations."
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_behavior": [
+    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_eq` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+  ]
+}

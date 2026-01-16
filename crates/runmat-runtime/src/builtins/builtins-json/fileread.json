@@ -1,0 +1,126 @@
+{
+  "title": "fileread",
+  "category": "io/filetext",
+  "keywords": [
+    "fileread",
+    "io",
+    "read file",
+    "text file",
+    "character vector"
+  ],
+  "summary": "Read the entire contents of a text file into a 1-by-N character vector.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fileread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When the file path lives on the GPU, RunMat gathers it first; the file contents remain host-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fileread::tests",
+    "integration": "builtins::io::filetext::fileread::tests::fileread_reads_text_file"
+  },
+  "description": "`fileread(filename)` loads the complete contents of a text file into memory and returns a row vector of characters that mirrors MATLAB's behaviour. The builtin preserves all bytes, including newlines and extended ASCII characters, so downstream code can parse, split, or convert the text as needed.",
+  "behaviors": [
+    "Accepts paths provided as character vectors or string scalars. String arrays must contain exactly one element.",
+    "Supports an optional encoding argument: `fileread(filename, encoding)` or `fileread(filename, 'Encoding', encoding)`. Recognised values include `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
+    "Resolves relative paths with respect to the current working directory of the RunMat process, just like MATLAB.",
+    "Returns a `1\u00d7N` character array. Empty files yield a `1\u00d70` character vector.",
+    "Leaves line endings untouched (`\\r`, `\\n`, or `\\r\\n`) so scripts can inspect original formatting.",
+    "When `auto` decoding detects invalid UTF-8 sequences, RunMat maps each byte to the corresponding extended-ASCII code point so that callers can recover the raw data.",
+    "Throws a descriptive error when the file cannot be opened or read."
+  ],
+  "examples": [
+    {
+      "description": "Read Entire File Into A Character Vector",
+      "input": "text = fileread(\"LICENSE.md\");",
+      "output": "% Character vector containing the full license text"
+    },
+    {
+      "description": "Read A File Using A Relative Path",
+      "input": "text = fileread(\"data/config.json\");",
+      "output": "% Returns the JSON file contents as a character vector"
+    },
+    {
+      "description": "Preserve Extended ASCII Bytes",
+      "input": "bytes = fileread(\"fixtures/high_ascii.txt\");\ndouble_values = double(bytes);",
+      "output": "% double_values contains the numeric codes for every byte in the file"
+    },
+    {
+      "description": "Convert File Contents To A String Scalar",
+      "input": "raw = fileread(\"README.md\");\ndoc = string(raw);",
+      "output": "% doc is a string scalar ready for further processing"
+    },
+    {
+      "description": "Read A File With UTF-8 Decoding Explicitly",
+      "input": "text = fileread(\"data/report.txt\", 'Encoding', 'utf-8');",
+      "output": "% Character vector decoded using UTF-8. An error is thrown if the bytes are not valid UTF-8."
+    },
+    {
+      "description": "Handle Missing Files With Try/Catch",
+      "input": "try\n    fileread(\"missing.txt\");\ncatch err\n    disp(err.message);\nend",
+      "output": "% Prints a descriptive error such as:\n% \"fileread: unable to read 'missing.txt' (No such file or directory)\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `fileread` return?",
+      "answer": "It returns a `1\u00d7N` character vector containing every byte from the file. Convert it to a string with `string(...)` when you prefer string scalars."
+    },
+    {
+      "question": "Does `fileread` change line endings?",
+      "answer": "No. The builtin preserves whatever newline sequence the file uses so downstream tools can handle formatting explicitly."
+    },
+    {
+      "question": "Can `fileread` read binary data?",
+      "answer": "While designed for text, `fileread` will happily return any bytes. The result is a character vector whose numeric codes match the file's bytes."
+    },
+    {
+      "question": "How are encodings handled?",
+      "answer": "The default `auto` mode attempts UTF-8 decoding and, if the data is not valid UTF-8, falls back to mapping each byte to its extended-ASCII code point (`latin1`). Provide an explicit encoding such as `'utf-8'`, `'latin1'`, `'ascii'`, or `'raw'` to control the conversion. Explicit encodings raise descriptive errors when the bytes are incompatible with the requested format."
+    },
+    {
+      "question": "Can I force raw byte behaviour?",
+      "answer": "Yes. Specify `'raw'` (or `'bytes'`) as the encoding argument to receive a character vector whose code points equal the file's bytes."
+    },
+    {
+      "question": "How do relative paths resolve?",
+      "answer": "Relative paths are evaluated against the current working directory of the RunMat process. Use `pwd` or `cd` to control where `fileread` looks."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "strlength",
+      "url": "./strlength"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/filetext/fileread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fileread.rs"
+  },
+  "gpu_behavior": [
+    "`fileread` performs synchronous host I/O and never dispatches GPU work. If the provided file name lives on the GPU (for example, produced by a GPU array that was gathered lazily), RunMat gathers that scalar first. File contents are returned as an ordinary character array that resides on the CPU. Providers do not need to implement any hooks for this builtin."
+  ]
+}

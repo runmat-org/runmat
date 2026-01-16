@@ -1,0 +1,126 @@
+{
+  "title": "strfind",
+  "category": "strings/search",
+  "keywords": [
+    "strfind",
+    "substring",
+    "index",
+    "positions",
+    "forcecelloutput"
+  ],
+  "summary": "Locate the starting indices of pattern matches in text inputs, returning doubles or cell arrays like MATLAB.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strfind.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Executes on the CPU. When inputs reside on the GPU, RunMat gathers them automatically before searching."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::search::strfind::tests",
+    "integration": "builtins::strings::search::strfind::tests::strfind_subject_cell_scalar_returns_cell"
+  },
+  "description": "`k = strfind(str, pattern)` returns the starting indices of every occurrence of `pattern` inside `str`. The builtin mirrors MATLAB semantics for character vectors, string scalars, string arrays, and cell arrays of character vectors.",
+  "behaviors": [
+    "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors. Mixed combinations are permitted.",
+    "Applies MATLAB-style implicit expansion when either argument is non-scalar.",
+    "Returns a numeric row vector when both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`. If either input is a cell array or the broadcasted result contains multiple elements, the output is a cell array with the broadcasted shape, and each cell contains a row vector of double indices.",
+    "Pattern matches are case-sensitive and may overlap. For example, `strfind(\"aaaa\",\"aa\")` yields `[1 2 3]`.",
+    "An empty pattern matches the boundaries between characters, producing indices `1:length(str)+1`. Missing strings (`<missing>`) never match any pattern.",
+    "Specify `'ForceCellOutput', true` to always obtain a cell array, even for scalar inputs."
+  ],
+  "examples": [
+    {
+      "description": "Find substring positions in a character vector",
+      "input": "idx = strfind('abracadabra', 'abra');",
+      "output": "idx = [1 8];"
+    },
+    {
+      "description": "Locate overlapping matches",
+      "input": "idx = strfind(\"aaaa\", \"aa\");",
+      "output": "idx = [1 2 3];"
+    },
+    {
+      "description": "Return matches for each element of a string array",
+      "input": "words = [\"hydrogen\"; \"helium\"; \"lithium\"];\nidx = strfind(words, \"i\");",
+      "output": "idx = 3\u00d71 cell array\n    {[]}\n    {[4]}\n    {[2 5]}"
+    },
+    {
+      "description": "Search with multiple patterns against one subject",
+      "input": "idx = strfind(\"saturn\", [\"sat\", \"turn\", \"moon\"]);",
+      "output": "idx = 1\u00d73 cell array\n    {[1]}    {[3]}    {[]}"
+    },
+    {
+      "description": "Force cell output for scalar inputs",
+      "input": "idx = strfind('mission', 's', 'ForceCellOutput', true);",
+      "output": "idx = 1\u00d71 cell array\n    {[3 4]}"
+    },
+    {
+      "description": "Handle empty patterns and missing strings",
+      "input": "idxEmpty = strfind(\"abc\", \"\");\nidxMissing = strfind(\"<missing>\", \"abc\");",
+      "output": "idxEmpty = [1 2 3 4];\nidxMissing = [];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass to `strfind`?",
+      "answer": "Use string scalars/arrays, character vectors/arrays, or cell arrays of character vectors for either argument. Mixed combinations are allowed; MATLAB-style implicit expansion aligns the inputs automatically."
+    },
+    {
+      "question": "How are the results formatted?",
+      "answer": "When both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`, `strfind` returns a numeric row vector with the starting indices. In all other cases \u2014 for example, if either input is a cell array or the broadcasted size exceeds one element \u2014 the result is a cell array whose shape matches the broadcasted size, with each cell containing a row vector of doubles."
+    },
+    {
+      "question": "Do matches overlap?",
+      "answer": "Yes. The builtin considers every occurrence of the pattern, including overlapping matches."
+    },
+    {
+      "question": "What happens with empty patterns?",
+      "answer": "An empty pattern matches the gaps between characters, so the indices `1:length(str)+1` are returned for non-missing text. When the subject is missing, the result is an empty array."
+    },
+    {
+      "question": "How do I always get a cell array?",
+      "answer": "Supply `'ForceCellOutput', true`. This mirrors MATLAB and is useful when you want consistent cell outputs regardless of input sizes."
+    },
+    {
+      "question": "Does `strfind` support case-insensitive matching?",
+      "answer": "No. `strfind` is case-sensitive like MATLAB. Use `contains`, `startsWith`, or the regular expression functions when you need case-insensitive searches."
+    }
+  ],
+  "links": [
+    {
+      "label": "`contains`",
+      "url": "./contains"
+    },
+    {
+      "label": "`startsWith`",
+      "url": "./startswith"
+    },
+    {
+      "label": "`endsWith`",
+      "url": "./endswith"
+    },
+    {
+      "label": "`regexp`",
+      "url": "./regexp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/search/strfind.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/strfind.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\n`strfind` always executes on the host, but if you pass in GPU-resident values RunMat gathers them automatically before performing the search. This keeps the results identical to MATLAB while still allowing upstream computations to benefit from acceleration.",
+  "gpu_behavior": [
+    "`strfind` performs substring searches on the host CPU. When its inputs currently live on the GPU (for example, after other accelerated operations), RunMat gathers them automatically before executing the search so the behaviour matches MATLAB exactly. No provider hooks are required."
+  ]
+}

@@ -17,8 +17,5 @@ pub mod shape;
 pub mod spec;
 pub mod tensor;
 
-pub use spec::builtin_doc_texts;
-pub use spec::DocTextInventory;
-
 #[cfg(test)]
 pub mod test_support;

@@ -3,8 +3,8 @@
 //! Responsible for creating a skeleton builtin source file under
 //! `crates/runmat-runtime/src/builtins/<category>/<name>.rs` and wiring
 //! the `mod.rs` chain so the file is compiled. The generated file contains
-//! a DOC_MD stub, a `#[runtime_builtin]` function stub, and a minimal smoke
-//! test so filtered cargo test runs succeed immediately.
+//! a `#[runtime_builtin]` function stub and a minimal smoke test so filtered
+//! cargo test runs succeed immediately.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;

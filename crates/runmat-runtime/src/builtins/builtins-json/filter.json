@@ -1,0 +1,146 @@
+{
+  "title": "filter",
+  "category": "math/signal",
+  "keywords": [
+    "filter",
+    "IIR",
+    "FIR",
+    "difference equation",
+    "initial conditions",
+    "gpu"
+  ],
+  "summary": "Apply an IIR/FIR digital filter to scalars, vectors, or tensors with MATLAB-compatible semantics.",
+  "references": [
+    "title: \"MATLAB filter documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat invokes the provider hook `iir_filter` when available. Real-valued operands run entirely on the device when the hook is implemented; complex coefficients or signals fall back to the host automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::filter::tests",
+    "integration": "builtins::math::signal::filter::tests::filter_gpu_matches_cpu"
+  },
+  "description": "`filter` evaluates the causal linear difference equation\n\n```\na(1) * y(n) = b(1) * x(n) + b(2) * x(n-1) + \u2026 + b(nb) * x(n-nb+1)\n              - a(2) * y(n-1) - \u2026 - a(na) * y(n-na+1)\n```\n\nwith MATLAB-compatible handling of scalars, row/column vectors, N-D tensors, complex numbers, and user-supplied initial conditions. RunMat normalises the coefficients internally so that `a(1)` becomes `1`, mirroring MATLAB.",
+  "behaviors": [
+    "`filter(b, a, X)` applies the filter along the first non-singleton dimension of `X` (column-wise for matrices).",
+    "The numerator `b` and denominator `a` must be non-empty vectors. `a(1)` must be non-zero; the runtime divides both coefficient vectors by `a(1)` automatically.",
+    "Optional initial conditions `zi` must have the same size as the output `zf` (the dimension being filtered is replaced by `max(numel(b), numel(a)) - 1`). Use `[]` to indicate zero initial state.",
+    "`filter(b, a, X, zi, dim)` processes `X` along dimension `dim`. Dimensions beyond `ndims(X)` are treated as length-one axes, exactly as in MATLAB.",
+    "Complex coefficients or inputs are supported; results follow MATLAB semantics for real/imaginary propagation.",
+    "The function returns a single output `y` by default. Request two outputs (`[y, zf] = filter(...)`) to obtain the final internal states `zf`."
+  ],
+  "examples": [
+    {
+      "description": "Smoothing a signal with an FIR moving-average filter",
+      "input": "b = ones(1, 3) / 3;\na = 1;\nx = [1 5 2 0 3];\ny = filter(b, a, x)",
+      "output": "y =\n    0.3333    2.0000    2.6667    2.3333    1.6667"
+    },
+    {
+      "description": "Applying a first-order IIR low-pass filter",
+      "input": "alpha = 0.8;\nb = 1 - alpha;\na = [1 -alpha];\nimp = [1 zeros(1, 4)];\ny = filter(b, a, imp)",
+      "output": "y =\n    0.2000    0.1600    0.1280    0.1024    0.0819"
+    },
+    {
+      "description": "Continuing a filtered stream with explicit initial conditions",
+      "input": "b = ones(1, 3) / 3;\na = 1;\nx1 = [1 5 2];\n[y1, zf] = filter(b, a, x1);   % First chunk\n\nx2 = [0 3];\n[y2, zf2] = filter(b, a, x2, zf);  % Resume with stored state",
+      "output": "y1 = [0.3333 2.0000 2.6667]\nzf  = [2.3333 0.6667]\n\ny2 = [2.3333 1.6667]\nzf2 = [1.0000 1.0000]"
+    },
+    {
+      "description": "Filtering along matrix rows (dimension 2)",
+      "input": "X = [1  2  3  4;\n     0  1  0  1];\nb = [1 -1];   % simple differentiator\na = 1;\nY = filter(b, a, X, [], 2)",
+      "output": "Y =\n     1     1     1     1\n     0     1    -1     1"
+    },
+    {
+      "description": "Filtering complex-valued data",
+      "input": "b = [1 1i];\na = 1;\nt = 0:3;\nx = exp(1i * pi/4 * t);\ny = filter(b, a, x)",
+      "output": "y =\n   1.0000 + 0.0000i   0.7071 + 1.7071i  -0.7071 + 1.7071i  -1.7071 + 0.7071i"
+    },
+    {
+      "description": "Executing a real filter on the GPU",
+      "input": "g = gpuArray([1 5 2 0 3]);\nb = ones(1, 3) / 3;\na = 1;\n[y_gpu, zf_gpu] = filter(b, a, g);\ny = gather(y_gpu)",
+      "output": "y =\n    0.3333    2.0000    2.6667    2.3333    1.6667"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens if `a(1)` is not 1.0?",
+      "answer": "RunMat (like MATLAB) divides every coefficient in `a` and `b` by `a(1)` internally so that `a(1)` becomes `1`. You only need to ensure `a(1)` is non-zero."
+    },
+    {
+      "question": "How large should `zi` be?",
+      "answer": "`zi` must have the same size as `zf` (the returned final state). Replace the filtered dimension with `max(numel(b), numel(a)) - 1`; all other dimensions match `X`. Use `[]` for a zero state."
+    },
+    {
+      "question": "Can I filter along a dimension greater than `ndims(X)`?",
+      "answer": "Yes. Just like MATLAB, RunMat treats missing higher dimensions as length-one axes. `filter(b, a, X, [], 5)` is valid even if `X` is a vector."
+    },
+    {
+      "question": "Does `filter` support complex coefficients or signals?",
+      "answer": "Absolutely. The host implementation handles complex arithmetic exactly. GPU acceleration is currently limited to real-valued filters; complex inputs fall back to the CPU automatically."
+    },
+    {
+      "question": "Do I need to initialise the GPU path manually?",
+      "answer": "No. If the signal is a `gpuArray` value and the active provider supports `iir_filter`, RunMat keeps the entire computation on the device. Otherwise, the runtime gathers operands to the host, ensuring MATLAB-compatible results without extra user code."
+    },
+    {
+      "question": "What shape does `zf` have?",
+      "answer": "`zf` matches `zi` (or the default zero state). The filtered dimension is replaced by `max(numel(b), numel(a)) - 1`; other dimensions mirror the input."
+    },
+    {
+      "question": "How are empty signals handled?",
+      "answer": "When `X` is empty, `y` is empty and `zf` equals the supplied `zi` (or zeros). No arithmetic is performed, matching MATLAB."
+    },
+    {
+      "question": "Are logical and integer inputs supported?",
+      "answer": "Yes. They are promoted to double precision before filtering, exactly as in MATLAB."
+    },
+    {
+      "question": "How do I resume filtering a long stream chunk-by-chunk?",
+      "answer": "Call `[y, zf] = filter(...)` on each chunk and pass `zf` as the fourth argument for the next chunk. The example above shows the pattern."
+    },
+    {
+      "question": "Can I accelerate filtering with the planner\u2019s auto-offload?",
+      "answer": "The planner leverages the same provider hook under the hood. As long as the operands are real and the provider implements `iir_filter`, auto-offload keeps the filter on the GPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "deconv",
+      "url": "./deconv"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "filtfilt",
+      "url": "https://www.mathworks.com/help/matlab/ref/filtfilt.html"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_behavior": [
+    "The input signal already resides on the GPU (for example, via `gpuArray`) and all operands are real-valued.",
+    "The active provider implements `iir_filter` (both the in-process provider and the WGPU backend do).\n\nUnder those conditions the entire evaluation\u2014including final-state propagation\u2014stays on the device. If the hook is absent, or if any operand is complex, RunMat transparently gathers to the host, evaluates the filter with the scalar reference implementation, and returns MATLAB-compatible results. Auto-offload and fusion residency reuse the same hook, so high-level code does not need to differentiate between CPU and GPU execution."
+  ]
+}

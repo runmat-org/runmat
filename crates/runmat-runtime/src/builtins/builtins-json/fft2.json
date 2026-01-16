@@ -1,0 +1,134 @@
+{
+  "title": "fft2",
+  "category": "math/fft",
+  "keywords": [
+    "fft2",
+    "2d fft",
+    "two dimensional fourier transform",
+    "image frequency analysis",
+    "gpu"
+  ],
+  "summary": "Compute the two-dimensional discrete Fourier transform (DFT) of numeric or complex data.",
+  "references": [
+    "title: \"MATLAB fft2 documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Runs two provider-backed fft_dim passes when available; otherwise the runtime gathers to the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::fft2::tests",
+    "integration": "builtins::math::fft::fft2::tests::fft2_gpu_roundtrip_matches_cpu"
+  },
+  "description": "`fft2(X)` computes the two-dimensional discrete Fourier transform (DFT) of `X`. It is equivalent to applying `fft` along the first dimension and then along the second dimension, preserving MATLAB\u2019s column-major ordering and output shape semantics.",
+  "behaviors": [
+    "`fft2(X)` transforms along the first and second dimensions that have size greater than one.",
+    "`fft2(X, M, N)` zero-pads or truncates `X` to `M` rows and `N` columns before evaluating the 2-D transform.",
+    "`fft2(X, SIZE)` accepts a two-element vector (or scalar) specifying the transform lengths.",
+    "Real inputs produce complex outputs; complex inputs are transformed element-wise with no additional conversion.",
+    "Higher-dimensional inputs are transformed slice-by-slice across trailing dimensions, matching MATLAB behaviour.",
+    "Empty dimensions yield empty outputs; zero padding with `0` produces a zero-sized complex tensor.",
+    "GPU arrays execute on-device when the provider advertises the `fft_dim` hook; otherwise RunMat gathers the data and performs the transform on the host using `rustfft`."
+  ],
+  "examples": [
+    {
+      "description": "Computing the 2-D FFT of a small matrix",
+      "input": "X = [1 2; 3 4];\nY = fft2(X);",
+      "output": "Y =\n    10 + 0i   -2 + 0i\n    -4 + 0i    0 + 0i"
+    },
+    {
+      "description": "Zero-padding an image patch before `fft2`",
+      "input": "patch = [1 0 1; 0 1 0; 1 0 1];\nF = fft2(patch, 8, 8);"
+    },
+    {
+      "description": "Specifying transform lengths with a size vector",
+      "input": "X = rand(4, 6);\nF = fft2(X, [8 4]);   % pad rows to 8 and truncate columns to 4"
+    },
+    {
+      "description": "Using `fft2` on `gpuArray` data",
+      "input": "G = gpuArray(rand(256, 256));\nF = fft2(G);\nR = gather(F);"
+    },
+    {
+      "description": "Applying `fft2` to each slice of a 3-D volume",
+      "input": "V = rand(64, 64, 10);\nspectra = fft2(V);"
+    },
+    {
+      "description": "Verifying `fft2` against sequential `fft` calls",
+      "input": "X = rand(5, 7);\nsequential = fft(fft(X, [], 1), [], 2);\ndirect = fft2(X);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `fft2(X)` the same as `fft(fft(X, [], 1), [], 2)`?",
+      "answer": "Yes. RunMat literally performs the two sequential transforms so the results match MATLAB exactly."
+    },
+    {
+      "question": "How do zero-length transform sizes behave?",
+      "answer": "Passing `0` for either `M` or `N` produces a complex tensor with zero elements along that dimension."
+    },
+    {
+      "question": "Can I use a single scalar for the size argument?",
+      "answer": "Yes. `fft2(X, K)` is shorthand for `fft2(X, [K K])`, padding or truncating both dimensions to `K`."
+    },
+    {
+      "question": "What happens when `X` has more than two dimensions?",
+      "answer": "RunMat applies `fft2` to every 2-D slice defined by the first two dimensions, leaving higher dimensions untouched."
+    },
+    {
+      "question": "Do I get complex outputs for real inputs?",
+      "answer": "Always. Even when the imaginary parts are zero, outputs are stored as complex tensors to mirror MATLAB semantics."
+    },
+    {
+      "question": "Will `fft2` run on the GPU automatically?",
+      "answer": "Yes if the active provider implements `fft_dim`. Otherwise RunMat gathers to the host and performs the transform with `rustfft`."
+    },
+    {
+      "question": "Does `fft2` normalise the output?",
+      "answer": "No. Like MATLAB, the forward FFT leaves scaling untouched; use `ifft2` for the inverse with `1/(M*N)` scaling."
+    },
+    {
+      "question": "Can I mix `[]` with explicit sizes (e.g., `fft2(X, [], 128)`)?",
+      "answer": "Yes. Passing `[]` leaves that dimension unchanged while applying the specified size to the other dimension."
+    }
+  ],
+  "links": [
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` manually. The fusion planner and native acceleration layer keep tensors on the GPU when a provider offers FFT kernels. If the provider lacks `fft_dim`, RunMat gathers inputs, evaluates the FFT pair on the host, and returns a MATLAB-compatible complex tensor. You can still use `gpuArray` for explicit residency control, particularly when interoperating with MATLAB code that expects it."
+}

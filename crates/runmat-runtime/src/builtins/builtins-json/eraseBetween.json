@@ -1,0 +1,136 @@
+{
+  "title": "eraseBetween",
+  "category": "strings/transform",
+  "keywords": [
+    "eraseBetween",
+    "delete substring",
+    "boundaries",
+    "inclusive",
+    "exclusive",
+    "string array"
+  ],
+  "summary": "Delete text that lies between boundary markers while matching MATLAB-compatible name-value options.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/string.erasebetween.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Executes on the CPU. RunMat gathers GPU-resident inputs before deleting text and returns host-side results; the builtin is registered as an Accelerate sink so fusion never keeps the data on device."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::erasebetween::tests",
+    "integration": "builtins::strings::transform::erasebetween::tests::eraseBetween_numeric_positions_array"
+  },
+  "description": "`eraseBetween(text, start, stop)` removes the portion of `text` that appears between two boundary markers. Boundaries can be substrings or numeric positions. The builtin mirrors MATLAB semantics, including support for string arrays, character arrays, cell arrays, implicit expansion, and the `'Boundaries'` name-value argument that toggles inclusive or exclusive behaviour.",
+  "behaviors": [
+    "Accepts **string scalars**, **string arrays**, **character arrays** (row-by-row), and **cell arrays** containing string scalars or character vectors; the output keeps the same container type.",
+    "Boundary arguments can be text or numeric positions. Both boundaries in a call must use the same representation\u2014mixing text and numeric markers raises a size/type error.",
+    "Text boundaries are **exclusive** by default: the markers are preserved while the enclosed text is deleted. Numeric positions are **inclusive** by default: characters at `startPos` and `endPos` are deleted together with the interior.",
+    "`'Boundaries','inclusive'` removes the markers themselves; `'Boundaries','exclusive'` keeps them. The option is case-insensitive and must be supplied as name-value pairs.",
+    "Missing string scalars propagate (the MATLAB `missing` placeholder in either boundary or text yields `<missing>` in the result). When a boundary cannot be located, `eraseBetween` returns the original element unchanged.",
+    "Numeric positions are validated as positive integers, clamped to the string length, and interpreted using MATLAB\u2019s 1-based indexing rules."
+  ],
+  "examples": [
+    {
+      "description": "Removing text between substrings",
+      "input": "txt = \"The quick brown fox\";\nresult = eraseBetween(txt, \"quick\", \" fox\");",
+      "output": "result = \"The quick fox\""
+    },
+    {
+      "description": "Deleting substrings across a string array",
+      "input": "str = [\"The quick brown fox jumps\"; \"over the lazy dog\"];\nstarts = [\"quick\"; \"the\"];\nends = [\" fox\"; \" dog\"];\ntrimmed = eraseBetween(str, starts, ends);",
+      "output": "trimmed = 2\u00d71 string\n    \"The quick fox jumps\"\n    \"over the dog\""
+    },
+    {
+      "description": "Removing characters between numeric positions",
+      "input": "name = \"Edgar Allen Poe\";\nshort = eraseBetween(name, 6, 11);",
+      "output": "short = \"Edgar Poe\""
+    },
+    {
+      "description": "Using inclusive boundaries to drop the markers",
+      "input": "sentence = \"The quick brown fox jumps over the lazy dog\";\ncollapsed = eraseBetween(sentence, \" brown\", \"lazy\", \"Boundaries\", \"inclusive\");",
+      "output": "collapsed = \"The quick dog\""
+    },
+    {
+      "description": "Operating on character arrays while preserving padding",
+      "input": "chars = char(\"Server<GPU>\", \"Engine<CPU>\");\ntrimmed = eraseBetween(chars, \"<\", \">\", \"Boundaries\", \"inclusive\");",
+      "output": "trimmed =\n\n  2\u00d76 char array\n\n    \"Server\"\n    \"Engine\""
+    },
+    {
+      "description": "Preserving element types in cell arrays",
+      "input": "C = {'alpha<1>', \"beta<2>\";\n     'gamma<3>', \"delta<4>\"};\nclean = eraseBetween(C, \"<\", \">\", \"Boundaries\", \"inclusive\");",
+      "output": "clean =\n  2\u00d72 cell array\n    {'alpha'}    {\"beta\"}\n    {'gamma'}    {\"delta\"}"
+    },
+    {
+      "description": "Handling missing strings safely",
+      "input": "texts = [missing, \"Planner<GPU>\"];\nresult = eraseBetween(texts, \"<\", \">\");",
+      "output": "result = 1\u00d72 string\n    \"<missing>\"    \"Planner\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which argument types does `eraseBetween` accept?",
+      "answer": "The first argument can be a string scalar, string array, character array, or cell array of character vectors / string scalars. Boundary arguments must both be text markers or both be numeric positions."
+    },
+    {
+      "question": "What happens if a boundary is not found?",
+      "answer": "The original text is returned unchanged. Missing string scalars also propagate unchanged."
+    },
+    {
+      "question": "How does `'Boundaries','inclusive'` interact with text markers?",
+      "answer": "Inclusive mode removes the matched start and end markers together with the enclosed text. Exclusive mode keeps the markers and removes only the interior."
+    },
+    {
+      "question": "Can I broadcast scalar boundaries across an array input?",
+      "answer": "Yes. Scalar markers follow MATLAB implicit expansion rules. Character-array and cell-array markers must match the size of the text input."
+    },
+    {
+      "question": "Are GPU inputs supported?",
+      "answer": "GPU values are gathered to host memory before processing. The builtin always returns host-resident outputs and is registered as an Accelerate sink, so fusion planning does not keep text on the GPU."
+    },
+    {
+      "question": "Does `eraseBetween` validate numeric positions?",
+      "answer": "Yes. Positions are parsed as positive integers using MATLAB\u2019s 1-based indexing. Stops are clamped to the string length, and start positions that lie beyond the text leave the element unchanged."
+    }
+  ],
+  "links": [
+    {
+      "label": "extractBetween",
+      "url": "./extractbetween"
+    },
+    {
+      "label": "erase",
+      "url": "./erase"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/erasebetween.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erasebetween.rs"
+  },
+  "gpu_residency": "No. RunMat automatically gathers device-resident inputs, performs the deletion on the CPU, and returns host outputs. Manual `gpuArray` / `gather` calls are unnecessary; they are honoured only for compatibility with MATLAB when you explicitly need to control residency.",
+  "gpu_behavior": [
+    "The builtin performs all work on the CPU. When any argument is GPU-resident, RunMat gathers the values first, applies the deletions on the host, and returns host-resident outputs. Providers do not need to expose device kernels, and fusion planning treats `eraseBetween` as a residency sink so surrounding expressions will gather automatically."
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "title": "getenv",
+  "category": "io/repl_fs",
+  "keywords": [
+    "getenv",
+    "environment variable",
+    "env",
+    "system variable",
+    "process environment"
+  ],
+  "summary": "Query environment variables as character vectors, strings, or structures.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/getenv.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-only operation. RunMat gathers GPU-resident arguments before querying the process environment; providers do not implement hooks for this builtin."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::getenv::tests",
+    "integration": "builtins::io::repl_fs::getenv::tests::getenv_returns_struct_with_all_variables"
+  },
+  "description": "`getenv` reads environment variables that are visible to the current process. When you call `getenv(\"NAME\")`, the builtin returns the value of the environment variable `NAME`, matching MATLAB behaviour. Supplying no input arguments returns a struct where each field corresponds to an environment variable.",
+  "behaviors": [
+    "Accepts character vectors (`'PATH'`) or string scalars (`\"PATH\"`). Character vector inputs return character vectors; string inputs return string scalars.",
+    "Vectorised calls are supported: pass a string array to receive a string array of values, or a cell array of character vectors to receive a cell array of character vectors.",
+    "When the requested variable is not defined, `getenv` returns an empty character vector or an empty string scalar (depending on the input type). This matches MATLAB\u2019s \u201cvariable not found\u201d semantics.",
+    "Calling `getenv` with no arguments returns a scalar struct. Field names are the environment variable names; field values are character vectors containing each variable\u2019s value.",
+    "On Windows, environment variable lookups are case-insensitive, mirroring the operating system. On Unix-like systems, lookups are case-sensitive.",
+    "Trailing spaces in character matrix inputs are ignored so that padded rows created with MATLAB\u2019s string manipulation functions remain compatible.",
+    "The builtin rejects non-text inputs (numeric arrays, logicals, GPU tensors, etc.) with a clear MATLAB-style diagnostic."
+  ],
+  "examples": [
+    {
+      "description": "Read A Single Environment Variable",
+      "input": "homeFolder = getenv(\"HOME\");\ndisp(homeFolder);",
+      "output": "homeFolder =\n    \"C:\\Users\\alex\""
+    },
+    {
+      "description": "Handle Missing Environment Variables",
+      "input": "token = getenv(\"RUNMAT_TOKEN\");\nif token == \"\"\n    warning(\"Token not configured.\");\nend",
+      "output": "Warning: Token not configured."
+    },
+    {
+      "description": "Fetch Multiple Variables With A String Array",
+      "input": "vars = getenv([\"PATH\", \"SHELL\"]);\ndisp(vars);",
+      "output": "vars = 1x2 string\n    \"/usr/local/bin:/usr/bin:...\"    \"/bin/zsh\""
+    },
+    {
+      "description": "Use A Cell Array Of Character Vectors",
+      "input": "cells = getenv({'HOME', 'PATH'});\ndisp(cells{1});",
+      "output": "cells =\n  1x2 cell array\n    {'/Users/alex'}    {'/usr/local/bin:/usr/bin:...'}"
+    },
+    {
+      "description": "Inspect All Environment Variables",
+      "input": "env = getenv();\ndisp(env.USER);",
+      "output": "env =\n  struct with fields:\n    HOME: '/Users/alex'\n    PATH: '/usr/local/bin:/usr/bin:...'\n    USER: 'alex'"
+    },
+    {
+      "description": "Cache The Environment For Repeated Access",
+      "input": "env = getenv();\nresultsFolder = fullfile(env.HOME, \"results\");",
+      "output": "resultsFolder =\n    \"/Users/alex/results\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `getenv` return when the variable is missing?",
+      "answer": "An empty character vector (`''`) for character inputs, or an empty string scalar (`\"\"`) for string inputs. You can test for a missing variable with `isempty(value)` or `value == \"\"`."
+    },
+    {
+      "question": "Does `getenv` support vectorised inputs?",
+      "answer": "Yes. Pass a string array or a cell array of character vectors to retrieve multiple values in one call. The output mirrors the input container type."
+    },
+    {
+      "question": "Are environment variable lookups case-sensitive?",
+      "answer": "RunMat follows the operating system. Lookups are case-insensitive on Windows and case-sensitive on Unix-like systems, matching MATLAB."
+    },
+    {
+      "question": "Does `getenv` modify the environment?",
+      "answer": "No. It is a read-only operation. Use the forthcoming `setenv` builtin to modify the environment once it is available."
+    },
+    {
+      "question": "Can I call `getenv` from GPU-accelerated code?",
+      "answer": "Yes. Inputs originating on the GPU are gathered automatically. The builtin still executes on the CPU, and the output lives on the host."
+    },
+    {
+      "question": "How do I access all environment variables at once?",
+      "answer": "Call `getenv()` with no arguments. The result is a struct whose fields contain character vectors for each environment variable."
+    },
+    {
+      "question": "What happens if an environment variable name is not a valid struct field?",
+      "answer": "RunMat preserves the exact name as a struct field. Access it via dynamic field references when the name contains characters that cannot be used in dot notation."
+    },
+    {
+      "question": "Are trailing spaces in character inputs significant?",
+      "answer": "No. Trailing spaces introduced by padding character matrices are stripped before the lookup so that MATLAB-style character arrays work as expected."
+    },
+    {
+      "question": "Does `getenv` include inherited environment variables?",
+      "answer": "Yes. The builtin reports every variable visible to the RunMat process, including inherited values."
+    }
+  ],
+  "links": [
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/getenv.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/getenv.rs"
+  },
+  "gpu_residency": "No. `getenv` has no GPU implementation and simply queries the host environment. Passing GPU-resident values is supported (RunMat gathers them automatically), but there is no benefit to calling `gpuArray` yourself.",
+  "gpu_behavior": [
+    "`getenv` always runs on the CPU. If the argument originates from the GPU\u2014for example, a string scalar produced by an accelerated builtin\u2014RunMat gathers it to host memory before reading the environment. No GPU kernels are launched, and acceleration providers do not need to implement hooks for this builtin."
+  ]
+}

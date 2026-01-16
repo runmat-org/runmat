@@ -11,180 +11,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{gather_if_needed, make_cell_with_shape};
 
-#[cfg_attr(
-    feature = "doc_export",
-    runmat_macros::register_doc_text(
-        name = "strcat",
-        builtin_path = "crate::builtins::strings::transform::strcat"
-    )
-)]
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
-pub const DOC_MD: &str = r#"---
-title: "strcat"
-category: "strings/transform"
-keywords: ["strcat", "string concatenation", "character arrays", "cell arrays", "trailing spaces"]
-summary: "Concatenate text inputs element-wise with MATLAB-compatible trimming and implicit expansion."
-references:
-  - https://www.mathworks.com/help/matlab/ref/strcat.html
-gpu_support:
-  elementwise: false
-  reduction: false
-  precisions: []
-  broadcasting: "matlab"
-  notes: "Executes on the CPU; GPU-resident inputs are gathered before concatenation so trimming semantics match MATLAB."
-fusion:
-  elementwise: false
-  reduction: false
-  max_inputs: 8
-  constants: "inline"
-requires_feature: null
-tested:
-  unit: "builtins::strings::transform::strcat::tests"
-  integration: "builtins::strings::transform::strcat::tests::strcat_cell_array_trims_trailing_spaces"
----
-
-# What does the `strcat` function do in MATLAB / RunMat?
-`strcat` horizontally concatenates text inputs element-wise. It accepts string arrays, character arrays,
-character vectors, and cell arrays of character vectors, applying MATLAB's implicit expansion rules to
-match array sizes.
-
-## How does the `strcat` function behave in MATLAB / RunMat?
-- Inputs are concatenated element-wise. Scalars expand across arrays of matching dimensions using MATLAB's
-  implicit expansion rules.
-- When at least one input is a string array (or string scalar), the result is a string array. `<missing>`
-  values propagate, so any missing operand yields a missing result for that element.
-- When no string arrays are present but any input is a cell array of character vectors, the result is a cell
-  array whose elements are character vectors.
-- Otherwise, the result is a character array. For character inputs, `strcat` removes trailing space characters
-  from each operand **before** concatenating.
-- Cell array elements must be character vectors (or string scalars). Mixing cell arrays with unsupported
-  content raises a MATLAB-compatible error.
-- Empty inputs broadcast naturally: an operand with a zero-length dimension yields an empty output after
-  broadcasting.
-
-## `strcat` Function GPU Execution Behaviour
-RunMat currently performs text concatenation on the CPU. When any operand resides on the GPU, the runtime
-gathers it to host memory before applying MATLAB-compatible trimming and concatenation rules. Providers do
-not need to implement device kernels for this builtin today.
-
-## GPU residency in RunMat (Do I need `gpuArray`?)
-No. String manipulation runs on the CPU. If intermediate values are on the GPU, RunMat gathers them
-automatically so you can call `strcat` without extra residency management.
-
-## Examples of using the `strcat` function in MATLAB / RunMat
-
-### Concatenate string scalars element-wise
-```matlab
-greeting = strcat("Run", "Mat");
-```
-Expected output:
-```matlab
-greeting = "RunMat"
-```
-
-### Concatenate a string scalar with a string array
-```matlab
-names = ["Ignition", "Turbine", "Accelerate"];
-tagged = strcat("runmat-", names);
-```
-Expected output:
-```matlab
-tagged = 1×3 string
-    "runmat-Ignition"    "runmat-Turbine"    "runmat-Accelerate"
-```
-
-### Concatenate character arrays while trimming trailing spaces
-```matlab
-A = char("GPU ", "Planner");
-B = char("Accel", " Stage ");
-result = strcat(A, B);
-```
-Expected output:
-```matlab
-result =
-
-  2×11 char array
-
-    'GPUAccel'
-    'PlannerStage'
-```
-
-### Concatenate cell arrays of character vectors
-```matlab
-C = {'Run ', 'Plan '; 'Fuse ', 'Cache '};
-suffix = {'Mat', 'Ops'; 'Kernels', 'Stats'};
-combined = strcat(C, suffix);
-```
-Expected output:
-```matlab
-combined = 2×2 cell
-    {'RunMat'}    {'PlanOps'}
-    {'FuseKernels'}    {'CacheStats'}
-```
-
-### Propagate missing strings during concatenation
-```matlab
-values = [string(missing) "ready"];
-out = strcat("job-", values);
-```
-Expected output:
-```matlab
-out = 1×2 string
-    <missing>    "job-ready"
-```
-
-### Broadcast a scalar character vector across a character array
-```matlab
-labels = char("core", "runtime", "planner");
-prefixed = strcat("runmat-", labels);
-```
-Expected output:
-```matlab
-prefixed =
-
-  3×11 char array
-
-    'runmat-core'
-    'runmat-runtime'
-    'runmat-planner'
-```
-
-## FAQ
-
-### Does `strcat` remove spaces between words?
-No. `strcat` only strips trailing **space characters** from character inputs before concatenating. Spaces in
-the middle of a string remain untouched. To insert separators explicitly, concatenate the desired delimiter
-or use `join`.
-
-### How are missing strings handled?
-Missing string scalars (`string(missing)`) propagate. If any operand is missing for a specific element, the
-resulting element is `<missing>`.
-
-### What happens when I mix strings and character arrays?
-The output is a string array. Character inputs are converted to strings (after trimming trailing spaces) and
-combined element-wise with the string operands.
-
-### Can I concatenate cell arrays with string arrays?
-Yes. Inputs are implicitly converted to strings when any operand is a string array, so the result is a string
-array. Cell array elements must still contain character vectors (or scalar strings).
-
-### What if I pass numeric or logical inputs?
-`strcat` only accepts strings, character arrays, character vectors, or cell arrays of character vectors.
-Passing unsupported types raises a MATLAB-compatible error.
-
-### How are empty inputs treated?
-Dimensions with length zero propagate through implicit expansion. For example, concatenating with an empty
-string array returns an empty array with the broadcasted shape.
-
-## See Also
-[string](./string), [plus](./plus) (string concatenation with operator overloading),
-[join](./join), [cellstr](./cellstr)
-
-## Source & Feedback
-- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/strcat.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strcat.rs)
-- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
-"#;
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strcat",
@@ -534,11 +360,10 @@ fn build_char_output(data: Vec<String>) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;
     use runmat_builtins::{CellArray, CharArray, IntValue, StringArray};
-
-    use crate::builtins::common::test_support;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -796,12 +621,5 @@ pub(crate) mod tests {
             let err = strcat_builtin(vec![Value::GpuTensor(handle)]).expect_err("expected error");
             assert!(err.contains("inputs must be strings"));
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn doc_examples_compile() {
-        let blocks = test_support::doc_examples(DOC_MD);
-        assert!(!blocks.is_empty());
     }
 }

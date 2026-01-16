@@ -42,9 +42,6 @@ fn build_record(
             .unwrap_or_default(),
         accel_tags: func.accel_tags.iter().map(tag_to_str).collect(),
         is_sink: func.is_sink,
-        doc_markdown: doc
-            .and_then(|d| d.examples.map(|ex| ex.to_string()))
-            .filter(|s| !s.is_empty()),
         param_types: func.param_types.iter().map(|t| format!("{t:?}")).collect(),
         return_type: format!("{:?}", func.return_type),
     }

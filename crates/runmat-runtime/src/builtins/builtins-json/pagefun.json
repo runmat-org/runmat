@@ -1,0 +1,107 @@
+{
+  "title": "pagefun",
+  "category": "acceleration/gpu",
+  "keywords": [
+    "pagefun",
+    "gpuArray",
+    "batched matrix multiply",
+    "mtimes",
+    "pages"
+  ],
+  "summary": "Apply MATLAB operators page-by-page across higher-dimensional arrays.",
+  "references": [
+    "https://www.mathworks.com/help/parallel-computing/pagefun.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "WGPU provider accelerates batched @mtimes; if no provider hook is present the runtime evaluates on the host and re-uploads numeric results."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::acceleration::gpu::pagefun::tests",
+    "integration": "builtins::acceleration::gpu::pagefun::tests::pagefun_gpu_roundtrip_mtimes"
+  },
+  "description": "`pagefun(func, A, B, \u2026)` applies the MATLAB operator referenced by `func` to every page of the supplied arrays. Pages are the two leading dimensions of the inputs; the third and higher dimensions index the individual pages. The inputs must agree in all trailing dimensions, allowing singleton expansion.",
+  "behaviors": [
+    "Accepts function handles, builtin names (character vectors or string scalars), and validates that the requested operator is supported.",
+    "The first two dimensions of each input form the matrix operated on by the builtin. Dimensions three and up identify individual pages. Inputs with fewer pages are broadcast so long as the page extent is `1`.",
+    "Any combination of empty matrices and empty page extents produces empty results with MATLAB-compatible shapes.",
+    "When all operands are `gpuArray` values the builtin gathers data to the host if the registered acceleration provider cannot satisfy the request. Uniform numeric results are uploaded back to the GPU so later operations retain residency."
+  ],
+  "examples": [
+    {
+      "description": "Batched matrix multiplication across pages",
+      "input": "A = reshape(1:12, [2 2 3]);\nB = reshape(13:24, [2 2 3]);\nC = pagefun(@mtimes, A, B)",
+      "output": "C(:,:,1) =\n    55    63\n    82    94\n\nC(:,:,2) =\n   211   235\n   246   274\n\nC(:,:,3) =\n   431   471\n   474   518"
+    },
+    {
+      "description": "Broadcasting a single page against multiple pages",
+      "input": "A = reshape(1:8, [2 2 2]);\nB = eye(2);\nC = pagefun(@mtimes, A, B);   % B broadcasts across the page dimension"
+    },
+    {
+      "description": "Working with `gpuArray` inputs",
+      "input": "G1 = gpuArray(rand(4, 4, 8));\nG2 = gpuArray(rand(4, 4, 8));\nH = pagefun(@mtimes, G1, G2);\nfirstPage = gather(H(:, :, 1));   % Inspect the first product page on the host"
+    },
+    {
+      "description": "Handling empty page dimensions",
+      "input": "Z = zeros(2, 2, 0);\nR = pagefun(@mtimes, Z, Z);\nsize(R)",
+      "output": "ans =\n     2     2     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which functions does `pagefun` support today?",
+      "answer": "RunMat currently supports `@mtimes` page-wise. Additional MATLAB page-aware functions will be added over time as the GPU provider hooks land."
+    },
+    {
+      "question": "How are page dimensions inferred?",
+      "answer": "The first two dimensions represent the matrix operated on by the builtin. Any remaining dimensions are treated as page indices. Inputs with fewer trailing dimensions receive implicit singleton expansion to match other operands."
+    },
+    {
+      "question": "What happens if the pages are incompatible?",
+      "answer": "`pagefun` raises a MATLAB-compatible error describing the mismatched page dimension. Matrix dimension mismatches are forwarded from the underlying builtin (for example, `Inner matrix dimensions must agree` for `@mtimes`)."
+    },
+    {
+      "question": "Are results always uploaded back to the GPU?",
+      "answer": "Numeric results are uploaded when every operand started as a `gpuArray` and an acceleration provider is registered. Complex results remain on the host today, matching MATLAB's behaviour when complex GPU buffers are not available."
+    },
+    {
+      "question": "Does `pagefun` participate in fusion?",
+      "answer": "No. Because `pagefun` can invoke arbitrary MATLAB builtins it forms a fusion barrier. Upstream expressions are evaluated before entering `pagefun`."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "arrayfun",
+      "url": "./arrayfun"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "",
+    "url": ""
+  },
+  "gpu_residency": "No. RunMat's auto-offload planner migrates tensors to the GPU when beneficial. When you explicitly pass `gpuArray` inputs, `pagefun` keeps numeric results on the device whenever all operands were device-resident and the provider can accept uploads. Complex outputs remain host-resident until device buffers for complex doubles ship.",
+  "gpu_behavior": [
+    "RunMat Accelerate exposes a custom `pagefun` provider hook. When the active provider implements it (the WGPU backend does for `@mtimes`), pages stay on the device and execute via a tiled compute shader. If the provider does not support the requested operator the runtime gathers the data to the host, evaluates using the CPU builtin, and re-uploads numeric outputs so subsequent GPU work can stay resident."
+  ]
+}

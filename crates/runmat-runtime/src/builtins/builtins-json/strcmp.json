@@ -1,0 +1,127 @@
+{
+  "title": "strcmp",
+  "category": "strings/core",
+  "keywords": [
+    "strcmp",
+    "string compare",
+    "text equality",
+    "cell array",
+    "character vector"
+  ],
+  "summary": "Compare text inputs for exact equality with MATLAB-compatible implicit expansion across text types.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strcmp.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically so results match MATLAB behaviour exactly."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::strcmp::tests",
+    "integration": "builtins::strings::core::strcmp::tests::strcmp_cell_array_scalar"
+  },
+  "description": "`strcmp(a, b)` returns logical `true` when two pieces of text match exactly and `false` otherwise. It accepts string arrays, character vectors/arrays, and cell arrays of character vectors, mirroring MATLAB semantics.",
+  "behaviors": [
+    "**Accepted text types**: Works with string scalars/arrays, character vectors or matrices created with `char`, and cell arrays of character vectors. Mixed combinations are converted automatically, matching MATLAB.",
+    "**Implicit expansion**: Scalar inputs expand to the shape of the other operand, producing element-wise comparisons for higher-dimensional arrays.",
+    "**Character arrays**: Rows are compared individually. The result is a column vector whose length equals the number of rows in the character array.",
+    "**Cell arrays**: Each cell is treated as a text scalar. Scalar cell arrays expand across the other operand before comparison.",
+    "**Missing strings**: String elements equal to `missing` compare unequal to everything, including other `missing` values.",
+    "**Result form**: A single logical scalar is returned for scalar comparisons; otherwise you receive a logical array using column-major MATLAB layout.",
+    "**Case sensitivity**: Matching is case-sensitive. Use `strcmpi` for case-insensitive comparisons."
+  ],
+  "examples": [
+    {
+      "description": "Compare Two Equal Strings",
+      "input": "tf = strcmp(\"RunMat\", \"RunMat\");",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Compare String Array With Scalar Text",
+      "input": "names = [\"red\" \"green\" \"blue\"];\ntf = strcmp(names, \"green\");",
+      "output": "tf = 1\u00d73 logical array\n   0   1   0"
+    },
+    {
+      "description": "Compare Character Array Rows",
+      "input": "labels = char(\"cat\", \"dog\", \"cat\");\ntf = strcmp(labels, \"cat\");",
+      "output": "tf = 3\u00d71 logical array\n   1\n   0\n   1"
+    },
+    {
+      "description": "Compare Two Cell Arrays Of Character Vectors",
+      "input": "C1 = {'apple', 'pear', 'grape'};\nC2 = {'apple', 'peach', 'grape'};\ntf = strcmp(C1, C2);",
+      "output": "tf = 1\u00d73 logical array\n   1   0   1"
+    },
+    {
+      "description": "Handle Missing Strings",
+      "input": "vals = [\"alpha\" missing];\ntf = strcmp(vals, \"alpha\");",
+      "output": "tf = 1\u00d72 logical array\n   1   0"
+    },
+    {
+      "description": "Implicit Expansion With Column Vector Text",
+      "input": "patterns = char(\"north\", \"south\");\ntf = strcmp(patterns, [\"north\" \"east\"]);",
+      "output": "tf = 2\u00d72 logical array\n   1   0\n   0   0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What types can I pass to `strcmp`?",
+      "answer": "Use string arrays, character vectors/arrays, or cell arrays of character vectors. Mixed combinations are accepted and follow MATLAB's implicit expansion rules."
+    },
+    {
+      "question": "Does `strcmp` ignore letter case?",
+      "answer": "No. `strcmp` is case-sensitive. Use `strcmpi` for case-insensitive comparisons."
+    },
+    {
+      "question": "What happens when the inputs contain missing strings?",
+      "answer": "Missing string scalars compare unequal to every value (including other missing strings), so the result is `false`."
+    },
+    {
+      "question": "Can `strcmp` compare matrices of characters?",
+      "answer": "Yes. Character arrays compare row-by-row, returning a column vector whose entries tell you whether each row matches."
+    },
+    {
+      "question": "Does `strcmp` return numeric or logical results?",
+      "answer": "It returns logical results. Scalars become logical scalars (`Value::Bool`), while arrays are returned as logical arrays."
+    }
+  ],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "contains",
+      "url": "./contains"
+    },
+    {
+      "label": "startswith",
+      "url": "./startswith"
+    },
+    {
+      "label": "strlength",
+      "url": "./strlength"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/strcmp.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmp.rs"
+  },
+  "gpu_residency": "You normally do **not** need to call `gpuArray`. If you do, RunMat gathers the operands before computing `strcmp` so the output matches MATLAB. The result always lives on the host because this builtin inspects text data.",
+  "gpu_behavior": [
+    "`strcmp` is registered as an acceleration sink. When either input resides on the GPU, RunMat gathers both operands back to host memory before comparing them so the results match MATLAB exactly. Providers do not need to implement custom kernels, and the logical result is always returned on the CPU."
+  ]
+}

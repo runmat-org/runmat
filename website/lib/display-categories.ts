@@ -1,5 +1,4 @@
 // Single source of truth for formatting JSON category paths to display names
-// The actual category names come directly from builtins.json
 
 export type DisplayCategory = string; // JSON category path (e.g., "array/creation")
 

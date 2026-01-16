@@ -1,0 +1,149 @@
+{
+  "title": "all",
+  "category": "math/reduction",
+  "keywords": [
+    "all",
+    "logical reduction",
+    "omitnan",
+    "gpu",
+    "vectorization"
+  ],
+  "summary": "Check whether every element of an array slice is nonzero with MATLAB-compatible semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "RunMat uses provider hooks (`reduce_all_dim`, `reduce_all`) when available; otherwise the runtime gathers to the host and evaluates there."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": true,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::all::tests",
+    "integration": "builtins::math::reduction::all::tests::all_gpu_provider_roundtrip"
+  },
+  "description": "`all(X)` returns logical `true` when every element of the requested slice of `X` is nonzero. When you omit the dimension, the reduction runs along the first non-singleton axis, mirroring MATLAB.",
+  "behaviors": [
+    "Works with logical, numeric, complex, and character arrays; other types raise a descriptive error.",
+    "Accepts `all(X, dim)` to reduce along a single dimension or `all(X, vecdim)` to collapse multiple axes at once.",
+    "`all(X, 'all')` flattens the entire array into a single logical scalar.",
+    "`all(___, 'omitnan')` ignores `NaN` values (including complex parts) when deciding whether a slice contains nonzero content; empty or all-`NaN` slices evaluate to `true`.",
+    "`all(___, 'includenan')` (default) treats `NaN` as logical `true`, matching MATLAB behaviour.",
+    "Empty dimensions yield logical ones with MATLAB-compatible shapes; empty arrays reduced with `'all'` return `true`.",
+    "Results are always host-resident logical scalars or logical arrays, even when the input tensor lives on the GPU, because the runtime copies the compact output back to the CPU."
+  ],
+  "examples": [
+    {
+      "description": "Checking if every column is nonzero",
+      "input": "A = [1 2 3; 4 5 6];\ncolAllNonZero = all(A);",
+      "output": "colAllNonZero = [1 1 1];"
+    },
+    {
+      "description": "Verifying that each row contains only nonzero values",
+      "input": "B = [1 0 3; 4 5 6; 0 7 8];\nrowAllNonZero = all(B, 2);",
+      "output": "rowAllNonZero = [0; 1; 0];"
+    },
+    {
+      "description": "Collapsing multiple dimensions with `vecdim`",
+      "input": "C = reshape(1:24, [3 4 2]);\nallAlongDims = squeeze(all(C > 0, [1 2]));",
+      "output": "allAlongDims = [1 1];"
+    },
+    {
+      "description": "Reducing all elements to a single logical scalar",
+      "input": "D = [2 4; 6 8];\neverythingNonZero = all(D, 'all');",
+      "output": "everythingNonZero = true;"
+    },
+    {
+      "description": "Ignoring `NaN` values while testing slices",
+      "input": "E = [NaN 1 2; NaN 0 3];\nwithNaN = all(E);               % returns [1 0 1]\nignoringNaN = all(E, 'omitnan'); % returns [1 0 1]",
+      "output": "withNaN = [1 0 1];\nignoringNaN = [1 0 1];"
+    },
+    {
+      "description": "Evaluating `all` on GPU arrays",
+      "input": "G = gpuArray([1 1 1; 1 1 1]);\ngpuResult = all(G, 2);     % RunMat returns a host logical array",
+      "output": "gpuResult = [1; 1];"
+    },
+    {
+      "description": "Testing `all` with character arrays",
+      "input": "chars = ['a' 0 'c'];\nallPrintable = all(chars);",
+      "output": "allPrintable = [1 0 1];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `all` function?",
+      "answer": "Use `all` whenever you need to confirm that every element of an array, row, column, or sub-array is nonzero or logical `true`."
+    },
+    {
+      "question": "Does `all` always return logical values?",
+      "answer": "Yes. Results are `logical` scalars or logical arrays even when the computation involves GPU inputs."
+    },
+    {
+      "question": "How do I test a specific dimension?",
+      "answer": "Pass the dimension as the second argument (for example, `all(X, 2)` reduces each row). Provide a vector such as `[1 3]` to collapse multiple axes."
+    },
+    {
+      "question": "What does `all(X, 'all')` compute?",
+      "answer": "It reduces across every dimension of `X` and returns a single logical scalar indicating whether every element of the entire array is nonzero."
+    },
+    {
+      "question": "How are `NaN` values handled?",
+      "answer": "By default they count as nonzero (`'includenan'`). Add `'omitnan'` to ignore them; if every element in a slice is `NaN`, the result becomes `true`."
+    },
+    {
+      "question": "Does `all` work with complex numbers?",
+      "answer": "Yes. Complex values are considered nonzero when either the real or imaginary component is nonzero. Complex values containing `NaN` obey the `'omitnan'`/`'includenan'` rules."
+    },
+    {
+      "question": "Can I apply `all` to character arrays?",
+      "answer": "Yes. Characters compare against their Unicode code points; zero-valued code points are treated as `false`, and everything else is `true`."
+    },
+    {
+      "question": "What happens with empty inputs?",
+      "answer": "Empty reductions follow MATLAB semantics: dimensions of length zero produce logical ones, while `all(X, 'all')` over an empty array evaluates to `true`."
+    },
+    {
+      "question": "How do GPU backends accelerate `all`?",
+      "answer": "Providers may expose specialised AND-reduction kernels (`reduce_all_dim`, `reduce_all`) or use `fused_reduction` to remain on the device. When such hooks are absent, RunMat downloads the small output and computes on the host."
+    }
+  ],
+  "links": [
+    {
+      "label": "any",
+      "url": "./any"
+    },
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/all.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/all.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. The fusion planner keeps GPU-resident inputs on the device and only gathers the small logical results that `all` produces. If your workload already uses explicit `gpuArray`/`gather` calls for MATLAB compatibility, RunMat honours them and still produces correct logical outputs.",
+  "gpu_behavior": [
+    "RunMat Accelerate keeps inputs resident on the GPU whenever possible. Providers that expose `reduce_all_dim` (and optionally `reduce_all`) perform the AND-reduction on device buffers, and the runtime then downloads the tiny logical result back to the CPU. When those hooks are missing, RunMat gathers the input tensor and evaluates the reduction on the host instead, preserving MATLAB behaviour in all cases."
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "title": "diff",
+  "category": "math/reduction",
+  "keywords": [
+    "diff",
+    "difference",
+    "finite difference",
+    "nth difference",
+    "gpu"
+  ],
+  "summary": "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Calls the provider's `diff_dim` hook; falls back to host when that hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::diff::tests",
+    "integration": "builtins::math::reduction::diff::tests::diff_gpu_provider_roundtrip"
+  },
+  "description": "`diff(X)` computes forward finite differences along the first dimension of `X` whose size exceeds 1. For vectors, this is simply the difference between adjacent elements. Higher-order differences are obtained by repeating this process.",
+  "behaviors": [
+    "`diff(X)` walks along the first non-singleton dimension. Column vectors therefore differentiate down the rows, while row vectors operate across columns.",
+    "`diff(X, N)` computes the Nth forward difference. `N = 0` returns `X` unchanged. Each order reduces the length of the working dimension by one, so the output length becomes `max(len - N, 0)`.",
+    "`diff(X, N, dim)` lets you choose the dimension explicitly. Passing `[]` for `N` or `dim` keeps the defaults, and dimensions larger than `ndims(X)` behave like length-1 axes (so any positive order yields an empty result).",
+    "Real, logical, and character inputs promote to double precision tensors before differencing. Complex inputs retain their complex type, with forward differences applied to both the real and imaginary parts independently.",
+    "Empty slices propagate: if the selected dimension has length 0 or 1, the corresponding axis in the output has length 0."
+  ],
+  "examples": [
+    {
+      "description": "Computing first differences of a vector",
+      "input": "v = [3 4 9 15];\nd1 = diff(v);",
+      "output": "d1 = [1 5 6];"
+    },
+    {
+      "description": "Taking second-order differences",
+      "input": "v = [1 4 9 16 25];\nd2 = diff(v, 2);",
+      "output": "d2 = [2 2 2];"
+    },
+    {
+      "description": "Selecting the working dimension explicitly",
+      "input": "A = [1 2 3; 4 5 6];\nrowDiff = diff(A, 1, 2);",
+      "output": "rowDiff =\n     1     1\n     1     1"
+    },
+    {
+      "description": "Running `diff` on GPU arrays",
+      "input": "G = gpuArray([1 4 9 16]);\ngDiff = diff(G);\nresult = gather(gDiff);",
+      "output": "result = [3 5 7];"
+    },
+    {
+      "description": "N exceeding the dimension length returns an empty array",
+      "input": "v = (1:3)';\nemptyResult = diff(v, 5);",
+      "output": "emptyResult =\n  0\u00d71 empty double column vector"
+    },
+    {
+      "description": "Applying `diff` to character data",
+      "input": "codes = diff('ACEG');",
+      "output": "codes = [2 2 2];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `diff` change the size of the input?",
+      "answer": "`diff` reduces the length along the working dimension by `N`. All other dimensions are preserved. If the working dimension is shorter than `N`, the result is empty. With the WGPU backend the empty result remains GPU-resident."
+    },
+    {
+      "question": "How are higher-order differences computed?",
+      "answer": "RunMat applies the first-order forward difference repeatedly. This mirrors MATLAB\u2019s definition and produces the same numerical results."
+    },
+    {
+      "question": "Can I pass `[]` for the order or dimension arguments?",
+      "answer": "Yes. An empty array keeps the default value (`N = 1`, first non-singleton dimension)."
+    },
+    {
+      "question": "Does `diff` support complex numbers?",
+      "answer": "Yes. Differences are taken on the real and imaginary parts independently, and the result remains complex unless it becomes empty."
+    },
+    {
+      "question": "What happens for character or logical inputs?",
+      "answer": "Characters and logical values are promoted to double precision differences, matching MATLAB."
+    },
+    {
+      "question": "Will the GPU path produce the same results as the CPU path?",
+      "answer": "Yes. When a provider lacks a finite-difference kernel, RunMat gathers the data and computes on the CPU to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces identical results on the GPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "cumsum",
+      "url": "./cumsum"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "cumprod",
+      "url": "./cumprod"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/diff.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/diff.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` promotion is optional. RunMat keeps tensors on the GPU when providers implement the relevant hooks and the planner predicts a benefit. With the WGPU backend registered, `diff` executes fully on the GPU and returns a device-resident tensor. When the hook is missing, RunMat gathers transparently, computes on the CPU, and keeps residency metadata consistent so fused expressions can re-promote values when profitable.",
+  "gpu_behavior": [
+    "When the operand already resides on the GPU, RunMat asks the active acceleration provider for a finite-difference kernel via `diff_dim`. The WGPU backend implements this hook, so forward differences execute entirely on the device and the result stays resident on the GPU. Providers that have not wired `diff_dim` yet transparently gather the data, run the CPU implementation, and hand the result back to the planner so subsequent kernels can re-promote it when beneficial."
+  ]
+}

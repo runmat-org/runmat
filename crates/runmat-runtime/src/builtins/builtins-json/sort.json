@@ -1,0 +1,161 @@
+{
+  "title": "sort",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "sort",
+    "ascending",
+    "descending",
+    "indices",
+    "comparisonmethod",
+    "gpu"
+  ],
+  "summary": "Sort scalars, vectors, matrices, or N-D tensors along a dimension, with optional index outputs.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/sort.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the provider `sort_dim` hook when available; otherwise tensors are gathered and sorted on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::sort::tests",
+    "integration": "builtins::array::sorting_sets::sort::tests::sort_gpu_round_trip"
+  },
+  "description": "`sort` orders the elements of its input along a chosen dimension. By default, it sorts ascending along the first non-singleton dimension and can also return the permutation indices that achieve the ordering.",
+  "behaviors": [
+    "Scalars remain unchanged; vectors are reordered into ascending or descending order.",
+    "For matrices and higher-dimensional tensors, the sort operates along a specified dimension (default: first non-singleton). All other dimensions remain untouched.",
+    "`[B, I] = sort(A, ...)` returns both the sorted values `B` and the permutation indices `I`, using MATLAB's one-based indexing.",
+    "Direction arguments accept `'ascend'` (default) or `'descend'`.",
+    "Name-value pairs support `'ComparisonMethod'` with values `'auto'`, `'real'`, or `'abs'`. The `'abs'` option sorts by absolute value while breaking ties using the signed value.",
+    "For complex inputs, the default `'ComparisonMethod'='auto'` behaves like `'abs'` (magnitude ordering) and `'real'` compares the real component first with the imaginary component used for tie-breaking.",
+    "NaN values are treated as missing: they appear at the end for ascending sorts and at the beginning for descending sorts (matching MATLAB's `'MissingPlacement','auto'` behaviour for doubles).",
+    "Dimensions greater than `ndims(A)` are treated as singleton dimensions (size 1) and therefore leave `A` unchanged while returning index values of `1`."
+  ],
+  "examples": [
+    {
+      "description": "Sorting a column vector in ascending order",
+      "input": "A = [3; 1; 2];\nB = sort(A);",
+      "output": "B =\n     1\n     2\n     3"
+    },
+    {
+      "description": "Sorting rows by specifying the dimension",
+      "input": "A = [1 4 2; 3 2 5];\nB = sort(A, 2);",
+      "output": "B =\n     1     2     4\n     2     3     5"
+    },
+    {
+      "description": "Sorting values in descending order",
+      "input": "A = [10 4 7 9];\nB = sort(A, 'descend');",
+      "output": "B =\n    10     9     7     4"
+    },
+    {
+      "description": "Retrieving permutation indices alongside the sorted values",
+      "input": "A = [4 1 9 2];\n[B, I] = sort(A);",
+      "output": "B =\n     1     2     4     9\nI =\n     2     4     1     3"
+    },
+    {
+      "description": "Sorting by absolute value using `ComparisonMethod`",
+      "input": "A = [-8 -1 3 -2];\nB = sort(A, 'ComparisonMethod', 'abs');",
+      "output": "B =\n    -1    -2     3    -8"
+    },
+    {
+      "description": "Sorting tensors containing NaN values",
+      "input": "A = [NaN 4 1 2];\n[B, I] = sort(A);",
+      "output": "B =\n     1     2     4   NaN\nI =\n     3     4     2     1"
+    },
+    {
+      "description": "Sorting GPU tensors with automatic host fallback",
+      "input": "G = gpuArray(randn(5, 1));\n[B, I] = sort(G, 'descend');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `sort` return both values and indices?",
+      "answer": "Yes. Use `[B, I] = sort(A, ...)` to receive the permutation indices alongside the sorted values."
+    },
+    {
+      "question": "How are NaN values handled?",
+      "answer": "NaN values are considered missing. They appear last for ascending sorts and first for descending sorts, matching MATLAB's `'MissingPlacement','auto'` default for doubles."
+    },
+    {
+      "question": "What happens when I sort along a dimension that does not exist?",
+      "answer": "`sort(A, dim)` treats dimensions beyond `ndims(A)` as singleton dimensions (size 1). The data remains unchanged and the index output is filled with ones."
+    },
+    {
+      "question": "Does `sort` support name-value arguments?",
+      "answer": "Yes. `'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'`. Other name-value pairs such as `'MissingPlacement'` are currently not supported and raise an error."
+    },
+    {
+      "question": "Are GPU tensors sorted in-place?",
+      "answer": "Not yet. `sort` is a sink builtin that gathers GPU tensors to host memory when no GPU sort kernel is available. Providers can implement specialised hooks in the future."
+    },
+    {
+      "question": "Does `sort` preserve the shape of the input?",
+      "answer": "Yes. The output is the same size as the input tensor. Only values along the selected dimension are reordered."
+    },
+    {
+      "question": "What numeric type do the index outputs use?",
+      "answer": "Permutation indices are returned as double-precision tensors (or scalars) using MATLAB's one-based indexing."
+    },
+    {
+      "question": "Is the sorting stable?",
+      "answer": "Yes. Equal elements (including ties when sorting by absolute value) preserve their original order."
+    },
+    {
+      "question": "How does `ComparisonMethod` behave with real inputs?",
+      "answer": "`'auto'` and `'real'` behave identically. `'abs'` sorts by absolute value and uses the signed value to break ties so that results match MATLAB."
+    },
+    {
+      "question": "How does `ComparisonMethod` behave with complex inputs?",
+      "answer": "`'auto'` (the default) and `'abs'` order values by magnitude. `'real'` compares the real component first and falls back to the imaginary component to break ties while preserving stability."
+    },
+    {
+      "question": "Do logical or scalar inputs work?",
+      "answer": "Yes. Logical inputs are promoted to double precision automatically. Scalars are returned unchanged with an index output of `1` when requested."
+    }
+  ],
+  "links": [
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/sort.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/sort.rs"
+  },
+  "gpu_behavior": [
+    "`sort` is registered as a sink builtin. When tensors reside on a GPU without a specialised sort kernel, RunMat gathers them to host memory, performs the sort, and returns host-resident outputs.",
+    "Providers may implement a future `sort_dim` hook to keep data on the GPU. Until then, all providers fall back to the host path automatically.",
+    "The returned index tensor is always host-resident double precision."
+  ]
+}

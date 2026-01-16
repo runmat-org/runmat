@@ -1,0 +1,124 @@
+{
+  "title": "rand",
+  "category": "array/creation",
+  "keywords": [
+    "rand",
+    "random",
+    "uniform",
+    "gpu",
+    "like"
+  ],
+  "summary": "Uniform random numbers on (0, 1) within the MATLAB language.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider random_uniform hooks when available; otherwise uploads host-generated samples to keep GPU residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::rand::tests",
+    "integration": "builtins::array::rand::tests::rand_gpu_like_uniform"
+  },
+  "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). RunMat mirrors MATLAB semantics across scalar, vector, matrix, and N-D invocations, including `'like'` prototypes that control data type and device residency.",
+  "behaviors": [
+    "`rand()` returns a scalar double drawn from `U(0, 1)`.",
+    "`rand(n)` returns an `n \u00d7 n` double matrix.",
+    "`rand(m, n, ...)` returns a dense double array of the requested dimensions.",
+    "`rand(sz)` accepts a size vector (row or column) and returns a tensor whose shape is `sz`.",
+    "`rand(A)` or `rand(___, 'like', A)` matches the shape and residency of `A`, including GPU tensors when an acceleration provider is active.",
+    "`rand(___, 'double')` leaves the output as double precision (default). `'single'` returns single-precision results that mirror MATLAB's behaviour."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 3x3 matrix of random numbers",
+      "input": "R = rand(3);         % 3x3 doubles in (0, 1)",
+      "output": "R = [0.8147 0.9134 0.1270; 0.9058 0.6324 0.0975; 0.1270 0.0975 0.2785];"
+    },
+    {
+      "description": "Creating a 2x4x3 matrix of random numbers",
+      "input": "sz = [2 4 3];\nT = rand(sz);",
+      "output": "T = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
+    },
+    {
+      "description": "Creating a 128x128 matrix of random numbers on a GPU",
+      "input": "G = rand(128, 128);",
+      "output": "H = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the `rand` function?",
+      "answer": "Use `rand` whenever you need to create arrays filled with random numbers over the open interval (0, 1). This is useful for Monte Carlo simulations, generating noise for testing, or creating random initial conditions for optimization."
+    },
+    {
+      "question": "Does `rand` produce double arrays by default?",
+      "answer": "Yes, by default, `rand` creates dense double-precision arrays unless you explicitly specify a type such as `'single'` or use the `'like'` argument to match a prototype array."
+    },
+    {
+      "question": "What does `rand(n)` return?",
+      "answer": "`rand(n)` returns an `n \u00d7 n` dense double-precision matrix filled with random numbers over the open interval (0, 1). For example, `rand(3)` yields a 3-by-3 matrix of random numbers."
+    },
+    {
+      "question": "How do I create a single precision array of random numbers?",
+      "answer": "Pass `'single'` as the last argument:\n```matlab\nS = rand(5, 5, 'single');\n```\nThis produces a 5x5 single precision matrix of random numbers."
+    },
+    {
+      "question": "How do I match the type and device residency of an existing array?",
+      "answer": "Use the `'like', prototype` syntax:\n```matlab\nA = gpuArray(rand(2,2));\nB = rand(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
+    },
+    {
+      "question": "Can I create N-dimensional arrays with `rand`?",
+      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab\nT = rand(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of random numbers."
+    },
+    {
+      "question": "How does `rand(A)` behave?",
+      "answer": "If you call `rand(A)`, where `A` is an array, the result is a new array of random numbers with the same shape as `A`."
+    },
+    {
+      "question": "Is the output always dense?",
+      "answer": "Yes. `rand` always produces a dense array. For sparse matrices of random numbers, use `sparse` with appropriate arguments."
+    },
+    {
+      "question": "What if I call `rand` with no arguments?",
+      "answer": "`rand()` returns a scalar double drawn from `U(0, 1)`."
+    }
+  ],
+  "links": [
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "randi",
+      "url": "./randi"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/rand.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/rand.rs"
+  },
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `rand` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
+  "gpu_behavior": [
+    "When the prototype lives on the GPU, RunMat first asks the active acceleration provider for a device-side random buffer via `random_uniform` / `random_uniform_like`. If the provider lacks those hooks, RunMat generates samples on the host and uploads them to maintain GPU residency. This guarantees MATLAB-compatible behaviour while documenting the extra transfer cost."
+  ]
+}

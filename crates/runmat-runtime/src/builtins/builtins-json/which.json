@@ -1,0 +1,138 @@
+{
+  "title": "which",
+  "category": "introspection",
+  "keywords": [
+    "which",
+    "search path",
+    "builtin lookup",
+    "script path",
+    "variable shadowing"
+  ],
+  "summary": "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/which.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. Arguments that live on the GPU are gathered before evaluating the search."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::which::tests",
+    "integration": "builtins::introspection::which::tests::which_variable_search_respects_workspace"
+  },
+  "description": "`which name` reports exactly which entity RunMat will call when you invoke `name`. It follows MATLAB's search order:\n\n1. Variables in the current workspace 2. Builtin functions 3. Class folders and classdef files 4. MATLAB files on the RunMat path (`.m`, `.mlx`, etc.) 5. Folders\n\nThe builtin accepts the same flags as MATLAB: `-all`, `-builtin`, `-var`, and `-file`.",
+  "behaviors": [
+    "Names can be supplied as character vectors or string scalars. Calling `which` with no name raises `which: not enough input arguments`.",
+    "`which name` without options returns the first match respecting MATLAB's precedence rules.",
+    "`which(name, \"-all\")` (or `which(\"-all\", name)`) returns a cell array with every match on the search path, in discovery order, without duplicates.",
+    "`which(..., \"-builtin\")` restricts the search to builtin functions. `\"-var\"` restricts to workspace variables, and `\"-file\"` restricts the search to files, classes, and folders.",
+    "Package-qualified names like `pkg.func` automatically map to `+pkg` folders. Class lookups recognise both `@ClassName` folders and `.m` files containing `classdef`.",
+    "Relative paths are resolved against the current working directory. Absolute paths and paths beginning with `~` or drive letters are honoured directly."
+  ],
+  "examples": [
+    {
+      "description": "Finding a built-in function's implementation",
+      "input": "which(\"sin\")",
+      "output": "built-in (RunMat builtin: sin)"
+    },
+    {
+      "description": "Checking if a workspace variable shadows a builtin",
+      "input": "answer = 42;\nwhich(\"answer\")",
+      "output": "'answer' is a variable."
+    },
+    {
+      "description": "Listing all matches on the path",
+      "input": "which(\"sum\", \"-all\")",
+      "output": "{\n    [1,1] = built-in (RunMat builtin: sum)\n    [2,1] = /Users/alex/runmat/stdlib/sum.m\n}"
+    },
+    {
+      "description": "Locating a script or function file",
+      "input": "which(\"helpers/process_data\")",
+      "output": "/Users/alex/projects/runmat/helpers/process_data.m"
+    },
+    {
+      "description": "Restricting the search to variables",
+      "input": "which(\"-var\", \"velocity\")",
+      "output": "'velocity' is a variable."
+    },
+    {
+      "description": "Restricting the search to files",
+      "input": "which(\"fft\", \"-file\")",
+      "output": "/Users/alex/runmat/overrides/fft.m"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens when nothing is found?",
+      "answer": "`which` returns the character vector `'<name>' not found.` just like MATLAB."
+    },
+    {
+      "question": "Are method lookups supported?",
+      "answer": "Methods defined via `@Class` folders or `classdef` files are discovered through the class search. Package-qualified methods are supported."
+    },
+    {
+      "question": "Does `which` canonicalise paths?",
+      "answer": "Yes. RunMat reports canonical absolute paths where possible; when canonicalisation fails, the original path is returned."
+    },
+    {
+      "question": "Can I combine `-all` with other options?",
+      "answer": "Yes. For example, `which(\"plot\", \"-all\", \"-file\")` lists every file-based implementation without reporting builtins or variables."
+    },
+    {
+      "question": "Does the search respect `RUNMAT_PATH` / `MATLABPATH`?",
+      "answer": "Yes. The directory list mirrors the logic used by other REPL filesystem builtins."
+    },
+    {
+      "question": "What about Simulink models or Java classes?",
+      "answer": "File-based matches with supported extensions (`.slx`, `.mdl`, `.class`, etc.) are reported when present on the path."
+    },
+    {
+      "question": "Are duplicate results filtered?",
+      "answer": "Yes. The first occurrence of each unique path is returned."
+    },
+    {
+      "question": "Is the lookup case sensitive?",
+      "answer": "No. Matching is case-insensitive on all platforms, following MATLAB semantics."
+    },
+    {
+      "question": "Does `which` gather GPU values?",
+      "answer": "Yes. GPU-resident arguments are automatically gathered before the search begins."
+    }
+  ],
+  "links": [
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/which.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/which.rs"
+  },
+  "gpu_residency": "No. `which` gathers GPU arguments implicitly and never produces device-resident output. There is no benefit in moving strings to the GPU before calling `which`.",
+  "gpu_behavior": [
+    "`which` performs string parsing and filesystem inspection on the host CPU. If you pass GPU-resident strings (for example, `gpuArray(\"sin\")`), RunMat gathers them automatically before evaluating the request. Results are always host-resident character arrays or cell arrays. Acceleration providers do not implement kernels for this builtin."
+  ]
+}

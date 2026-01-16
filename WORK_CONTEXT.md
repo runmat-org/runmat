@@ -102,7 +102,7 @@ _Audit 2024-05-05_: `LineStyleParseOptions` previously forbade both leading and 
 - ✅ `contour`/`contourf` accept MATLAB-style `'LevelList'`, `'LevelStep'`, and `'LineColor'` options (defaulting to auto color tables). GPU + CPU paths share the new `ContourLineColor` enum so explicit colors stay zero-copy; `'LineColor','none'` simply suppresses the contour overlay when used via `contourf`. Need doc/test coverage that mirrors MATLAB semantics (see TODO list below).
 
 - [ ] **Docs/tests**
-  - For each builtin, expand `DOC_MD` with new argument coverage, add unit tests for parser edge cases, and integration tests mirroring MATLAB scripts.
+  - For each builtin, expand argument coverage, add unit tests for parser edge cases, and integration tests mirroring MATLAB scripts.
   - _Status 2024-05-05_: `stairs` accepts shared parser output (line width, colors) and reflects styles into both CPU + zero-copy GPU packers. Missing pieces: comprehensive doc/tests and marker semantics (MATLAB exposes markers on `stairs`, which we still ignore).
   - _Status 2025-12-??_: `stairs` now honors `'DisplayName'` from name/value pairs so legends match MATLAB. Next up is marker support, line-style cycling, and doc/test coverage.
 

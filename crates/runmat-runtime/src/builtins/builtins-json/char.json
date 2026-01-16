@@ -1,0 +1,127 @@
+{
+  "title": "char",
+  "category": "strings/core",
+  "keywords": [
+    "char",
+    "character array",
+    "string conversion",
+    "padding",
+    "gpu"
+  ],
+  "summary": "Convert text, numeric codes, and cell contents into MATLAB-style character arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/char.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Conversion always runs on the CPU; GPU tensors are gathered to host memory before building the character array."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::char::tests",
+    "integration": "builtins::strings::core::char::tests::char_gpu_tensor_round_trip"
+  },
+  "description": "`char` converts its inputs into a character array. Numeric inputs are interpreted as Unicode code points, text inputs become rows of characters, and cell elements or string scalars are padded with spaces when necessary so every row in the result has the same width.",
+  "behaviors": [
+    "`char(x)` with no arguments returns a `0\u00d70` character array.",
+    "Numeric arrays must be real integers. The output character array has the same shape (up to two dimensions) as the numeric input.",
+    "String scalars and character vectors become individual rows. Rows are padded on the right with spaces to match the longest row.",
+    "String arrays with one or two dimensions contribute one row per element using MATLAB's column-major ordering.",
+    "Cell arrays must contain character vectors or string scalars. Each element becomes exactly one row in the result.",
+    "Inputs may be mixed and are vertically concatenated in the order they appear.",
+    "Complex inputs are unsupported and raise MATLAB-compatible errors."
+  ],
+  "examples": [
+    {
+      "description": "Converting a string scalar to a character row",
+      "input": "name = char(\"RunMat\");",
+      "output": "name =\n    'RunMat'"
+    },
+    {
+      "description": "Building a character matrix from multiple rows",
+      "input": "rows = char(\"alpha\", \"beta\");",
+      "output": "rows =\n    'alpha'\n    'beta '"
+    },
+    {
+      "description": "Transforming numeric codes to characters",
+      "input": "codes = [77 65 84 76 65 66];\nletters = char(codes);",
+      "output": "letters =\n    'MATLAB'"
+    },
+    {
+      "description": "Padding a string array into a character matrix",
+      "input": "animals = [\"cat\"; \"giraffe\"];\nC = char(animals);",
+      "output": "C =\n    'cat   '\n    'giraffe'"
+    },
+    {
+      "description": "Creating rows from a cell array of character vectors",
+      "input": "dirs = {'north', 'east', 'west'};\nchart = char(dirs);",
+      "output": "chart =\n    'north'\n    'east '\n    'west '"
+    },
+    {
+      "description": "Converting GPU-resident codes back to text",
+      "input": "G = gpuArray([82 85 78 77 65 84]);\nlabel = char(G);",
+      "output": "label =\n    'RUNMAT'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `char` accept numeric arrays with more than two dimensions?",
+      "answer": "No. Numeric inputs must be scalars, vectors, or two-dimensional matrices. Higher-dimensional arrays raise an error so MATLAB's behaviour is preserved."
+    },
+    {
+      "question": "How are rows padded when lengths differ?",
+      "answer": "Each row is right-padded with space characters so every row in the result has the same width as the longest row that was produced."
+    },
+    {
+      "question": "Can I convert cell arrays that contain empty text?",
+      "answer": "Yes. Empty strings or character vectors become rows with zero columns; they still participate in padding when combined with longer rows."
+    },
+    {
+      "question": "What happens if a numeric value is not an integer?",
+      "answer": "The builtin rejects non-integer numeric values. Use `round`, `floor`, or `uint32` beforehand if you need to convert floating-point values into valid code points."
+    },
+    {
+      "question": "Are code points above the Basic Multilingual Plane supported?",
+      "answer": "Yes. Any integer that represents a valid Unicode scalar value (`0..0x10FFFF`, excluding surrogates) is accepted and converted to the corresponding character."
+    },
+    {
+      "question": "Can `char` convert complex numbers?",
+      "answer": "No. Complex values are not supported because MATLAB also rejects them. Convert the data to real values before calling `char`."
+    },
+    {
+      "question": "Does `char` keep characters on the GPU?",
+      "answer": "No. After conversion the result is a CPU-resident character array. Use `gpuArray(char(...))` if you need to move the result back to the device."
+    }
+  ],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/char.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/char.rs"
+  },
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually for `char`. The runtime recognises that this builtin materialises text on the host, gathers GPU tensors automatically, and keeps the character array in CPU memory. Wrap the result in `gpuArray(char(...))` only when you explicitly want the characters back on the device for subsequent GPU pipelines.",
+  "gpu_behavior": [
+    "`char` gathers GPU tensors back to host memory using the active RunMat Accelerate provider before performing any conversion. The resulting character array always resides in host memory; providers do not need to supply specialised kernels."
+  ]
+}
