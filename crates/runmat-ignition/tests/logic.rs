@@ -1,7 +1,9 @@
+mod test_helpers;
+
 use runmat_hir::lower;
-use runmat_ignition::execute;
 use runmat_parser::parse;
 use std::convert::TryInto;
+use test_helpers::execute;
 
 #[test]
 fn logical_operators_and_short_circuit() {

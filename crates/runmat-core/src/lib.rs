@@ -27,8 +27,6 @@ use std::sync::{
 use uuid::Uuid;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
 
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -395,47 +393,6 @@ pub struct ExecutionResult {
     pub stdin_events: Vec<StdinEvent>,
 }
 
-enum ExecuteStep {
-    Completed(ExecutionResult),
-    Pending(PendingFrame),
-}
-
-/// Poll-driven execution future (Phase 2).
-///
-/// This owns the session state while running, and returns the session back on completion so
-/// hosts (wasm, desktop, native) can keep using the same long-lived session without any
-/// "resume" APIs or sentinel strings.
-pub struct ExecuteFuture {
-    session: RunMatSession,
-    input: String,
-    state: ExecuteFutureState,
-}
-
-enum ExecuteFutureState {
-    Start,
-    WaitingOnInput {
-        frame: PendingFrame,
-        fut: Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>>,
-    },
-    WaitingOnGpu {
-        frame: PendingFrame,
-    },
-    Done,
-}
-
-#[derive(Debug, Clone)]
-pub struct PendingInput {
-    pub id: Uuid,
-    pub request: InputRequest,
-    pub waiting_ms: u64,
-}
-
-struct PendingFrame {
-    plan: ExecutionPlan,
-    pending: runmat_ignition::PendingExecution,
-    streams: Vec<ExecutionStreamEntry>,
-    pending_since: Instant,
-}
 
 #[derive(Debug, Clone)]
 struct WorkspaceMaterializeTicket {
@@ -450,49 +407,6 @@ enum FinalStmtEmitDisposition {
     Suppressed,
 }
 
-struct ExecutionPlan {
-    assigned_this_execution: HashSet<String>,
-    id_to_name: HashMap<usize, String>,
-    prev_assigned_snapshot: HashSet<String>,
-    updated_functions: HashMap<String, runmat_hir::HirStmt>,
-    execution_bytecode: runmat_ignition::Bytecode,
-    single_assign_var: Option<usize>,
-    single_stmt_non_assign: bool,
-    is_expression_stmt: bool,
-    is_semicolon_suppressed: bool,
-    final_stmt_emit: FinalStmtEmitDisposition,
-    result_value: Option<Value>,
-    suppressed_value: Option<Value>,
-    error: Option<String>,
-    workspace_updates: Vec<WorkspaceEntry>,
-    fusion_snapshot: Option<FusionPlanSnapshot>,
-    start_time: Instant,
-    used_jit: bool,
-    stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
-    workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
-}
-
-struct ExecutionPlanInputs<'a> {
-    assigned_this_execution: &'a HashSet<String>,
-    id_to_name: &'a HashMap<usize, String>,
-    prev_assigned_snapshot: &'a HashSet<String>,
-    updated_functions: &'a HashMap<String, runmat_hir::HirStmt>,
-    execution_bytecode: &'a runmat_ignition::Bytecode,
-    single_assign_var: Option<usize>,
-    single_stmt_non_assign: bool,
-    is_expression_stmt: bool,
-    is_semicolon_suppressed: bool,
-    final_stmt_emit: FinalStmtEmitDisposition,
-    result_value: &'a Option<Value>,
-    suppressed_value: &'a Option<Value>,
-    error: &'a Option<String>,
-    workspace_updates: &'a [WorkspaceEntry],
-    fusion_snapshot: &'a Option<FusionPlanSnapshot>,
-    start_time: Instant,
-    used_jit: bool,
-    stdin_events: Arc<Mutex<Vec<StdinEvent>>>,
-    workspace_guard: Option<runmat_ignition::PendingWorkspaceGuard>,
-}
 
 fn determine_display_label_from_context(
     single_assign_var: Option<usize>,
@@ -773,17 +687,6 @@ impl RunMatSession {
         self.async_input_handler = None;
     }
 
-    /// Start a poll-driven execution. The returned future owns the session state while running,
-    /// and yields it back on completion.
-    pub fn execute_future(self, input: impl Into<String>) -> ExecuteFuture {
-        // Ensure a clean cancellation flag for this run.
-        self.interrupt_flag.store(false, Ordering::Relaxed);
-        ExecuteFuture {
-            session: self,
-            input: input.into(),
-            state: ExecuteFutureState::Start,
-        }
-    }
 
     pub fn telemetry_consent(&self) -> bool {
         self.telemetry_consent
@@ -956,14 +859,11 @@ impl RunMatSession {
 
     /// Execute MATLAB/Octave code
     pub async fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
-        let mut session = std::mem::take(self);
-        let _active = ActiveExecutionGuard::new(&mut session)?;
-        let (session, result) = session.execute_future(input).await?;
-        *self = session;
-        Ok(result)
+        let _active = ActiveExecutionGuard::new(self)?;
+        self.execute_internal(input).await
     }
 
-    fn execute_internal(&mut self, input: &str) -> Result<ExecuteStep> {
+    async fn execute_internal(&mut self, input: &str) -> Result<ExecutionResult> {
         let exec_span = info_span!(
             "runtime.execute",
             input_len = input.len(),
@@ -1035,10 +935,10 @@ impl RunMatSession {
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
-        let mut pending_workspace_guard = Some(runmat_ignition::push_pending_workspace(
+        let _pending_workspace_guard = runmat_ignition::push_pending_workspace(
             updated_vars.clone(),
             assigned_snapshot.clone(),
-        ));
+        );
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -1246,7 +1146,7 @@ impl RunMatSession {
                 }
             }
 
-            match self.interpret_with_context(&execution_bytecode) {
+            match self.interpret_with_context(&execution_bytecode).await {
                 Ok(runmat_ignition::InterpreterOutcome::Completed(results)) => {
                     // Only increment interpreter_fallback if JIT wasn't attempted
                     if !self.has_jit() || is_expression_stmt {
@@ -1324,32 +1224,10 @@ impl RunMatSession {
                     }
                     debug!("Interpreter execution successful");
                 }
-                Ok(runmat_ignition::InterpreterOutcome::Pending(pending_exec)) => {
-                    let plan = self.capture_execution_plan(ExecutionPlanInputs {
-                        assigned_this_execution: &assigned_this_execution,
-                        id_to_name: &id_to_name,
-                        prev_assigned_snapshot: &prev_assigned_snapshot,
-                        updated_functions: &updated_functions,
-                        execution_bytecode: &execution_bytecode,
-                        single_assign_var,
-                        single_stmt_non_assign,
-                        is_expression_stmt,
-                        is_semicolon_suppressed,
-                        final_stmt_emit,
-                        result_value: &result_value,
-                        suppressed_value: &suppressed_value,
-                        error: &error,
-                        workspace_updates: &workspace_updates,
-                        fusion_snapshot: &fusion_snapshot,
-                        start_time,
-                        used_jit,
-                        stdin_events: Arc::clone(&stdin_events),
-                        workspace_guard: pending_workspace_guard.take(),
-                    });
-                    let console_streams = drain_console_streams();
-                    let frame =
-                        self.defer_pending_execution(plan, *pending_exec, console_streams)?;
-                    return Ok(ExecuteStep::Pending(frame));
+                Ok(runmat_ignition::InterpreterOutcome::Pending(_pending_exec)) => {
+                    return Err(anyhow::anyhow!(
+                        "Execution suspended unexpectedly; async interpreter should handle awaits"
+                    ));
                 }
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
@@ -1525,7 +1403,7 @@ impl RunMatSession {
             result_value
         };
 
-        Ok(ExecuteStep::Completed(ExecutionResult {
+        Ok(ExecutionResult {
             value: public_value,
             execution_time_ms,
             used_jit,
@@ -1538,7 +1416,7 @@ impl RunMatSession {
             profiling: gather_profiling(execution_time_ms),
             fusion_plan: fusion_snapshot,
             stdin_events,
-        }))
+        })
     }
 
     /// Get execution statistics
@@ -1648,246 +1526,13 @@ impl RunMatSession {
     }
 
     /// Interpret bytecode with persistent variable context
-    fn interpret_with_context(
+    async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
     ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeControlFlow> {
-        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
+        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>")).await
     }
 
-    fn capture_execution_plan(&self, inputs: ExecutionPlanInputs<'_>) -> ExecutionPlan {
-        ExecutionPlan {
-            assigned_this_execution: inputs.assigned_this_execution.clone(),
-            id_to_name: inputs.id_to_name.clone(),
-            prev_assigned_snapshot: inputs.prev_assigned_snapshot.clone(),
-            updated_functions: inputs.updated_functions.clone(),
-            execution_bytecode: inputs.execution_bytecode.clone(),
-            single_assign_var: inputs.single_assign_var,
-            single_stmt_non_assign: inputs.single_stmt_non_assign,
-            is_expression_stmt: inputs.is_expression_stmt,
-            is_semicolon_suppressed: inputs.is_semicolon_suppressed,
-            final_stmt_emit: inputs.final_stmt_emit,
-            result_value: inputs.result_value.clone(),
-            suppressed_value: inputs.suppressed_value.clone(),
-            error: inputs.error.clone(),
-            workspace_updates: inputs.workspace_updates.to_vec(),
-            fusion_snapshot: inputs.fusion_snapshot.clone(),
-            start_time: inputs.start_time,
-            used_jit: inputs.used_jit,
-            stdin_events: inputs.stdin_events,
-            workspace_guard: inputs.workspace_guard,
-        }
-    }
-
-    fn defer_pending_execution(
-        &mut self,
-        plan: ExecutionPlan,
-        pending: runmat_ignition::PendingExecution,
-        new_streams: Vec<ExecutionStreamEntry>,
-    ) -> Result<PendingFrame> {
-        let frame = PendingFrame {
-            plan,
-            pending,
-            streams: new_streams.clone(),
-            pending_since: Instant::now(),
-        };
-        Ok(frame)
-    }
-
-    fn finalize_pending_execution(
-        &mut self,
-        mut plan: ExecutionPlan,
-        interpreter_values: Vec<Value>,
-        mut streams: Vec<ExecutionStreamEntry>,
-    ) -> Result<ExecutionResult> {
-        // Drop the pending workspace guard now that the interpreter has resumed.
-        let _ = plan.workspace_guard.take();
-
-        if !self.has_jit() || plan.is_expression_stmt {
-            self.stats.interpreter_fallback += 1;
-        }
-
-        if let Some(var_id) = plan.single_assign_var {
-            if let Some(name) = plan.id_to_name.get(&var_id) {
-                plan.assigned_this_execution.insert(name.clone());
-            }
-            if var_id < self.variable_array.len() {
-                let assignment_value = self.variable_array[var_id].clone();
-                if !plan.is_semicolon_suppressed {
-                    plan.result_value = Some(assignment_value);
-                } else {
-                    plan.suppressed_value = Some(assignment_value);
-                }
-            }
-        } else if plan.single_stmt_non_assign
-            && !plan.is_expression_stmt
-            && !interpreter_values.is_empty()
-            && !plan.is_semicolon_suppressed
-            && matches!(
-                plan.final_stmt_emit,
-                FinalStmtEmitDisposition::NeedsFallback
-            )
-        {
-            plan.result_value = Some(interpreter_values[0].clone());
-        }
-
-        if plan.is_expression_stmt && plan.result_value.is_none() && plan.suppressed_value.is_none()
-        {
-            if plan.execution_bytecode.var_count > 0 {
-                let temp_var_id = plan.execution_bytecode.var_count - 1;
-                if temp_var_id < self.variable_array.len() {
-                    let expression_value = self.variable_array[temp_var_id].clone();
-                    if !plan.is_semicolon_suppressed {
-                        plan.result_value = Some(expression_value);
-                    } else {
-                        plan.suppressed_value = Some(expression_value);
-                    }
-                }
-            }
-        } else if !plan.is_semicolon_suppressed
-            && matches!(
-                plan.final_stmt_emit,
-                FinalStmtEmitDisposition::NeedsFallback
-            )
-            && plan.result_value.is_none()
-        {
-            plan.result_value = interpreter_values.into_iter().last();
-        }
-
-        let execution_time = plan.start_time.elapsed();
-        let execution_time_ms = execution_time.as_millis() as u64;
-        self.stats.total_execution_time_ms += execution_time_ms;
-        self.stats.average_execution_time_ms =
-            self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
-
-        if plan.error.is_none() {
-            if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
-            {
-                self.variable_names = mutated_names.clone();
-                let mut new_assigned: HashSet<String> = assigned
-                    .difference(&plan.prev_assigned_snapshot)
-                    .cloned()
-                    .collect();
-                new_assigned.extend(plan.assigned_this_execution.iter().cloned());
-                for (name, var_id) in &mutated_names {
-                    if *var_id >= self.variable_array.len() {
-                        continue;
-                    }
-                    let new_value = &self.variable_array[*var_id];
-                    let changed = match self.workspace_values.get(name) {
-                        Some(old_value) => old_value != new_value,
-                        None => true,
-                    };
-                    if changed {
-                        new_assigned.insert(name.clone());
-                    }
-                }
-                for name in new_assigned {
-                    let var_id = mutated_names.get(&name).copied().or_else(|| {
-                        plan.id_to_name
-                            .iter()
-                            .find_map(|(vid, n)| if n == &name { Some(*vid) } else { None })
-                    });
-                    if let Some(var_id) = var_id {
-                        if var_id < self.variable_array.len() {
-                            let value_clone = self.variable_array[var_id].clone();
-                            self.workspace_values
-                                .insert(name.clone(), value_clone.clone());
-                            plan.workspace_updates
-                                .push(workspace_entry(&name, &value_clone));
-                        }
-                    }
-                }
-            } else {
-                for name in &plan.assigned_this_execution {
-                    if let Some(var_id) =
-                        plan.id_to_name
-                            .iter()
-                            .find_map(|(vid, n)| if n == name { Some(*vid) } else { None })
-                    {
-                        if var_id < self.variable_array.len() {
-                            let value_clone = self.variable_array[var_id].clone();
-                            self.workspace_values
-                                .insert(name.clone(), value_clone.clone());
-                            plan.workspace_updates
-                                .push(workspace_entry(name, &value_clone));
-                        }
-                    }
-                }
-            }
-            self.function_definitions = plan.updated_functions.clone();
-        }
-
-        if plan.is_semicolon_suppressed && plan.suppressed_value.is_some() {
-            // keep
-        }
-        let type_info = plan.suppressed_value.as_ref().map(format_type_info);
-        if !plan.is_semicolon_suppressed
-            && matches!(
-                plan.final_stmt_emit,
-                FinalStmtEmitDisposition::NeedsFallback
-            )
-            && plan.result_value.is_none()
-        {
-            if let Some(v) = self
-                .variable_array
-                .iter()
-                .rev()
-                .find(|v| !matches!(v, Value::Num(0.0)))
-                .cloned()
-            {
-                plan.result_value = Some(v);
-            }
-        }
-
-        if !plan.is_semicolon_suppressed
-            && matches!(
-                plan.final_stmt_emit,
-                FinalStmtEmitDisposition::NeedsFallback
-            )
-        {
-            if let Some(value) = plan.result_value.as_ref() {
-                let label = determine_display_label_from_context(
-                    plan.single_assign_var,
-                    &plan.id_to_name,
-                    plan.is_expression_stmt,
-                    plan.single_stmt_non_assign,
-                );
-                runmat_runtime::console::record_value_output(label.as_deref(), value);
-            }
-        }
-
-        streams.extend(drain_console_streams());
-        let workspace_snapshot = self.build_workspace_snapshot(plan.workspace_updates, false);
-        let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
-        let stdin_events = plan
-            .stdin_events
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        let warnings = runmat_runtime::warning_store::take_all();
-
-        let public_value = if plan.is_semicolon_suppressed {
-            None
-        } else {
-            plan.result_value.clone()
-        };
-
-        Ok(ExecutionResult {
-            value: public_value,
-            execution_time_ms,
-            used_jit: plan.used_jit,
-            error: plan.error,
-            type_info,
-            streams,
-            workspace: workspace_snapshot,
-            figures_touched,
-            warnings,
-            profiling: gather_profiling(execution_time_ms),
-            fusion_plan: plan.fusion_snapshot,
-            stdin_events,
-        })
-    }
 
     /// Prepare variable array for execution by populating with existing values
     fn prepare_variable_array_for_execution(
@@ -2051,206 +1696,6 @@ impl RunMatSession {
     }
 }
 
-impl ExecuteFuture {
-    fn make_input_future(
-        session: &RunMatSession,
-        interaction: &runmat_runtime::interaction::PendingInteraction,
-    ) -> Pin<Box<dyn Future<Output = Result<InputResponse, String>> + 'static>> {
-        let request = pending_interaction_to_request(interaction);
-        if let Some(handler) = &session.async_input_handler {
-            return handler(request);
-        }
-        if let Some(sync) = &session.input_handler {
-            match sync(&request) {
-                InputHandlerAction::Respond(result) => {
-                    return Box::pin(std::future::ready(result));
-                }
-                InputHandlerAction::Pending => {
-                    return Box::pin(std::future::ready(Err(
-                        "stdin handler returned Pending but no async handler is installed"
-                            .to_string(),
-                    )));
-                }
-            }
-        }
-        // Default (native) blocking handlers.
-        match request.kind {
-            InputRequestKind::Line { echo } => Box::pin(std::future::ready(
-                runmat_runtime::interaction::default_read_line(&request.prompt, echo)
-                    .map(InputResponse::Line),
-            )),
-            InputRequestKind::KeyPress => Box::pin(std::future::ready(
-                runmat_runtime::interaction::default_wait_for_key(&request.prompt)
-                    .map(|_| InputResponse::KeyPress),
-            )),
-        }
-    }
-
-    fn record_stdin_result(frame: &PendingFrame, response: &Result<InputResponse, String>) {
-        let request = pending_interaction_to_request(&frame.pending.interaction);
-        let (event_kind, echo_flag) = match &request.kind {
-            InputRequestKind::Line { echo } => (StdinEventKind::Line, *echo),
-            InputRequestKind::KeyPress => (StdinEventKind::KeyPress, false),
-        };
-        let mut event = StdinEvent {
-            prompt: request.prompt,
-            kind: event_kind,
-            echo: echo_flag,
-            value: None,
-            error: None,
-        };
-        match response {
-            Ok(InputResponse::Line(v)) => event.value = Some(v.clone()),
-            Ok(InputResponse::KeyPress) => {}
-            Err(e) => event.error = Some(e.clone()),
-        }
-        if let Ok(mut guard) = frame.plan.stdin_events.lock() {
-            guard.push(event);
-        }
-    }
-
-    fn resume_pending_frame(session: &mut RunMatSession, mut frame: PendingFrame) -> Result<ExecuteStep> {
-        // Reinstall per-run runtime hooks before resuming.
-        let stdin_events = Arc::clone(&frame.plan.stdin_events);
-        let runtime_handler = session.build_runtime_input_handler(stdin_events);
-        let _input_guard = runmat_runtime::interaction::replace_handler(Some(runtime_handler));
-        let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(session.interrupt_flag.clone()));
-
-        match runmat_ignition::resume_with_state(frame.pending.state, &mut session.variable_array) {
-            Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => {
-                let mut streams = frame.streams;
-                streams.extend(drain_console_streams());
-                let result = session.finalize_pending_execution(frame.plan, values, streams)?;
-                Ok(ExecuteStep::Completed(result))
-            }
-            Ok(runmat_ignition::InterpreterOutcome::Pending(next_pending)) => {
-                let chunk = drain_console_streams();
-                frame.streams.extend(chunk);
-                frame.pending = *next_pending;
-                frame.pending_since = Instant::now();
-                Ok(ExecuteStep::Pending(frame))
-            }
-            Err(err) => Err(anyhow::anyhow!(err.to_string())),
-        }
-    }
-}
-
-impl Future for ExecuteFuture {
-    type Output = Result<(RunMatSession, ExecutionResult)>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            match std::mem::replace(&mut self.state, ExecuteFutureState::Done) {
-                ExecuteFutureState::Start => {
-                    // Start executing synchronously until the first suspension point.
-                    // Note: this still uses the interpreter's existing suspend mechanism; Phase 2
-                    // completes by removing the sentinel strings under it.
-                    let input = self.input.clone();
-                    let step = match self.session.execute_internal(&input) {
-                        Ok(step) => step,
-                        Err(err) => return Poll::Ready(Err(err)),
-                    };
-                    match step {
-                        ExecuteStep::Completed(result) => {
-                            return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
-                        }
-                        ExecuteStep::Pending(frame) => {
-                            match frame.pending.interaction.kind {
-                                runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                                    runmat_async::register_gpu_map_read_waker(cx.waker());
-                                    self.state = ExecuteFutureState::WaitingOnGpu { frame };
-                                    return Poll::Pending;
-                                }
-                                runmat_runtime::interaction::InteractionKind::Line { .. }
-                                | runmat_runtime::interaction::InteractionKind::KeyPress => {
-                                    let fut = Self::make_input_future(&self.session, &frame.pending.interaction);
-                                    self.state = ExecuteFutureState::WaitingOnInput { frame, fut };
-                                    // Continue; we may be able to poll the input future immediately.
-                                }
-                            }
-                        }
-                    }
-                }
-                ExecuteFutureState::WaitingOnInput { frame, mut fut } => {
-                    match fut.as_mut().poll(cx) {
-                        Poll::Pending => {
-                            self.state = ExecuteFutureState::WaitingOnInput { frame, fut };
-                            return Poll::Pending;
-                        }
-                        Poll::Ready(response) => {
-                            Self::record_stdin_result(&frame, &response);
-                            runmat_runtime::interaction::push_queued_response(
-                                response.map(map_input_response),
-                            );
-                            let step = match Self::resume_pending_frame(&mut self.session, frame) {
-                                Ok(step) => step,
-                                Err(err) => return Poll::Ready(Err(err)),
-                            };
-                            match step {
-                                ExecuteStep::Completed(result) => {
-                                    return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
-                                }
-                                ExecuteStep::Pending(next_frame) => {
-                                    match next_frame.pending.interaction.kind {
-                                        runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                                            runmat_async::register_gpu_map_read_waker(cx.waker());
-                                            self.state = ExecuteFutureState::WaitingOnGpu { frame: next_frame };
-                                            return Poll::Pending;
-                                        }
-                                        runmat_runtime::interaction::InteractionKind::Line { .. }
-                                        | runmat_runtime::interaction::InteractionKind::KeyPress => {
-                                            let next_fut = Self::make_input_future(
-                                                &self.session,
-                                                &next_frame.pending.interaction,
-                                            );
-                                            self.state = ExecuteFutureState::WaitingOnInput {
-                                                frame: next_frame,
-                                                fut: next_fut,
-                                            };
-                                            // loop and poll again
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                ExecuteFutureState::WaitingOnGpu { frame } => {
-                    // Register waker and attempt to resume once. If the GPU is still pending,
-                    // the interpreter will re-suspend and we'll return Pending again.
-                    runmat_async::register_gpu_map_read_waker(cx.waker());
-                    let step = match Self::resume_pending_frame(&mut self.session, frame) {
-                        Ok(step) => step,
-                        Err(err) => return Poll::Ready(Err(err)),
-                    };
-                    match step {
-                        ExecuteStep::Completed(result) => {
-                            return Poll::Ready(Ok((std::mem::take(&mut self.session), result)));
-                        }
-                        ExecuteStep::Pending(next_frame) => match next_frame.pending.interaction.kind {
-                            runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-                                self.state = ExecuteFutureState::WaitingOnGpu { frame: next_frame };
-                                return Poll::Pending;
-                            }
-                            runmat_runtime::interaction::InteractionKind::Line { .. }
-                            | runmat_runtime::interaction::InteractionKind::KeyPress => {
-                                let fut = Self::make_input_future(&self.session, &next_frame.pending.interaction);
-                                self.state = ExecuteFutureState::WaitingOnInput { frame: next_frame, fut };
-                                // loop
-                            }
-                        },
-                    }
-                }
-                ExecuteFutureState::Done => {
-                    return Poll::Ready(Err(anyhow::anyhow!(
-                        "ExecuteFuture polled after completion"
-                    )));
-                }
-            }
-        }
-    }
-}
 
 fn last_displayable_statement_emit_disposition(
     body: &[runmat_hir::HirStmt],
@@ -2305,45 +1750,6 @@ fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
     }
 }
 
-fn drain_console_streams() -> Vec<ExecutionStreamEntry> {
-    runmat_runtime::console::take_thread_buffer()
-        .into_iter()
-        .map(|entry| ExecutionStreamEntry {
-            stream: match entry.stream {
-                runmat_runtime::console::ConsoleStream::Stdout => ExecutionStreamKind::Stdout,
-                runmat_runtime::console::ConsoleStream::Stderr => ExecutionStreamKind::Stderr,
-            },
-            text: entry.text,
-            timestamp_ms: entry.timestamp_ms,
-        })
-        .collect()
-}
-
-fn pending_interaction_to_request(
-    interaction: &runmat_runtime::interaction::PendingInteraction,
-) -> InputRequest {
-    let kind = match interaction.kind {
-        runmat_runtime::interaction::InteractionKind::Line { echo } => {
-            InputRequestKind::Line { echo }
-        }
-        runmat_runtime::interaction::InteractionKind::KeyPress => InputRequestKind::KeyPress,
-        runmat_runtime::interaction::InteractionKind::GpuMapRead => {
-            // Should not be mapped to an input request; caller must branch before calling.
-            InputRequestKind::KeyPress
-        }
-    };
-    InputRequest {
-        prompt: interaction.prompt.clone(),
-        kind,
-    }
-}
-
-fn map_input_response(response: InputResponse) -> runmat_runtime::interaction::InteractionResponse {
-    match response {
-        InputResponse::Line(value) => runmat_runtime::interaction::InteractionResponse::Line(value),
-        InputResponse::KeyPress => runmat_runtime::interaction::InteractionResponse::KeyPress,
-    }
-}
 
 struct ActiveExecutionGuard {
     flag: *mut bool,

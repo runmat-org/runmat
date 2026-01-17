@@ -1,7 +1,11 @@
+mod test_helpers;
+
+use runmat_builtins::Value;
 use runmat_hir::lower;
-use runmat_ignition::{compile, execute, instr::Instr};
+use runmat_ignition::{compile, instr::Instr};
 use runmat_parser::parse;
 use std::convert::TryInto;
+use test_helpers::execute;
 
 #[test]
 fn while_loop_decrements() {

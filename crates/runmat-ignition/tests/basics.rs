@@ -1,9 +1,12 @@
+mod test_helpers;
+
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_hir::lower;
-use runmat_ignition::{compile, execute, Instr};
+use runmat_ignition::{compile, Instr};
 use runmat_parser::parse;
 use std::convert::TryInto;
+use test_helpers::execute;
 
 #[test]
 fn arithmetic_and_assignment() {

@@ -1,6 +1,8 @@
+mod test_helpers;
+
 use runmat_hir::lower;
-use runmat_ignition::execute;
 use runmat_parser::parse;
+use test_helpers::execute;
 
 #[test]
 fn global_across_functions() {

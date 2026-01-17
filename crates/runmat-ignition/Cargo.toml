@@ -28,6 +28,7 @@ once_cell = "1"
 [dev-dependencies]
 runmat-lexer = { workspace = true }
 anyhow = { workspace = true }
+futures = "0.3"
 
 [features]
 default = ["native-accel", "plot-core"]

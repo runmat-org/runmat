@@ -21,7 +21,7 @@ use runmat_builtins::{Type, Value};
 use runmat_runtime::{
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    build_runtime_error, call_builtin, gather_if_needed, RuntimeControlFlow,
+    build_runtime_error, gather_if_needed, RuntimeControlFlow,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use runmat_thread_local::runmat_thread_local;
@@ -214,9 +214,15 @@ fn accel_prepare_args(_name: &str, args: &[Value]) -> VmResult<Vec<Value>> {
     Ok(args.to_vec())
 }
 
-fn call_builtin_auto(name: &str, args: &[Value]) -> VmResult<Value> {
+macro_rules! call_builtin_vm {
+    ($name:expr, $args:expr $(,)?) => {
+        runmat_runtime::call_builtin_async($name, $args).await
+    };
+}
+
+async fn call_builtin_auto(name: &str, args: &[Value]) -> VmResult<Value> {
     let prepared = accel_prepare_args(name, args)?;
-    Ok(runmat_runtime::call_builtin(name, &prepared)?)
+    Ok(call_builtin_vm!(name, &prepared)?)
 }
 
 #[cfg(feature = "native-accel")]
@@ -1293,29 +1299,29 @@ fn resolve_emit_label_text(
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
     match (&a, &b) {
-        (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
+        (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
-            let args = vec![Value::Object(obj.clone()), Value::String(rev.to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
+            let args = vec![Value::Object(obj.clone()), Value::String(rev.to_string()), a.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) }
     }
 }}; }
-pub fn interpret_with_vars(
+pub async fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
-    run_interpreter(state, initial_vars)
+    run_interpreter(state, initial_vars).await
 }
 
-pub fn resume_with_state(
+pub async fn resume_with_state(
     state: InterpreterState,
     initial_vars: &mut [Value],
 ) -> VmResult<InterpreterOutcome> {
-    run_interpreter(state, initial_vars)
+    run_interpreter(state, initial_vars).await
 }
 
-fn run_interpreter(
+async fn run_interpreter(
     state: InterpreterState,
     initial_vars: &mut [Value],
 ) -> VmResult<InterpreterOutcome> {
@@ -1575,7 +1581,7 @@ fn run_interpreter(
                         let mut call_args = c.captures.clone();
                         call_args.extend(args);
                         // Try runtime builtin target for closures (e.g., call_method)
-                        if let Ok(result) = runmat_runtime::call_builtin(&name, &call_args) {
+                        if let Ok(result) = call_builtin_vm!(&name, &call_args) {
                             stack.push(result);
                             pc += 1;
                             continue;
@@ -1694,7 +1700,7 @@ fn run_interpreter(
                         for (k, v) in func_bytecode.functions.iter() {
                             context.functions.insert(k.clone(), v.clone());
                         }
-                        let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                        let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
@@ -1715,7 +1721,7 @@ fn run_interpreter(
                         let mut argv = Vec::with_capacity(1 + args.len());
                         argv.push(other);
                         argv.extend(args);
-                        match runmat_runtime::call_builtin("feval", &argv) {
+                        match call_builtin_vm!("feval", &argv) {
                             Ok(result) => stack.push(result),
                             Err(err) => vm_bail!(err),
                         }
@@ -1971,10 +1977,10 @@ fn run_interpreter(
                             Value::String("plus".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
+                                let v = call_builtin_vm!("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1985,10 +1991,10 @@ fn run_interpreter(
                             Value::String("plus".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
+                                let v = call_builtin_vm!("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1996,7 +2002,7 @@ fn run_interpreter(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("plus", &[a_acc, b_acc])?;
+                        let v = call_builtin_vm!("plus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -2011,20 +2017,20 @@ fn run_interpreter(
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), b.clone()];
-                        match call_builtin("minus", &args) {
+                        match call_builtin_vm!("minus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
+                                let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
                     }
                     (_, Value::Object(obj)) => {
                         let args = vec![Value::Object(obj.clone()), a.clone()];
-                        match call_builtin("uminus", &args) {
+                        match call_builtin_vm!("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
+                                let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -2032,7 +2038,7 @@ fn run_interpreter(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("minus", &[a_acc, b_acc])?;
+                        let v = call_builtin_vm!("minus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -2051,7 +2057,7 @@ fn run_interpreter(
                             Value::String("mtimes".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = runmat_runtime::matrix::value_matmul(&a, &b)?;
@@ -2065,7 +2071,7 @@ fn run_interpreter(
                             Value::String("mtimes".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = runmat_runtime::matrix::value_matmul(&a, &b)?;
@@ -2094,12 +2100,12 @@ fn run_interpreter(
                             Value::String("mrdivide".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
+                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
@@ -2110,12 +2116,12 @@ fn run_interpreter(
                             Value::String("mrdivide".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
+                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
@@ -2123,7 +2129,7 @@ fn run_interpreter(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
+                        let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -2147,7 +2153,7 @@ fn run_interpreter(
                             Value::String("power".to_string()),
                             arg_val,
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = runmat_runtime::power(&a, &b)?;
@@ -2170,10 +2176,10 @@ fn run_interpreter(
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
-                        match call_builtin("uminus", &args) {
+                        match call_builtin_vm!("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let result = runmat_runtime::call_builtin(
+                                let result = call_builtin_vm!(
                                     "times",
                                     &[value.clone(), runmat_builtins::Value::Num(-1.0)],
                                 )?;
@@ -2182,7 +2188,7 @@ fn run_interpreter(
                         }
                     }
                     _ => {
-                        let result = runmat_runtime::call_builtin(
+                        let result = call_builtin_vm!(
                             "times",
                             &[value.clone(), runmat_builtins::Value::Num(-1.0)],
                         )?;
@@ -2197,7 +2203,7 @@ fn run_interpreter(
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
-                        match call_builtin("uplus", &args) {
+                        match call_builtin_vm!("uplus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => stack.push(value),
                         }
@@ -2211,7 +2217,7 @@ fn run_interpreter(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
                 let args = [promoted];
-                let result = runmat_runtime::call_builtin("transpose", &args)?;
+                let result = call_builtin_vm!("transpose", &args)?;
                 stack.push(result);
             }
             Instr::ConjugateTranspose => {
@@ -2220,7 +2226,7 @@ fn run_interpreter(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
                 let args = [promoted];
-                let result = runmat_runtime::call_builtin("ctranspose", &args)?;
+                let result = call_builtin_vm!("ctranspose", &args)?;
                 stack.push(result);
             }
             Instr::ElemMul => {
@@ -2237,12 +2243,12 @@ fn run_interpreter(
                             Value::String("times".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
+                                stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -2252,19 +2258,19 @@ fn run_interpreter(
                             Value::String("times".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
+                                stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
+                        stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -2282,13 +2288,13 @@ fn run_interpreter(
                             Value::String("rdivide".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
                                 stack
-                                    .push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
+                                    .push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -2298,20 +2304,20 @@ fn run_interpreter(
                             Value::String("rdivide".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
                                 stack
-                                    .push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
+                                    .push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
+                        stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -2332,19 +2338,19 @@ fn run_interpreter(
                                 a.clone()
                             },
                         ];
-                        match call_builtin("power", &args) {
+                        match call_builtin_vm!("power", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::call_builtin("power", &[a_acc, b_acc])?)
+                                stack.push(call_builtin_vm!("power", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::call_builtin("power", &[a_acc, b_acc])?)
+                        stack.push(call_builtin_vm!("power", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -2362,13 +2368,13 @@ fn run_interpreter(
                             Value::String("ldivide".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
                                 stack
-                                    .push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
+                                    .push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
@@ -2378,20 +2384,20 @@ fn run_interpreter(
                             Value::String("ldivide".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
                                 stack
-                                    .push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
+                                    .push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (b_acc, a_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                        stack.push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
+                        stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
                     }
                 }
             }
@@ -2409,7 +2415,7 @@ fn run_interpreter(
                             Value::String("le".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: le(a,b) = ~gt(a,b)
@@ -2418,7 +2424,7 @@ fn run_interpreter(
                                     Value::String("gt".to_string()),
                                     b.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2442,7 +2448,7 @@ fn run_interpreter(
                             Value::String("ge".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: ge(b,a) = ~lt(b,a) hence le(a,b) = ge(b,a)
@@ -2451,7 +2457,7 @@ fn run_interpreter(
                                     Value::String("lt".to_string()),
                                     a.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2496,7 +2502,7 @@ fn run_interpreter(
                             Value::String("ge".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: ge(a,b) = ~lt(a,b)
@@ -2505,7 +2511,7 @@ fn run_interpreter(
                                     Value::String("lt".to_string()),
                                     b.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2529,7 +2535,7 @@ fn run_interpreter(
                             Value::String("le".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: le(b,a) = ~gt(b,a); hence ge(a,b) = le(b,a)
@@ -2538,7 +2544,7 @@ fn run_interpreter(
                                     Value::String("gt".to_string()),
                                     a.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2577,7 +2583,7 @@ fn run_interpreter(
                             Value::String("eq".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let aa: f64 = (&a).try_into()?;
@@ -2592,7 +2598,7 @@ fn run_interpreter(
                             Value::String("eq".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let aa: f64 = (&a).try_into()?;
@@ -2603,7 +2609,7 @@ fn run_interpreter(
                     }
                     (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
                         // Delegate to runtime eq builtin which implements identity semantics
-                        let v = runmat_runtime::call_builtin("eq", &[a.clone(), b.clone()])?;
+                        let v = call_builtin_vm!("eq", &[a.clone(), b.clone()])?;
                         stack.push(v);
                     }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
@@ -2719,7 +2725,7 @@ fn run_interpreter(
                             Value::String("ne".to_string()),
                             b.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: ne(a,b) = ~eq(a,b)
@@ -2728,7 +2734,7 @@ fn run_interpreter(
                                     Value::String("eq".to_string()),
                                     b.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2752,7 +2758,7 @@ fn run_interpreter(
                             Value::String("ne".to_string()),
                             a.clone(),
                         ];
-                        match call_builtin("call_method", &args) {
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 // Fallback: ne(b,a) = ~eq(b,a)
@@ -2761,7 +2767,7 @@ fn run_interpreter(
                                     Value::String("eq".to_string()),
                                     a.clone(),
                                 ];
-                                match call_builtin("call_method", &args2) {
+                                match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
                                         let truth: f64 = (&v).try_into()?;
                                         stack.push(Value::Num(if truth == 0.0 {
@@ -2780,7 +2786,7 @@ fn run_interpreter(
                         }
                     }
                     (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
-                        let v = runmat_runtime::call_builtin("ne", &[a.clone(), b.clone()])?;
+                        let v = call_builtin_vm!("ne", &[a.clone(), b.clone()])?;
                         stack.push(v);
                     }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
@@ -2959,7 +2965,7 @@ fn run_interpreter(
                 args.reverse();
 
                 let prepared_primary = accel_prepare_args(&name, &args)?;
-                match runmat_runtime::call_builtin(&name, &prepared_primary) {
+                match call_builtin_vm!(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
                         if is_suspend_flow(&e) {
@@ -2985,7 +2991,7 @@ fn run_interpreter(
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => specific_matches.push((qual, qual_args, value)),
                                     Err(err) => {
                                         if is_suspend_flow(&err) {
@@ -3034,7 +3040,7 @@ fn run_interpreter(
                                 qual.push('.');
                                 qual.push_str(&name);
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => wildcard_matches.push((qual, qual_args, value)),
                                     Err(err) => {
                                         if is_suspend_flow(&err) {
@@ -3182,7 +3188,7 @@ fn run_interpreter(
                                     indices.len(),
                                 )
                                 .map_err(|e| format!("subsref build error: {e}"))?;
-                                let v = match runmat_runtime::call_builtin(
+                                let v = match call_builtin_vm!(
                                     "call_method",
                                     &[
                                         Value::Object(obj),
@@ -3207,7 +3213,7 @@ fn run_interpreter(
                 };
                 let mut args = fixed;
                 args.extend(expanded.into_iter());
-                match call_builtin_auto(&name, &args) {
+                match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -3299,8 +3305,8 @@ fn run_interpreter(
                             .iter()
                             .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
                             .collect();
-                        let cell = runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
-                        let v = match runmat_runtime::call_builtin(
+                        let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
+                        let v = match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -3324,7 +3330,7 @@ fn run_interpreter(
                 let mut args = before;
                 args.extend(expanded.into_iter());
                 args.extend(after.into_iter());
-                match call_builtin_auto(&name, &args) {
+                match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -3359,7 +3365,7 @@ fn run_interpreter(
                                     // subsref(obj,'{}', {}) with empty indices; expect a cell or value
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
                                         .map_err(|e| format!("subsref build error: {e}"))?;
-                                    let v = match runmat_runtime::call_builtin(
+                                    let v = match call_builtin_vm!(
                                         "call_method",
                                         &[
                                             Value::Object(obj),
@@ -3445,8 +3451,8 @@ fn run_interpreter(
                                         .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
                                         .collect();
                                     let cell =
-                                        runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
-                                    let v = match runmat_runtime::call_builtin(
+                                        call_builtin_vm!("__make_cell", &idx_vals)?;
+                                    let v = match call_builtin_vm!(
                                         "call_method",
                                         &[
                                             Value::Object(obj),
@@ -3479,7 +3485,7 @@ fn run_interpreter(
                 }
                 temp.reverse();
                 args.extend(temp.into_iter());
-                match call_builtin_auto(&name, &args) {
+                match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -3545,7 +3551,7 @@ fn run_interpreter(
                                 Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(),
                                 Value::Object(obj) => {
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
-                                    let v = match runmat_runtime::call_builtin("call_method", &[
+                                    let v = match call_builtin_vm!("call_method", &[
                                         Value::Object(obj),
                                         Value::String("subsref".to_string()),
                                         Value::String("{}".to_string()),
@@ -3618,7 +3624,7 @@ fn run_interpreter(
                                         indices.len(),
                                     )
                                     .map_err(|e| format!("subsref build error: {e}"))?;
-                                    let v = match runmat_runtime::call_builtin(
+                                    let v = match call_builtin_vm!(
                                         "call_method",
                                         &[
                                             Value::Object(obj),
@@ -3701,7 +3707,7 @@ fn run_interpreter(
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
                 }
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
                     Ok(v) => v,
                     Err(e) => vm_bail!(e),
                 };
@@ -3729,7 +3735,7 @@ fn run_interpreter(
                     }
                     args.reverse();
                     let prepared_primary = accel_prepare_args(&name, &args)?;
-                    if let Ok(result) = runmat_runtime::call_builtin(&name, &prepared_primary) {
+                    if let Ok(result) = call_builtin_vm!(&name, &prepared_primary) {
                         stack.push(result);
                         pc += 1;
                         continue;
@@ -3869,7 +3875,8 @@ fn run_interpreter(
                     &name,
                     1,
                     arg_count,
-                ) {
+                )
+                .await {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -4011,8 +4018,8 @@ fn run_interpreter(
                             .iter()
                             .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
                             .collect();
-                        let cell = runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
-                        let v = match runmat_runtime::call_builtin(
+                        let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
+                        let v = match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -4036,7 +4043,7 @@ fn run_interpreter(
                 let mut args = before;
                 args.extend(expanded.into_iter());
                 args.extend(after.into_iter());
-                match call_builtin(&name, &args) {
+                match call_builtin_vm!(&name, &args) {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -4166,7 +4173,8 @@ fn run_interpreter(
                     &name,
                     out_count,
                     arg_count,
-                ) {
+                )
+                .await {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -5510,7 +5518,7 @@ fn run_interpreter(
                     }
                     continue;
                 }
-                match call_builtin(&name, &args) {
+                match call_builtin_vm!(&name, &args) {
                     Ok(v) => match v {
                         Value::Tensor(t) => {
                             let mut pushed = 0usize;
@@ -5561,7 +5569,7 @@ fn run_interpreter(
                             }
                             qual.push('.');
                             qual.push_str(&name);
-                            if let Ok(v) = call_builtin(&qual, &args) {
+                            if let Ok(v) = call_builtin_vm!(&qual, &args) {
                                 resolved = Some(v);
                                 break;
                             }
@@ -5715,7 +5723,7 @@ fn run_interpreter(
                             indices.len(),
                         )
                         .map_err(|e| format!("subsref build error: {e}"))?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -5772,7 +5780,7 @@ fn run_interpreter(
                         let cell =
                             runmat_builtins::CellArray::new(numeric.to_vec(), 1, numeric.len())
                                 .map_err(|e| format!("subsref build error: {e}"))?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -7214,7 +7222,7 @@ fn run_interpreter(
                         let cell =
                             runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len())
                                 .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj.clone()),
@@ -7229,7 +7237,7 @@ fn run_interpreter(
                                 // Fallback to direct builtin OverIdx.subsasgn if class method isn't registered
                                 // Determine class name and call fully qualified builtin if present
                                 let qualified = format!("{}.subsasgn", obj.class_name);
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     &qualified,
                                     &[
                                         Value::Object(obj),
@@ -9244,7 +9252,7 @@ fn run_interpreter(
                         }
                         let cell = runmat_builtins::CellArray::new(idx_values, 1, dims)
                             .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -9369,14 +9377,14 @@ fn run_interpreter(
                 match base {
                     Value::Object(obj) => {
                         // Route to subsref(obj, '{}', {indices})
-                        let cell = runmat_runtime::call_builtin(
+                        let cell = call_builtin_vm!(
                             "__make_cell",
                             &indices
                                 .iter()
                                 .map(|n| Value::Num(*n as f64))
                                 .collect::<Vec<_>>(),
                         )?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -9481,14 +9489,14 @@ fn run_interpreter(
                     }
                     Value::Object(obj) => {
                         // Defer to subsref; expect a cell back; then expand one element
-                        let cell = runmat_runtime::call_builtin(
+                        let cell = call_builtin_vm!(
                             "__make_cell",
                             &indices
                                 .iter()
                                 .map(|n| Value::Num(*n as f64))
                                 .collect::<Vec<_>>(),
                         )?;
-                        let v = match runmat_runtime::call_builtin(
+                        let v = match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -9659,14 +9667,14 @@ fn run_interpreter(
                 match base {
                     Value::Object(obj) => {
                         // subsasgn(obj, '()', {indices...}, rhs)
-                        let cell = runmat_runtime::call_builtin(
+                        let cell = call_builtin_vm!(
                             "__make_cell",
                             &indices
                                 .iter()
                                 .map(|n| Value::Num(*n as f64))
                                 .collect::<Vec<_>>(),
                         )?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -9894,7 +9902,7 @@ fn run_interpreter(
                             indices.len(),
                         )
                         .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match runmat_runtime::call_builtin(
+                        match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
@@ -9965,7 +9973,7 @@ fn run_interpreter(
                             if p.is_dependent {
                                 // Call get.<field>(obj)
                                 let getter = format!("get.{field}");
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     &getter,
                                     &[Value::Object(obj.clone())],
                                 ) {
@@ -9991,7 +9999,7 @@ fn run_interpreter(
                             }
                         } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                             if cls.methods.contains_key("subsref") {
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     "call_method",
                                     &[
                                         Value::Object(obj),
@@ -10071,7 +10079,7 @@ fn run_interpreter(
                             stack.push(v.clone());
                         } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                             if cls.methods.contains_key("subsref") {
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     "call_method",
                                     &[
                                         Value::Object(obj),
@@ -10128,7 +10136,7 @@ fn run_interpreter(
                             if p.is_dependent {
                                 // Call set.<field>(obj, rhs)
                                 let setter = format!("set.{field}");
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     &setter,
                                     &[Value::Object(obj.clone()), rhs.clone()],
                                 ) {
@@ -10146,7 +10154,7 @@ fn run_interpreter(
                             stack.push(Value::Object(obj));
                         } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                             if cls.methods.contains_key("subsasgn") {
-                                match runmat_runtime::call_builtin(
+                                match call_builtin_vm!(
                                     "call_method",
                                     &[
                                         Value::Object(obj),
@@ -10348,7 +10356,7 @@ fn run_interpreter(
                             let mut full_args = Vec::with_capacity(1 + args.len());
                             full_args.push(Value::Object(obj));
                             full_args.extend(args.into_iter());
-                            let v = runmat_runtime::call_builtin(&m.function_name, &full_args)?;
+                            let v = call_builtin_vm!(&m.function_name, &full_args)?;
                             stack.push(v);
                             continue;
                         }
@@ -10356,10 +10364,10 @@ fn run_interpreter(
                         let mut full_args = Vec::with_capacity(1 + args.len());
                         full_args.push(Value::Object(obj));
                         full_args.extend(args.into_iter());
-                        if let Ok(v) = runmat_runtime::call_builtin(&qualified, &full_args) {
+                        if let Ok(v) = call_builtin_vm!(&qualified, &full_args) {
                             stack.push(v);
                         } else {
-                            match runmat_runtime::call_builtin(&name, &full_args) {
+                            match call_builtin_vm!(&name, &full_args) {
                                 Ok(v) => {
                                     stack.push(v);
                                 }
@@ -10457,7 +10465,7 @@ fn run_interpreter(
                     if m.access == runmat_builtins::Access::Private {
                         vm_bail!(format!("Method '{}' is private", method))
                     }
-                    let v = match runmat_runtime::call_builtin(&m.function_name, &args) {
+                    let v = match call_builtin_vm!(&m.function_name, &args) {
                         Ok(v) => v,
                         Err(e) => vm_bail!(e),
                     };
@@ -11633,9 +11641,9 @@ fn flow_to_string(flow: RuntimeControlFlow) -> String {
 }
 
 /// Interpret bytecode with default variable initialization
-pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
+pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    match interpret_with_vars(bytecode, &mut vars, Some("<main>")) {
+    match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
         Ok(InterpreterOutcome::Pending(_)) => {
             Err("interaction pending is unsupported in interpret".to_string())
@@ -11644,12 +11652,12 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     }
 }
 
-pub fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, String> {
+pub async fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, String> {
     // Delegate to the counted variant with anonymous name and zero counts
-    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0)
+    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0).await
 }
 
-fn interpret_function_with_counts(
+async fn interpret_function_with_counts(
     bytecode: &Bytecode,
     mut vars: Vec<Value>,
     name: &str,
@@ -11657,11 +11665,12 @@ fn interpret_function_with_counts(
     in_count: usize,
 ) -> Result<Vec<Value>, String> {
     // Push (nargin, nargout), run, then pop
-    let res = CALL_COUNTS.with(|cc| {
+    CALL_COUNTS.with(|cc| {
         cc.borrow_mut().push((in_count, out_count));
-        let r = interpret_with_vars(bytecode, &mut vars, Some(name));
+    });
+    let res = Box::pin(interpret_with_vars(bytecode, &mut vars, Some(name))).await;
+    CALL_COUNTS.with(|cc| {
         cc.borrow_mut().pop();
-        r
     });
     let res = match res {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),

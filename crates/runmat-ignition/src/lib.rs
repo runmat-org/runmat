@@ -19,7 +19,7 @@ pub use vm::{
 use runmat_builtins::Value;
 use runmat_hir::HirProgram;
 
-pub fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
+pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
     let bc = compile(program)?;
-    interpret(&bc)
+    interpret(&bc).await
 }

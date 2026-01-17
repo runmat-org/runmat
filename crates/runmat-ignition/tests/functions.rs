@@ -1,6 +1,9 @@
+mod test_helpers;
+
+use runmat_builtins::Value;
 use runmat_hir::lower;
-use runmat_ignition::execute;
 use runmat_parser::parse;
+use test_helpers::{execute, interpret};
 
 #[test]
 fn nargin_nargout_in_user_functions() {
@@ -142,7 +145,7 @@ fn member_get_set_and_method_call_skeleton() {
     let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
     let ast2 = parse(input2).unwrap();
     let hir2 = lower(&ast2).unwrap();
-    let vars2 = runmat_ignition::execute(&hir2).unwrap();
+    let vars2 = execute(&hir2).unwrap();
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
@@ -205,7 +208,7 @@ fn classes_static_and_inheritance() {
         parse("__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');")
             .unwrap();
     let hir5 = lower(&ast5).unwrap();
-    assert!(runmat_ignition::execute(&hir5).is_err());
+    assert!(execute(&hir5).is_err());
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -238,7 +241,7 @@ fn classes_property_access_attributes() {
         parse("__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);")
             .unwrap();
     let hir = lower(&ast).unwrap();
-    assert!(runmat_ignition::execute(&hir).is_err());
+    assert!(execute(&hir).is_err());
 }
 
 #[test]
@@ -603,7 +606,7 @@ fn user_function_with_two_expanded_args() {
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    assert!(runmat_ignition::execute(&hir).is_err());
+    assert!(execute(&hir).is_err());
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -733,7 +736,7 @@ fn mixed_range_end_assign_shape_mismatch_error() {
     // RHS shape 3x1 does not match rows 2:end (len 2) and cannot broadcast
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let res = runmat_ignition::execute(&hir);
+    let res = execute(&hir);
     assert!(res.is_err());
 }
 
@@ -1062,7 +1065,7 @@ fn bitwise_or_row_vectors() {
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let bc = runmat_ignition::compile(&hir).unwrap();
     dbg!(&bc.instructions);
-    let _ = runmat_ignition::interpret(&bc).unwrap();
+    let _ = interpret(&bc).unwrap();
 }
 
 #[test]

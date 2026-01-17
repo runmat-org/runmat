@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context};
+use futures::executor::block_on;
 use once_cell::sync::OnceCell;
 use runmat_accelerate::{
     configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions,
@@ -13,11 +14,22 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
 use runmat_hir::lower;
-use runmat_ignition::vm::interpret_function;
-use runmat_ignition::{compile, interpret, Instr};
+use runmat_ignition::vm::interpret_function as interpret_function_async;
+use runmat_ignition::{compile, interpret as interpret_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
+
+fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, String> {
+    block_on(interpret_async(bytecode))
+}
+
+fn interpret_function(
+    bytecode: &runmat_ignition::Bytecode,
+    vars: Vec<Value>,
+) -> Result<Vec<Value>, String> {
+    block_on(interpret_function_async(bytecode, vars))
+}
 use runmat_runtime::gather_if_needed;
 use runmat_runtime::RuntimeControlFlow;
 use runmat_time::Instant;

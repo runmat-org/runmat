@@ -10,6 +10,7 @@
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
+use futures::executor::block_on;
 use log::{debug, error, info, warn};
 use runmat_builtins::{Type, Value};
 use runmat_gc::gc_allocate;
@@ -680,11 +681,11 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = match runmat_ignition::interpret_with_vars(
+    let func_result_vars = match block_on(runmat_ignition::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
-    ) {
+    )) {
         Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
         Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => Err(TurbineError::ExecutionError(
             "interaction pending is unsupported in turbine execution".to_string(),
@@ -1070,7 +1071,7 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")) {
+        match block_on(runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>"))) {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
             Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => {
                 Err(TurbineError::ExecutionError(

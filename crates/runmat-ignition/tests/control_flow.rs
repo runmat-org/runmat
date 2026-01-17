@@ -1,7 +1,10 @@
+mod test_helpers;
+
+use runmat_builtins::Value;
 use runmat_hir::lower;
-use runmat_ignition::execute;
 use runmat_parser::parse;
 use std::convert::TryInto;
+use test_helpers::execute;
 
 #[test]
 fn break_and_continue() {
