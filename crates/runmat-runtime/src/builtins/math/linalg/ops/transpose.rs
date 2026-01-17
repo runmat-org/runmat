@@ -246,7 +246,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "transpose",
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
-fn transpose_builtin(value: Value) -> BuiltinResult<Value> {
+fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+    let value = match args.len() {
+        0 => return Err(builtin_error("transpose: missing input argument")),
+        1 => args.remove(0),
+        _ => return Err(builtin_error("transpose: too many input arguments")),
+    };
     match value {
         Value::GpuTensor(handle) => transpose_gpu(handle),
         Value::Tensor(t) => Ok(tensor::tensor_into_value(transpose_tensor(t)?)),
@@ -272,7 +277,7 @@ fn transpose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         transpose_tensor_matrix(&tensor)
     } else {
         let order = transpose_order(rank);
-        permute_tensor(tensor, &order)
+        permute_tensor(NAME, tensor, &order)
     }
 }
 
@@ -286,7 +291,7 @@ fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
             .map_err(|e| builtin_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
-        permute_complex_tensor(ct, &order)
+        permute_complex_tensor(NAME, ct, &order)
     }
 }
 
@@ -316,7 +321,7 @@ fn transpose_logical_array(la: LogicalArray) -> BuiltinResult<LogicalArray> {
         LogicalArray::new(out, new_shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
-        permute_logical_array(la, &order)
+        permute_logical_array(NAME, la, &order)
     }
 }
 
@@ -371,7 +376,7 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         StringArray::new(out, new_shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
-        permute_string_array(sa, &order)
+        permute_string_array(NAME, sa, &order)
     }
 }
 
@@ -483,6 +488,10 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
+    fn call_transpose(value: Value) -> BuiltinResult<Value> {
+        transpose_builtin(vec![value])
+    }
+
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
@@ -491,7 +500,7 @@ pub(crate) mod tests {
     #[test]
     fn transpose_numeric_matrix() {
         let input = tensor(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &[2, 3]);
-        let value = transpose_builtin(Value::Tensor(input)).expect("transpose");
+        let value = call_transpose(Value::Tensor(input)).expect("transpose");
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
@@ -505,7 +514,7 @@ pub(crate) mod tests {
     #[test]
     fn transpose_vector_to_column() {
         let input = tensor(&[1.0, 2.0, 3.0], &[1, 3]);
-        let value = transpose_builtin(Value::Tensor(input)).expect("transpose");
+        let value = call_transpose(Value::Tensor(input)).expect("transpose");
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
@@ -520,7 +529,7 @@ pub(crate) mod tests {
     fn transpose_complex_does_not_conjugate() {
         let data = vec![(1.0, 2.0), (3.0, -4.0)];
         let ct = ComplexTensor::new(data, vec![1, 2]).unwrap();
-        let value = transpose_builtin(Value::ComplexTensor(ct)).expect("transpose");
+        let value = call_transpose(Value::ComplexTensor(ct)).expect("transpose");
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
@@ -535,7 +544,7 @@ pub(crate) mod tests {
     fn transpose_high_dim_tensor() {
         let data: Vec<f64> = (1..=24).map(|n| n as f64).collect();
         let tensor = tensor(&data, &[2, 3, 4]);
-        let value = transpose_builtin(Value::Tensor(tensor)).expect("transpose");
+        let value = call_transpose(Value::Tensor(tensor)).expect("transpose");
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 4]);
@@ -549,7 +558,7 @@ pub(crate) mod tests {
     #[test]
     fn transpose_logical_mask() {
         let la = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
-        let value = transpose_builtin(Value::LogicalArray(la)).expect("transpose");
+        let value = call_transpose(Value::LogicalArray(la)).expect("transpose");
         match value {
             Value::LogicalArray(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
@@ -563,7 +572,7 @@ pub(crate) mod tests {
     #[test]
     fn transpose_char_matrix() {
         let ca = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
-        let value = transpose_builtin(Value::CharArray(ca)).expect("transpose");
+        let value = call_transpose(Value::CharArray(ca)).expect("transpose");
         match value {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
@@ -578,7 +587,7 @@ pub(crate) mod tests {
     #[test]
     fn transpose_string_array() {
         let sa = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap();
-        let value = transpose_builtin(Value::StringArray(sa)).expect("transpose");
+        let value = call_transpose(Value::StringArray(sa)).expect("transpose");
         match value {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
@@ -601,7 +610,7 @@ pub(crate) mod tests {
             Value::from(4),
         ];
         let cell_array = CellArray::new(cells, 2, 2).unwrap();
-        let value = transpose_builtin(Value::Cell(cell_array)).expect("transpose");
+        let value = call_transpose(Value::Cell(cell_array)).expect("transpose");
         match value {
             Value::Cell(out) => {
                 assert_eq!(out.rows, 2);
@@ -623,19 +632,19 @@ pub(crate) mod tests {
     #[test]
     fn transpose_scalar_types_identity() {
         assert_eq!(
-            transpose_builtin(Value::Num(std::f64::consts::PI)).unwrap(),
+            call_transpose(Value::Num(std::f64::consts::PI)).unwrap(),
             Value::Num(std::f64::consts::PI)
         );
         assert_eq!(
-            transpose_builtin(Value::Complex(1.0, -2.0)).unwrap(),
+            call_transpose(Value::Complex(1.0, -2.0)).unwrap(),
             Value::Complex(1.0, -2.0)
         );
         assert_eq!(
-            transpose_builtin(Value::Int(IntValue::I32(5))).unwrap(),
+            call_transpose(Value::Int(IntValue::I32(5))).unwrap(),
             Value::Int(IntValue::I32(5))
         );
         assert_eq!(
-            transpose_builtin(Value::Bool(true)).unwrap(),
+            call_transpose(Value::Bool(true)).unwrap(),
             Value::Bool(true)
         );
     }
@@ -650,7 +659,7 @@ pub(crate) mod tests {
                 shape: &t.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = transpose_builtin(Value::GpuTensor(handle)).expect("transpose");
+            let result = call_transpose(Value::GpuTensor(handle)).expect("transpose");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, vec![1.0, 2.0, 4.0, 5.0]);
@@ -665,7 +674,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
         let tensor = Tensor::new(data, vec![3, 4]).expect("tensor");
-        let cpu_value = transpose_builtin(Value::Tensor(tensor.clone())).expect("cpu transpose");
+        let cpu_value = call_transpose(Value::Tensor(tensor.clone())).expect("cpu transpose");
         let cpu_tensor = match cpu_value {
             Value::Tensor(t) => t,
             other => panic!("expected tensor result, got {other:?}"),
@@ -676,7 +685,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = transpose_builtin(Value::GpuTensor(handle)).expect("gpu transpose");
+        let gpu_value = call_transpose(Value::GpuTensor(handle)).expect("gpu transpose");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
         assert_eq!(gathered.data, cpu_tensor.data);

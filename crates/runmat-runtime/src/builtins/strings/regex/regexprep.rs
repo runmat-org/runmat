@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -198,6 +198,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Regex replacements are control-flow heavy and are excluded from fusion.",
 };
 
+const BUILTIN_NAME: &str = "regexprep";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn with_builtin_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Error(mut err) => {
+            if err.context.builtin.is_none() {
+                err.context = err.context.with_builtin(BUILTIN_NAME);
+            }
+            RuntimeControlFlow::Error(err)
+        }
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+    }
+}
+
 #[runtime_builtin(
     name = "regexprep",
     category = "strings/regex",
@@ -212,15 +233,15 @@ fn regexprep_builtin(
     replacement: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let subject = gather_if_needed(&subject).map_err(|e| format!("regexprep: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("regexprep: {e}"))?;
-    let replacement = gather_if_needed(&replacement).map_err(|e| format!("regexprep: {e}"))?;
-    let options = RegexprepOptions::parse(&rest)?;
+    let subject = gather_if_needed(&subject).map_err(with_builtin_context)?;
+    let pattern = gather_if_needed(&pattern).map_err(with_builtin_context)?;
+    let replacement = gather_if_needed(&replacement).map_err(with_builtin_context)?;
+    let options = RegexprepOptions::parse(BUILTIN_NAME, &rest)?;
 
-    let subjects = SubjectCollection::collect(subject)?;
-    let patterns = PatternCollection::collect(pattern, &subjects)?;
-    let replacements = ReplacementCollection::collect(replacement, &subjects)?;
-    let plan = build_plan(&patterns, &replacements, &options, &subjects)?;
+    let subjects = SubjectCollection::collect(BUILTIN_NAME, subject)?;
+    let patterns = PatternCollection::collect(BUILTIN_NAME, pattern, &subjects)?;
+    let replacements = ReplacementCollection::collect(BUILTIN_NAME, replacement, &subjects)?;
+    let plan = build_plan(BUILTIN_NAME, &patterns, &replacements, &options, &subjects)?;
 
     let mut results = Vec::with_capacity(subjects.entries.len());
     for (idx, original) in subjects.entries.iter().enumerate() {
@@ -233,7 +254,7 @@ fn regexprep_builtin(
         results.push(current);
     }
 
-    reconstruct_output(&subjects, results).map_err(Into::into)
+    reconstruct_output(BUILTIN_NAME, &subjects, results)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,7 +274,7 @@ struct RegexprepOptions {
 }
 
 impl RegexprepOptions {
-    fn parse(rest: &[Value]) -> Result<Self, String> {
+    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
         let mut case_insensitive = false;
         let mut multi_line = false;
         let mut dot_all = false;
@@ -262,30 +283,38 @@ impl RegexprepOptions {
         let mut preserve_case = false;
         let mut idx = 0usize;
         while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx])
-                .ok_or_else(|| format!("regexprep: expected option string, got {:?}", rest[idx]))?;
+            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
+                runtime_error_for(
+                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
+                )
+            })?;
             idx += 1;
             match raw.as_str() {
                 "ignorecase" => case_insensitive = true,
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
                     let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        "regexprep: expected logical or 'on'/'off' after 'lineanchors'".to_string()
+                        runtime_error_for(format!(
+                            "{builtin}: expected logical or 'on'/'off' after 'lineanchors'"
+                        ))
                     })?;
                     multi_line = flag;
                     idx += 1;
                 }
                 "dotall" => {
                     let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        "regexprep: expected logical or 'on'/'off' after 'dotall'".to_string()
+                        runtime_error_for(format!(
+                            "{builtin}: expected logical or 'on'/'off' after 'dotall'"
+                        ))
                     })?;
                     dot_all = flag;
                     idx += 1;
                 }
                 "dotexceptnewline" => {
                     let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        "regexprep: expected logical or 'on'/'off' after 'dotExceptNewline'"
-                            .to_string()
+                        runtime_error_for(format!(
+                            "{builtin}: expected logical or 'on'/'off' after 'dotExceptNewline'"
+                        ))
                     })?;
                     dot_all = !flag;
                     idx += 1;
@@ -293,19 +322,23 @@ impl RegexprepOptions {
                 "once" => once = true,
                 "emptymatch" => {
                     let value = rest.get(idx).ok_or_else(|| {
-                        "regexprep: expected 'allow' or 'remove' after 'emptymatch'".to_string()
+                        runtime_error_for(format!(
+                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
+                        ))
                     })?;
                     let policy = value_to_lower_string(value).ok_or_else(|| {
-                        "regexprep: expected 'allow' or 'remove' after 'emptymatch'".to_string()
+                        runtime_error_for(format!(
+                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
+                        ))
                     })?;
                     idx += 1;
                     match policy.as_str() {
                         "allow" => emptymatch = EmptyMatchPolicy::Allow,
                         "remove" => emptymatch = EmptyMatchPolicy::Remove,
                         other => {
-                            return Err(format!(
-                                "regexprep: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                            ))
+                            return Err(runtime_error_for(format!(
+                                "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
+                            )))
                         }
                     }
                 }
@@ -318,10 +351,9 @@ impl RegexprepOptions {
                             }
                             idx += 1;
                         } else {
-                            return Err(
-                                "regexprep: expected logical or 'on'/'off' after 'preservecase'"
-                                    .to_string(),
-                            );
+                            return Err(runtime_error_for(format!(
+                                "{builtin}: expected logical or 'on'/'off' after 'preservecase'"
+                            )));
                         }
                     } else {
                         preserve_case = true;
@@ -334,7 +366,9 @@ impl RegexprepOptions {
                     }
                 }
                 other => {
-                    return Err(format!("regexprep: unrecognised option '{other}'"));
+                    return Err(runtime_error_for(format!(
+                        "{builtin}: unrecognised option '{other}'"
+                    )));
                 }
             }
         }
@@ -367,7 +401,7 @@ struct SubjectCollection {
 }
 
 impl SubjectCollection {
-    fn collect(value: Value) -> Result<Self, String> {
+    fn collect(builtin: &'static str, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
                 entries: vec![s],
@@ -377,15 +411,15 @@ impl SubjectCollection {
             }),
             Value::CharArray(array) => collect_char_array(array),
             Value::StringArray(array) => collect_string_array(array),
-            Value::Cell(cell) => collect_cell_array(cell),
-            other => Err(format!(
-                "regexprep: expected char vector, string, string array, or cell array of text, got {other:?}"
-            )),
+            Value::Cell(cell) => collect_cell_array(builtin, cell),
+            other => Err(runtime_error_for(format!(
+                "{builtin}: expected char vector, string, string array, or cell array of text, got {other:?}"
+            ))),
         }
     }
 }
 
-fn collect_char_array(array: CharArray) -> Result<SubjectCollection, String> {
+fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
     if array.rows == 0 {
         return Ok(SubjectCollection {
             entries: Vec::new(),
@@ -419,7 +453,7 @@ fn collect_char_array(array: CharArray) -> Result<SubjectCollection, String> {
     })
 }
 
-fn collect_string_array(array: StringArray) -> Result<SubjectCollection, String> {
+fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> {
     let rows = array.rows();
     let cols = array.cols();
     let mut entries = Vec::with_capacity(array.data.len());
@@ -437,14 +471,17 @@ fn collect_string_array(array: StringArray) -> Result<SubjectCollection, String>
     })
 }
 
-fn collect_cell_array(cell: runmat_builtins::CellArray) -> Result<SubjectCollection, String> {
+fn collect_cell_array(
+    builtin: &'static str,
+    cell: runmat_builtins::CellArray,
+) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
-            format!(
-                "regexprep: cell array elements must be character vectors or string scalars, got {value:?}"
-            )
+            runtime_error_for(format!(
+                "{builtin}: cell array elements must be character vectors or string scalars, got {value:?}"
+            ))
         })?;
         entries.push(text);
     }
@@ -467,20 +504,24 @@ enum PatternCollection {
 }
 
 impl PatternCollection {
-    fn collect(value: Value, subjects: &SubjectCollection) -> Result<Self, String> {
+    fn collect(
+        builtin: &'static str,
+        value: Value,
+        subjects: &SubjectCollection,
+    ) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self::Scalar(s)),
             Value::CharArray(array) => collect_pattern_char_array(array),
             Value::StringArray(array) => collect_pattern_string_array(array, subjects),
-            Value::Cell(cell) => collect_pattern_cell(cell, subjects),
-            other => Err(format!(
-                "regexprep: expected char vector, string array, or cell array for pattern, got {other:?}"
-            )),
+            Value::Cell(cell) => collect_pattern_cell(builtin, cell, subjects),
+            other => Err(runtime_error_for(format!(
+                "{builtin}: expected char vector, string array, or cell array for pattern, got {other:?}"
+            ))),
         }
     }
 }
 
-fn collect_pattern_char_array(array: CharArray) -> Result<PatternCollection, String> {
+fn collect_pattern_char_array(array: CharArray) -> BuiltinResult<PatternCollection> {
     if array.rows <= 1 {
         let text: String = array.data.into_iter().collect();
         return Ok(PatternCollection::Scalar(text));
@@ -499,7 +540,7 @@ fn collect_pattern_char_array(array: CharArray) -> Result<PatternCollection, Str
 fn collect_pattern_string_array(
     array: StringArray,
     subjects: &SubjectCollection,
-) -> Result<PatternCollection, String> {
+) -> BuiltinResult<PatternCollection> {
     let rows = array.rows();
     let cols = array.cols();
     if rows == 1 && cols == 1 && !array.data.is_empty() {
@@ -512,16 +553,17 @@ fn collect_pattern_string_array(
 }
 
 fn collect_pattern_cell(
+    builtin: &'static str,
     cell: runmat_builtins::CellArray,
     subjects: &SubjectCollection,
-) -> Result<PatternCollection, String> {
+) -> BuiltinResult<PatternCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
-            format!(
-                "regexprep: pattern cell elements must be character vectors or string scalars, got {value:?}"
-            )
+            runtime_error_for(format!(
+                "{builtin}: pattern cell elements must be character vectors or string scalars, got {value:?}"
+            ))
         })?;
         entries.push(text);
     }
@@ -539,20 +581,24 @@ enum ReplacementCollection {
 }
 
 impl ReplacementCollection {
-    fn collect(value: Value, subjects: &SubjectCollection) -> Result<Self, String> {
+    fn collect(
+        builtin: &'static str,
+        value: Value,
+        subjects: &SubjectCollection,
+    ) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self::Scalar(s)),
             Value::CharArray(array) => collect_replacement_char_array(array),
             Value::StringArray(array) => collect_replacement_string_array(array, subjects),
-            Value::Cell(cell) => collect_replacement_cell(cell, subjects),
-            other => Err(format!(
-                "regexprep: expected char vector, string array, or cell array for replacement, got {other:?}"
-            )),
+            Value::Cell(cell) => collect_replacement_cell(builtin, cell, subjects),
+            other => Err(runtime_error_for(format!(
+                "{builtin}: expected char vector, string array, or cell array for replacement, got {other:?}"
+            ))),
         }
     }
 }
 
-fn collect_replacement_char_array(array: CharArray) -> Result<ReplacementCollection, String> {
+fn collect_replacement_char_array(array: CharArray) -> BuiltinResult<ReplacementCollection> {
     if array.rows <= 1 {
         let text: String = array.data.into_iter().collect();
         return Ok(ReplacementCollection::Scalar(text));
@@ -571,7 +617,7 @@ fn collect_replacement_char_array(array: CharArray) -> Result<ReplacementCollect
 fn collect_replacement_string_array(
     array: StringArray,
     subjects: &SubjectCollection,
-) -> Result<ReplacementCollection, String> {
+) -> BuiltinResult<ReplacementCollection> {
     let rows = array.rows();
     let cols = array.cols();
     if rows == 1 && cols == 1 && !array.data.is_empty() {
@@ -584,16 +630,17 @@ fn collect_replacement_string_array(
 }
 
 fn collect_replacement_cell(
+    builtin: &'static str,
     cell: runmat_builtins::CellArray,
     subjects: &SubjectCollection,
-) -> Result<ReplacementCollection, String> {
+) -> BuiltinResult<ReplacementCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(with_builtin_context)?;
         let text = extract_string(&value).ok_or_else(|| {
-            format!(
-                "regexprep: replacement cell elements must be character vectors or string scalars, got {value:?}"
-            )
+            runtime_error_for(format!(
+                "{builtin}: replacement cell elements must be character vectors or string scalars, got {value:?}"
+            ))
         })?;
         entries.push(text);
     }
@@ -634,15 +681,20 @@ struct CompiledReplacement {
 }
 
 impl CompiledReplacement {
-    fn new(pattern: &str, replacement: &str, options: &RegexprepOptions) -> Result<Self, String> {
-        let regex = compile_regex(pattern, options)?;
+    fn new(
+        builtin: &'static str,
+        pattern: &str,
+        replacement: &str,
+        options: &RegexprepOptions,
+    ) -> BuiltinResult<Self> {
+        let regex = compile_regex(builtin, pattern, options)?;
         Ok(Self {
             regex,
             template: ReplacementTemplate::new(replacement),
         })
     }
 
-    fn with_template(regex: Arc<Regex>, template: ReplacementTemplate) -> Result<Self, String> {
+    fn with_template(regex: Arc<Regex>, template: ReplacementTemplate) -> BuiltinResult<Self> {
         Ok(Self { regex, template })
     }
 
@@ -651,7 +703,11 @@ impl CompiledReplacement {
     }
 }
 
-fn compile_regex(pattern: &str, options: &RegexprepOptions) -> Result<Arc<Regex>, String> {
+fn compile_regex(
+    builtin: &'static str,
+    pattern: &str,
+    options: &RegexprepOptions,
+) -> BuiltinResult<Arc<Regex>> {
     let mut builder = RegexBuilder::new(pattern);
     if options.case_insensitive {
         builder.case_insensitive(true);
@@ -665,29 +721,30 @@ fn compile_regex(pattern: &str, options: &RegexprepOptions) -> Result<Arc<Regex>
     builder
         .build()
         .map(Arc::new)
-        .map_err(|e| format!("regexprep: {e}"))
+        .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
 }
 
 fn build_plan(
+    builtin: &'static str,
     patterns: &PatternCollection,
     replacements: &ReplacementCollection,
     options: &RegexprepOptions,
     subjects: &SubjectCollection,
-) -> Result<Vec<Vec<CompiledReplacement>>, String> {
+) -> BuiltinResult<Vec<Vec<CompiledReplacement>>> {
     let subject_len = subjects.entries.len();
     match patterns {
         PatternCollection::Scalar(pattern) => match replacements {
             ReplacementCollection::Scalar(text) => {
-                let compiled = CompiledReplacement::new(pattern, text, options)?;
+                let compiled = CompiledReplacement::new(builtin, pattern, text, options)?;
                 Ok(vec![vec![compiled]; subject_len])
             }
             ReplacementCollection::Elementwise(values) => {
                 if values.len() != subject_len {
-                    return Err(
-                        "regexprep: replacement array must match the subject size".to_string()
-                    );
+                    return Err(runtime_error_for(format!(
+                        "{builtin}: replacement array must match the subject size"
+                    )));
                 }
-                let regex = compile_regex(pattern, options)?;
+                let regex = compile_regex(builtin, pattern, options)?;
                 let mut plan = Vec::with_capacity(subject_len);
                 for value in values {
                     let template = ReplacementTemplate::new(value);
@@ -700,12 +757,11 @@ fn build_plan(
             }
             ReplacementCollection::Sequence(values) => {
                 if values.len() != 1 {
-                    return Err(
-                        "regexprep: replacement sequence must match pattern sequence length"
-                            .to_string(),
-                    );
+                    return Err(runtime_error_for(format!(
+                        "{builtin}: replacement sequence must match pattern sequence length"
+                    )));
                 }
-                let compiled = CompiledReplacement::new(pattern, &values[0], options)?;
+                let compiled = CompiledReplacement::new(builtin, pattern, &values[0], options)?;
                 Ok(vec![vec![compiled]; subject_len])
             }
         },
@@ -717,46 +773,46 @@ fn build_plan(
                 ReplacementCollection::Scalar(text) => {
                     let mut seq = Vec::with_capacity(patterns_vec.len());
                     for pattern in patterns_vec {
-                        seq.push(CompiledReplacement::new(pattern, text, options)?);
+                        seq.push(CompiledReplacement::new(builtin, pattern, text, options)?);
                     }
                     seq
                 }
                 ReplacementCollection::Sequence(values) => {
                     if patterns_vec.len() != values.len() {
-                        return Err(
-                            "regexprep: pattern and replacement sequence lengths must match"
-                                .to_string(),
-                        );
+                        return Err(runtime_error_for(format!(
+                            "{builtin}: pattern and replacement sequence lengths must match"
+                        )));
                     }
                     let mut seq = Vec::with_capacity(patterns_vec.len());
                     for (pattern, value) in patterns_vec.iter().zip(values.iter()) {
-                        seq.push(CompiledReplacement::new(pattern, value, options)?);
+                        seq.push(CompiledReplacement::new(builtin, pattern, value, options)?);
                     }
                     seq
                 }
                 ReplacementCollection::Elementwise(_) => {
-                    return Err(
-                        "regexprep: element-wise replacements require element-wise patterns"
-                            .to_string(),
-                    );
+                    return Err(runtime_error_for(format!(
+                        "{builtin}: element-wise replacements require element-wise patterns"
+                    )));
                 }
             };
             Ok(vec![sequence.clone(); subject_len])
         }
         PatternCollection::Elementwise(values) => {
             if values.len() != subject_len {
-                return Err("regexprep: pattern array must match the subject size".to_string());
+                return Err(runtime_error_for(format!(
+                    "{builtin}: pattern array must match the subject size"
+                )));
             }
             match replacements {
                 ReplacementCollection::Elementwise(reps) => {
                     if reps.len() != subject_len {
-                        return Err(
-                            "regexprep: replacement array must match the subject size".to_string()
-                        );
+                        return Err(runtime_error_for(format!(
+                            "{builtin}: replacement array must match the subject size"
+                        )));
                     }
                     let mut plan = Vec::with_capacity(subject_len);
                     for (pattern, rep) in values.iter().zip(reps.iter()) {
-                        let compiled = CompiledReplacement::new(pattern, rep, options)?;
+                        let compiled = CompiledReplacement::new(builtin, pattern, rep, options)?;
                         plan.push(vec![compiled]);
                     }
                     Ok(plan)
@@ -764,15 +820,14 @@ fn build_plan(
                 ReplacementCollection::Scalar(rep) => {
                     let mut plan = Vec::with_capacity(subject_len);
                     for pattern in values {
-                        let compiled = CompiledReplacement::new(pattern, rep, options)?;
+                        let compiled = CompiledReplacement::new(builtin, pattern, rep, options)?;
                         plan.push(vec![compiled]);
                     }
                     Ok(plan)
                 }
-                ReplacementCollection::Sequence(_) => Err(
-                    "regexprep: replacement sequence is incompatible with element-wise patterns"
-                        .to_string(),
-                ),
+                ReplacementCollection::Sequence(_) => Err(runtime_error_for(format!(
+                    "{builtin}: replacement sequence is incompatible with element-wise patterns"
+                ))),
             }
         }
     }
@@ -811,34 +866,44 @@ fn replace_with_policy(
     output
 }
 
-fn reconstruct_output(subjects: &SubjectCollection, results: Vec<String>) -> Result<Value, String> {
+fn reconstruct_output(
+    builtin: &'static str,
+    subjects: &SubjectCollection,
+    results: Vec<String>,
+) -> BuiltinResult<Value> {
     match subjects.kind {
         InputKind::CharScalar => {
-            let array = strings_to_char_array(1, &results)?;
+            let array = strings_to_char_array(builtin, 1, &results)?;
             Ok(Value::CharArray(array))
         }
         InputKind::StringScalar => Ok(Value::String(
             results.into_iter().next().unwrap_or_default(),
         )),
         InputKind::CharMatrix { rows } => {
-            let array = strings_to_char_array(rows, &results)?;
+            let array = strings_to_char_array(builtin, rows, &results)?;
             Ok(Value::CharArray(array))
         }
         InputKind::StringArray { rows, cols } => {
             let array = StringArray::new(results, vec![rows, cols])
-                .map_err(|e| format!("regexprep: {e}"))?;
+                .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))?;
             Ok(Value::StringArray(array))
         }
         InputKind::CellArray { rows, cols } => {
             let values = results.into_iter().map(Value::String).collect();
             make_cell(values, rows, cols)
+                .map_err(|err| runtime_error_for(format!("{builtin}: {err}")))
         }
     }
 }
 
-fn strings_to_char_array(rows: usize, strings: &[String]) -> Result<CharArray, String> {
+fn strings_to_char_array(
+    builtin: &'static str,
+    rows: usize,
+    strings: &[String],
+) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| format!("regexprep: {e}"));
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|e| runtime_error_for(format!("{builtin}: {e}")));
     }
     let max_cols = strings
         .iter()
@@ -855,7 +920,8 @@ fn strings_to_char_array(rows: usize, strings: &[String]) -> Result<CharArray, S
         }
         data.extend(chars);
     }
-    CharArray::new(data, rows, max_cols).map_err(|e| format!("regexprep: {e}"))
+    CharArray::new(data, rows, max_cols)
+        .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
 }
 
 fn matlab_template_to_rust(raw: &str) -> String {
@@ -1199,9 +1265,13 @@ pub(crate) mod tests {
             vec![Value::String("unknownOption".into())],
         )
         .expect_err("expected error");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("expected regexprep error, got suspension"),
+        };
         assert!(
-            err.contains("unrecognised option"),
-            "unexpected error message: {err}"
+            message.contains("unrecognised option"),
+            "unexpected error message: {message}"
         );
     }
 
@@ -1281,9 +1351,13 @@ pub(crate) mod tests {
         );
         let err = regexprep_builtin(subject, patterns, replacements, Vec::new())
             .expect_err("expected error");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("expected regexprep error, got suspension"),
+        };
         assert!(
-            err.contains("replacement sequence is incompatible with element-wise patterns"),
-            "unexpected error message: {err}"
+            message.contains("replacement sequence is incompatible with element-wise patterns"),
+            "unexpected error message: {message}"
         );
     }
 

@@ -475,7 +475,7 @@ impl PlotSeriesInput {
         }
     }
 
-    fn into_tensors(self, name: &str) -> BuiltinResult<(Tensor, Tensor)> {
+    fn into_tensors(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
         let x = self.x.into_tensor(name)?;
         let y = self.y.into_tensor(name)?;
         Ok((x, y))

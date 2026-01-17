@@ -9,8 +9,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -188,6 +189,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results; not eligible for GPU fusion.",
 };
 
+#[allow(dead_code)]
+fn strcmpi_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("strcmpi").build().into()
+}
+
+fn remap_strcmpi_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, "strcmpi")
+}
+
 #[runtime_builtin(
     name = "strcmpi",
     category = "strings/core",
@@ -197,14 +207,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
 fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed(&a).map_err(|e| format!("strcmpi: {e}"))?;
-    let b = gather_if_needed(&b).map_err(|e| format!("strcmpi: {e}"))?;
+    let a = gather_if_needed(&a).map_err(remap_strcmpi_flow)?;
+    let b = gather_if_needed(&b).map_err(remap_strcmpi_flow)?;
     let left = TextCollection::from_argument("strcmpi", a, "first argument")?;
     let right = TextCollection::from_argument("strcmpi", b, "second argument")?;
-    (evaluate_strcmpi(&left, &right)).map_err(Into::into)
+    evaluate_strcmpi(&left, &right)
 }
 
-fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> Result<Value, String> {
+fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
     let shape = broadcast_shapes("strcmpi", &left.shape, &right.shape)?;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -237,7 +247,15 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> Result<Val
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -366,16 +384,19 @@ pub(crate) mod tests {
     fn strcmpi_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let right = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = strcmpi_builtin(Value::StringArray(left), Value::StringArray(right))
-            .expect_err("size mismatch");
+        let err = error_message(
+            strcmpi_builtin(Value::StringArray(left), Value::StringArray(right))
+                .expect_err("size mismatch"),
+        );
         assert!(err.contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_invalid_argument_type() {
-        let err =
-            strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type");
+        let err = error_message(
+            strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
+        );
         assert!(err.contains("first argument must be text"));
     }
 
@@ -383,8 +404,10 @@ pub(crate) mod tests {
     #[test]
     fn strcmpi_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
-        let err = strcmpi_builtin(Value::Cell(cell), Value::String("test".into()))
-            .expect_err("cell element type");
+        let err = error_message(
+            strcmpi_builtin(Value::Cell(cell), Value::String("test".into()))
+                .expect_err("cell element type"),
+        );
         assert!(err.contains("cell array elements must be character vectors or string scalars"));
     }
 

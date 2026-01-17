@@ -211,20 +211,18 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn jsondecode_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin("jsondecode")
-        .build()
-        .into()
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("jsondecode").build())
 }
 
 fn jsondecode_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => build_runtime_error(err.message().to_string())
-            .with_builtin("jsondecode")
-            .with_source(err)
-            .build()
-            .into(),
+        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
+            build_runtime_error(err.message().to_string())
+                .with_builtin("jsondecode")
+                .with_source(err)
+                .build(),
+        ),
     }
 }
 
@@ -251,22 +249,24 @@ fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&text).map_err(jsondecode_flow_with_context)?;
     let source = extract_text(gathered)?;
     let parsed: JsonValue = serde_json::from_str(&source).map_err(|err| {
-        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-            .with_builtin("jsondecode")
-            .with_source(err)
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
+                .with_builtin("jsondecode")
+                .with_source(err)
+                .build(),
+        )
     })?;
     value_from_json(&parsed)
 }
 
 pub(crate) fn decode_json_text(text: &str) -> BuiltinResult<Value> {
     let parsed: JsonValue = serde_json::from_str(text).map_err(|err| {
-        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-            .with_builtin("jsondecode")
-            .with_source(err)
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
+                .with_builtin("jsondecode")
+                .with_source(err)
+                .build(),
+        )
     })?;
     value_from_json(&parsed)
 }
@@ -380,12 +380,17 @@ fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
 }
 
 fn empty_double() -> BuiltinResult<Value> {
-    static EMPTY_DOUBLE: Lazy<BuiltinResult<Value>> = Lazy::new(|| {
+    static EMPTY_DOUBLE: Lazy<Option<Value>> = Lazy::new(|| {
         Tensor::new(Vec::new(), vec![0, 0])
             .map(Value::Tensor)
-            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))
+            .ok()
     });
-    EMPTY_DOUBLE.clone()
+    if let Some(value) = EMPTY_DOUBLE.as_ref() {
+        return Ok(value.clone());
+    }
+    Tensor::new(Vec::new(), vec![0, 0])
+        .map(Value::Tensor)
+        .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))
 }
 
 fn cell_matrix(elements: Vec<Value>, rows: usize, cols: usize) -> BuiltinResult<Value> {

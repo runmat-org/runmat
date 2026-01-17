@@ -243,7 +243,7 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let rows = cells.len();
     make_cell(cells, rows, 1).map_err(|err| {
-        build_runtime_error(err).with_builtin("who").build().into()
+        RuntimeControlFlow::Error(build_runtime_error(err).with_builtin("who").build())
     })
 }
 
@@ -268,21 +268,15 @@ enum NameSelector {
 }
 
 fn who_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("who").build().into()
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("who").build())
 }
 
 fn who_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|id| id.to_string());
-            let mut builder = build_runtime_error(err.message().to_string())
-                .with_builtin("who")
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
+        RuntimeControlFlow::Error(mut err) => {
+            err.context = err.context.with_builtin("who");
+            RuntimeControlFlow::Error(err)
         }
     }
 }
@@ -326,13 +320,14 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
                         }
                         for pattern in candidates {
                             let regex = Regex::new(&pattern).map_err(|err| {
-                                build_runtime_error(format!(
-                                    "who: invalid regular expression '{pattern}': {err}"
-                                ))
-                                .with_builtin("who")
-                                .with_source(err)
-                                .build()
-                                .into()
+                                RuntimeControlFlow::Error(
+                                    build_runtime_error(format!(
+                                        "who: invalid regular expression '{pattern}': {err}"
+                                    ))
+                                    .with_builtin("who")
+                                    .with_source(err)
+                                    .build(),
+                                )
                             })?;
                             regex_patterns.push(regex);
                         }
@@ -399,11 +394,12 @@ fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
     for name in names {
         if contains_wildcards(name) {
             let pattern = Pattern::new(name).map_err(|err| {
-                build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
-                    .with_builtin("who")
-                    .with_source(err)
-                    .build()
-                    .into()
+                RuntimeControlFlow::Error(
+                    build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
+                        .with_builtin("who")
+                        .with_source(err)
+                        .build(),
+                )
             })?;
             selectors.push(NameSelector::Wildcard(pattern));
         } else {

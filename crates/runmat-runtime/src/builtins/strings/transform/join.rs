@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -220,6 +221,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Joins operate on CPU-managed text and are ineligible for fusion.",
 };
 
+const BUILTIN_NAME: &str = "join";
 const INPUT_TYPE_ERROR: &str =
     "join: input must be a string array, string scalar, character array, or cell array of character vectors";
 const DELIMITER_TYPE_ERROR: &str =
@@ -227,6 +229,17 @@ const DELIMITER_TYPE_ERROR: &str =
 const DELIMITER_SIZE_ERROR: &str =
     "join: size of delimiter array must match the size of str, with the join dimension reduced by one";
 const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer scalar";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[runtime_builtin(
     name = "join",
@@ -236,11 +249,11 @@ const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer s
     accel = "none",
     builtin_path = "crate::builtins::strings::transform::join"
 )]
-fn join_builtin(text: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(|e| format!("join: {e}"))?;
+fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let text = gather_if_needed(&text).map_err(map_flow)?;
     let mut args = Vec::with_capacity(rest.len());
     for arg in rest {
-        args.push(gather_if_needed(&arg).map_err(|e| format!("join: {e}"))?);
+        args.push(gather_if_needed(&arg).map_err(map_flow)?);
     }
 
     let mut input = JoinInput::from_value(text)?;
@@ -258,27 +271,26 @@ fn join_builtin(text: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     };
 
     if dimension == 0 {
-        return Err(((DIMENSION_TYPE_ERROR.to_string())).into());
+        return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
     }
 
     let ndims = input.ndims();
     if dimension > ndims {
-        return (input.into_value()).map_err(Into::into);
+        return input.into_value();
     }
 
     let axis_idx = dimension - 1;
     input.ensure_shape_len(dimension);
     let full_shape = input.shape.clone();
 
-    let delimiter = Delimiter::from_value(delimiter_arg, &full_shape, axis_idx)
-        .map_err(|e| format!("join: {e}"))?;
+    let delimiter = Delimiter::from_value(delimiter_arg, &full_shape, axis_idx)?;
 
     let (output_data, output_shape) = perform_join(&input.data, &full_shape, axis_idx, &delimiter);
 
-    input.build_output(output_data, output_shape).map_err(Into::into)
+    input.build_output(output_data, output_shape)
 }
 
-fn parse_arguments(args: &[Value]) -> Result<(Option<Value>, Option<usize>), String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<Value>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
@@ -294,10 +306,10 @@ fn parse_arguments(args: &[Value]) -> Result<(Option<Value>, Option<usize>), Str
             } else if let Some(dim) = value_to_dimension(&args[0])? {
                 Ok((Some(args[1].clone()), Some(dim)))
             } else {
-                Err(DIMENSION_TYPE_ERROR.to_string())
+                Err(runtime_error_for(DIMENSION_TYPE_ERROR))
             }
         }
-        _ => Err("join: too many input arguments".to_string()),
+        _ => Err(runtime_error_for("join: too many input arguments")),
     }
 }
 
@@ -310,33 +322,33 @@ fn default_dimension(shape: &[usize]) -> usize {
     2
 }
 
-fn value_to_dimension(value: &Value) -> Result<Option<usize>, String> {
+fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
             let v = i.to_i64();
             if v <= 0 {
-                return Err(DIMENSION_TYPE_ERROR.to_string());
+                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
             }
             Ok(Some(v as usize))
         }
         Value::Num(n) => {
             if !n.is_finite() || *n <= 0.0 {
-                return Err(DIMENSION_TYPE_ERROR.to_string());
+                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(DIMENSION_TYPE_ERROR.to_string());
+                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
             }
             Ok(Some(rounded as usize))
         }
         Value::Tensor(t) if t.data.len() == 1 => {
             let val = t.data[0];
             if !val.is_finite() || val <= 0.0 {
-                return Err(DIMENSION_TYPE_ERROR.to_string());
+                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
             }
             let rounded = val.round();
             if (rounded - val).abs() > f64::EPSILON {
-                return Err(DIMENSION_TYPE_ERROR.to_string());
+                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
             }
             Ok(Some(rounded as usize))
         }
@@ -358,7 +370,7 @@ enum OutputKind {
 }
 
 impl JoinInput {
-    fn from_value(value: Value) -> Result<Self, String> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(text) => Ok(Self {
                 data: vec![text],
@@ -386,7 +398,7 @@ impl JoinInput {
                     kind: OutputKind::CellArray,
                 })
             }
-            _ => Err(INPUT_TYPE_ERROR.to_string()),
+            _ => Err(runtime_error_for(INPUT_TYPE_ERROR)),
         }
     }
 
@@ -404,27 +416,28 @@ impl JoinInput {
         }
     }
 
-    fn into_value(self) -> Result<Value, String> {
+    fn into_value(self) -> BuiltinResult<Value> {
         build_value(self.kind, self.data, self.shape)
     }
 
-    fn build_output(&self, data: Vec<String>, shape: Vec<usize>) -> Result<Value, String> {
+    fn build_output(&self, data: Vec<String>, shape: Vec<usize>) -> BuiltinResult<Value> {
         build_value(self.kind.clone(), data, shape)
     }
 }
 
-fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Result<Value, String> {
+fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> BuiltinResult<Value> {
     match kind {
         OutputKind::StringScalar => Ok(Value::String(data.into_iter().next().unwrap_or_default())),
         OutputKind::StringArray => {
-            let array = StringArray::new(data, shape).map_err(|e| format!("join: {e}"))?;
+            let array = StringArray::new(data, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
             Ok(Value::StringArray(array))
         }
         OutputKind::CellArray => {
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(1);
             if rows == 0 || cols == 0 || data.is_empty() {
-                return make_cell(Vec::new(), rows, cols);
+                return make_cell(Vec::new(), rows, cols)
+                    .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")));
             }
             let mut values = Vec::with_capacity(rows * cols);
             for row in 0..rows {
@@ -434,11 +447,11 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Result
                     let chars: Vec<char> = text.chars().collect();
                     let cols_count = chars.len();
                     let char_array =
-                        CharArray::new(chars, 1, cols_count).map_err(|e| format!("join: {e}"))?;
+                        CharArray::new(chars, 1, cols_count).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
                     values.push(Value::CharArray(char_array));
                 }
             }
-            make_cell(values, rows, cols).map_err(|e| format!("join: {e}"))
+            make_cell(values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
         }
     }
 }
@@ -451,7 +464,7 @@ fn char_array_rows_to_strings(array: &CharArray) -> Vec<String> {
     strings
 }
 
-fn cell_array_to_strings(cell: CellArray) -> Result<(Vec<String>, Vec<usize>), String> {
+fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -460,7 +473,7 @@ fn cell_array_to_strings(cell: CellArray) -> Result<(Vec<String>, Vec<usize>), S
         for row in 0..rows {
             let idx = row * cols + col;
             strings.push(
-                cell_element_to_string(&data[idx]).ok_or_else(|| INPUT_TYPE_ERROR.to_string())?,
+                cell_element_to_string(&data[idx]).ok_or_else(|| runtime_error_for(INPUT_TYPE_ERROR))?,
             );
         }
     }
@@ -500,7 +513,7 @@ impl Delimiter {
         value: Option<Value>,
         full_shape: &[usize],
         axis_idx: usize,
-    ) -> Result<Self, String> {
+    ) -> BuiltinResult<Self> {
         match value {
             None => Ok(Self::Scalar(" ".to_string())),
             Some(v) => {
@@ -561,7 +574,7 @@ fn value_to_scalar_string(value: &Value) -> Option<String> {
     }
 }
 
-fn value_to_string_array(value: Value) -> Result<(Vec<String>, Vec<usize>), String> {
+fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
     match value {
         Value::StringArray(array) => Ok((array.data, array.shape)),
         Value::Cell(cell) => {
@@ -573,7 +586,7 @@ fn value_to_string_array(value: Value) -> Result<(Vec<String>, Vec<usize>), Stri
             let strings = char_array_rows_to_strings(&array);
             Ok((strings, vec![rows, 1]))
         }
-        _ => Err(DELIMITER_TYPE_ERROR.to_string()),
+        _ => Err(runtime_error_for(DELIMITER_TYPE_ERROR)),
     }
 }
 
@@ -581,9 +594,9 @@ fn normalize_delimiter_shape(
     mut shape: Vec<usize>,
     full_shape: &[usize],
     axis_idx: usize,
-) -> Result<Vec<usize>, String> {
+) -> BuiltinResult<Vec<usize>> {
     if shape.len() > full_shape.len() {
-        return Err(DELIMITER_SIZE_ERROR.to_string());
+        return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
     }
     if shape.len() < full_shape.len() {
         shape.resize(full_shape.len(), 1);
@@ -593,7 +606,7 @@ fn normalize_delimiter_shape(
     if axis_len == 0 {
         shape[axis_idx] = 1;
     } else if shape[axis_idx] != axis_len {
-        return Err(DELIMITER_SIZE_ERROR.to_string());
+        return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
     }
 
     for (dim, size) in shape.iter().enumerate() {
@@ -602,7 +615,7 @@ fn normalize_delimiter_shape(
         }
         let reference = full_shape[dim];
         if *size != reference && *size != 1 {
-            return Err(DELIMITER_SIZE_ERROR.to_string());
+            return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
         }
     }
 
@@ -1018,9 +1031,10 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(0))],
         )
         .unwrap_err();
+        let err_text = err.to_string();
         assert!(
-            err.contains("dimension"),
-            "expected dimension error, got {err}"
+            err_text.contains("dimension"),
+            "expected dimension error, got {err_text}"
         );
     }
 

@@ -233,7 +233,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+    RuntimeControlFlow::from(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
@@ -293,7 +297,7 @@ fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             },
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(runtime_error_for)?;
+    let tensor = gpu_helpers::gather_tensor(&handle)?;
     atanh_tensor_real(tensor)
 }
 

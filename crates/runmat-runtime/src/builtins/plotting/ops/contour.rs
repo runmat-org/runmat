@@ -419,7 +419,12 @@ impl ContourCall {
             }
         }
 
-        let grid = tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len())?;
+        let grid = tensor_to_surface_grid(
+            z_input.into_tensor(name)?,
+            x_axis.len(),
+            y_axis.len(),
+            name,
+        )?;
         if let ContourLineColor::None = line_color {
             return Ok(());
         }

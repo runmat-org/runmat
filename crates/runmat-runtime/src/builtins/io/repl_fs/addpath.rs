@@ -205,23 +205,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "addpath";
 
 fn addpath_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()
+    RuntimeControlFlow::Error(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
+            let identifier = err.identifier().map(str::to_string);
             let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
-            builder.build().into()
+            RuntimeControlFlow::Error(builder.build())
         }
     }
 }

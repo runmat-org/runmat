@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -234,8 +234,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`ismember` materialises logical outputs and terminates fusion chains; upstream tensors are gathered when necessary.",
 };
 
-fn ismember_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("ismember").build()
+fn ismember_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("ismember")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -288,7 +291,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IsMemberOptions> {
             "legacy" | "r2012a" => {
                 return Err(ismember_error("ismember: the 'legacy' behaviour is not supported"))
             }
-            other => return Err(ismember_error(format!("ismember: unrecognised option '{other}'")).into()),
+            other => return Err(ismember_error(format!("ismember: unrecognised option '{other}'"))),
         }
     }
     Ok(opts)
@@ -332,19 +335,19 @@ fn ismember_host(a: Value, b: Value, opts: &IsMemberOptions) -> crate::BuiltinRe
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => ismember_complex(at, bt, opts.rows),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
             let bt = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+                .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_complex(at, bt, opts.rows)
         }
         (Value::Complex(a_re, a_im), Value::ComplexTensor(bt)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+                .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_complex(at, bt, opts.rows)
         }
         (Value::Complex(a_re, a_im), Value::Complex(b_re, b_im)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+                .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             let bt = ComplexTensor::new(vec![(b_re, b_im)], vec![1, 1])
-                .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+                .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_complex(at, bt, opts.rows)
         }
 
@@ -356,22 +359,22 @@ fn ismember_host(a: Value, b: Value, opts: &IsMemberOptions) -> crate::BuiltinRe
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring =
                 StringArray::new(vec![b], vec![1, 1])
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring =
                 StringArray::new(vec![a], vec![1, 1])
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::String(b)) => {
             let astring =
                 StringArray::new(vec![a], vec![1, 1])
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             let bstring =
                 StringArray::new(vec![b], vec![1, 1])
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
 
@@ -380,7 +383,7 @@ fn ismember_host(a: Value, b: Value, opts: &IsMemberOptions) -> crate::BuiltinRe
                 .map_err(|e| ismember_error(e))?;
             let tensor_b = tensor::value_into_tensor_for("ismember", right)
                 .map_err(|e| ismember_error(e))?;
-            ismember_numeric(tensor_a, tensor_b, opts)
+            ismember_numeric_tensors(tensor_a, tensor_b, opts)
         }
 
     }
@@ -429,10 +432,10 @@ fn ismember_numeric_elements(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMem
     }
 
     let logical = LogicalArray::new(mask_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor =
         Tensor::new(loc_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -474,9 +477,9 @@ fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberE
 
     let shape = vec![rows_a, 1];
     let logical = LogicalArray::new(mask_data, shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor = Tensor::new(loc_data, shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -516,10 +519,10 @@ fn ismember_complex_elements(
     }
 
     let logical = LogicalArray::new(mask_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor =
         Tensor::new(loc_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -560,9 +563,9 @@ fn ismember_complex_rows(a: ComplexTensor, b: ComplexTensor) -> crate::BuiltinRe
 
     let shape = vec![rows_a, 1];
     let logical = LogicalArray::new(mask_data, shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor = Tensor::new(loc_data, shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -607,9 +610,9 @@ fn ismember_char_elements(a: CharArray, b: CharArray) -> crate::BuiltinResult<Is
 
     let shape = vec![rows_a, cols_a];
     let logical = LogicalArray::new(mask_data, shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor = Tensor::new(loc_data, shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -654,9 +657,9 @@ fn ismember_char_rows(a: CharArray, b: CharArray) -> crate::BuiltinResult<IsMemb
 
     let shape = vec![rows_a, 1];
     let logical = LogicalArray::new(mask_data, shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor = Tensor::new(loc_data, shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -692,10 +695,10 @@ fn ismember_string_elements(a: StringArray, b: StringArray) -> crate::BuiltinRes
     }
 
     let logical = LogicalArray::new(mask_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor =
         Tensor::new(loc_data, a.shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -743,9 +746,9 @@ fn ismember_string_rows(a: StringArray, b: StringArray) -> crate::BuiltinResult<
 
     let shape = vec![rows_a, 1];
     let logical = LogicalArray::new(mask_data, shape.clone())
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     let loc_tensor = Tensor::new(loc_data, shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
@@ -829,10 +832,10 @@ impl IsMemberEvaluation {
 
     pub fn from_provider_result(result: IsMemberResult) -> crate::BuiltinResult<Self> {
         let mask = LogicalArray::new(result.mask.data, result.mask.shape)
-            .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+            .map_err(|e| ismember_error(format!("ismember: {e}")))?;
         let loc =
             Tensor::new(result.loc.data, result.loc.shape)
-        .map_err(|e| ismember_error(format!("ismember: {e}")).into())?;
+        .map_err(|e| ismember_error(format!("ismember: {e}")))?;
         Ok(IsMemberEvaluation::new(mask, loc))
     }
 

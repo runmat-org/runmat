@@ -255,6 +255,14 @@ fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) 
         .build()
 }
 
+fn arrayfun_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    RuntimeControlFlow::Error(arrayfun_error(message))
+}
+
+fn arrayfun_flow_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeControlFlow {
+    RuntimeControlFlow::Error(arrayfun_error_with_source(message, source))
+}
+
 fn format_handler_error(err: &RuntimeError) -> String {
     if let Some(identifier) = err.identifier() {
         if err.message().is_empty() {
@@ -293,16 +301,15 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             "uniformoutput" => uniform_output = parse_uniform_output(value)?,
             "errorhandler" => error_handler = Some(Callable::from_function(value)?),
             other => {
-                return Err(arrayfun_error(format!(
+                return Err(arrayfun_flow(format!(
                     "arrayfun: unknown name-value argument '{other}'"
-                ))
-                .into())
+                )))
             }
         }
     }
 
     if rest.is_empty() {
-        return Err(arrayfun_error("arrayfun: expected at least one input array"));
+        return Err(arrayfun_flow("arrayfun: expected at least one input array"));
     }
 
     let inputs_snapshot = rest.clone();
@@ -331,13 +338,12 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
 
     for (idx, raw) in rest.into_iter().enumerate() {
         if matches!(raw, Value::Cell(_)) {
-            return Err(
-                arrayfun_error("arrayfun: cell inputs are not supported (use cellfun instead)")
-                    .into(),
-            );
+            return Err(arrayfun_flow(
+                "arrayfun: cell inputs are not supported (use cellfun instead)",
+            ));
         }
         if matches!(raw, Value::Struct(_)) {
-            return Err(arrayfun_error("arrayfun: struct inputs are not supported"));
+            return Err(arrayfun_flow("arrayfun: struct inputs are not supported"));
         }
 
         let host_value =
@@ -353,11 +359,10 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
                 if len > 1 {
                     let shape = input.shape_vec();
                     if shape != base_shape {
-                        return Err(arrayfun_error(format!(
+                        return Err(arrayfun_flow(format!(
                             "arrayfun: input {} does not match the size of the first array",
                             idx + 1
-                        ))
-                        .into());
+                        )));
                     }
                 }
             } else if len == 1 {
@@ -369,39 +374,35 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
                     let prior_len = prior.len();
                     if prior_len == len {
                         if prior.shape_vec() != base_shape {
-                            return Err(arrayfun_error(format!(
+                            return Err(arrayfun_flow(format!(
                                 "arrayfun: input {} does not match the size of the first array",
                                 idx
-                            ))
-                            .into());
+                            )));
                         }
                     } else if prior_len == 1 {
                         prior.is_scalar = true;
                     } else if prior_len == 0 && len == 0 {
                         continue;
                     } else {
-                        return Err(arrayfun_error(format!(
+                        return Err(arrayfun_flow(format!(
                             "arrayfun: input {} does not match the size of the first array",
                             idx
-                        ))
-                        .into());
+                        )));
                     }
                 }
             } else if len == 0 && current == 0 {
                 let shape = input.shape_vec();
                 if shape != base_shape {
-                    return Err(arrayfun_error(format!(
+                    return Err(arrayfun_flow(format!(
                         "arrayfun: input {} does not match the size of the first array",
                         idx + 1
-                    ))
-                    .into());
+                    )));
                 }
             } else {
-                return Err(arrayfun_error(format!(
+                return Err(arrayfun_flow(format!(
                     "arrayfun: input {} does not match the size of the first array",
                     idx + 1
-                ))
-                .into());
+                )));
             }
         } else {
             base_len = Some(len);
@@ -418,7 +419,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
             return Ok(empty_uniform(&base_shape));
         } else {
             return make_cell_with_shape(Vec::new(), base_shape)
-                .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into());
+                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")));
         }
     }
 
@@ -446,13 +447,10 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
                 let handler = match error_handler.as_ref() {
                     Some(handler) => handler,
                     None => {
-                        return Err(
-                            arrayfun_error_with_source(
-                                format!("arrayfun: {}", err.message()),
-                                err,
-                            )
-                            .into(),
-                        )
+                        return Err(arrayfun_flow_with_source(
+                            format!("arrayfun: {}", err.message()),
+                            err,
+                        ))
                     }
                 };
                 let err_message = format_handler_error(&err);
@@ -479,7 +477,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
         maybe_upload_uniform(uniform, has_gpu_input, gpu_device_id)
     } else {
         make_cell_with_shape(cell_outputs, base_shape)
-            .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())
+            .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
     }
 }
 
@@ -513,7 +511,7 @@ fn maybe_upload_uniform(
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::LogicalArray(logical) => {
@@ -523,14 +521,14 @@ fn maybe_upload_uniform(
                 .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
                 .collect();
             let tensor = Tensor::new(data, logical.shape.clone())
-                .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
             set_handle_logical(&handle, true);
             Ok(Value::GpuTensor(handle))
         }
@@ -554,17 +552,16 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
         Value::String(s) => parse_bool_string(&s)
-            .ok_or_else(|| arrayfun_error("arrayfun: UniformOutput must be logical true or false")),
+            .ok_or_else(|| arrayfun_flow("arrayfun: UniformOutput must be logical true or false")),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
             parse_bool_string(&text).ok_or_else(|| {
-                arrayfun_error("arrayfun: UniformOutput must be logical true or false")
+                arrayfun_flow("arrayfun: UniformOutput must be logical true or false")
             })
         }
-        other => Err(arrayfun_error(format!(
+        other => Err(arrayfun_flow(format!(
             "arrayfun: UniformOutput must be logical true or false, got {other:?}"
-        ))
-        .into()),
+        ))),
     }
 }
 
@@ -626,10 +623,9 @@ impl ArrayData {
             Value::Num(_) | Value::Bool(_) | Value::Int(_) | Value::Complex(_, _) => {
                 Ok(ArrayData::Scalar(value))
             }
-            other => Err(arrayfun_error(format!(
+            other => Err(arrayfun_flow(format!(
                 "arrayfun: unsupported input type {other:?} (expected numeric, logical, complex, or char arrays)"
-            ))
-            .into()),
+            ))),
         }
     }
 
@@ -674,26 +670,26 @@ impl ArrayData {
     fn value_at(&self, idx: usize) -> BuiltinResult<Value> {
         match self {
             ArrayData::Tensor(t) => Ok(Value::Num(*t.data.get(idx).ok_or_else(|| {
-                arrayfun_error("arrayfun: index out of bounds")
+                arrayfun_flow("arrayfun: index out of bounds")
             })?)),
             ArrayData::Logical(l) => Ok(Value::Bool(
                 *l.data
                     .get(idx)
-                    .ok_or_else(|| arrayfun_error("arrayfun: index out of bounds"))?
+                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?
                     != 0,
             )),
             ArrayData::Complex(c) => {
                 let (re, im) = c
                     .data
                     .get(idx)
-                    .ok_or_else(|| arrayfun_error("arrayfun: index out of bounds"))?;
+                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?;
                 Ok(Value::Complex(*re, *im))
             }
             ArrayData::Char(ca) => {
                 if ca.rows == 0 || ca.cols == 0 {
                     return Ok(Value::CharArray(
                         CharArray::new(Vec::new(), 0, 0)
-                            .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?,
+                            .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?,
                     ));
                 }
                 let rows = ca.rows;
@@ -704,9 +700,9 @@ impl ArrayData {
                 let ch = *ca
                     .data
                     .get(data_idx)
-                    .ok_or_else(|| arrayfun_error("arrayfun: index out of bounds"))?;
+                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?;
                 let char_array = CharArray::new(vec![ch], 1, 1)
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(char_array))
             }
             ArrayData::Scalar(v) => Ok(v.clone()),
@@ -726,10 +722,9 @@ impl Callable {
             Value::String(text) => Self::from_text(&text),
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
-                    Err(arrayfun_error(
+                    Err(arrayfun_flow(
                         "arrayfun: function name must be a character vector or string scalar",
-                    )
-                    .into())
+                    ))
                 } else {
                     let text: String = ca.data.iter().collect();
                     Self::from_text(&text)
@@ -738,29 +733,26 @@ impl Callable {
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
             Value::FunctionHandle(name) => Ok(Callable::Builtin { name }),
             Value::Closure(closure) => Ok(Callable::Closure(closure)),
-            Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_error(
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, not a scalar value",
-            )
-            .into()),
-            other => Err(arrayfun_error(format!(
+            )),
+            other => Err(arrayfun_flow(format!(
                 "arrayfun: expected function handle or builtin name, got {other:?}"
-            ))
-            .into()),
+            ))),
         }
     }
 
     fn from_text(text: &str) -> BuiltinResult<Self> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err(arrayfun_error(
+            return Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, got empty string",
-            )
-            .into());
+            ));
         }
         if let Some(rest) = trimmed.strip_prefix('@') {
             let name = rest.trim();
             if name.is_empty() {
-                Err(arrayfun_error("arrayfun: empty function handle"))
+                Err(arrayfun_flow("arrayfun: empty function handle"))
             } else {
                 Ok(Callable::Builtin {
                     name: name.to_string(),
@@ -1001,22 +993,22 @@ impl UniformCollector {
             UniformCollector::Pending => {
                 let total = shape.iter().product();
                 let tensor = Tensor::new(vec![0.0; total], shape.to_vec())
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
                 let tensor = Tensor::new(data, shape.to_vec())
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
                 let logical = LogicalArray::new(bits, shape.to_vec())
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(entries) => {
                 let tensor = ComplexTensor::new(entries, shape.to_vec())
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::ComplexTensor(tensor))
             }
             UniformCollector::Char(chars) => {
@@ -1027,23 +1019,21 @@ impl UniformCollector {
                 };
 
                 if normalized_shape.len() > 2 {
-                    return Err(arrayfun_error(
+                    return Err(arrayfun_flow(
                         "arrayfun: character outputs with UniformOutput=true must be 2-D",
-                    )
-                    .into());
+                    ));
                 }
 
                 let rows = normalized_shape.first().copied().unwrap_or(1);
                 let cols = normalized_shape.get(1).copied().unwrap_or(1);
                 let expected = rows.checked_mul(cols).ok_or_else(|| {
-                    arrayfun_error("arrayfun: character output size exceeds platform limits")
+                    arrayfun_flow("arrayfun: character output size exceeds platform limits")
                 })?;
 
                 if expected != chars.len() {
-                    return Err(
-                        arrayfun_error("arrayfun: callback returned the wrong number of characters")
-                            .into(),
-                    );
+                    return Err(arrayfun_flow(
+                        "arrayfun: callback returned the wrong number of characters",
+                    ));
                 }
 
                 let mut row_major = vec!['\0'; expected];
@@ -1056,7 +1046,7 @@ impl UniformCollector {
                 }
 
                 let array = CharArray::new(row_major, rows, cols)
-                    .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())?;
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(array))
             }
         }
@@ -1083,10 +1073,9 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             let ch = ca.data.first().copied().unwrap_or('\0');
             Ok(ClassifiedValue::Char(ch))
         }
-        other => Err(arrayfun_error(format!(
+        other => Err(arrayfun_flow(format!(
             "arrayfun: callback must return scalar numeric, logical, character, or complex values for UniformOutput=true (got {other:?})"
-        ))
-        .into()),
+        ))),
     }
 }
 
@@ -1160,7 +1149,7 @@ fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
 fn dims_to_row_tensor(dims: &[usize]) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = dims.iter().map(|&d| d as f64).collect();
     Tensor::new(data, vec![1, dims.len()])
-        .map_err(|e| arrayfun_error(format!("arrayfun: {e}")).into())
+        .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
 }
 
 #[cfg(test)]

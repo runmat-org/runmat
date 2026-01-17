@@ -11,7 +11,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -236,6 +237,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting is a residency sink and is not fused; callers should treat sprintf as a CPU-only builtin.",
 };
 
+fn sprintf_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("sprintf").build().into()
+}
+
+fn remap_sprintf_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, "sprintf")
+}
+
 #[runtime_builtin(
     name = "sprintf",
     category = "strings/core",
@@ -246,23 +255,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;
-    let raw_format = extract_format_string(&gathered_spec, "sprintf")?;
-    let format_string = decode_escape_sequences("sprintf", &raw_format)?;
-    let flattened_args = flatten_arguments(&rest, "sprintf")?;
+    let gathered_spec = gather_if_needed(&format_spec).map_err(remap_sprintf_flow)?;
+    let raw_format = extract_format_string(&gathered_spec, "sprintf").map_err(remap_sprintf_flow)?;
+    let format_string = decode_escape_sequences("sprintf", &raw_format).map_err(remap_sprintf_flow)?;
+    let flattened_args = flatten_arguments(&rest, "sprintf").map_err(remap_sprintf_flow)?;
     let mut cursor = ArgCursor::new(&flattened_args);
     let mut output = String::new();
 
     loop {
-        let step = format_variadic_with_cursor(&format_string, &mut cursor)?;
+        let step =
+            format_variadic_with_cursor(&format_string, &mut cursor).map_err(remap_sprintf_flow)?;
         output.push_str(&step.output);
 
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
-                return Err(
-                    (("sprintf: formatSpec contains no conversion specifiers but additional arguments were supplied"
-                        .to_string())).into(),
-                );
+                return Err(sprintf_flow(
+                    "sprintf: formatSpec contains no conversion specifiers but additional arguments were supplied",
+                ));
             }
             break;
         }
@@ -272,21 +281,29 @@ fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult
         }
     }
 
-    char_row_value(&output).map_err(Into::into)
+    char_row_value(&output)
 }
 
-fn char_row_value(text: &str) -> Result<Value, String> {
+fn char_row_value(text: &str) -> BuiltinResult<Value> {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
-    let array = CharArray::new(chars, 1, len).map_err(|e| format!("sprintf: {e}"))?;
+    let array =
+        CharArray::new(chars, 1, len).map_err(|e| sprintf_flow(format!("sprintf: {e}")))?;
     Ok(Value::CharArray(array))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{builtins::common::test_support, make_cell};
+    use crate::{builtins::common::test_support, make_cell, RuntimeControlFlow};
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     fn char_value_to_string(value: Value) -> String {
         match value {
@@ -381,11 +398,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_not_enough_arguments_error() {
-        let err = sprintf_builtin(
-            Value::String("%d %d".to_string()),
-            vec![Value::Int(IntValue::I32(1))],
-        )
-        .expect_err("sprintf should error");
+        let err = error_message(
+            sprintf_builtin(
+                Value::String("%d %d".to_string()),
+                vec![Value::Int(IntValue::I32(1))],
+            )
+            .expect_err("sprintf should error"),
+        );
         assert!(
             err.contains("not enough input arguments"),
             "unexpected error: {err}"
@@ -395,11 +414,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_extra_arguments_error() {
-        let err = sprintf_builtin(
-            Value::String("literal text".to_string()),
-            vec![Value::Int(IntValue::I32(1))],
-        )
-        .expect_err("sprintf should error");
+        let err = error_message(
+            sprintf_builtin(
+                Value::String("literal text".to_string()),
+                vec![Value::Int(IntValue::I32(1))],
+            )
+            .expect_err("sprintf should error"),
+        );
         assert!(
             err.contains("contains no conversion specifiers"),
             "unexpected error: {err}"
@@ -410,7 +431,9 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_format_spec_multirow_error() {
         let chars = CharArray::new("hi!".chars().collect(), 3, 1).unwrap();
-        let err = sprintf_builtin(Value::CharArray(chars), Vec::new()).expect_err("sprintf");
+        let err = error_message(
+            sprintf_builtin(Value::CharArray(chars), Vec::new()).expect_err("sprintf"),
+        );
         assert!(
             err.contains("formatSpec must be a character row vector"),
             "unexpected error: {err}"

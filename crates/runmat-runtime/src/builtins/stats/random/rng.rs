@@ -258,14 +258,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
-        let current = random::snapshot().map_err(builtin_error)?;
+        let current = random::snapshot()?;
         return snapshot_to_value(current);
     }
 
-    let previous = random::snapshot().map_err(builtin_error)?;
+    let previous = random::snapshot()?;
     let command = parse_command(&args)?;
     apply_command(command)?;
-    let current = random::snapshot().map_err(builtin_error)?;
+    let current = random::snapshot()?;
     sync_provider_state(current.state);
     snapshot_to_value(previous)
 }

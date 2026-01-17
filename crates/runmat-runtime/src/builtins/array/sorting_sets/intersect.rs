@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -226,8 +226,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`intersect` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered when necessary.",
 };
 
-fn intersect_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("intersect").build()
+fn intersect_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("intersect")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -302,7 +305,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
             "legacy" | "r2012a" => {
                 return Err(intersect_error("intersect: the 'legacy' behaviour is not supported"));
             }
-            other => return Err(intersect_error(format!("intersect: unrecognised option '{other}'")).into()),
+            other => return Err(intersect_error(format!("intersect: unrecognised option '{other}'"))),
         }
     }
 
@@ -381,19 +384,19 @@ fn intersect_host(
         }
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+                StringArray::new(vec![b], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+                StringArray::new(vec![a], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
             let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+                StringArray::new(vec![a], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
             let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+                StringArray::new(vec![b], vec![1, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
 
@@ -959,9 +962,9 @@ fn assemble_numeric_intersect(
     }
 
     let value_tensor =
-        Tensor::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        Tensor::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1003,9 +1006,9 @@ fn assemble_numeric_row_intersect(
     }
 
     let value_tensor =
-        Tensor::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        Tensor::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1039,9 +1042,9 @@ fn assemble_complex_intersect(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1083,9 +1086,9 @@ fn assemble_complex_row_intersect(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        ComplexTensor::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1121,9 +1124,9 @@ fn assemble_char_intersect(
     }
 
     let value_array =
-        CharArray::new(values, order.len(), 1).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        CharArray::new(values, order.len(), 1).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::CharArray(value_array),
@@ -1165,9 +1168,9 @@ fn assemble_char_row_intersect(
     }
 
     let value_array =
-        CharArray::new(values, rows_out, cols).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        CharArray::new(values, rows_out, cols).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::CharArray(value_array),
@@ -1201,9 +1204,9 @@ fn assemble_string_intersect(
     }
 
     let value_array =
-        StringArray::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        StringArray::new(values, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![order.len(), 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::StringArray(value_array),
@@ -1245,9 +1248,9 @@ fn assemble_string_row_intersect(
     }
 
     let value_array =
-        StringArray::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")).into())?;
+        StringArray::new(values, vec![rows_out, cols]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![rows_out, 1]).map_err(|e| intersect_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::StringArray(value_array),
@@ -1300,14 +1303,14 @@ impl RowStringKey {
 
 fn scalar_complex_tensor(re: f64, im: f64) -> crate::BuiltinResult<ComplexTensor> {
     ComplexTensor::new(vec![(re, im)], vec![1, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")).into())
+        .map_err(|e| intersect_error(format!("intersect: {e}")))
 }
 
 fn tensor_to_complex_owned(name: &str, tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let Tensor { data, shape, .. } = tensor;
     let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
     ComplexTensor::new(complex, shape)
-        .map_err(|e| intersect_error(format!("{name}: {e}")).into())
+        .map_err(|e| intersect_error(format!("{name}: {e}")))
 }
 
 fn value_into_complex_tensor(value: Value) -> crate::BuiltinResult<ComplexTensor> {

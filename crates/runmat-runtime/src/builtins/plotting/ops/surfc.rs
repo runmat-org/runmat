@@ -27,6 +27,7 @@ use crate::RuntimeControlFlow;
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "surfc";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "surfc"
 category: "plotting"
@@ -139,7 +140,12 @@ pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate:
             }
         }
 
-        let grid = tensor_to_surface_grid(z_arg.into_tensor("surfc")?, x_vec.len(), y_vec.len())?;
+        let grid = tensor_to_surface_grid(
+            z_arg.into_tensor(BUILTIN_NAME)?,
+            x_vec.len(),
+            y_vec.len(),
+            BUILTIN_NAME,
+        )?;
         let mut surface = build_surface(x_vec.clone(), y_vec.clone(), grid.clone())?;
         style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;

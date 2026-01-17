@@ -5,9 +5,15 @@
 
 use runmat_builtins::{Tensor, Value};
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
+fn concat_error(message: impl Into<String>) -> RuntimeControlFlow {
+    RuntimeControlFlow::from(build_runtime_error(message).build())
+}
+
 /// Horizontally concatenate two matrices [A, B]
 /// In language: C = [A, B] creates a matrix with A and B side by side
-pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     // Language semantics: [] acts as a neutral element for concatenation
     if a.rows() == 0 && a.cols() == 0 {
         return Ok(b.clone());
@@ -16,10 +22,10 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         return Ok(a.clone());
     }
     if a.rows() != b.rows() {
-        return Err(format!(
+        return Err(concat_error(format!(
             "Cannot horizontally concatenate matrices with different row counts: {} vs {}",
             a.rows, b.rows
-        ));
+        )));
     }
 
     let new_rows = a.rows();
@@ -40,12 +46,12 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         }
     }
 
-    Tensor::new_2d(new_data, new_rows, new_cols)
+    Tensor::new_2d(new_data, new_rows, new_cols).map_err(concat_error)
 }
 
 /// Vertically concatenate two matrices [A; B]
 /// In language: C = [A; B] creates a matrix with A on top and B below
-pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     // Language semantics: [] acts as a neutral element for concatenation
     if a.rows() == 0 && a.cols() == 0 {
         return Ok(b.clone());
@@ -54,10 +60,10 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         return Ok(a.clone());
     }
     if a.cols() != b.cols() {
-        return Err(format!(
+        return Err(concat_error(format!(
             "Cannot vertically concatenate matrices with different column counts: {} vs {}",
             a.cols, b.cols
-        ));
+        )));
     }
 
     let new_rows = a.rows() + b.rows();
@@ -76,13 +82,15 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         }
     }
 
-    Tensor::new_2d(new_data, new_rows, new_cols)
+    Tensor::new_2d(new_data, new_rows, new_cols).map_err(concat_error)
 }
 
 /// Concatenate values horizontally - handles mixed scalars and matrices
-pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
+pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        return Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?));
+        return Ok(Value::Tensor(
+            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+        ));
     }
 
     // If any operand is a string or string array, perform string-array concatenation
@@ -104,7 +112,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(sa.rows());
                     } else if rows != Some(sa.rows()) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     cols_total += sa.cols();
                     blocks.push(sa.clone());
@@ -115,7 +123,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     cols_total += 1;
                     blocks.push(sa);
@@ -128,7 +136,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(ca.rows);
                     } else if rows != Some(ca.rows) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     let mut out: Vec<String> = Vec::with_capacity(ca.rows);
                     for r in 0..ca.rows {
@@ -148,7 +156,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     cols_total += 1;
                     blocks.push(sa);
@@ -162,7 +170,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     cols_total += 1;
                     blocks.push(sa);
@@ -174,20 +182,20 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
-                        return Err("string hcat: row mismatch".to_string());
+                        return Err(concat_error("string hcat: row mismatch"));
                     }
                     cols_total += 1;
                     blocks.push(sa);
                 }
                 Value::Tensor(_) | Value::Cell(_) => {
-                    return Err(format!(
+                    return Err(concat_error(format!(
                         "Cannot concatenate value of type {v:?} with string array"
-                    ))
+                    )))
                 }
                 _ => {
-                    return Err(format!(
+                    return Err(concat_error(format!(
                         "Cannot concatenate value of type {v:?} with string array"
-                    ))
+                    )))
                 }
             }
         }
@@ -206,7 +214,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
             }
         }
         let sa = runmat_builtins::StringArray::new(data, vec![rows, cols_total])
-            .map_err(|e| format!("string hcat: {e}"))?;
+            .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
 
@@ -218,31 +226,32 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
     for value in values {
         match value {
             Value::Num(n) => {
-                let matrix = Tensor::new_2d(vec![*n], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![*n], 1, 1).map_err(concat_error)?;
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err("Cannot concatenate scalar with multi-row matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
             }
             Value::Complex(re, _im) => {
-                let matrix = Tensor::new_2d(vec![*re], 1, 1)?; // real part in numeric hcat coercion
+                let matrix =
+                    Tensor::new_2d(vec![*re], 1, 1).map_err(concat_error)?; // real part in numeric hcat coercion
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err("Cannot concatenate scalar with multi-row matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
             }
             Value::Int(i) => {
-                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1).map_err(concat_error)?;
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
-                    return Err("Cannot concatenate scalar with multi-row matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-row matrix"));
                 }
                 _total_cols += 1;
                 matrices.push(matrix);
@@ -255,16 +264,16 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                 if rows == 0 {
                     rows = m.rows();
                 } else if rows != m.rows() {
-                    return Err(format!(
+                    return Err(concat_error(format!(
                         "Cannot concatenate matrices with different row counts: {} vs {}",
                         rows,
                         m.rows()
-                    ));
+                    )));
                 }
                 _total_cols += m.cols();
                 matrices.push(m.clone());
             }
-            _ => return Err(format!("Cannot concatenate value of type {value:?}")),
+            _ => return Err(concat_error(format!("Cannot concatenate value of type {value:?}"))),
         }
     }
 
@@ -278,9 +287,11 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
 }
 
 /// Concatenate values vertically - handles mixed scalars and matrices
-pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
+pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        return Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?));
+        return Ok(Value::Tensor(
+            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+        ));
     }
 
     // If any operand is a string or string array, perform string-array vertical concatenation by stacking rows
@@ -301,7 +312,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(sa.cols());
                     } else if cols != Some(sa.cols()) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     rows_total += sa.rows();
                     blocks.push(sa.clone());
@@ -313,7 +324,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     blocks.push(sa);
                 }
@@ -327,7 +338,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     blocks.push(sa);
                 }
@@ -338,7 +349,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     blocks.push(sa);
                 }
@@ -352,7 +363,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     blocks.push(sa);
                 }
@@ -364,14 +375,14 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {
-                        return Err("string vcat: column mismatch".to_string());
+                        return Err(concat_error("string vcat: column mismatch"));
                     }
                     blocks.push(sa);
                 }
                 _ => {
-                    return Err(format!(
+                    return Err(concat_error(format!(
                         "Cannot concatenate value of type {v:?} with string array"
-                    ))
+                    )))
                 }
             }
         }
@@ -387,7 +398,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
             }
         }
         let sa = runmat_builtins::StringArray::new(data, vec![rows_total, cols])
-            .map_err(|e| format!("string vcat: {e}"))?;
+            .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
 
@@ -399,31 +410,31 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
     for value in values {
         match value {
             Value::Num(n) => {
-                let matrix = Tensor::new_2d(vec![*n], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![*n], 1, 1).map_err(concat_error)?;
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err("Cannot concatenate scalar with multi-column matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
             }
             Value::Complex(re, _im) => {
-                let matrix = Tensor::new_2d(vec![*re], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![*re], 1, 1).map_err(concat_error)?;
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err("Cannot concatenate scalar with multi-column matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
             }
             Value::Int(i) => {
-                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1).map_err(concat_error)?;
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {
-                    return Err("Cannot concatenate scalar with multi-column matrix".to_string());
+                    return Err(concat_error("Cannot concatenate scalar with multi-column matrix"));
                 }
                 _total_rows += 1;
                 matrices.push(matrix);
@@ -436,16 +447,16 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                 if cols == 0 {
                     cols = m.cols();
                 } else if cols != m.cols() {
-                    return Err(format!(
+                    return Err(concat_error(format!(
                         "Cannot concatenate matrices with different column counts: {} vs {}",
                         cols,
                         m.cols()
-                    ));
+                    )));
                 }
                 _total_rows += m.rows();
                 matrices.push(m.clone());
             }
-            _ => return Err(format!("Cannot concatenate value of type {value:?}")),
+            _ => return Err(concat_error(format!("Cannot concatenate value of type {value:?}"))),
         }
     }
 
@@ -460,16 +471,18 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
 
 /// Create a matrix from a 2D array of Values with proper concatenation semantics
 /// This handles the case where matrix elements can be variables, not just literals
-pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
+pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
     if rows.is_empty() {
-        return Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?));
+        return Ok(Value::Tensor(
+            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+        ));
     }
 
     // Build each row using horzcat builtin to preserve canonical semantics
     let mut row_matrices: Vec<Value> = Vec::with_capacity(rows.len());
     for row in rows {
         let row_value = if row.is_empty() {
-            Value::Tensor(Tensor::new(vec![], vec![0, 0])?)
+            Value::Tensor(Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?)
         } else {
             crate::call_builtin("horzcat", row)?
         };
@@ -478,7 +491,9 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
 
     // Stack rows using vertcat builtin
     if row_matrices.is_empty() {
-        Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?))
+        Ok(Value::Tensor(
+            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+        ))
     } else if row_matrices.len() == 1 {
         Ok(row_matrices.into_iter().next().unwrap())
     } else {

@@ -25,7 +25,7 @@ pub mod test_support;
 
 pub(crate) fn map_control_flow_with_builtin(
     flow: crate::RuntimeControlFlow,
-    builtin: &'static str,
+    builtin: &str,
 ) -> crate::RuntimeControlFlow {
     match flow {
         crate::RuntimeControlFlow::Suspend(pending) => crate::RuntimeControlFlow::Suspend(pending),

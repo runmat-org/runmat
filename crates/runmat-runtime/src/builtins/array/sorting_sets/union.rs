@@ -21,7 +21,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -250,8 +250,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`union` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn union_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("union").build()
+fn union_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("union")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -315,7 +318,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
             "legacy" | "r2012a" => {
                 return Err(union_error("union: the 'legacy' behaviour is not supported"));
             }
-            other => return Err(union_error(format!("union: unrecognised option '{other}'")).into()),
+            other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
         }
     }
 
@@ -362,19 +365,19 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => union_complex(at, bt, opts),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
             let bt = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")).into())?;
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
         (Value::Complex(re, im), Value::ComplexTensor(bt)) => {
             let at = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")).into())?;
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
         (Value::Complex(a_re, a_im), Value::Complex(b_re, b_im)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")).into())?;
+                .map_err(|e| union_error(format!("union: {e}")))?;
             let bt = ComplexTensor::new(vec![(b_re, b_im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")).into())?;
+                .map_err(|e| union_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
 
@@ -387,19 +390,19 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
         }
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
             let astring =
-                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+                StringArray::new(vec![a], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
             let bstring =
-                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+                StringArray::new(vec![b], vec![1, 1]).map_err(|e| union_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
 
@@ -1001,9 +1004,9 @@ impl UnionEvaluation {
     pub fn from_union_result(result: UnionResult) -> crate::BuiltinResult<Self> {
         let UnionResult { values, ia, ib } = result;
         let values_tensor =
-            Tensor::new(values.data, values.shape).map_err(|e| union_error(format!("union: {e}")).into())?;
-        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| union_error(format!("union: {e}")).into())?;
-        let ib_tensor = Tensor::new(ib.data, ib.shape).map_err(|e| union_error(format!("union: {e}")).into())?;
+            Tensor::new(values.data, values.shape).map_err(|e| union_error(format!("union: {e}")))?;
+        let ia_tensor = Tensor::new(ia.data, ia.shape).map_err(|e| union_error(format!("union: {e}")))?;
+        let ib_tensor = Tensor::new(ib.data, ib.shape).map_err(|e| union_error(format!("union: {e}")))?;
         Ok(UnionEvaluation::new(
             tensor::tensor_into_value(values_tensor),
             ia_tensor,
@@ -1187,11 +1190,11 @@ fn assemble_numeric_union(
     }
 
     let value_tensor =
-        Tensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        Tensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1236,11 +1239,11 @@ fn assemble_numeric_row_union(
     }
 
     let value_tensor =
-        Tensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        Tensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1277,11 +1280,11 @@ fn assemble_complex_union(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        ComplexTensor::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1326,11 +1329,11 @@ fn assemble_complex_row_union(
     }
 
     let value_tensor =
-        ComplexTensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        ComplexTensor::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1366,11 +1369,11 @@ fn assemble_char_union(
         }
     }
 
-    let value_array = CharArray::new(values, order.len(), 1).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let value_array = CharArray::new(values, order.len(), 1).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1415,11 +1418,11 @@ fn assemble_char_row_union(
     }
 
     let value_array =
-        CharArray::new(values, unique_rows, cols).map_err(|e| union_error(format!("union: {e}")).into())?;
+        CharArray::new(values, unique_rows, cols).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1456,11 +1459,11 @@ fn assemble_string_union(
     }
 
     let value_array =
-        StringArray::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        StringArray::new(values, vec![order.len(), 1]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),
@@ -1505,11 +1508,11 @@ fn assemble_string_row_union(
     }
 
     let value_array =
-        StringArray::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")).into())?;
+        StringArray::new(values, vec![unique_rows, cols]).map_err(|e| union_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
-    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")).into())?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),

@@ -8,9 +8,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 const LABEL: &str = "string.empty";
+
+fn string_empty_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(LABEL).build().into()
+}
+
+fn remap_string_empty_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, LABEL)
+}
 
 #[cfg_attr(
     feature = "doc_export",
@@ -239,11 +248,12 @@ fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let total: usize = shape.iter().product();
     debug_assert_eq!(total, 0, "string.empty must produce an empty array");
     let data = Vec::<String>::new();
-    let array = StringArray::new(data, shape).map_err(|e| format!("{LABEL}: {e}"))?;
+    let array =
+        StringArray::new(data, shape).map_err(|e| string_empty_flow(format!("{LABEL}: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
-fn parse_shape(args: &[Value]) -> Result<Vec<usize>, String> {
+fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         return Ok(vec![0, 0]);
     }
@@ -253,19 +263,21 @@ fn parse_shape(args: &[Value]) -> Result<Vec<usize>, String> {
     let mut idx = 0;
 
     while idx < args.len() {
-        let arg_host = gather_if_needed(&args[idx]).map_err(|e| format!("{LABEL}: {e}"))?;
+        let arg_host = gather_if_needed(&args[idx]).map_err(remap_string_empty_flow)?;
 
         if let Some(keyword) = keyword_of(&arg_host) {
             if keyword.as_str() == "like" {
-                if like_shape.is_some() {
-                    return Err(format!(
-                        "{LABEL}: multiple 'like' prototypes are not supported"
-                    ));
-                }
+                    if like_shape.is_some() {
+                        return Err(string_empty_flow(format!(
+                            "{LABEL}: multiple 'like' prototypes are not supported"
+                        )));
+                    }
                 let Some(proto_raw) = args.get(idx + 1) else {
-                    return Err(format!("{LABEL}: expected prototype after 'like'"));
+                    return Err(string_empty_flow(format!(
+                        "{LABEL}: expected prototype after 'like'"
+                    )));
                 };
-                let proto = gather_if_needed(proto_raw).map_err(|e| format!("{LABEL}: {e}"))?;
+                let proto = gather_if_needed(proto_raw).map_err(remap_string_empty_flow)?;
                 like_shape = Some(prototype_dims(&proto));
                 idx += 2;
                 continue;
@@ -274,7 +286,7 @@ fn parse_shape(args: &[Value]) -> Result<Vec<usize>, String> {
             // be validated under numeric size parsing below.
         }
 
-        if let Some(parsed) = extract_dims(&arg_host, LABEL)? {
+        if let Some(parsed) = extract_dims(&arg_host, LABEL).map_err(string_empty_flow)? {
             if explicit_dims.is_empty() {
                 explicit_dims = parsed;
             } else {
@@ -284,9 +296,9 @@ fn parse_shape(args: &[Value]) -> Result<Vec<usize>, String> {
             continue;
         }
 
-        return Err(format!(
+        return Err(string_empty_flow(format!(
             "{LABEL}: size inputs must be numeric scalars or size vectors"
-        ));
+        )));
     }
 
     let shape = if !explicit_dims.is_empty() {
@@ -326,11 +338,11 @@ fn shape_from_like(proto: &[usize]) -> Vec<usize> {
     shape
 }
 
-fn ensure_empty_shape(shape: &[usize]) -> Result<(), String> {
+fn ensure_empty_shape(shape: &[usize]) -> BuiltinResult<()> {
     if shape.iter().product::<usize>() != 0 {
-        return Err(format!(
+        return Err(string_empty_flow(format!(
             "{LABEL}: at least one dimension must be zero to construct an empty string array"
-        ));
+        )));
     }
     Ok(())
 }
@@ -354,8 +366,16 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor, Value};
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -504,7 +524,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn missing_like_prototype_errors() {
-        let err = string_empty_builtin(vec![Value::from("like")]).expect_err("expected error");
+        let err = error_message(
+            string_empty_builtin(vec![Value::from("like")]).expect_err("expected error"),
+        );
         assert!(
             err.contains("expected prototype"),
             "unexpected error: {err}"
@@ -515,21 +537,24 @@ pub(crate) mod tests {
     #[test]
     fn duplicate_like_errors() {
         let proto = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
-        let err = string_empty_builtin(vec![
-            Value::from("like"),
-            Value::StringArray(proto.clone()),
-            Value::from("like"),
-            Value::StringArray(proto),
-        ])
-        .expect_err("expected error");
+        let err = error_message(
+            string_empty_builtin(vec![
+                Value::from("like"),
+                Value::StringArray(proto.clone()),
+                Value::from("like"),
+                Value::StringArray(proto),
+            ])
+            .expect_err("expected error"),
+        );
         assert!(err.contains("multiple 'like'"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_dimension_inputs() {
-        let err =
-            string_empty_builtin(vec![Value::String("oops".into())]).expect_err("expected error");
+        let err = error_message(
+            string_empty_builtin(vec![Value::String("oops".into())]).expect_err("expected error"),
+        );
         assert!(
             err.contains("size inputs must be numeric"),
             "unexpected error: {err}"
@@ -587,7 +612,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_negative_dimension() {
-        let err = string_empty_builtin(vec![Value::from(-1.0)]).expect_err("expected error");
+        let err = error_message(
+            string_empty_builtin(vec![Value::from(-1.0)]).expect_err("expected error"),
+        );
         assert!(
             err.contains("matrix dimensions must be non-negative"),
             "unexpected error: {err}"

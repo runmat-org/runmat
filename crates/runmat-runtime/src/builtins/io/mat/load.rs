@@ -728,7 +728,7 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 .copied()
                 .fold(1usize, |acc, d| acc.saturating_mul(d));
             if data.len() != total {
-                return Err("load: logical data length mismatch".to_string());
+                return Err(load_error("load: logical data length mismatch"));
             }
             if total == 1 {
                 Ok(Value::Bool(data.first().copied().unwrap_or(0) != 0))

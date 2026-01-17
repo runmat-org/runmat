@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -207,6 +207,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Text operation; not eligible for fusion and materialises host-side numeric or cell outputs.",
 };
 
+const BUILTIN_NAME: &str = "strfind";
+
 #[runtime_builtin(
     name = "strfind",
     category = "strings/search",
@@ -216,22 +218,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 fn strfind_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(|e| format!("strfind: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("strfind: {e}"))?;
+    let text = gather_if_needed(&text)?;
+    let pattern = gather_if_needed(&pattern)?;
     let force_cell_output = parse_force_cell_output(&rest)?;
 
-    let subject = TextCollection::from_subject("strfind", text)?;
-    let patterns = TextCollection::from_pattern("strfind", pattern)?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
 
-    evaluate_strfind(&subject, &patterns, force_cell_output).map_err(Into::into)
+    evaluate_strfind(&subject, &patterns, force_cell_output)
 }
 
 fn evaluate_strfind(
     subject: &TextCollection,
     patterns: &TextCollection,
     force_cell_output: bool,
-) -> Result<Value, String> {
-    let output_shape = broadcast_shapes("strfind", &subject.shape, &patterns.shape)?;
+) -> BuiltinResult<Value> {
+    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
+        .map_err(strfind_error)?;
     let total = tensor::element_count(&output_shape);
     let return_cell = force_cell_output || subject.is_cell || patterns.is_cell || total != 1;
 
@@ -287,35 +290,37 @@ fn find_indices(text: &str, pattern: &str) -> Vec<usize> {
     indices
 }
 
-fn indices_to_numeric_value(indices: &[usize]) -> Result<Value, String> {
+fn indices_to_numeric_value(indices: &[usize]) -> BuiltinResult<Value> {
     let data = indices.iter().map(|&pos| pos as f64).collect::<Vec<_>>();
     let cols = indices.len();
     Tensor::new(data, vec![1, cols])
         .map(Value::Tensor)
-        .map_err(|e| format!("strfind: {e}"))
+        .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn indices_to_tensor(indices: &[usize]) -> Result<Value, String> {
+fn indices_to_tensor(indices: &[usize]) -> BuiltinResult<Value> {
     Tensor::new(
         indices.iter().map(|&pos| pos as f64).collect::<Vec<_>>(),
         vec![1, indices.len()],
     )
     .map(Value::Tensor)
-    .map_err(|e| format!("strfind: {e}"))
+    .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> Result<Value, String> {
+fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> BuiltinResult<Value> {
     let total = matches.len();
     if total == 0 {
         let (rows, cols) = shape_to_rows_cols(shape);
         return CellArray::new(Vec::new(), rows, cols)
             .map(Value::Cell)
-            .map_err(|e| format!("strfind: {e}"));
+            .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")));
     }
 
     let (rows, cols) = shape_to_rows_cols(shape);
     if rows * cols != total {
-        return Err("strfind: internal size mismatch while constructing cell output".to_string());
+        return Err(strfind_error(
+            "strfind: internal size mismatch while constructing cell output",
+        ));
     }
 
     let mut values = Vec::with_capacity(total);
@@ -324,7 +329,7 @@ fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> Result<Value, S
             let column_major_idx = row + rows * col;
             let indices = matches
                 .get(column_major_idx)
-                .ok_or_else(|| "strfind: internal indexing error".to_string())?;
+                .ok_or_else(|| strfind_error("strfind: internal indexing error"))?;
             let cell_value = indices_to_tensor(indices)?;
             values.push(cell_value);
         }
@@ -332,7 +337,7 @@ fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> Result<Value, S
 
     CellArray::new(values, rows, cols)
         .map(Value::Cell)
-        .map_err(|e| format!("strfind: {e}"))
+        .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
@@ -350,75 +355,87 @@ fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn parse_force_cell_output(rest: &[Value]) -> Result<bool, String> {
+fn strfind_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
     if !rest.len().is_multiple_of(2) {
-        return Err(
-            "strfind: expected name-value pairs after the pattern (e.g., 'ForceCellOutput', true)"
-                .to_string(),
-        );
+        return Err(strfind_error(
+            "strfind: expected name-value pairs after the pattern (e.g., 'ForceCellOutput', true)",
+        ));
     }
 
     let mut force_cell = None;
     for pair in rest.chunks(2) {
         let name = value_to_owned_string(&pair[0])
-            .ok_or_else(|| "strfind: option names must be text scalars".to_string())?;
+            .ok_or_else(|| strfind_error("strfind: option names must be text scalars"))?;
         if !name.eq_ignore_ascii_case("forcecelloutput") {
-            return Err(format!(
+            return Err(strfind_error(format!(
                 "strfind: unknown option '{name}'; supported option is 'ForceCellOutput'"
-            ));
+            )));
         }
         let value = parse_bool_like(&pair[1])?;
         force_cell = Some(value);
     }
     force_cell.ok_or_else(|| {
-        "strfind: expected 'ForceCellOutput' option when providing name-value arguments".to_string()
+        strfind_error(
+            "strfind: expected 'ForceCellOutput' option when providing name-value arguments",
+        )
     })
 }
 
-fn parse_bool_like(value: &Value) -> Result<bool, String> {
+fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => {
             if !n.is_finite() {
-                Err("strfind: option values must be finite numeric scalars".to_string())
+                Err(strfind_error(
+                    "strfind: option values must be finite numeric scalars",
+                ))
             } else {
                 Ok(*n != 0.0)
             }
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
-                Err(format!(
+                Err(strfind_error(format!(
                     "strfind: option values must be scalar logicals (received {} elements)",
                     array.data.len()
-                ))
+                )))
             } else {
                 Ok(array.data[0] != 0)
             }
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                Err(format!(
+                Err(strfind_error(format!(
                     "strfind: option values must be scalar numeric values (received {} elements)",
                     tensor.data.len()
-                ))
+                )))
             } else if !tensor.data[0].is_finite() {
-                Err("strfind: option values must be finite numeric scalars".to_string())
+                Err(strfind_error(
+                    "strfind: option values must be finite numeric scalars",
+                ))
             } else {
                 Ok(tensor.data[0] != 0.0)
             }
         }
         other => value_to_owned_string(other)
-            .ok_or_else(|| "strfind: option values must be logical or numeric scalars".to_string())
+            .ok_or_else(|| strfind_error("strfind: option values must be logical or numeric scalars"))
             .and_then(|text| match text.trim().to_ascii_lowercase().as_str() {
                 "true" | "on" | "1" => Ok(true),
                 "false" | "off" | "0" => Ok(false),
-                _ => Err(format!(
+                _ => Err(strfind_error(format!(
                     "strfind: invalid value '{text}' for 'ForceCellOutput'; expected true or false"
-                )),
+                ))),
             }),
     }
 }
@@ -654,7 +671,7 @@ pub(crate) mod tests {
         )
         .expect_err("strfind should error for non-scalar ForceCellOutput");
         assert!(
-            err.contains("scalar"),
+            err.to_string().contains("scalar"),
             "unexpected error message for non-scalar option: {err}"
         );
     }
@@ -669,7 +686,7 @@ pub(crate) mod tests {
         )
         .expect_err("strfind should error when ForceCellOutput value missing");
         assert!(
-            err.contains("name-value pairs"),
+            err.to_string().contains("name-value pairs"),
             "unexpected error message: {err}"
         );
     }
@@ -800,7 +817,7 @@ pub(crate) mod tests {
         )
         .expect_err("strfind should error");
         assert!(
-            err.contains("unknown option"),
+            err.to_string().contains("unknown option"),
             "unexpected error message: {err}"
         );
     }

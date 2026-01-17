@@ -260,38 +260,36 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cumsum: direction specified more than once".to_string()
-                                );
+                                return Err(cumsum_error(
+                                    "cumsum: direction specified more than once",
+                                ));
                             }
                             direction = CumsumDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cumsum: direction specified more than once".to_string()
-                                );
+                                return Err(cumsum_error(
+                                    "cumsum: direction specified more than once",
+                                ));
                             }
                             direction = CumsumDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumsum: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumsum_error(
+                                    "cumsum: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumsumNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumsum: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumsum_error(
+                                    "cumsum: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumsumNanMode::Include;
                             nan_set = true;

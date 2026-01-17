@@ -35,6 +35,7 @@ use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "bar";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "bar"
 category: "plotting"

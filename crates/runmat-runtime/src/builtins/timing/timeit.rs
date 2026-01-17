@@ -19,6 +19,14 @@ const MAX_BATCH_SECONDS: f64 = 0.25;
 const LOOP_COUNT_LIMIT: usize = 1 << 20;
 const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
+const BUILTIN_NAME: &str = "timeit";
+
+fn timeit_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    crate::build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
 
 #[cfg_attr(
     feature = "doc_export",
@@ -184,42 +192,46 @@ fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     Ok(Value::Num(compute_median(samples)))
 }
 
-fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, String> {
+fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeControlFlow> {
     match rest.len() {
         0 => Ok(None),
         1 => parse_non_negative_integer(&rest[0]).map(Some),
-        _ => Err("timeit: too many input arguments".to_string()),
+        _ => Err(timeit_error("timeit: too many input arguments")),
     }
 }
 
-fn parse_non_negative_integer(value: &Value) -> Result<usize, String> {
+fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeControlFlow> {
     match value {
         Value::Int(iv) => {
             let raw = iv.to_i64();
             if raw < 0 {
-                Err("timeit: numOutputs must be a nonnegative integer".to_string())
+                Err(timeit_error(
+                    "timeit: numOutputs must be a nonnegative integer",
+                ))
             } else {
                 Ok(raw as usize)
             }
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err("timeit: numOutputs must be finite".to_string());
+                return Err(timeit_error("timeit: numOutputs must be finite"));
             }
             if *n < 0.0 {
-                return Err("timeit: numOutputs must be a nonnegative integer".to_string());
+                return Err(timeit_error(
+                    "timeit: numOutputs must be a nonnegative integer",
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err("timeit: numOutputs must be an integer value".to_string());
+                return Err(timeit_error("timeit: numOutputs must be an integer value"));
             }
             Ok(rounded as usize)
         }
-        _ => Err("timeit: numOutputs must be a scalar numeric value".to_string()),
+        _ => Err(timeit_error("timeit: numOutputs must be a scalar numeric value")),
     }
 }
 
-fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, String> {
+fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeControlFlow> {
     let mut loops = 1usize;
     loop {
         let elapsed = run_batch(callable, loops)?;
@@ -236,7 +248,10 @@ fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, String> {
     }
 }
 
-fn collect_samples(callable: &TimeitCallable, loop_count: usize) -> Result<Vec<f64>, String> {
+fn collect_samples(
+    callable: &TimeitCallable,
+    loop_count: usize,
+) -> Result<Vec<f64>, crate::RuntimeControlFlow> {
     let mut samples = Vec::with_capacity(MIN_SAMPLE_COUNT);
     while samples.len() < MIN_SAMPLE_COUNT {
         let elapsed = run_batch(callable, loop_count)?;
@@ -249,7 +264,7 @@ fn collect_samples(callable: &TimeitCallable, loop_count: usize) -> Result<Vec<f
     Ok(samples)
 }
 
-fn run_batch(callable: &TimeitCallable, loop_count: usize) -> Result<f64, String> {
+fn run_batch(callable: &TimeitCallable, loop_count: usize) -> Result<f64, crate::RuntimeControlFlow> {
     let start = Instant::now();
     for _ in 0..loop_count {
         let value = callable.invoke()?;
@@ -289,7 +304,7 @@ struct TimeitCallable {
 }
 
 impl TimeitCallable {
-    fn invoke(&self) -> Result<Value, String> {
+    fn invoke(&self) -> Result<Value, crate::RuntimeControlFlow> {
         // The runtime currently treats all builtin invocations as returning a single `Value`.
         // The optional `num_outputs` flag is stored so future multi-output support can
         // request the correct number of outputs when dispatching through `feval`.
@@ -304,7 +319,10 @@ impl TimeitCallable {
     }
 }
 
-fn prepare_callable(func: Value, num_outputs: Option<usize>) -> Result<TimeitCallable, String> {
+fn prepare_callable(
+    func: Value,
+    num_outputs: Option<usize>,
+) -> Result<TimeitCallable, crate::RuntimeControlFlow> {
     match func {
         Value::String(text) => parse_handle_string(&text).map(|handle| TimeitCallable {
             handle: Value::String(handle),
@@ -312,10 +330,9 @@ fn prepare_callable(func: Value, num_outputs: Option<usize>) -> Result<TimeitCal
         }),
         Value::CharArray(arr) => {
             if arr.rows != 1 {
-                Err(
-                    "timeit: function handle must be a string scalar or function handle"
-                        .to_string(),
-                )
+                Err(timeit_error(
+                    "timeit: function handle must be a string scalar or function handle",
+                ))
             } else {
                 let text: String = arr.data.iter().collect();
                 parse_handle_string(&text).map(|handle| TimeitCallable {
@@ -331,10 +348,9 @@ fn prepare_callable(func: Value, num_outputs: Option<usize>) -> Result<TimeitCal
                     num_outputs,
                 })
             } else {
-                Err(
-                    "timeit: function handle must be a string scalar or function handle"
-                        .to_string(),
-                )
+                Err(timeit_error(
+                    "timeit: function handle must be a string scalar or function handle",
+                ))
             }
         }
         Value::FunctionHandle(name) => Ok(TimeitCallable {
@@ -345,22 +361,24 @@ fn prepare_callable(func: Value, num_outputs: Option<usize>) -> Result<TimeitCal
             handle: Value::Closure(closure),
             num_outputs,
         }),
-        other => Err(format!(
+        other => Err(timeit_error(format!(
             "timeit: first argument must be a function handle, got {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_handle_string(text: &str) -> Result<String, String> {
+fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeControlFlow> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix('@') {
         if rest.trim().is_empty() {
-            Err("timeit: empty function handle string".to_string())
+            Err(timeit_error("timeit: empty function handle string"))
         } else {
             Ok(format!("@{}", rest.trim()))
         }
     } else {
-        Err("timeit: expected a function handle string beginning with '@'".to_string())
+        Err(timeit_error(
+            "timeit: expected a function handle string beginning with '@'",
+        ))
     }
 }
 
@@ -415,6 +433,22 @@ pub(crate) mod tests {
 
     fn default_handle() -> Value {
         Value::String("@__timeit_helper_counter_default".to_string())
+    }
+
+    fn assert_timeit_error_contains(err: crate::RuntimeControlFlow, needle: &str) {
+        match err {
+            crate::RuntimeControlFlow::Error(err) => {
+                let message = err.message().to_ascii_lowercase();
+                assert!(
+                    message.contains(&needle.to_ascii_lowercase()),
+                    "unexpected error text: {}",
+                    err.message()
+                );
+            }
+            crate::RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspend: {pending:?}");
+            }
+        }
     }
 
     fn outputs_handle() -> Value {
@@ -489,10 +523,7 @@ pub(crate) mod tests {
     #[test]
     fn timeit_rejects_non_function_input() {
         let err = timeit_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert!(
-            err.to_ascii_lowercase().contains("function"),
-            "unexpected error text: {err}"
-        );
+        assert_timeit_error_contains(err, "function");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -500,7 +531,7 @@ pub(crate) mod tests {
     fn timeit_rejects_invalid_num_outputs() {
         COUNTER_INVALID.store(0, Ordering::SeqCst);
         let err = timeit_builtin(invalid_handle(), vec![Value::Num(-1.0)]).unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+        assert_timeit_error_contains(err, "nonnegative");
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
     }
 
@@ -509,7 +540,7 @@ pub(crate) mod tests {
     fn timeit_rejects_extra_arguments() {
         let err =
             timeit_builtin(default_handle(), vec![Value::from(1.0), Value::from(2.0)]).unwrap_err();
-        assert!(err.to_ascii_lowercase().contains("too many"));
+        assert_timeit_error_contains(err, "too many");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

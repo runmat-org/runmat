@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -235,8 +235,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`sortrows` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn sortrows_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("sortrows").build()
+fn sortrows_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("sortrows")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -286,9 +289,9 @@ fn sortrows_gpu(handle: GpuTensorHandle, rest: &[Value]) -> crate::BuiltinResult
 
 fn sortrows_from_provider_result(result: ProviderSortResult) -> crate::BuiltinResult<SortRowsEvaluation> {
     let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-        .map_err(|e| sortrows_error(format!("sortrows: {e}")).into())?;
+        .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
     let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-        .map_err(|e| sortrows_error(format!("sortrows: {e}")).into())?;
+        .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
     Ok(SortRowsEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
         indices: indices_tensor,
@@ -311,7 +314,7 @@ fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsE
         Value::ComplexTensor(ct) => sortrows_complex_tensor(ct, rest),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| sortrows_error(format!("sortrows: {e}")).into())?;
+                .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
             sortrows_complex_tensor(tensor, rest)
         }
         Value::CharArray(ca) => sortrows_char_array(ca, rest),
@@ -522,7 +525,7 @@ fn reorder_real_rows(
             data[dst_idx] = tensor.data[src_idx];
         }
     }
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")).into())
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn reorder_complex_rows(
@@ -539,7 +542,7 @@ fn reorder_complex_rows(
             data[dst_idx] = tensor.data[src_idx];
         }
     }
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")).into())
+    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn reorder_char_rows(
@@ -556,7 +559,7 @@ fn reorder_char_rows(
             data[dst_idx] = ca.data[src_idx];
         }
     }
-    CharArray::new(data, rows, cols).map_err(|e| sortrows_error(format!("sortrows: {e}")).into())
+    CharArray::new(data, rows, cols).map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn compare_real_scalars(
@@ -674,7 +677,7 @@ fn permutation_indices(order: &[usize]) -> crate::BuiltinResult<Tensor> {
     for &idx in order {
         data.push((idx + 1) as f64);
     }
-    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")).into())
+    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn identity_indices(rows: usize) -> crate::BuiltinResult<Tensor> {
@@ -682,7 +685,7 @@ fn identity_indices(rows: usize) -> crate::BuiltinResult<Tensor> {
     for i in 0..rows {
         data.push((i + 1) as f64);
     }
-    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")).into())
+    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -781,7 +784,7 @@ impl SortRowsArgs {
                 continue;
             }
             let Some(keyword) = tensor::value_to_string(&rest[i]) else {
-                return Err(sortrows_error(format!("sortrows: invalid argument {:?}", rest[i])).into());
+                return Err(sortrows_error(format!("sortrows: invalid argument {:?}", rest[i])));
             };
             let lowered = keyword.trim().to_ascii_lowercase();
             match lowered.as_str() {
@@ -835,7 +838,7 @@ impl SortRowsArgs {
                     i += 1;
                 }
                 other => {
-                    return Err(sortrows_error(format!("sortrows: unexpected argument '{other}'")).into());
+                    return Err(sortrows_error(format!("sortrows: unexpected argument '{other}'")));
                 }
             }
         }

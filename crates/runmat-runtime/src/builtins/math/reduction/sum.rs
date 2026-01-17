@@ -768,7 +768,7 @@ fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
 }
 
 fn sum_gpu_fallback(handle: &GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor(handle).map_err(sum_error)?;
+    let tensor = gpu_helpers::gather_tensor(handle)?;
     let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
     let reduced = sum_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
@@ -1073,7 +1073,7 @@ fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Val
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle).map_err(sum_error)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)?;
                 let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
                 Ok(Value::Tensor(tensor))
             }
@@ -1101,7 +1101,7 @@ fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value>
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor(&handle).map_err(sum_error)?;
+                let tensor = gpu_helpers::gather_tensor(&handle)?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             _ => Ok(value),

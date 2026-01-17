@@ -236,23 +236,26 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn fprintf_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()
+    RuntimeControlFlow::Error(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+            let message = err.message().to_string();
+            let identifier = err.identifier().map(|value| value.to_string());
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
-            builder.build().into()
+            RuntimeControlFlow::Error(builder.build())
         }
     }
 }
@@ -360,7 +363,7 @@ pub fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
 
     let format_string = decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
     let flattened_args = flatten_arguments(&data_args, "fprintf").map_err(map_control_flow)?;
-    let rendered = map_string_result(format_with_repetition(&format_string, &flattened_args))?;
+    let rendered = format_with_repetition(&format_string, &flattened_args)?;
     let bytes = map_string_result(encode_output(&rendered, target.encoding_label()))?;
     map_string_result(target.write(&bytes))?;
     Ok(FprintfEval {
@@ -651,7 +654,7 @@ fn match_stream_label(value: &Value) -> Option<SpecialStream> {
     }
 }
 
-fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String> {
+fn format_with_repetition(format: &str, args: &[Value]) -> BuiltinResult<String> {
     let mut cursor = ArgCursor::new(args);
     let mut out = String::new();
     loop {
@@ -659,7 +662,9 @@ fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String
         out.push_str(&step.output);
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
-                return Err("fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied".to_string());
+                return Err(fprintf_error(
+                    "fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied",
+                ));
             }
             break;
         }
@@ -670,11 +675,20 @@ fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String
     Ok(out)
 }
 
-fn remap_format_error(err: String) -> String {
-    if err.contains("sprintf") {
-        err.replace("sprintf", "fprintf")
-    } else {
-        err
+fn remap_format_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let message = err.message().replace("sprintf", "fprintf");
+            let identifier = err.identifier().map(|value| value.to_string());
+            let mut builder = build_runtime_error(message)
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            RuntimeControlFlow::Error(builder.build())
+        }
     }
 }
 

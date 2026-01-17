@@ -43,16 +43,7 @@ fn format_error(message: impl Into<String>) -> RuntimeControlFlow {
 }
 
 fn map_control_flow_with_context(flow: RuntimeControlFlow, context: &str) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(format!("{context}: {}", err.message()));
-            if let Some(identifier) = err.identifier() {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.with_source(err).build().into()
-        }
-    }
+    crate::builtins::common::map_control_flow_with_builtin(flow, context)
 }
 
 /// Result of formatting a string with the current cursor state.

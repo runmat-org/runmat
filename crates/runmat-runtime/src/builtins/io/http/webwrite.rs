@@ -204,7 +204,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn webwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("webwrite").build().into()
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("webwrite").build())
 }
 
 fn remap_webwrite_flow<F>(flow: RuntimeControlFlow, message: F) -> RuntimeControlFlow
@@ -213,11 +213,12 @@ where
 {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
-            .with_builtin("webwrite")
-            .with_source(err)
-            .build()
-            .into(),
+        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
+            build_runtime_error(message(&err))
+                .with_builtin("webwrite")
+                .with_source(err)
+                .build(),
+        ),
     }
 }
 
@@ -406,11 +407,12 @@ fn execute_request(
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
-        build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
-            .with_builtin("webwrite")
-            .with_source(err)
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
+                .with_builtin("webwrite")
+                .with_source(err)
+                .build(),
+        )
     })?;
     if !query_params.is_empty() {
         {
@@ -458,11 +460,12 @@ fn execute_request(
     };
 
     let response = transport::send_request(&request).map_err(|err| {
-        build_runtime_error(err.message_with_prefix("webwrite"))
-            .with_builtin("webwrite")
-            .with_source(err)
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(err.message_with_prefix("webwrite"))
+                .with_builtin("webwrite")
+                .with_source(err)
+                .build(),
+        )
     })?;
 
     let header_content_type =
@@ -823,11 +826,12 @@ fn map_json_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
                     err.message()
                 )
             };
-            build_runtime_error(message)
-                .with_builtin("webwrite")
-                .with_source(err)
-                .build()
-                .into()
+            RuntimeControlFlow::Error(
+                build_runtime_error(message)
+                    .with_builtin("webwrite")
+                    .with_source(err)
+                    .build(),
+            )
         }
     }
 }

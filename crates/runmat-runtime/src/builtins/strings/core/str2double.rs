@@ -9,8 +9,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -219,6 +220,17 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "str2double: cell array elements must be character vectors or string scalars";
 
+fn str2double_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("str2double")
+        .build()
+        .into()
+}
+
+fn remap_str2double_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, "str2double")
+}
+
 #[runtime_builtin(
     name = "str2double",
     category = "strings/core",
@@ -228,27 +240,28 @@ const CELL_ELEMENT_ERROR: &str =
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("str2double: {e}"))?;
+    let gathered = gather_if_needed(&value).map_err(remap_str2double_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
-        Value::StringArray(array) => (str2double_string_array(array)).map_err(Into::into),
-        Value::CharArray(array) => (str2double_char_array(array)).map_err(Into::into),
-        Value::Cell(cell) => (str2double_cell_array(cell)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::StringArray(array) => str2double_string_array(array),
+        Value::CharArray(array) => str2double_char_array(array),
+        Value::Cell(cell) => str2double_cell_array(cell),
+        _ => Err(str2double_flow(ARG_TYPE_ERROR)),
     }
 }
 
-fn str2double_string_array(array: StringArray) -> Result<Value, String> {
+fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut values = Vec::with_capacity(data.len());
     for text in &data {
         values.push(parse_numeric_scalar(text));
     }
-    let tensor = Tensor::new(values, shape).map_err(|e| format!("str2double: {e}"))?;
+    let tensor =
+        Tensor::new(values, shape).map_err(|e| str2double_flow(format!("str2double: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn str2double_char_array(array: CharArray) -> Result<Value, String> {
+fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
     let rows = array.rows;
     let cols = array.cols;
     let mut values = Vec::with_capacity(rows);
@@ -258,11 +271,12 @@ fn str2double_char_array(array: CharArray) -> Result<Value, String> {
         let row_text: String = array.data[start..end].iter().collect();
         values.push(parse_numeric_scalar(&row_text));
     }
-    let tensor = Tensor::new(values, vec![rows, 1]).map_err(|e| format!("str2double: {e}"))?;
+    let tensor = Tensor::new(values, vec![rows, 1])
+        .map_err(|e| str2double_flow(format!("str2double: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn str2double_cell_array(cell: CellArray) -> Result<Value, String> {
+fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -278,13 +292,14 @@ fn str2double_cell_array(cell: CellArray) -> Result<Value, String> {
                     let row_text: String = char_vec.data.iter().collect();
                     parse_numeric_scalar(&row_text)
                 }
-                Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-                _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+                Value::CharArray(_) => return Err(str2double_flow(CELL_ELEMENT_ERROR)),
+                _ => return Err(str2double_flow(CELL_ELEMENT_ERROR)),
             };
             values.push(numeric);
         }
     }
-    let tensor = Tensor::new(values, vec![rows, cols]).map_err(|e| format!("str2double: {e}"))?;
+    let tensor = Tensor::new(values, vec![rows, cols])
+        .map_err(|e| str2double_flow(format!("str2double: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -320,6 +335,14 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -419,7 +442,7 @@ pub(crate) mod tests {
     #[test]
     fn str2double_cell_array_invalid_element_errors() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
-        let err = str2double_builtin(Value::Cell(cell)).unwrap_err();
+        let err = error_message(str2double_builtin(Value::Cell(cell)).unwrap_err());
         assert!(
             err.contains("str2double"),
             "unexpected error message: {err}"

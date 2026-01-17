@@ -261,10 +261,12 @@ fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(err.message().to_string())
+            let identifier = err.identifier().map(|value| value.to_string());
+            let message = err.message().to_string();
+            let mut builder = build_runtime_error(message)
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
             builder.build().into()

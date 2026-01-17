@@ -8,6 +8,8 @@ use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -198,6 +200,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata mutation forces fusion planners to flush pending groups on the host.",
 };
 
+fn rmfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("rmfield")
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "rmfield",
     category = "structs/core",
@@ -205,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rmfield,struct,remove field,struct array",
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
-fn rmfield_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let names = parse_field_names(&rest)?;
     if names.is_empty() {
         return Ok(value);
@@ -220,15 +229,15 @@ fn rmfield_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             let updated = remove_fields_from_struct_array(&cell, &names)?;
             Ok(Value::Cell(updated))
         }
-        other => Err(((format!(
+        other => Err(rmfield_flow(format!(
             "rmfield: expected struct or struct array, got {other:?}"
-        ))).into()),
+        ))),
     }
 }
 
-fn parse_field_names(args: &[Value]) -> Result<Vec<String>, String> {
+fn parse_field_names(args: &[Value]) -> BuiltinResult<Vec<String>> {
     if args.is_empty() {
-        return Err("rmfield: not enough input arguments".to_string());
+        return Err(rmfield_flow("rmfield: not enough input arguments"));
     }
     let mut names: Vec<String> = Vec::new();
     for value in args {
@@ -237,51 +246,51 @@ fn parse_field_names(args: &[Value]) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-fn collect_field_names(value: &Value) -> Result<Vec<String>, String> {
+fn collect_field_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(_) | Value::CharArray(_) => expect_scalar_name(value)
             .map(|name| vec![name])
-            .map_err(|err| format!("rmfield: {}", describe_field_name_error(err))),
+            .map_err(|err| rmfield_flow(format!("rmfield: {}", describe_field_name_error(err)))),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 expect_scalar_name(value)
                     .map(|name| vec![name])
-                    .map_err(|err| format!("rmfield: {}", describe_field_name_error(err)))
+                    .map_err(|err| rmfield_flow(format!("rmfield: {}", describe_field_name_error(err))))
             } else {
                 string_array_to_names(sa)
             }
         }
         Value::Cell(cell) => cell_to_names(cell),
-        other => Err(format!(
+        other => Err(rmfield_flow(format!(
             "rmfield: field names must be strings or character vectors (got {other:?})"
-        )),
+        ))),
     }
 }
 
-fn string_array_to_names(array: &StringArray) -> Result<Vec<String>, String> {
+fn string_array_to_names(array: &StringArray) -> BuiltinResult<Vec<String>> {
     let mut names = Vec::with_capacity(array.data.len());
     for (index, name) in array.data.iter().enumerate() {
         if name.is_empty() {
-            return Err(format!(
+            return Err(rmfield_flow(format!(
                 "rmfield: field names must be nonempty character vectors or strings (string array element {})",
                 index + 1
-            ));
+            )));
         }
         names.push(name.clone());
     }
     Ok(names)
 }
 
-fn cell_to_names(cell: &CellArray) -> Result<Vec<String>, String> {
+fn cell_to_names(cell: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut output = Vec::with_capacity(cell.data.len());
     for (index, handle) in cell.data.iter().enumerate() {
         let value = unsafe { &*handle.as_raw() };
         let name = expect_scalar_name(value).map_err(|err| {
-            format!(
+            rmfield_flow(format!(
                 "rmfield: {} (cell element {})",
                 describe_field_name_error(err),
                 index + 1
-            )
+            ))
         })?;
         output.push(name);
     }
@@ -341,7 +350,7 @@ fn expect_scalar_name(value: &Value) -> Result<String, FieldNameError> {
 fn remove_fields_from_struct_owned(
     mut st: StructValue,
     names: &[String],
-) -> Result<StructValue, String> {
+) -> BuiltinResult<StructValue> {
     let mut seen: HashSet<&str> = HashSet::new();
     for name in names {
         if !seen.insert(name.as_str()) {
@@ -357,7 +366,7 @@ fn remove_fields_from_struct_owned(
 fn remove_fields_from_struct_array(
     array: &CellArray,
     names: &[String],
-) -> Result<CellArray, String> {
+) -> BuiltinResult<CellArray> {
     if array.data.is_empty() {
         return Ok(array.clone());
     }
@@ -366,17 +375,19 @@ fn remove_fields_from_struct_array(
     for handle in &array.data {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err("rmfield: expected struct array contents to be structs".to_string());
+            return Err(rmfield_flow(
+                "rmfield: expected struct array contents to be structs",
+            ));
         };
         let revised = remove_fields_from_struct_owned(st.clone(), names)?;
         updated.push(Value::Struct(revised));
     }
     CellArray::new_with_shape(updated, array.shape.clone())
-        .map_err(|e| format!("rmfield: failed to rebuild struct array: {e}"))
+        .map_err(|e| rmfield_flow(format!("rmfield: failed to rebuild struct array: {e}")))
 }
 
-fn missing_field_error(name: &str) -> String {
-    format!("Reference to non-existent field '{name}'.")
+fn missing_field_error(name: &str) -> RuntimeControlFlow {
+    rmfield_flow(format!("Reference to non-existent field '{name}'."))
 }
 
 fn is_struct_array(cell: &CellArray) -> bool {
@@ -391,6 +402,22 @@ pub(crate) mod tests {
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
@@ -450,7 +477,9 @@ pub(crate) mod tests {
     fn rmfield_errors_when_field_missing() {
         let mut st = StructValue::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
-        let err = rmfield_builtin(Value::Struct(st), vec![Value::from("id")]).unwrap_err();
+        let err = error_message(
+            rmfield_builtin(Value::Struct(st), vec![Value::from("id")]).unwrap_err(),
+        );
         assert!(
             err.contains("Reference to non-existent field 'id'."),
             "unexpected error: {err}"
@@ -506,7 +535,9 @@ pub(crate) mod tests {
         )
         .expect("struct array");
 
-        let err = rmfield_builtin(Value::Cell(array), vec![Value::from("missing")]).unwrap_err();
+        let err = error_message(
+            rmfield_builtin(Value::Cell(array), vec![Value::from("missing")]).unwrap_err(),
+        );
         assert!(
             err.contains("Reference to non-existent field 'missing'."),
             "unexpected error: {err}"
@@ -516,7 +547,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rmfield_rejects_non_struct_inputs() {
-        let err = rmfield_builtin(Value::Num(1.0), vec![Value::from("field")]).unwrap_err();
+        let err = error_message(
+            rmfield_builtin(Value::Num(1.0), vec![Value::from("field")]).unwrap_err(),
+        );
         assert!(
             err.contains("expected struct or struct array"),
             "unexpected error: {err}"
@@ -528,7 +561,8 @@ pub(crate) mod tests {
     fn rmfield_produces_error_for_empty_field_name() {
         let mut st = StructValue::new();
         st.fields.insert("data".to_string(), Value::Num(1.0));
-        let err = rmfield_builtin(Value::Struct(st), vec![Value::from("")]).unwrap_err();
+        let err =
+            error_message(rmfield_builtin(Value::Struct(st), vec![Value::from("")]).unwrap_err());
         assert!(
             err.contains("field names must be nonempty"),
             "unexpected error: {err}"
@@ -602,7 +636,7 @@ pub(crate) mod tests {
     fn rmfield_requires_field_names() {
         let mut st = StructValue::new();
         st.fields.insert("value".to_string(), Value::Num(10.0));
-        let err = rmfield_builtin(Value::Struct(st), Vec::new()).unwrap_err();
+        let err = error_message(rmfield_builtin(Value::Struct(st), Vec::new()).unwrap_err());
         assert!(
             err.contains("rmfield: not enough input arguments"),
             "unexpected error: {err}"

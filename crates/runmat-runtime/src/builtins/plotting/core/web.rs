@@ -8,6 +8,7 @@ fn web_error(message: impl Into<String>) -> RuntimeControlFlow {
     build_runtime_error(message).build().into()
 }
 
+#[allow(dead_code)]
 fn web_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,

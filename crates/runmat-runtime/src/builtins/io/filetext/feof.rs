@@ -184,23 +184,26 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn feof_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()
+    RuntimeControlFlow::Error(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+            let message = err.message().to_string();
+            let identifier = err.identifier().map(|value| value.to_string());
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
-            builder.build().into()
+            RuntimeControlFlow::Error(builder.build())
         }
     }
 }
@@ -247,11 +250,12 @@ pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
         .map_err(|_| feof_error("feof: failed to lock file handle (poisoned mutex)"))?;
 
     let position = file.seek(SeekFrom::Current(0)).map_err(|err| {
-        build_runtime_error(format!("feof: failed to query file position: {err}"))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!("feof: failed to query file position: {err}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err)
+                .build(),
+        )
     })?;
 
     let end_position = match file.seek(SeekFrom::End(0)) {
@@ -261,22 +265,24 @@ pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
                 let _ = file.seek(SeekFrom::Start(position));
                 return Ok(false);
             }
-            return Err(build_runtime_error(format!("feof: failed to query file length: {err}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err)
-                .build()
-                .into());
+            return Err(RuntimeControlFlow::Error(
+                build_runtime_error(format!("feof: failed to query file length: {err}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(err)
+                    .build(),
+            ));
         }
     };
 
     if let Err(err) = file.seek(SeekFrom::Start(position)) {
-        return Err(build_runtime_error(format!(
-            "feof: failed to restore file position: {err}"
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
-        .into());
+        return Err(RuntimeControlFlow::Error(
+            build_runtime_error(format!(
+                "feof: failed to restore file position: {err}"
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build(),
+        ));
     }
 
     Ok(position >= end_position)

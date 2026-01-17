@@ -7,9 +7,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -188,6 +189,17 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "strlength: cell array elements must be character vectors or string scalars";
 
+fn strlength_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("strlength")
+        .build()
+        .into()
+}
+
+fn remap_strlength_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, "strlength")
+}
+
 #[runtime_builtin(
     name = "strlength",
     category = "strings/core",
@@ -197,27 +209,27 @@ const CELL_ELEMENT_ERROR: &str =
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("strlength: {e}"))?;
+    let gathered = gather_if_needed(&value).map_err(remap_strlength_flow)?;
     match gathered {
-        Value::StringArray(array) => (strlength_string_array(array)).map_err(Into::into),
+        Value::StringArray(array) => strlength_string_array(array),
         Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
-        Value::CharArray(array) => (strlength_char_array(array)).map_err(Into::into),
-        Value::Cell(cell) => (strlength_cell_array(cell)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::CharArray(array) => strlength_char_array(array),
+        Value::Cell(cell) => strlength_cell_array(cell),
+        _ => Err(strlength_flow(ARG_TYPE_ERROR)),
     }
 }
 
-fn strlength_string_array(array: StringArray) -> Result<Value, String> {
+fn strlength_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut lengths = Vec::with_capacity(data.len());
     for text in &data {
         lengths.push(string_scalar_length(text));
     }
-    let tensor = Tensor::new(lengths, shape).map_err(|e| format!("strlength: {e}"))?;
+    let tensor = Tensor::new(lengths, shape).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn strlength_char_array(array: CharArray) -> Result<Value, String> {
+fn strlength_char_array(array: CharArray) -> BuiltinResult<Value> {
     let rows = array.rows;
     let mut lengths = Vec::with_capacity(rows);
     for row in 0..rows {
@@ -228,11 +240,12 @@ fn strlength_char_array(array: CharArray) -> Result<Value, String> {
         } as f64;
         lengths.push(length);
     }
-    let tensor = Tensor::new(lengths, vec![rows, 1]).map_err(|e| format!("strlength: {e}"))?;
+    let tensor =
+        Tensor::new(lengths, vec![rows, 1]).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn strlength_cell_array(cell: CellArray) -> Result<Value, String> {
+fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -245,13 +258,14 @@ fn strlength_cell_array(cell: CellArray) -> Result<Value, String> {
                 Value::String(text) => string_scalar_length(text),
                 Value::StringArray(sa) if sa.data.len() == 1 => string_scalar_length(&sa.data[0]),
                 Value::CharArray(char_vec) if char_vec.rows == 1 => char_vec.cols as f64,
-                Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-                _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+                Value::CharArray(_) => return Err(strlength_flow(CELL_ELEMENT_ERROR)),
+                _ => return Err(strlength_flow(CELL_ELEMENT_ERROR)),
             };
             lengths.push(length);
         }
     }
-    let tensor = Tensor::new(lengths, vec![rows, cols]).map_err(|e| format!("strlength: {e}"))?;
+    let tensor =
+        Tensor::new(lengths, vec![rows, cols]).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -281,6 +295,14 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -413,7 +435,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_errors_on_invalid_input() {
-        let err = strlength_builtin(Value::Num(1.0)).unwrap_err();
+        let err = error_message(strlength_builtin(Value::Num(1.0)).unwrap_err());
         assert_eq!(err, ARG_TYPE_ERROR);
     }
 
@@ -426,7 +448,7 @@ pub(crate) mod tests {
             2,
         )
         .unwrap();
-        let err = strlength_builtin(Value::Cell(cell)).unwrap_err();
+        let err = error_message(strlength_builtin(Value::Cell(cell)).unwrap_err());
         assert_eq!(err, CELL_ELEMENT_ERROR);
     }
 

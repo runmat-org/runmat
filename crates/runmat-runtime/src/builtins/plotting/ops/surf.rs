@@ -34,6 +34,7 @@ use crate::{BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "surf";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "surf"
 category: "plotting"
@@ -167,9 +168,10 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::Bu
         }
 
         let grid = tensor_to_surface_grid(
-            z_arg.into_tensor("surf")?,
+            z_arg.into_tensor(BUILTIN_NAME)?,
             x_axis_vec.len(),
             y_axis_vec.len(),
+            BUILTIN_NAME,
         )?;
         let mut surface = build_surface(x_axis_vec, y_axis_vec, grid)?;
         let style = Arc::clone(&style);

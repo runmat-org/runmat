@@ -220,7 +220,7 @@ fn fix_builtin(value: Value) -> BuiltinResult<Value> {
         Value::CharArray(ca) => fix_char_array(ca),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
-            Ok(fix_tensor(tensor)?.map(tensor::tensor_into_value)?)
+            fix_tensor(tensor).map(tensor::tensor_into_value)
         }
         Value::String(_) | Value::StringArray(_) => {
             Err(builtin_error("fix: expected numeric or logical input"))

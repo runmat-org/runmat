@@ -9,8 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::call_builtin;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, call_builtin, gather_if_needed, BuiltinResult, RuntimeControlFlow, RuntimeError};
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
     StructValue, Tensor, Value,
@@ -215,21 +214,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Assignments terminate fusion and gather device data back to the host.",
 };
 
+const BUILTIN_NAME: &str = "setfield";
+
+fn setfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn remap_setfield_flow(flow: RuntimeControlFlow, prefix: Option<&str>) -> RuntimeControlFlow {
+    match flow {
+        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+        RuntimeControlFlow::Error(err) => {
+            let mut message = err.message().to_string();
+            if let Some(prefix) = prefix {
+                if !message.starts_with(prefix) {
+                    message = format!("{prefix}{message}");
+                }
+            }
+            let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.with_source(err).build().into()
+        }
+    }
+}
+
+fn is_undefined_function(err: &RuntimeError) -> bool {
+    err.identifier() == Some("MATLAB:UndefinedFunction")
+        || err.message().contains("MATLAB:UndefinedFunction")
+}
+
 #[runtime_builtin(
+
     name = "setfield",
     category = "structs/core",
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
     keywords = "setfield,struct,assignment,object property",
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
-fn setfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
     let ParsedArguments {
         leading_index,
         steps,
         value,
     } = parsed;
-    assign_value(base, leading_index, steps, value).map_err(Into::into)
+    assign_value(base, leading_index, steps, value)
 }
 
 struct ParsedArguments {
@@ -254,9 +287,9 @@ enum IndexComponent {
     End,
 }
 
-fn parse_arguments(mut rest: Vec<Value>) -> Result<ParsedArguments, String> {
+fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     if rest.len() < 2 {
-        return Err("setfield: expected at least one field name and a value".to_string());
+        return Err(setfield_flow("setfield: expected at least one field name and a value"));
     }
 
     let value = rest
@@ -277,7 +310,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> Result<ParsedArguments, String> {
     }
 
     if rest.is_empty() {
-        return Err("setfield: expected field name arguments".to_string());
+        return Err(setfield_flow("setfield: expected field name arguments"));
     }
 
     let mut iter = rest.into_iter().peekable();
@@ -294,7 +327,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> Result<ParsedArguments, String> {
     }
 
     if parsed.steps.is_empty() {
-        return Err("setfield: expected field name arguments".to_string());
+        return Err(setfield_flow("setfield: expected field name arguments"));
     }
 
     Ok(parsed)
@@ -305,9 +338,9 @@ fn assign_value(
     leading_index: Option<IndexSelector>,
     steps: Vec<FieldStep>,
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if steps.is_empty() {
-        return Err("setfield: expected field name arguments".to_string());
+        return Err(setfield_flow("setfield: expected field name arguments"));
     }
     if let Some(selector) = leading_index {
         assign_with_leading_index(base, &selector, &steps, rhs)
@@ -321,12 +354,12 @@ fn assign_with_leading_index(
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     match base {
         Value::Cell(cell) => assign_into_struct_array(cell, selector, steps, rhs),
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "setfield: leading indices require a struct array, got {other:?}"
-        )),
+        ))),
     }
 }
 
@@ -334,13 +367,13 @@ fn assign_without_leading_index(
     base: Value,
     steps: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     match base {
         Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs),
         Value::Object(object) => assign_into_object(object, steps, rhs),
         Value::Cell(cell) if is_struct_array(&cell) => {
             if cell.data.is_empty() {
-                Err("setfield: struct array is empty; supply indices in a cell array".to_string())
+                Err(setfield_flow("setfield: struct array is empty; supply indices in a cell array"))
             } else {
                 let selector = IndexSelector {
                     components: vec![IndexComponent::Scalar(1)],
@@ -350,12 +383,12 @@ fn assign_without_leading_index(
         }
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
         Value::Listener(_) => {
-            Err("setfield: listeners do not support direct field assignment".to_string())
+            Err(setfield_flow("setfield: listeners do not support direct field assignment"))
         }
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "setfield unsupported on this value for field '{}': {other:?}",
             steps.first().map(|s| s.name.as_str()).unwrap_or_default()
-        )),
+        ))),
     }
 }
 
@@ -364,9 +397,9 @@ fn assign_into_struct_array(
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if selector.components.is_empty() {
-        return Err("setfield: index cell must contain at least one element".to_string());
+        return Err(setfield_flow("setfield: index cell must contain at least one element"));
     }
 
     let resolved = resolve_indices(&Value::Cell(cell.clone()), selector)?;
@@ -375,7 +408,7 @@ fn assign_into_struct_array(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > cell.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             idx - 1
         }
@@ -383,13 +416,13 @@ fn assign_into_struct_array(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             (row - 1) * cell.cols + (col - 1)
         }
         _ => {
             return Err(
-                "setfield: indexing with more than two indices is not supported yet".to_string(),
+                setfield_flow("setfield: indexing with more than two indices is not supported yet"),
             );
         }
     };
@@ -397,7 +430,7 @@ fn assign_into_struct_array(
     let handle = cell
         .data
         .get(position)
-        .ok_or_else(|| "Index exceeds the number of array elements.".to_string())?
+        .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
         .clone();
 
     let current = unsafe { &*handle.as_raw() }.clone();
@@ -406,7 +439,7 @@ fn assign_into_struct_array(
     Ok(Value::Cell(cell))
 }
 
-fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> Result<Value, String> {
+fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     if steps.is_empty() {
         return Ok(rhs);
     }
@@ -416,11 +449,11 @@ fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> Result<Va
         Value::Cell(cell) => assign_into_cell(cell, steps, rhs),
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs),
         Value::Listener(_) => {
-            Err("setfield: listeners do not support nested field assignment".to_string())
+            Err(setfield_flow("setfield: listeners do not support nested field assignment"))
         }
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "Struct contents assignment to a {other:?} object is not supported."
-        )),
+        ))),
     }
 }
 
@@ -428,7 +461,7 @@ fn assign_into_struct(
     mut struct_value: StructValue,
     steps: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let (first, rest) = steps
         .split_first()
         .expect("steps is non-empty when assign_into_struct is called");
@@ -473,14 +506,14 @@ fn assign_into_object(
     mut object: ObjectInstance,
     steps: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let (first, rest) = steps
         .split_first()
         .expect("steps is non-empty when assign_into_object is called");
 
     if first.index.is_some() {
         return Err(
-            "setfield: indexing into object properties is not currently supported".to_string(),
+            setfield_flow("setfield: indexing into object properties is not currently supported"),
         );
     }
 
@@ -495,13 +528,13 @@ fn assign_into_object(
     Ok(Value::Object(object))
 }
 
-fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> Result<Value, String> {
+fn assign_into_cell(cell: CellArray, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     let (first, rest) = steps
         .split_first()
         .expect("steps is non-empty when assign_into_cell is called");
 
     let selector = first.index.as_ref().ok_or_else(|| {
-        "setfield: cell array assignments require indices in a cell array".to_string()
+        setfield_flow("setfield: cell array assignments require indices in a cell array")
     })?;
     if rest.is_empty() {
         assign_with_selector(Value::Cell(cell), selector, &[], rhs)
@@ -515,8 +548,9 @@ fn assign_with_selector(
     selector: &IndexSelector,
     rest: &[FieldStep],
     rhs: Value,
-) -> Result<Value, String> {
-    let host_value = gather_if_needed(&value).map_err(|e| format!("setfield: {e}"))?;
+) -> BuiltinResult<Value> {
+    let host_value =
+        gather_if_needed(&value).map_err(|flow| remap_setfield_flow(flow, Some("setfield: ")))?;
     match host_value {
         Value::Cell(mut cell) => {
             let resolved = resolve_indices(&Value::Cell(cell.clone()), selector)?;
@@ -524,7 +558,7 @@ fn assign_with_selector(
                 1 => {
                     let idx = resolved[0];
                     if idx == 0 || idx > cell.data.len() {
-                        return Err("Index exceeds the number of array elements.".to_string());
+                        return Err(setfield_flow("Index exceeds the number of array elements."));
                     }
                     idx - 1
                 }
@@ -532,22 +566,21 @@ fn assign_with_selector(
                     let row = resolved[0];
                     let col = resolved[1];
                     if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                        return Err("Index exceeds the number of array elements.".to_string());
+                        return Err(setfield_flow("Index exceeds the number of array elements."));
                     }
                     (row - 1) * cell.cols + (col - 1)
                 }
                 _ => {
-                    return Err(
-                        "setfield: indexing with more than two indices is not supported yet"
-                            .to_string(),
-                    );
+                    return Err(setfield_flow(
+                        "setfield: indexing with more than two indices is not supported yet",
+                    ));
                 }
             };
 
             let handle = cell
                 .data
                 .get(position)
-                .ok_or_else(|| "Index exceeds the number of array elements.".to_string())?
+                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
                 .clone();
             let existing = unsafe { &*handle.as_raw() }.clone();
             let new_value = if rest.is_empty() {
@@ -560,57 +593,52 @@ fn assign_with_selector(
         }
         Value::Tensor(mut tensor) => {
             if !rest.is_empty() {
-                return Err(
-                    "setfield: cannot traverse deeper fields after indexing into a numeric tensor"
-                        .to_string(),
-                );
+                return Err(setfield_flow(
+                    "setfield: cannot traverse deeper fields after indexing into a numeric tensor",
+                ));
             }
             assign_tensor_element(&mut tensor, selector, rhs)?;
             Ok(Value::Tensor(tensor))
         }
         Value::LogicalArray(mut logical) => {
             if !rest.is_empty() {
-                return Err(
-                    "setfield: cannot traverse deeper fields after indexing into a logical array"
-                        .to_string(),
-                );
+                return Err(setfield_flow(
+                    "setfield: cannot traverse deeper fields after indexing into a logical array",
+                ));
             }
             assign_logical_element(&mut logical, selector, rhs)?;
             Ok(Value::LogicalArray(logical))
         }
         Value::StringArray(mut sa) => {
             if !rest.is_empty() {
-                return Err(
-                    "setfield: cannot traverse deeper fields after indexing into a string array"
-                        .to_string(),
-                );
+                return Err(setfield_flow(
+                    "setfield: cannot traverse deeper fields after indexing into a string array",
+                ));
             }
             assign_string_array_element(&mut sa, selector, rhs)?;
             Ok(Value::StringArray(sa))
         }
         Value::CharArray(mut ca) => {
             if !rest.is_empty() {
-                return Err(
-                    "setfield: cannot traverse deeper fields after indexing into a char array"
-                        .to_string(),
-                );
+                return Err(setfield_flow(
+                    "setfield: cannot traverse deeper fields after indexing into a char array",
+                ));
             }
             assign_char_array_element(&mut ca, selector, rhs)?;
             Ok(Value::CharArray(ca))
         }
         Value::ComplexTensor(mut tensor) => {
             if !rest.is_empty() {
-                return Err(
-                    "setfield: cannot traverse deeper fields after indexing into a complex tensor"
-                        .to_string(),
-                );
+                return Err(setfield_flow(
+                    "setfield: cannot traverse deeper fields after indexing into a complex tensor",
+                ));
             }
             assign_complex_tensor_element(&mut tensor, selector, rhs)?;
             Ok(Value::ComplexTensor(tensor))
         }
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "Struct contents assignment to a {other:?} object is not supported."
-        )),
+        ))),
     }
 }
 
@@ -618,14 +646,14 @@ fn assign_tensor_element(
     tensor: &mut Tensor,
     selector: &IndexSelector,
     rhs: Value,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::Tensor(tensor.clone()), selector)?;
     let value = value_to_scalar(rhs)?;
     match resolved.len() {
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             tensor.data[idx - 1] = value;
             Ok(())
@@ -634,16 +662,16 @@ fn assign_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows() || col == 0 || col > tensor.cols() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows();
             tensor
                 .data
                 .get_mut(pos)
                 .map(|slot| *slot = value)
-                .ok_or_else(|| "Index exceeds the number of array elements.".to_string())
+                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))
         }
-        _ => Err("setfield: indexing with more than two indices is not supported yet".to_string()),
+        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
     }
 }
 
@@ -651,37 +679,37 @@ fn assign_logical_element(
     logical: &mut LogicalArray,
     selector: &IndexSelector,
     rhs: Value,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::LogicalArray(logical.clone()), selector)?;
     let value = value_to_bool(rhs)?;
     match resolved.len() {
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > logical.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             logical.data[idx - 1] = if value { 1 } else { 0 };
             Ok(())
         }
         2 => {
             if logical.shape.len() < 2 {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let row = resolved[0];
             let col = resolved[1];
             let rows = logical.shape[0];
             let cols = logical.shape[1];
             if row == 0 || row > rows || col == 0 || col > cols {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let pos = (row - 1) + (col - 1) * rows;
             if pos >= logical.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             logical.data[pos] = if value { 1 } else { 0 };
             Ok(())
         }
-        _ => Err("setfield: indexing with more than two indices is not supported yet".to_string()),
+        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
     }
 }
 
@@ -689,15 +717,15 @@ fn assign_string_array_element(
     array: &mut runmat_builtins::StringArray,
     selector: &IndexSelector,
     rhs: Value,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::StringArray(array.clone()), selector)?;
     let text = String::try_from(&rhs)
-        .map_err(|_| "setfield: string assignments require text-compatible values".to_string())?;
+        .map_err(|_| setfield_flow("setfield: string assignments require text-compatible values"))?;
     match resolved.len() {
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             array.data[idx - 1] = text;
             Ok(())
@@ -706,16 +734,16 @@ fn assign_string_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let pos = (row - 1) + (col - 1) * array.rows;
             if pos >= array.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             array.data[pos] = text;
             Ok(())
         }
-        _ => Err("setfield: indexing with more than two indices is not supported yet".to_string()),
+        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
     }
 }
 
@@ -723,19 +751,19 @@ fn assign_char_array_element(
     array: &mut CharArray,
     selector: &IndexSelector,
     rhs: Value,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::CharArray(array.clone()), selector)?;
     let text = String::try_from(&rhs)
-        .map_err(|_| "setfield: char assignments require text-compatible values".to_string())?;
+        .map_err(|_| setfield_flow("setfield: char assignments require text-compatible values"))?;
     if text.chars().count() != 1 {
-        return Err("setfield: char array assignments require single characters".to_string());
+        return Err(setfield_flow("setfield: char array assignments require single characters"));
     }
     let ch = text.chars().next().unwrap();
     match resolved.len() {
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             array.data[idx - 1] = ch;
             Ok(())
@@ -744,16 +772,16 @@ fn assign_char_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let pos = (row - 1) * array.cols + (col - 1);
             if pos >= array.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             array.data[pos] = ch;
             Ok(())
         }
-        _ => Err("setfield: indexing with more than two indices is not supported yet".to_string()),
+        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
     }
 }
 
@@ -761,23 +789,23 @@ fn assign_complex_tensor_element(
     tensor: &mut ComplexTensor,
     selector: &IndexSelector,
     rhs: Value,
-) -> Result<(), String> {
+) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::ComplexTensor(tensor.clone()), selector)?;
     let (re, im) = match rhs {
         Value::Complex(r, i) => (r, i),
         Value::Num(n) => (n, 0.0),
         Value::Int(i) => (i.to_f64(), 0.0),
         other => {
-            return Err(format!(
+            return Err(setfield_flow(format!(
                 "setfield: cannot assign {other:?} into a complex tensor element"
-            ));
+            )));
         }
     };
     match resolved.len() {
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             tensor.data[idx - 1] = (re, im);
             Ok(())
@@ -786,43 +814,47 @@ fn assign_complex_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows || col == 0 || col > tensor.cols {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows;
             if pos >= tensor.data.len() {
-                return Err("Index exceeds the number of array elements.".to_string());
+                return Err(setfield_flow("Index exceeds the number of array elements."));
             }
             tensor.data[pos] = (re, im);
             Ok(())
         }
-        _ => Err("setfield: indexing with more than two indices is not supported yet".to_string()),
+        _ => Err(setfield_flow("setfield: indexing with more than two indices is not supported yet")),
     }
 }
 
-fn read_object_property(obj: &ObjectInstance, name: &str) -> Result<Value, String> {
+fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
-            return Err(format!(
+            return Err(setfield_flow(format!(
                 "You cannot access the static property '{}' through an instance of class '{}'.",
                 name, obj.class_name
-            ));
+            )));
         }
         if prop.get_access == Access::Private {
-            return Err(format!(
+            return Err(setfield_flow(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
-            ));
+            )));
         }
         if prop.is_dependent {
             let getter = format!("get.{name}");
             match call_builtin(&getter, &[Value::Object(obj.clone())]) {
                 Ok(value) => return Ok(value),
-                Err(err) => {
-                    let message: String = err.into();
-                    if !message.contains("MATLAB:UndefinedFunction") {
-                        return Err(message);
+                Err(flow) => match flow {
+                    RuntimeControlFlow::Suspend(pending) => {
+                        return Err(RuntimeControlFlow::Suspend(pending))
                     }
-                }
+                    RuntimeControlFlow::Error(err) => {
+                        if !is_undefined_function(&err) {
+                            return Err(remap_setfield_flow(RuntimeControlFlow::Error(err), None));
+                        }
+                    }
+                },
             }
             if let Some(value) = obj.properties.get(&format!("{name}_backing")) {
                 return Ok(value.clone());
@@ -836,45 +868,57 @@ fn read_object_property(obj: &ObjectInstance, name: &str) -> Result<Value, Strin
 
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.get_access == Access::Private {
-            return Err(format!(
+            return Err(setfield_flow(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
-            ));
+            )));
         }
-        return Err(format!(
+        return Err(setfield_flow(format!(
             "No public property '{}' for class '{}'.",
             name, obj.class_name
-        ));
+        )));
     }
 
-    Err(format!(
+    Err(setfield_flow(format!(
         "Undefined property '{}' for class {}",
         name, obj.class_name
-    ))
+    )))
 }
 
-fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> Result<(), String> {
+fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> BuiltinResult<()> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
-            return Err(format!(
+            return Err(setfield_flow(format!(
                 "Property '{}' is static; use classref('{}').{}",
                 name, obj.class_name, name
-            ));
+            )));
         }
         if prop.set_access == Access::Private {
-            return Err(format!("Property '{name}' is private"));
+            return Err(setfield_flow(format!("Property '{name}' is private")));
         }
         if prop.is_dependent {
             let setter = format!("set.{name}");
-            if let Ok(value) = call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()]) {
-                if let Value::Object(updated) = value {
-                    *obj = updated;
-                    return Ok(());
+            match call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()]) {
+                Ok(value) => {
+                    if let Value::Object(updated) = value {
+                        *obj = updated;
+                        return Ok(());
+                    }
+                    return Err(setfield_flow(format!(
+                        "Dependent property setter for '{}' must return the updated object",
+                        name
+                    )));
                 }
-                return Err(format!(
-                    "Dependent property setter for '{}' must return the updated object",
-                    name
-                ));
+                Err(flow) => match flow {
+                    RuntimeControlFlow::Suspend(pending) => {
+                        return Err(RuntimeControlFlow::Suspend(pending))
+                    }
+                    RuntimeControlFlow::Error(err) => {
+                        if !is_undefined_function(&err) {
+                            return Err(remap_setfield_flow(RuntimeControlFlow::Error(err), None));
+                        }
+                    }
+                },
             }
             obj.properties.insert(format!("{name}_backing"), rhs);
             return Ok(());
@@ -885,23 +929,23 @@ fn write_object_property(obj: &mut ObjectInstance, name: &str, rhs: Value) -> Re
     Ok(())
 }
 
-fn assign_into_handle(handle: HandleRef, steps: &[FieldStep], rhs: Value) -> Result<Value, String> {
+fn assign_into_handle(handle: HandleRef, steps: &[FieldStep], rhs: Value) -> BuiltinResult<Value> {
     if steps.is_empty() {
         return Err(
-            "setfield: expected at least one field name when assigning into a handle".to_string(),
+            setfield_flow("setfield: expected at least one field name when assigning into a handle"),
         );
     }
     if !handle.valid {
-        return Err(format!(
+        return Err(setfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
             handle.class_name
-        ));
+        )));
     }
     let current = unsafe { &*handle.target.as_raw() }.clone();
     let updated = assign_into_value(current, steps, rhs)?;
     let raw = unsafe { handle.target.as_raw_mut() };
     if raw.is_null() {
-        return Err("setfield: handle target is null".to_string());
+        return Err(setfield_flow("setfield: handle target is null"));
     }
     unsafe {
         *raw = updated;
@@ -913,9 +957,9 @@ fn is_index_selector(value: &Value) -> bool {
     matches!(value, Value::Cell(_))
 }
 
-fn parse_index_selector(value: Value) -> Result<IndexSelector, String> {
+fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err("setfield: indices must be provided in a cell array".to_string());
+        return Err(setfield_flow("setfield: indices must be provided in a cell array"));
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
@@ -925,7 +969,7 @@ fn parse_index_selector(value: Value) -> Result<IndexSelector, String> {
     Ok(IndexSelector { components })
 }
 
-fn parse_index_component(value: &Value) -> Result<IndexComponent, String> {
+fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
     match value {
         Value::CharArray(ca) => {
             let text: String = ca.data.iter().collect();
@@ -934,83 +978,96 @@ fn parse_index_component(value: &Value) -> Result<IndexComponent, String> {
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
         _ => {
-            let idx = parse_positive_scalar(value)
-                .map_err(|e| format!("setfield: invalid index element ({e})"))?;
+            let idx = parse_positive_scalar(value).map_err(|flow| match flow {
+                RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+                RuntimeControlFlow::Error(err) => setfield_flow(format!(
+                    "setfield: invalid index element ({})",
+                    err.message()
+                )),
+            })?;
             Ok(IndexComponent::Scalar(idx))
         }
     }
 }
 
-fn parse_index_text(text: &str) -> Result<IndexComponent, String> {
+fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
     if text.eq_ignore_ascii_case("end") {
         return Ok(IndexComponent::End);
     }
     if text == ":" {
-        return Err("setfield: ':' indexing is not currently supported".to_string());
+        return Err(setfield_flow("setfield: ':' indexing is not currently supported"));
     }
     if text.is_empty() {
-        return Err("setfield: index elements must not be empty".to_string());
+        return Err(setfield_flow("setfield: index elements must not be empty"));
     }
     if let Ok(value) = text.parse::<usize>() {
         if value == 0 {
-            return Err("setfield: index must be >= 1".to_string());
+            return Err(setfield_flow("setfield: index must be >= 1"));
         }
         return Ok(IndexComponent::Scalar(value));
     }
-    Err(format!("setfield: invalid index element '{}'", text))
+    Err(setfield_flow(format!(
+        "setfield: invalid index element '{}'",
+        text
+    )))
 }
 
-fn parse_positive_scalar(value: &Value) -> Result<usize, String> {
+fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
     let number = match value {
         Value::Int(i) => i.to_i64() as f64,
         Value::Num(n) => *n,
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
             let repr = format!("{value:?}");
-            return Err(format!("expected positive integer index, got {repr}"));
+            return Err(setfield_flow(format!(
+                "expected positive integer index, got {repr}"
+            )));
         }
     };
 
     if !number.is_finite() {
-        return Err("index must be a finite number".to_string());
+        return Err(setfield_flow("index must be a finite number"));
     }
     if number.fract() != 0.0 {
-        return Err("index must be an integer".to_string());
+        return Err(setfield_flow("index must be an integer"));
     }
     if number <= 0.0 {
-        return Err("index must be >= 1".to_string());
+        return Err(setfield_flow("index must be >= 1"));
     }
     if number > usize::MAX as f64 {
-        return Err("index exceeds platform limits".to_string());
+        return Err(setfield_flow("index exceeds platform limits"));
     }
     Ok(number as usize)
 }
 
-fn parse_field_name(value: Value) -> Result<String, String> {
+fn parse_field_name(value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(
-                    "setfield: field names must be scalar string arrays or character vectors"
-                        .to_string(),
-                )
+                Err(setfield_flow(
+                    "setfield: field names must be scalar string arrays or character vectors",
+                ))
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err("setfield: field names must be 1-by-N character vectors".to_string())
+                Err(setfield_flow(
+                    "setfield: field names must be 1-by-N character vectors",
+                ))
             }
         }
-        other => Err(format!("setfield: expected field name, got {other:?}")),
+        other => Err(setfield_flow(format!(
+            "setfield: expected field name, got {other:?}"
+        ))),
     }
 }
 
-fn resolve_indices(value: &Value, selector: &IndexSelector) -> Result<Vec<usize>, String> {
+fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec<usize>> {
     let dims = selector.components.len();
     let mut resolved = Vec::with_capacity(dims);
     for (dim_idx, component) in selector.components.iter().enumerate() {
@@ -1023,7 +1080,7 @@ fn resolve_indices(value: &Value, selector: &IndexSelector) -> Result<Vec<usize>
     Ok(resolved)
 }
 
-fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> Result<usize, String> {
+fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => tensor_dimension_length(tensor, dims, dim_idx),
         Value::Cell(cell) => cell_dimension_length(cell, dims, dim_idx),
@@ -1035,29 +1092,28 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> Result<usize,
             if dims == 1 {
                 Ok(1)
             } else {
-                Err(
-                    "setfield: indexing with more than one dimension is not supported for scalars"
-                        .to_string(),
-                )
+                Err(setfield_flow(
+                    "setfield: indexing with more than one dimension is not supported for scalars",
+                ))
             }
         }
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "Struct contents assignment to a {other:?} object is not supported."
-        )),
+        ))),
     }
 }
 
-fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Result<usize, String> {
+fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     let len = if dim_idx == 0 {
@@ -1066,27 +1122,27 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Resu
         tensor.cols()
     };
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
 
-fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Result<usize, String> {
+fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = cell.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     let len = if dim_idx == 0 { cell.rows } else { cell.cols };
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
@@ -1095,22 +1151,22 @@ fn string_array_dimension_length(
     array: &runmat_builtins::StringArray,
     dims: usize,
     dim_idx: usize,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
@@ -1119,25 +1175,25 @@ fn logical_array_dimension_length(
     array: &LogicalArray,
     dims: usize,
     dim_idx: usize,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     if array.shape.len() < dims {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     let len = array.shape[dim_idx];
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
@@ -1146,22 +1202,22 @@ fn char_array_dimension_length(
     array: &CharArray,
     dims: usize,
     dim_idx: usize,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
@@ -1170,17 +1226,17 @@ fn complex_tensor_dimension_length(
     tensor: &ComplexTensor,
     dims: usize,
     dim_idx: usize,
-) -> Result<usize, String> {
+) -> BuiltinResult<usize> {
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err("Index exceeds the number of array elements (0).".to_string());
+            return Err(setfield_flow("Index exceeds the number of array elements (0)."));
         }
         return Ok(total);
     }
     if dims > 2 {
         return Err(
-            "setfield: indexing with more than two indices is not supported yet".to_string(),
+            setfield_flow("setfield: indexing with more than two indices is not supported yet"),
         );
     }
     let len = if dim_idx == 0 {
@@ -1189,38 +1245,39 @@ fn complex_tensor_dimension_length(
         tensor.cols
     };
     if len == 0 {
-        return Err("Index exceeds the number of array elements (0).".to_string());
+        return Err(setfield_flow("Index exceeds the number of array elements (0)."));
     }
     Ok(len)
 }
 
-fn value_to_scalar(value: Value) -> Result<f64, String> {
+fn value_to_scalar(value: Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
         Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a numeric tensor element"
-        )),
+        ))),
     }
 }
 
-fn value_to_bool(value: Value) -> Result<bool, String> {
+fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(i) => Ok(i.to_i64() != 0),
         Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0] != 0.0),
-        other => Err(format!(
+        other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a logical array element"
-        )),
+        ))),
     }
 }
 
-fn allocate_cell_handle(value: Value) -> Result<GcPtr<Value>, String> {
-    runmat_gc::gc_allocate(value)
-        .map_err(|e| format!("setfield: failed to allocate cell element in GC: {e}"))
+fn allocate_cell_handle(value: Value) -> BuiltinResult<GcPtr<Value>> {
+    runmat_gc::gc_allocate(value).map_err(|e| {
+        setfield_flow(format!("setfield: failed to allocate cell element in GC: {e}"))
+    })
 }
 
 fn is_struct_array(cell: &CellArray) -> bool {
@@ -1238,6 +1295,14 @@ pub(crate) mod tests {
     use runmat_gc::gc_allocate;
 
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1457,15 +1522,17 @@ pub(crate) mod tests {
         let struct_value = StructValue::new();
         let index_cell =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
-        let err = setfield_builtin(
-            Value::Struct(struct_value),
-            vec![
-                Value::from("missing"),
-                Value::Cell(index_cell),
-                Value::Num(1.0),
-            ],
-        )
-        .expect_err("setfield should fail when field is missing");
+        let err = error_message(
+            setfield_builtin(
+                Value::Struct(struct_value),
+                vec![
+                    Value::from("missing"),
+                    Value::Cell(index_cell),
+                    Value::Num(1.0),
+                ],
+            )
+            .expect_err("setfield should fail when field is missing"),
+        );
         assert!(
             err.contains("Reference to non-existent field 'missing'."),
             "unexpected error message: {err}"
@@ -1495,11 +1562,13 @@ pub(crate) mod tests {
         runmat_builtins::register_class(class_def);
 
         let obj = ObjectInstance::new("StaticSetfield".to_string());
-        let err = setfield_builtin(
-            Value::Object(obj),
-            vec![Value::from("version"), Value::Num(2.0)],
-        )
-        .expect_err("setfield should reject static property writes");
+        let err = error_message(
+            setfield_builtin(
+                Value::Object(obj),
+                vec![Value::from("version"), Value::Num(2.0)],
+            )
+            .expect_err("setfield should reject static property writes"),
+        );
         assert!(
             err.contains("Property 'version' is static"),
             "unexpected error message: {err}"

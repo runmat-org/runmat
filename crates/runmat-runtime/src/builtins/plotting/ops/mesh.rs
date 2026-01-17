@@ -29,6 +29,7 @@ use crate::{BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "mesh";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "mesh"
 category: "plotting"
@@ -150,9 +151,10 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
         }
 
         let grid = tensor_to_surface_grid(
-            z_arg.into_tensor("mesh")?,
+            z_arg.into_tensor(BUILTIN_NAME)?,
             x_axis_vec.len(),
             y_axis_vec.len(),
+            BUILTIN_NAME,
         )?;
         let mut surface = build_mesh_surface(x_axis_vec, y_axis_vec, grid)?;
         let style = Arc::clone(&style);

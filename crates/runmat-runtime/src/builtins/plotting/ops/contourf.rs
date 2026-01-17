@@ -24,6 +24,7 @@ use crate::RuntimeControlFlow;
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "contourf";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "contourf"
 category: "plotting"
@@ -134,7 +135,12 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             }
         }
 
-        let grid = tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len())?;
+        let grid = tensor_to_surface_grid(
+            z_input.into_tensor(name)?,
+            x_axis.len(),
+            y_axis.len(),
+            name,
+        )?;
         let fill_plot = build_contour_fill_plot(
             name,
             &x_axis,

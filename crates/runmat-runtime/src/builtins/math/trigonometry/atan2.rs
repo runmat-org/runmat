@@ -202,7 +202,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+    RuntimeControlFlow::from(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
@@ -235,11 +239,11 @@ fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
     match (y, x) {
         (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh),
         (Value::GpuTensor(yh), other) => {
-            let gathered = gpu_helpers::gather_tensor(&yh).map_err(runtime_error_for)?;
+            let gathered = gpu_helpers::gather_tensor(&yh)?;
             atan2_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(xh)) => {
-            let gathered = gpu_helpers::gather_tensor(&xh).map_err(runtime_error_for)?;
+            let gathered = gpu_helpers::gather_tensor(&xh)?;
             atan2_host(other, Value::Tensor(gathered))
         }
         (lhs, rhs) => atan2_host(lhs, rhs),
@@ -256,8 +260,8 @@ fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value
             }
         }
     }
-    let host_y = gpu_helpers::gather_tensor(&y).map_err(runtime_error_for)?;
-    let host_x = gpu_helpers::gather_tensor(&x).map_err(runtime_error_for)?;
+    let host_y = gpu_helpers::gather_tensor(&y)?;
+    let host_x = gpu_helpers::gather_tensor(&x)?;
     atan2_host(Value::Tensor(host_y), Value::Tensor(host_x))
 }
 

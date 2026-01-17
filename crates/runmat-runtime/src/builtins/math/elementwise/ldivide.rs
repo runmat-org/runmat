@@ -594,6 +594,17 @@ fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> BuiltinR
     }
     let divisor_host = gpu_helpers::gather_tensor(&divisor)
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    ldivide_host(Value::Tensor(divisor_host), numerator)
+}
+
+fn ldivide_gpu_host_right(divisor: Value, numerator: GpuTensorHandle) -> BuiltinResult<Value> {
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(scalar) = extract_scalar_f64(&divisor)? {
+            if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
+                return Ok(Value::GpuTensor(handle));
+            }
+        }
+    }
     let numerator_host = gpu_helpers::gather_tensor(&numerator)
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     ldivide_host(divisor, Value::Tensor(numerator_host))

@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -212,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
 };
 
+const BUILTIN_NAME: &str = "strip";
 const ARG_TYPE_ERROR: &str =
     "strip: first argument must be a string array, character array, or cell array of character vectors";
 const CELL_ELEMENT_ERROR: &str =
@@ -221,6 +223,17 @@ const CHARACTERS_ERROR: &str =
     "strip: characters to remove must be a string array, character vector, or cell array of character vectors";
 const SIZE_MISMATCH_ERROR: &str =
     "strip: stripCharacters must be the same size as the input when supplying multiple values";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum StripDirection {
@@ -295,18 +308,18 @@ impl PatternSpec {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
-fn strip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("strip: {e}"))?;
+fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed(&value).map_err(map_flow)?;
     match gathered {
-        Value::String(text) => (strip_string(text, &rest)).map_err(Into::into),
-        Value::StringArray(array) => (strip_string_array(array, &rest)).map_err(Into::into),
-        Value::CharArray(array) => (strip_char_array(array, &rest)).map_err(Into::into),
-        Value::Cell(cell) => (strip_cell_array(cell, &rest)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::String(text) => strip_string(text, &rest),
+        Value::StringArray(array) => strip_string_array(array, &rest),
+        Value::CharArray(array) => strip_char_array(array, &rest),
+        Value::Cell(cell) => strip_cell_array(cell, &rest),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn strip_string(text: String, args: &[Value]) -> Result<Value, String> {
+fn strip_string(text: String, args: &[Value]) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::String(text));
     }
@@ -316,7 +329,7 @@ fn strip_string(text: String, args: &[Value]) -> Result<Value, String> {
     Ok(Value::String(stripped))
 }
 
-fn strip_string_array(array: StringArray, args: &[Value]) -> Result<Value, String> {
+fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value> {
     let expected_len = array.data.len();
     let expectation = PatternExpectation::with_shape(expected_len, &array.shape);
     let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
@@ -330,11 +343,11 @@ fn strip_string_array(array: StringArray, args: &[Value]) -> Result<Value, Strin
             stripped.push(strip_text(&text, direction, pattern));
         }
     }
-    let result = StringArray::new(stripped, shape).map_err(|e| format!("strip: {e}"))?;
+    let result = StringArray::new(stripped, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(result))
 }
 
-fn strip_char_array(array: CharArray, args: &[Value]) -> Result<Value, String> {
+fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     let expectation = PatternExpectation::with_len(rows);
     let (direction, pattern_spec) = parse_arguments(args, &expectation)?;
@@ -365,10 +378,10 @@ fn strip_char_array(array: CharArray, args: &[Value]) -> Result<Value, String> {
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("strip: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strip_cell_array(cell: CellArray, args: &[Value]) -> Result<Value, String> {
+fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
     let rows = cell.rows;
     let cols = cell.cols;
     let dims = [rows, cols];
@@ -382,15 +395,15 @@ fn strip_cell_array(cell: CellArray, args: &[Value]) -> Result<Value, String> {
         let stripped = strip_cell_element(value, direction, pattern)?;
         stripped_values.push(stripped);
     }
-    make_cell(stripped_values, rows, cols).map_err(|e| format!("strip: {e}"))
+    make_cell(stripped_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 fn strip_cell_element(
     value: &Value,
     direction: StripDirection,
     pattern: PatternRef<'_>,
-) -> Result<Value, String> {
-    let gathered = gather_if_needed(value).map_err(|e| format!("strip: {e}"))?;
+) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed(value).map_err(map_flow)?;
     match gathered {
         Value::String(text) => {
             if is_missing_string(&text) {
@@ -422,17 +435,17 @@ fn strip_cell_element(
             let cols = if rows == 0 { ca.cols } else { len };
             CharArray::new(data, rows, cols)
                 .map(Value::CharArray)
-                .map_err(|e| format!("strip: {e}"))
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
         }
-        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
     }
 }
 
 fn parse_arguments(
     args: &[Value],
     expectation: &PatternExpectation,
-) -> Result<(StripDirection, PatternSpec), String> {
+) -> BuiltinResult<(StripDirection, PatternSpec)> {
     match args.len() {
         0 => Ok((StripDirection::Both, PatternSpec::Default)),
         1 => {
@@ -446,23 +459,23 @@ fn parse_arguments(
         2 => {
             let direction = match try_parse_direction(&args[0], true)? {
                 Some(dir) => dir,
-                None => return Err(DIRECTION_ERROR.to_string()),
+                None => return Err(runtime_error_for(DIRECTION_ERROR)),
             };
             let pattern = parse_pattern(&args[1], expectation)?;
             Ok((direction, pattern))
         }
-        _ => Err("strip: too many input arguments".to_string()),
+        _ => Err(runtime_error_for("strip: too many input arguments")),
     }
 }
 
-fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<StripDirection>, String> {
+fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<StripDirection>> {
     let Some(text) = value_to_single_string(value) else {
         return Ok(None);
     };
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return if strict {
-            Err(DIRECTION_ERROR.to_string())
+            Err(runtime_error_for(DIRECTION_ERROR))
         } else {
             Ok(None)
         };
@@ -474,7 +487,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<StripDirect
         "right" | "trailing" => Some(StripDirection::Right),
         _ => {
             if strict {
-                return Err(DIRECTION_ERROR.to_string());
+                return Err(runtime_error_for(DIRECTION_ERROR));
             }
             None
         }
@@ -503,7 +516,7 @@ fn value_to_single_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> Result<PatternSpec, String> {
+fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> BuiltinResult<PatternSpec> {
     let expected_len = expectation.len();
     match value {
         Value::String(text) => Ok(PatternSpec::Scalar(text.chars().collect())),
@@ -517,7 +530,7 @@ fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> Result<Patt
             } else if sa.data.len() == expected_len {
                 if let Some(shape) = expectation.shape() {
                     if sa.shape != shape {
-                        return Err(SIZE_MISMATCH_ERROR.to_string());
+                        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
                     }
                 }
                 let mut patterns = Vec::with_capacity(sa.data.len());
@@ -526,7 +539,7 @@ fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> Result<Patt
                 }
                 Ok(PatternSpec::PerElement(patterns))
             } else {
-                Err(SIZE_MISMATCH_ERROR.to_string())
+                Err(runtime_error_for(SIZE_MISMATCH_ERROR))
             }
         }
         Value::CharArray(ca) => {
@@ -545,18 +558,18 @@ fn parse_pattern(value: &Value, expectation: &PatternExpectation) -> Result<Patt
                 }
                 Ok(PatternSpec::PerElement(patterns))
             } else {
-                Err(SIZE_MISMATCH_ERROR.to_string())
+                Err(runtime_error_for(SIZE_MISMATCH_ERROR))
             }
         }
         Value::Cell(cell) => parse_pattern_cell(cell, expectation),
-        _ => Err(CHARACTERS_ERROR.to_string()),
+        _ => Err(runtime_error_for(CHARACTERS_ERROR)),
     }
 }
 
 fn parse_pattern_cell(
     cell: &CellArray,
     expectation: &PatternExpectation,
-) -> Result<PatternSpec, String> {
+) -> BuiltinResult<PatternSpec> {
     let len = cell.rows * cell.cols;
     if len == 0 {
         return Ok(PatternSpec::Scalar(Vec::new()));
@@ -566,19 +579,19 @@ fn parse_pattern_cell(
         return Ok(PatternSpec::Scalar(chars));
     }
     if len != expectation.len() {
-        return Err(SIZE_MISMATCH_ERROR.to_string());
+        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
     }
     if let Some(shape) = expectation.shape() {
         match shape.len() {
             0 => {}
             1 => {
                 if cell.rows != shape[0] || cell.cols != 1 {
-                    return Err(SIZE_MISMATCH_ERROR.to_string());
+                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
                 }
             }
             _ => {
                 if cell.rows != shape[0] || cell.cols != shape[1] {
-                    return Err(SIZE_MISMATCH_ERROR.to_string());
+                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
                 }
             }
         }
@@ -590,8 +603,8 @@ fn parse_pattern_cell(
     Ok(PatternSpec::PerElement(patterns))
 }
 
-fn pattern_chars_from_value(value: &Value) -> Result<Vec<char>, String> {
-    let gathered = gather_if_needed(value).map_err(|e| format!("strip: {e}"))?;
+fn pattern_chars_from_value(value: &Value) -> BuiltinResult<Vec<char>> {
+    let gathered = gather_if_needed(value).map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(text.chars().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].chars().collect()),
@@ -603,8 +616,8 @@ fn pattern_chars_from_value(value: &Value) -> Result<Vec<char>, String> {
                 Ok(text.chars().collect())
             }
         }
-        Value::CharArray(_) => Err(CHARACTERS_ERROR.to_string()),
-        _ => Err(CHARACTERS_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CHARACTERS_ERROR)),
+        _ => Err(runtime_error_for(CHARACTERS_ERROR)),
     }
 }
 
@@ -865,14 +878,14 @@ pub(crate) mod tests {
     #[test]
     fn strip_errors_on_invalid_input() {
         let err = strip_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_errors_on_invalid_pattern_type() {
         let err = strip_builtin(Value::String("abc".into()), vec![Value::Num(1.0)]).unwrap_err();
-        assert_eq!(err, CHARACTERS_ERROR);
+        assert_eq!(err.to_string(), CHARACTERS_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -883,7 +896,7 @@ pub(crate) mod tests {
             vec![Value::String("sideways".into()), Value::String("a".into())],
         )
         .unwrap_err();
-        assert_eq!(err, DIRECTION_ERROR);
+        assert_eq!(err.to_string(), DIRECTION_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -897,7 +910,7 @@ pub(crate) mod tests {
             vec![Value::StringArray(pattern)],
         )
         .unwrap_err();
-        assert_eq!(err, SIZE_MISMATCH_ERROR);
+        assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -910,7 +923,7 @@ pub(crate) mod tests {
             vec![Value::StringArray(pattern)],
         )
         .unwrap_err();
-        assert_eq!(err, SIZE_MISMATCH_ERROR);
+        assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -925,7 +938,7 @@ pub(crate) mod tests {
         .unwrap();
         let err = strip_builtin(Value::StringArray(strings), vec![Value::Cell(cell_pattern)])
             .unwrap_err();
-        assert_eq!(err, SIZE_MISMATCH_ERROR);
+        assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -940,7 +953,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err, "strip: too many input arguments");
+        assert_eq!(err.to_string(), "strip: too many input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -960,7 +973,7 @@ pub(crate) mod tests {
             })
             .expect("upload");
         let err = strip_builtin(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
     }
 

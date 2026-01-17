@@ -10,6 +10,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use std::collections::BTreeSet;
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -223,6 +225,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fieldnames as a host inspector; it terminates any pending fusion group.",
 };
 
+fn fieldnames_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("fieldnames")
+        .build()
+        .into()
+}
+
 #[runtime_builtin(
     name = "fieldnames",
     category = "structs/core",
@@ -230,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fieldnames,struct,introspection,fields",
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
-fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {
+fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
     let names = match &value {
         Value::Struct(st) => collect_struct_fieldnames(st),
         Value::Cell(cell) => collect_struct_array_fieldnames(cell)?,
@@ -238,9 +247,9 @@ fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::HandleObject(handle) => collect_handle_fieldnames(handle)?,
         Value::Listener(listener) => collect_listener_fieldnames(listener),
         other => {
-            return Err(((format!(
+            return Err(fieldnames_flow(format!(
                 "fieldnames: expected struct, struct array, or object (got {other:?})"
-            ))).into())
+            )))
         }
     };
 
@@ -250,8 +259,7 @@ fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .map(|name| Value::CharArray(CharArray::new_row(&name)))
         .collect();
     crate::make_cell(cells, rows, 1)
-        .map_err(|e| format!("fieldnames: {e}"))
-        .map_err(Into::into)
+        .map_err(|e| fieldnames_flow(format!("fieldnames: {e}")))
 }
 
 fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
@@ -260,12 +268,14 @@ fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
     names
 }
 
-fn collect_struct_array_fieldnames(array: &CellArray) -> Result<Vec<String>, String> {
+fn collect_struct_array_fieldnames(array: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut names = BTreeSet::new();
     for handle in array.data.iter() {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err("fieldnames: expected struct array contents to be structs".to_string());
+            return Err(fieldnames_flow(
+                "fieldnames: expected struct array contents to be structs",
+            ));
         };
         names.extend(st.fields.keys().cloned());
     }
@@ -278,7 +288,7 @@ fn collect_object_fieldnames(obj: &ObjectInstance) -> Vec<String> {
     names.into_iter().collect()
 }
 
-fn collect_handle_fieldnames(handle: &HandleRef) -> Result<Vec<String>, String> {
+fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
     if handle.valid {
@@ -340,6 +350,14 @@ pub(crate) mod tests {
     use std::collections::HashMap;
 
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -400,7 +418,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fieldnames_errors_for_non_struct_inputs() {
-        let err = fieldnames_builtin(Value::Num(1.0)).unwrap_err();
+        let err = error_message(fieldnames_builtin(Value::Num(1.0)).unwrap_err());
         assert!(
             err.contains("expected struct, struct array, or object"),
             "unexpected error message: {err}"
@@ -423,7 +441,7 @@ pub(crate) mod tests {
     #[test]
     fn fieldnames_cell_without_struct_errors() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
-        let err = fieldnames_builtin(Value::Cell(cell)).unwrap_err();
+        let err = error_message(fieldnames_builtin(Value::Cell(cell)).unwrap_err());
         assert!(
             err.contains("expected struct array contents to be structs"),
             "unexpected error message: {err}"

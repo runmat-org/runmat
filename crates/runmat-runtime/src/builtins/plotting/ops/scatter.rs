@@ -47,6 +47,7 @@ use crate::{BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "scatter";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "scatter"
 category: "plotting"
@@ -248,7 +249,7 @@ struct ScatterResolvedStyle {
 fn resolve_scatter_style(
     point_count: usize,
     args: &PointArgs,
-    context: &str,
+    context: &'static str,
 ) -> BuiltinResult<ScatterResolvedStyle> {
     let mut style = ScatterResolvedStyle {
         uniform_color: default_color(),

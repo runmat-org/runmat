@@ -5,16 +5,23 @@ use super::common::ERR_PLOTTING_UNAVAILABLE;
 use super::state::{clone_figure, FigureHandle};
 use thiserror::Error;
 
+#[cfg(feature = "plot-core")]
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 #[derive(Debug, Error)]
-#[error("{0}")]
-struct PlottingStringError(String);
-
-impl From<String> for PlottingStringError {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
+#[allow(dead_code)]
+enum PlottingBackendError {
+    #[error("interactive backend error: {0}")]
+    Interactive(String),
+    #[error("static backend error: {0}")]
+    Static(String),
+    #[error("jupyter backend error: {0}")]
+    Jupyter(String),
+    #[error("export initialization error: {0}")]
+    ImageExportInit(String),
+    #[error("export render error: {0}")]
+    ImageExport(String),
 }
 
 fn engine_error(message: impl Into<String>) -> RuntimeControlFlow {
@@ -66,14 +73,14 @@ pub async fn render_figure_png_bytes(
     let exporter = ImageExporter::with_settings(settings).await.map_err(|err| {
         engine_error_with_source(
             "Plot export initialization failed.",
-            PlottingStringError::from(err),
+            PlottingBackendError::ImageExportInit(err),
         )
     })?;
     exporter
         .render_png_bytes(&mut figure)
         .await
         .map_err(|err| {
-            engine_error_with_source("Plot export failed.", PlottingStringError::from(err))
+            engine_error_with_source("Plot export failed.", PlottingBackendError::ImageExport(err))
         })
 }
 
@@ -83,13 +90,19 @@ pub async fn render_figure_snapshot(
     width: u32,
     height: u32,
 ) -> BuiltinResult<Vec<u8>> {
+    const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
     let figure = clone_figure(handle).ok_or_else(|| {
-        engine_error(format!(
-            "figure handle {} does not exist",
-            handle.as_u32()
-        ))
+        map_control_flow_with_builtin(
+            engine_error(format!(
+                "figure handle {} does not exist",
+                handle.as_u32()
+            )),
+            SNAPSHOT_CONTEXT,
+        )
     })?;
-    render_figure_png_bytes(figure, width, height).await
+    render_figure_png_bytes(figure, width, height)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, SNAPSHOT_CONTEXT))
 }
 
 #[cfg(feature = "gui")]
@@ -145,7 +158,7 @@ pub(crate) mod native {
         runmat_plot::render_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
             engine_error_with_source(
                 "Interactive plotting failed. Please check GPU/GUI system setup.",
-                PlottingStringError::from(err),
+                PlottingBackendError::Interactive(err),
             )
         })
     }
@@ -157,7 +170,7 @@ pub(crate) mod native {
         runmat_plot::show_plot_unified(figure.clone(), Some(filename))
             .map(|_| format!("Plot saved to {filename}"))
             .map_err(|err| {
-                engine_error_with_source("Plot export failed.", PlottingStringError::from(err))
+                engine_error_with_source("Plot export failed.", PlottingBackendError::Static(err))
             })
     }
 
@@ -166,7 +179,7 @@ pub(crate) mod native {
         use runmat_plot::jupyter::JupyterBackend;
         let mut backend = JupyterBackend::new();
         backend.display_figure(figure).map_err(|err| {
-            engine_error_with_source("Jupyter plotting failed.", PlottingStringError::from(err))
+            engine_error_with_source("Jupyter plotting failed.", PlottingBackendError::Jupyter(err))
         })
     }
 

@@ -297,38 +297,36 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cummax: direction specified more than once".to_string()
-                                );
+                                return Err(cummax_error(
+                                    "cummax: direction specified more than once",
+                                ));
                             }
                             direction = CummaxDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cummax: direction specified more than once".to_string()
-                                );
+                                return Err(cummax_error(
+                                    "cummax: direction specified more than once",
+                                ));
                             }
                             direction = CummaxDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummax: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummax_error(
+                                    "cummax: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CummaxNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummax: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummax_error(
+                                    "cummax: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CummaxNanMode::Include;
                             nan_set = true;

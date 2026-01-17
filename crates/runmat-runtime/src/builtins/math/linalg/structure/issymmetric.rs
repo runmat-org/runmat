@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -238,6 +238,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "issymmetric";
 
+fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin(name).build())
+}
+
 #[runtime_builtin(
     name = "issymmetric",
     category = "math/linalg/structure",
@@ -328,12 +332,8 @@ impl MatrixInput {
             }
             Value::ComplexTensor(tensor) => MatrixData::Complex(tensor),
             Value::Complex(re, im) => {
-                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
-                    build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
-                        .with_builtin(BUILTIN_NAME)
-                        .build()
-                        .into()
-                })?;
+                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                    .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
                 MatrixData::Complex(tensor)
             }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
@@ -341,13 +341,13 @@ impl MatrixInput {
                 MatrixData::Real(tensor)
             }
             other => {
-                return Err(build_runtime_error(format!(
-                    "issymmetric: unsupported input type {:?}; expected numeric or logical matrix",
-                    other
-                ))
-                .with_builtin(BUILTIN_NAME)
-                .build()
-                .into());
+                return Err(runtime_error(
+                    BUILTIN_NAME,
+                    format!(
+                        "issymmetric: unsupported input type {:?}; expected numeric or logical matrix",
+                        other
+                    ),
+                ));
             }
         };
 
@@ -369,10 +369,10 @@ fn evaluate_matrix(matrix: MatrixInput, mode: SymmetryMode, tol: f64) -> bool {
 
 fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
     if args.len() > 2 {
-        return Err(build_runtime_error("issymmetric: too many input arguments")
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into());
+        return Err(runtime_error(
+            BUILTIN_NAME,
+            "issymmetric: too many input arguments",
+        ));
     }
 
     let mut mode = SymmetryMode::Symmetric;
@@ -382,10 +382,10 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
     for arg in args {
         if let Some(flag) = parse_mode_flag(arg)? {
             if mode_set {
-                return Err(build_runtime_error("issymmetric: duplicate symmetry flag")
-                    .with_builtin(BUILTIN_NAME)
-                    .build()
-                    .into());
+                return Err(runtime_error(
+                    BUILTIN_NAME,
+                    "issymmetric: duplicate symmetry flag",
+                ));
             }
             mode = flag;
             mode_set = true;
@@ -393,10 +393,10 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
         }
 
         if tol.is_some() {
-            return Err(build_runtime_error("issymmetric: tolerance specified more than once")
-                .with_builtin(BUILTIN_NAME)
-                .build()
-                .into());
+            return Err(runtime_error(
+                BUILTIN_NAME,
+                "issymmetric: tolerance specified more than once",
+            ));
         }
 
         let local = parse_single_tolerance(arg)?;
@@ -422,10 +422,10 @@ fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     match lowered.as_str() {
         "skew" => Ok(Some(SymmetryMode::Skew)),
         "nonskew" | "symmetric" => Ok(Some(SymmetryMode::Symmetric)),
-        other => Err(build_runtime_error(format!("issymmetric: unknown flag '{other}'"))
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()),
+        other => Err(runtime_error(
+            BUILTIN_NAME,
+            format!("issymmetric: unknown flag '{other}'"),
+        )),
     }
 }
 
@@ -454,25 +454,20 @@ fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(build_runtime_error(format!(
-                "{name}: tolerance must be a real scalar, got {other:?}"
+            return Err(runtime_error(
+                name,
+                format!("{name}: tolerance must be a real scalar, got {other:?}"),
             ))
-            .with_builtin(name)
-            .build()
-            .into())
         }
     };
     if !raw.is_finite() {
-        return Err(build_runtime_error(format!("{name}: tolerance must be finite"))
-            .with_builtin(name)
-            .build()
-            .into());
+        return Err(runtime_error(name, format!("{name}: tolerance must be finite")));
     }
     if raw < 0.0 {
-        return Err(build_runtime_error(format!("{name}: tolerance must be >= 0"))
-            .with_builtin(name)
-            .build()
-            .into());
+        return Err(runtime_error(
+            name,
+            format!("{name}: tolerance must be >= 0"),
+        ));
     }
     Ok(raw)
 }
@@ -483,12 +478,10 @@ fn matrix_dimensions_for(name: &str, shape: &[usize]) -> BuiltinResult<(usize, u
         1 => Ok((shape[0], 1)),
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(build_runtime_error(format!(
-                    "{name}: inputs must be 2-D matrices or vectors"
+                Err(runtime_error(
+                    name,
+                    format!("{name}: inputs must be 2-D matrices or vectors"),
                 ))
-                .with_builtin(name)
-                .build()
-                .into())
             } else {
                 Ok((shape[0], shape[1]))
             }
@@ -500,31 +493,16 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        other => Err(build_runtime_error(format!(
-            "{name}: unsupported input type {:?}; expected numeric or logical values",
-            other
-        ))
-        .with_builtin(name)
-        .build()
-        .into()),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        other => Err(runtime_error(
+            name,
+            format!("{name}: unsupported input type {:?}; expected numeric or logical values", other),
+        )),
     }
 }
 
@@ -534,12 +512,8 @@ fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor
         .iter()
         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
         .collect();
-    Tensor::new(data, logical.shape.clone()).map_err(|e| {
-        build_runtime_error(format!("{name}: {e}"))
-            .with_builtin(name)
-            .build()
-            .into()
-    })
+    Tensor::new(data, logical.shape.clone())
+        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
 }
 
 fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
@@ -665,12 +639,8 @@ pub fn issymmetric_host_real_data(
     if rows != cols {
         return Ok(false);
     }
-    let tensor = Tensor::new(data.to_vec(), shape.to_vec()).map_err(|e| {
-        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()
-    })?;
+    let tensor = Tensor::new(data.to_vec(), shape.to_vec())
+        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
     issymmetric_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -684,12 +654,8 @@ pub fn issymmetric_host_complex_data(
     if rows != cols {
         return Ok(false);
     }
-    let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec()).map_err(|e| {
-        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()
-    })?;
+    let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
+        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
     issymmetric_host_complex_tensor(&tensor, skew, tol)
 }
 

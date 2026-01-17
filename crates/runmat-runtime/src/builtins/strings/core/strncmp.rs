@@ -9,8 +9,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 const FN_NAME: &str = "strncmp";
 
@@ -184,6 +185,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results and is not eligible for GPU fusion.",
 };
 
+fn strncmp_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(FN_NAME).build().into()
+}
+
+fn remap_strncmp_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, FN_NAME)
+}
+
 #[runtime_builtin(
     name = "strncmp",
     category = "strings/core",
@@ -193,21 +202,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed(&a).map_err(|e| format!("{FN_NAME}: {e}"))?;
-    let b = gather_if_needed(&b).map_err(|e| format!("{FN_NAME}: {e}"))?;
-    let n = gather_if_needed(&n).map_err(|e| format!("{FN_NAME}: {e}"))?;
+    let a = gather_if_needed(&a).map_err(remap_strncmp_flow)?;
+    let b = gather_if_needed(&b).map_err(remap_strncmp_flow)?;
+    let n = gather_if_needed(&n).map_err(remap_strncmp_flow)?;
 
     let limit = parse_prefix_length(n)?;
     let left = TextCollection::from_argument(FN_NAME, a, "first argument")?;
     let right = TextCollection::from_argument(FN_NAME, b, "second argument")?;
-    evaluate_strncmp(&left, &right, limit).map_err(Into::into)
+    evaluate_strncmp(&left, &right, limit)
 }
 
 fn evaluate_strncmp(
     left: &TextCollection,
     right: &TextCollection,
     limit: usize,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     let shape = broadcast_shapes(FN_NAME, &left.shape, &right.shape)?;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -265,14 +274,14 @@ fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
     true
 }
 
-fn parse_prefix_length(value: Value) -> Result<usize, String> {
+fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     match value {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(format!(
+                return Err(strncmp_flow(format!(
                     "{FN_NAME}: prefix length must be a nonnegative integer"
-                ));
+                )));
             }
             Ok(raw as usize)
         }
@@ -280,47 +289,47 @@ fn parse_prefix_length(value: Value) -> Result<usize, String> {
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(format!(
+                return Err(strncmp_flow(format!(
                     "{FN_NAME}: prefix length must be a nonnegative integer scalar"
-                ));
+                )));
             }
             parse_prefix_length_from_float(tensor.data[0])
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
-                return Err(format!(
+                return Err(strncmp_flow(format!(
                     "{FN_NAME}: prefix length must be a nonnegative integer scalar"
-                ));
+                )));
             }
             Ok(if array.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(format!(
+        other => Err(strncmp_flow(format!(
             "{FN_NAME}: prefix length must be a nonnegative integer scalar, received {other:?}"
-        )),
+        ))),
     }
 }
 
-fn parse_prefix_length_from_float(value: f64) -> Result<usize, String> {
+fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(format!(
+        return Err(strncmp_flow(format!(
             "{FN_NAME}: prefix length must be a finite nonnegative integer"
-        ));
+        )));
     }
     if value < 0.0 {
-        return Err(format!(
+        return Err(strncmp_flow(format!(
             "{FN_NAME}: prefix length must be a nonnegative integer"
-        ));
+        )));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(format!(
+        return Err(strncmp_flow(format!(
             "{FN_NAME}: prefix length must be a nonnegative integer"
-        ));
+        )));
     }
     if rounded > (usize::MAX as f64) {
-        return Err(format!(
+        return Err(strncmp_flow(format!(
             "{FN_NAME}: prefix length exceeds the maximum supported size"
-        ));
+        )));
     }
     Ok(rounded as usize)
 }
@@ -329,9 +338,17 @@ fn parse_prefix_length_from_float(value: f64) -> Result<usize, String> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -536,36 +553,42 @@ pub(crate) mod tests {
     fn strncmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let right = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = strncmp_builtin(
-            Value::StringArray(left),
-            Value::StringArray(right),
-            Value::Int(IntValue::I32(1)),
-        )
-        .expect_err("size mismatch");
+        let err = error_message(
+            strncmp_builtin(
+                Value::StringArray(left),
+                Value::StringArray(right),
+                Value::Int(IntValue::I32(1)),
+            )
+            .expect_err("size mismatch"),
+        );
         assert!(err.contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_invalid_length_type_errors() {
-        let err = strncmp_builtin(
-            Value::String("abc".into()),
-            Value::String("abc".into()),
-            Value::String("3".into()),
-        )
-        .expect_err("invalid prefix length");
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::String("3".into()),
+            )
+            .expect_err("invalid prefix length"),
+        );
         assert!(err.contains("prefix length"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_negative_length_errors() {
-        let err = strncmp_builtin(
-            Value::String("abc".into()),
-            Value::String("abc".into()),
-            Value::Num(-1.0),
-        )
-        .expect_err("negative length");
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::Num(-1.0),
+            )
+            .expect_err("negative length"),
+        );
         assert!(err.to_ascii_lowercase().contains("nonnegative"));
     }
 

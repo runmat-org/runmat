@@ -254,38 +254,36 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cumprod: direction specified more than once".to_string()
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: direction specified more than once",
+                                ));
                             }
                             direction = CumprodDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cumprod: direction specified more than once".to_string()
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: direction specified more than once",
+                                ));
                             }
                             direction = CumprodDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumprod: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumprodNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cumprod: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cumprod_error(
+                                    "cumprod: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumprodNanMode::Include;
                             nan_set = true;

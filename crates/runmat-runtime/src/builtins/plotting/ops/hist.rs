@@ -280,7 +280,7 @@ impl HistWeightsInput {
 
     fn resolve_for_cpu(
         &self,
-        context: &str,
+        context: &'static str,
         sample_len: usize,
     ) -> BuiltinResult<(Option<Vec<f64>>, f64)> {
         match self {
@@ -1333,7 +1333,7 @@ impl HistInput {
         }
     }
 
-    fn into_tensor(self, context: &str) -> BuiltinResult<Tensor> {
+    fn into_tensor(self, context: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, context),

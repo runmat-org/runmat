@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -218,6 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; always gathers inputs and is not eligible for fusion.",
 };
 
+const BUILTIN_NAME: &str = "pad";
 const ARG_TYPE_ERROR: &str =
     "pad: first argument must be a string array, character array, or cell array of character vectors";
 const LENGTH_ERROR: &str = "pad: target length must be a non-negative integer scalar";
@@ -227,6 +229,17 @@ const PAD_CHAR_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "pad: cell array elements must be string scalars or character vectors";
 const ARGUMENT_CONFIG_ERROR: &str = "pad: unable to interpret input arguments";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum PadDirection {
@@ -275,19 +288,19 @@ impl PadOptions {
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
-fn pad_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let options = parse_arguments(&rest)?;
-    let gathered = gather_if_needed(&value).map_err(|e| format!("pad: {e}"))?;
+    let gathered = gather_if_needed(&value).map_err(map_flow)?;
     match gathered {
-        Value::String(text) => (pad_string(text, options)).map_err(Into::into),
-        Value::StringArray(array) => (pad_string_array(array, options)).map_err(Into::into),
-        Value::CharArray(array) => (pad_char_array(array, options)).map_err(Into::into),
-        Value::Cell(cell) => (pad_cell_array(cell, options)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::String(text) => pad_string(text, options),
+        Value::StringArray(array) => pad_string_array(array, options),
+        Value::CharArray(array) => pad_char_array(array, options),
+        Value::Cell(cell) => pad_cell_array(cell, options),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn pad_string(text: String, options: PadOptions) -> Result<Value, String> {
+fn pad_string(text: String, options: PadOptions) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::String(text));
     }
@@ -298,7 +311,7 @@ fn pad_string(text: String, options: PadOptions) -> Result<Value, String> {
     Ok(Value::String(padded))
 }
 
-fn pad_string_array(array: StringArray, options: PadOptions) -> Result<Value, String> {
+fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut auto_len: usize = 0;
     if matches!(options.target, PadTarget::Auto) {
@@ -320,11 +333,11 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> Result<Value, St
         let new_text = apply_padding_owned(text, char_count, target_len, &options);
         padded.push(new_text);
     }
-    let result = StringArray::new(padded, shape).map_err(|e| format!("pad: {e}"))?;
+    let result = StringArray::new(padded, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(result))
 }
 
-fn pad_char_array(array: CharArray, options: PadOptions) -> Result<Value, String> {
+fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -360,10 +373,10 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> Result<Value, String
 
     CharArray::new(new_data, rows, final_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("pad: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn pad_cell_array(cell: CellArray, options: PadOptions) -> Result<Value, String> {
+fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> {
     let rows = cell.rows;
     let cols = cell.cols;
     let total = rows * cols;
@@ -372,7 +385,7 @@ fn pad_cell_array(cell: CellArray, options: PadOptions) -> Result<Value, String>
 
     for idx in 0..total {
         let value = &cell.data[idx];
-        let gathered = gather_if_needed(value).map_err(|e| format!("pad: {e}"))?;
+        let gathered = gather_if_needed(value).map_err(map_flow)?;
         let item = match gathered {
             Value::String(text) => {
                 let is_missing = is_missing_string(&text);
@@ -416,8 +429,8 @@ fn pad_cell_array(cell: CellArray, options: PadOptions) -> Result<Value, String>
                     is_missing: false,
                 }
             }
-            Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-            _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+            Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+            _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
         };
         items.push(item);
     }
@@ -436,13 +449,13 @@ fn pad_cell_array(cell: CellArray, options: PadOptions) -> Result<Value, String>
             CellKind::Char { rows } => {
                 let chars: Vec<char> = padded.chars().collect();
                 let cols = chars.len();
-                let array = CharArray::new(chars, rows, cols).map_err(|e| format!("pad: {e}"))?;
+                let array = CharArray::new(chars, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
                 results.push(Value::CharArray(array));
             }
         }
     }
 
-    make_cell(results, rows, cols).map_err(|e| format!("pad: {e}"))
+    make_cell(results, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
 #[derive(Clone)]
@@ -459,7 +472,7 @@ enum CellKind {
     Char { rows: usize },
 }
 
-fn parse_arguments(args: &[Value]) -> Result<PadOptions, String> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
     let mut options = PadOptions::default();
     match args.len() {
         0 => Ok(options),
@@ -484,7 +497,7 @@ fn parse_arguments(args: &[Value]) -> Result<PadOptions, String> {
                 } else {
                     match parse_pad_char(&args[1]) {
                         Ok(pad_char) => options.pad_char = pad_char,
-                        Err(_) => return Err(DIRECTION_ERROR.to_string()),
+                        Err(_) => return Err(runtime_error_for(DIRECTION_ERROR)),
                     }
                 }
                 Ok(options)
@@ -494,38 +507,38 @@ fn parse_arguments(args: &[Value]) -> Result<PadOptions, String> {
                 options.pad_char = pad_char;
                 Ok(options)
             } else {
-                Err(ARGUMENT_CONFIG_ERROR.to_string())
+                Err(runtime_error_for(ARGUMENT_CONFIG_ERROR))
             }
         }
         3 => {
-            let length = parse_length(&args[0])?.ok_or_else(|| LENGTH_ERROR.to_string())?;
+            let length = parse_length(&args[0])?.ok_or_else(|| runtime_error_for(LENGTH_ERROR))?;
             let direction =
-                try_parse_direction(&args[1], true)?.ok_or_else(|| DIRECTION_ERROR.to_string())?;
+                try_parse_direction(&args[1], true)?.ok_or_else(|| runtime_error_for(DIRECTION_ERROR))?;
             let pad_char = parse_pad_char(&args[2])?;
             options.target = PadTarget::Length(length);
             options.direction = direction;
             options.pad_char = pad_char;
             Ok(options)
         }
-        _ => Err("pad: too many input arguments".to_string()),
+        _ => Err(runtime_error_for("pad: too many input arguments")),
     }
 }
 
-fn parse_length(value: &Value) -> Result<Option<usize>, String> {
+fn parse_length(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Num(n) => {
             if !n.is_finite() || *n < 0.0 {
-                return Err(LENGTH_ERROR.to_string());
+                return Err(runtime_error_for(LENGTH_ERROR));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err(LENGTH_ERROR.to_string());
+                return Err(runtime_error_for(LENGTH_ERROR));
             }
             Ok(Some(*n as usize))
         }
         Value::Int(i) => {
             let val = i.to_i64();
             if val < 0 {
-                return Err(LENGTH_ERROR.to_string());
+                return Err(runtime_error_for(LENGTH_ERROR));
             }
             Ok(Some(val as usize))
         }
@@ -533,10 +546,10 @@ fn parse_length(value: &Value) -> Result<Option<usize>, String> {
     }
 }
 
-fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<PadDirection>, String> {
+fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadDirection>> {
     let Some(text) = value_to_single_string(value) else {
         return if strict {
-            Err(DIRECTION_ERROR.to_string())
+            Err(runtime_error_for(DIRECTION_ERROR))
         } else {
             Ok(None)
         };
@@ -544,7 +557,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<PadDirectio
     let lowered = text.trim().to_ascii_lowercase();
     if lowered.is_empty() {
         return if strict {
-            Err(DIRECTION_ERROR.to_string())
+            Err(runtime_error_for(DIRECTION_ERROR))
         } else {
             Ok(None)
         };
@@ -555,7 +568,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<PadDirectio
         "both" => PadDirection::Both,
         _ => {
             return if strict {
-                Err(DIRECTION_ERROR.to_string())
+                Err(runtime_error_for(DIRECTION_ERROR))
             } else {
                 Ok(None)
             };
@@ -564,14 +577,14 @@ fn try_parse_direction(value: &Value, strict: bool) -> Result<Option<PadDirectio
     Ok(Some(direction))
 }
 
-fn parse_pad_char(value: &Value) -> Result<char, String> {
-    let text = value_to_single_string(value).ok_or_else(|| PAD_CHAR_ERROR.to_string())?;
+fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
+    let text = value_to_single_string(value).ok_or_else(|| runtime_error_for(PAD_CHAR_ERROR))?;
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
-        return Err(PAD_CHAR_ERROR.to_string());
+        return Err(runtime_error_for(PAD_CHAR_ERROR));
     };
     if chars.next().is_some() {
-        return Err(PAD_CHAR_ERROR.to_string());
+        return Err(runtime_error_for(PAD_CHAR_ERROR));
     }
     Ok(first)
 }
@@ -816,14 +829,14 @@ pub(crate) mod tests {
     #[test]
     fn pad_errors_on_invalid_input_type() {
         let err = pad_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_negative_length() {
         let err = pad_builtin(Value::String("data".into()), vec![Value::Num(-1.0)]).unwrap_err();
-        assert_eq!(err, LENGTH_ERROR);
+        assert_eq!(err.to_string(), LENGTH_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -834,7 +847,7 @@ pub(crate) mod tests {
             vec![Value::Num(6.0), Value::String("around".into())],
         )
         .unwrap_err();
-        assert_eq!(err, DIRECTION_ERROR);
+        assert_eq!(err.to_string(), DIRECTION_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -845,7 +858,7 @@ pub(crate) mod tests {
             vec![Value::String("left".into()), Value::String("##".into())],
         )
         .unwrap_err();
-        assert_eq!(err, PAD_CHAR_ERROR);
+        assert_eq!(err.to_string(), PAD_CHAR_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

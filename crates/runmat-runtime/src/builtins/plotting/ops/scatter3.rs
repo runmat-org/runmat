@@ -44,6 +44,7 @@ use super::style::LineStyleParseOptions;
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "scatter3";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "scatter3"
 category: "plotting"
@@ -209,7 +210,7 @@ struct Scatter3ResolvedStyle {
 fn resolve_scatter3_style(
     point_count: usize,
     args: &PointArgs,
-    context: &str,
+    context: &'static str,
 ) -> BuiltinResult<Scatter3ResolvedStyle> {
     let mut style = Scatter3ResolvedStyle {
         uniform_color: default_color(),

@@ -9,8 +9,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -189,6 +190,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical results on the host; not eligible for GPU fusion.",
 };
 
+#[allow(dead_code)]
+fn strcmp_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin("strcmp").build().into()
+}
+
+fn remap_strcmp_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, "strcmp")
+}
+
 #[runtime_builtin(
     name = "strcmp",
     category = "strings/core",
@@ -198,14 +208,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
 fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
-    let a = gather_if_needed(&a).map_err(|e| format!("strcmp: {e}"))?;
-    let b = gather_if_needed(&b).map_err(|e| format!("strcmp: {e}"))?;
+    let a = gather_if_needed(&a).map_err(remap_strcmp_flow)?;
+    let b = gather_if_needed(&b).map_err(remap_strcmp_flow)?;
     let left = TextCollection::from_argument("strcmp", a, "first argument")?;
     let right = TextCollection::from_argument("strcmp", b, "second argument")?;
-    (evaluate_strcmp(&left, &right)).map_err(Into::into)
+    evaluate_strcmp(&left, &right)
 }
 
-fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Value, String> {
+fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
     let shape = broadcast_shapes("strcmp", &left.shape, &right.shape)?;
     let total = tensor::element_count(&shape);
     if total == 0 {
@@ -231,7 +241,15 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> Result<Valu
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -385,16 +403,19 @@ pub(crate) mod tests {
     fn strcmp_size_mismatch_error() {
         let left = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
         let right = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
-        let err = strcmp_builtin(Value::StringArray(left), Value::StringArray(right))
-            .expect_err("size mismatch");
+        let err = error_message(
+            strcmp_builtin(Value::StringArray(left), Value::StringArray(right))
+                .expect_err("size mismatch"),
+        );
         assert!(err.contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_invalid_argument_type() {
-        let err =
-            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type");
+        let err = error_message(
+            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
+        );
         assert!(err.contains("first argument must be text"));
     }
 

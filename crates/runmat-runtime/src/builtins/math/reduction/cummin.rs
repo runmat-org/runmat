@@ -292,38 +292,36 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(
-                                    "cummin: direction specified more than once".to_string()
-                                );
+                                return Err(cummin_error(
+                                    "cummin: direction specified more than once",
+                                ));
                             }
                             direction = CumminDirection::Forward;
                             direction_set = true;
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(
-                                    "cummin: direction specified more than once".to_string()
-                                );
+                                return Err(cummin_error(
+                                    "cummin: direction specified more than once",
+                                ));
                             }
                             direction = CumminDirection::Reverse;
                             direction_set = true;
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummin: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummin_error(
+                                    "cummin: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumminNanMode::Omit;
                             nan_set = true;
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(
-                                    "cummin: missing-value handling specified more than once"
-                                        .to_string(),
-                                );
+                                return Err(cummin_error(
+                                    "cummin: missing-value handling specified more than once",
+                                ));
                             }
                             nan_mode = CumminNanMode::Include;
                             nan_set = true;

@@ -459,19 +459,6 @@ fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             let tensor = linalg::matmul_real(&ta, &tb).map_err(builtin_error)?;
             Ok(tensor::tensor_into_value(tensor))
         }
-
-        (ComplexTensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_complex_real(&ta, &tb).map_err(builtin_error)?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        (Tensor(ta), ComplexTensor(tb)) => {
-            let tensor = linalg::matmul_real_complex(&ta, &tb).map_err(builtin_error)?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        (Tensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_real(&ta, &tb).map_err(builtin_error)?;
-            Ok(tensor::tensor_into_value(tensor))
-        }
         (Tensor(ta), Num(s)) => Ok(tensor::tensor_into_value(linalg::scalar_mul_real(&ta, s))),
         (Num(s), Tensor(tb)) => Ok(tensor::tensor_into_value(linalg::scalar_mul_real(&tb, s))),
         (Tensor(ta), Int(i)) => Ok(tensor::tensor_into_value(linalg::scalar_mul_real(

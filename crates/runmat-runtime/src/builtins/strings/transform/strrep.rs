@@ -559,7 +559,7 @@ pub(crate) mod tests {
             Value::String("one".into()),
         )
         .expect_err("expected cell element error");
-        assert!(err.contains("cell array elements"));
+        assert!(err.to_string().contains("cell array elements"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -640,7 +640,7 @@ pub(crate) mod tests {
             Value::CharArray(CharArray::new_row("x")),
         )
         .expect_err("expected type mismatch");
-        assert!(err.contains("same data type"));
+        assert!(err.to_string().contains("same data type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -652,7 +652,7 @@ pub(crate) mod tests {
             Value::String("x".into()),
         )
         .expect_err("expected pattern error");
-        assert!(err.contains("string scalars or character vectors"));
+        assert!(err.to_string().contains("string scalars or character vectors"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -664,7 +664,7 @@ pub(crate) mod tests {
             Value::String("b".into()),
         )
         .expect_err("expected argument type error");
-        assert!(err.contains("first argument"));
+        assert!(err.to_string().contains("first argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -4,11 +4,12 @@ use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
@@ -16,6 +17,14 @@ const SIZE_NONNEGATIVE_ERR: &str = "size inputs must be nonnegative integers";
 const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_NUMERIC_ERR: &str = "size arguments must be numeric scalars or vectors";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
+
+fn strings_flow(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message).with_builtin(FN_NAME).build().into()
+}
+
+fn remap_strings_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, FN_NAME)
+}
 
 #[cfg_attr(
     feature = "doc_export",
@@ -261,7 +270,7 @@ fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ParsedStrings { shape, fill } = parse_arguments(rest)?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)
-            .ok_or_else(|| format!("{FN_NAME}: requested size exceeds platform limits"))
+            .ok_or_else(|| strings_flow(format!("{FN_NAME}: requested size exceeds platform limits")))
     })?;
 
     let fill_text = match fill {
@@ -274,31 +283,31 @@ fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         data.push(fill_text.clone());
     }
 
-    let array = StringArray::new(data, shape).map_err(|e| format!("{FN_NAME}: {e}"))?;
+    let array =
+        StringArray::new(data, shape).map_err(|e| strings_flow(format!("{FN_NAME}: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
-fn parse_arguments(args: Vec<Value>) -> Result<ParsedStrings, String> {
+fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
     let mut size_values: Vec<Value> = Vec::new();
     let mut like_proto: Option<Value> = None;
     let mut fill = FillKind::Empty;
 
     let mut idx = 0;
     while idx < args.len() {
-        let host = gather_if_needed(&args[idx]).map_err(|e| format!("{FN_NAME}: {e}"))?;
+        let host = gather_if_needed(&args[idx]).map_err(remap_strings_flow)?;
         if let Some(keyword) = keyword_of(&host) {
             match keyword.as_str() {
                 "like" => {
                     if like_proto.is_some() {
-                        return Err(format!(
+                        return Err(strings_flow(format!(
                             "{FN_NAME}: multiple 'like' specifications are not supported"
-                        ));
+                        )));
                     }
                     let Some(proto_raw) = args.get(idx + 1) else {
-                        return Err(format!("{FN_NAME}: expected prototype after 'like'"));
+                        return Err(strings_flow(format!("{FN_NAME}: expected prototype after 'like'")));
                     };
-                    let proto =
-                        gather_if_needed(proto_raw).map_err(|e| format!("{FN_NAME}: {e}"))?;
+                    let proto = gather_if_needed(proto_raw).map_err(remap_strings_flow)?;
                     like_proto = Some(proto);
                     idx += 2;
                     continue;
@@ -336,26 +345,26 @@ fn parse_arguments(args: Vec<Value>) -> Result<ParsedStrings, String> {
     Ok(ParsedStrings { shape, fill })
 }
 
-fn prototype_shape(value: &Value) -> Result<Vec<usize>, String> {
+fn prototype_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::StringArray(sa) => Ok(sa.shape.clone()),
-        _ => shape_from_value(value, FN_NAME),
+        _ => shape_from_value(value, FN_NAME).map_err(strings_flow),
     }
 }
 
-fn err_integer() -> String {
-    format!("{FN_NAME}: {SIZE_INTEGER_ERR}")
+fn err_integer() -> RuntimeControlFlow {
+    strings_flow(format!("{FN_NAME}: {SIZE_INTEGER_ERR}"))
 }
 
-fn err_nonnegative() -> String {
-    format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}")
+fn err_nonnegative() -> RuntimeControlFlow {
+    strings_flow(format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}"))
 }
 
-fn err_finite() -> String {
-    format!("{FN_NAME}: {SIZE_FINITE_ERR}")
+fn err_finite() -> RuntimeControlFlow {
+    strings_flow(format!("{FN_NAME}: {SIZE_FINITE_ERR}"))
 }
 
-fn parse_size_values(values: Vec<Value>) -> Result<Option<Vec<usize>>, String> {
+fn parse_size_values(values: Vec<Value>) -> BuiltinResult<Option<Vec<usize>>> {
     match values.len() {
         0 => Ok(None),
         1 => parse_single_argument(values.into_iter().next().unwrap()).map(Some),
@@ -369,18 +378,18 @@ fn parse_size_values(values: Vec<Value>) -> Result<Option<Vec<usize>>, String> {
     }
 }
 
-fn parse_single_argument(value: Value) -> Result<Vec<usize>, String> {
+fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(iv) => Ok(vec![validate_i64_dimension(iv.to_i64())?]),
         Value::Num(n) => Ok(vec![parse_numeric_dimension(n)?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
         Value::LogicalArray(arr) => parse_size_logical_array(&arr),
-        other => Err(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}")),
+        other => Err(strings_flow(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"))),
     }
 }
 
-fn parse_size_scalar(value: &Value) -> Result<usize, String> {
+fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Int(iv) => {
             let raw = iv.to_i64();
@@ -390,28 +399,28 @@ fn parse_size_scalar(value: &Value) -> Result<usize, String> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(format!("{FN_NAME}: {SIZE_SCALAR_ERR}"));
+                return Err(strings_flow(format!("{FN_NAME}: {SIZE_SCALAR_ERR}")));
             }
             parse_numeric_dimension(t.data[0])
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
-                return Err(format!("{FN_NAME}: {SIZE_SCALAR_ERR}"));
+                return Err(strings_flow(format!("{FN_NAME}: {SIZE_SCALAR_ERR}")));
             }
             Ok(if arr.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}")),
+        other => Err(strings_flow(format!("{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"))),
     }
 }
 
-fn parse_size_tensor(tensor: &Tensor) -> Result<Vec<usize>, String> {
+fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     if tensor.data.is_empty() {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err(format!(
+        return Err(strings_flow(format!(
             "{FN_NAME}: size vector must be a row or column vector"
-        ));
+        )));
     }
     tensor
         .data
@@ -420,14 +429,14 @@ fn parse_size_tensor(tensor: &Tensor) -> Result<Vec<usize>, String> {
         .collect()
 }
 
-fn parse_size_logical_array(array: &LogicalArray) -> Result<Vec<usize>, String> {
+fn parse_size_logical_array(array: &LogicalArray) -> BuiltinResult<Vec<usize>> {
     if array.data.is_empty() {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&array.shape) {
-        return Err(format!(
+        return Err(strings_flow(format!(
             "{FN_NAME}: size vector must be a row or column vector"
-        ));
+        )));
     }
     array
         .data
@@ -436,7 +445,7 @@ fn parse_size_logical_array(array: &LogicalArray) -> Result<Vec<usize>, String> 
         .collect()
 }
 
-fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
+fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(err_finite());
     }
@@ -448,9 +457,9 @@ fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
         return Err(err_nonnegative());
     }
     if rounded > usize::MAX as f64 {
-        return Err(format!(
+        return Err(strings_flow(format!(
             "{FN_NAME}: requested dimension exceeds platform limits"
-        ));
+        )));
     }
     Ok(rounded as usize)
 }
@@ -474,14 +483,14 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn validate_i64_dimension(raw: i64) -> Result<usize, String> {
+fn validate_i64_dimension(raw: i64) -> BuiltinResult<usize> {
     if raw < 0 {
         return Err(err_nonnegative());
     }
     if (raw as u128) > (usize::MAX as u128) {
-        return Err(format!(
+        return Err(strings_flow(format!(
             "{FN_NAME}: requested dimension exceeds platform limits"
-        ));
+        )));
     }
     Ok(raw as usize)
 }
@@ -491,7 +500,15 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::builtins::common::test_support;
+    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
+
+    fn error_message(flow: RuntimeControlFlow) -> String {
+        match flow {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -601,21 +618,25 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_negative_dimension_errors() {
-        let err = strings_builtin(vec![Value::Num(-5.0)]).expect_err("expected error");
+        let err =
+            error_message(strings_builtin(vec![Value::Num(-5.0)]).expect_err("expected error"));
         assert!(err.contains(super::SIZE_NONNEGATIVE_ERR));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rejects_non_integer_dimension() {
-        let err = strings_builtin(vec![Value::Num(2.5)]).expect_err("expected error");
+        let err =
+            error_message(strings_builtin(vec![Value::Num(2.5)]).expect_err("expected error"));
         assert!(err.contains(super::SIZE_INTEGER_ERR));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rejects_non_numeric_dimension() {
-        let err = strings_builtin(vec![Value::String("size".into())]).expect_err("expected error");
+        let err = error_message(
+            strings_builtin(vec![Value::String("size".into())]).expect_err("expected error"),
+        );
         assert!(err.contains("size arguments must be numeric"));
     }
 
@@ -726,20 +747,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_requires_prototype() {
-        let err = strings_builtin(vec![Value::String("like".into())]).expect_err("expected error");
+        let err = error_message(
+            strings_builtin(vec![Value::String("like".into())]).expect_err("expected error"),
+        );
         assert!(err.contains("expected prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_like_rejects_multiple_specs() {
-        let err = strings_builtin(vec![
-            Value::String("like".into()),
-            Value::Num(1.0),
-            Value::String("like".into()),
-            Value::Num(2.0),
-        ])
-        .expect_err("expected error");
+        let err = error_message(
+            strings_builtin(vec![
+                Value::String("like".into()),
+                Value::Num(1.0),
+                Value::String("like".into()),
+                Value::Num(2.0),
+            ])
+            .expect_err("expected error"),
+        );
         assert!(err.contains("multiple 'like'"));
     }
 

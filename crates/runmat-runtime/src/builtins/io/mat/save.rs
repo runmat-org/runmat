@@ -351,8 +351,9 @@ fn save_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn save_error_with_source(
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl std::fmt::Display,
 ) -> RuntimeControlFlow {
+    let source = std::io::Error::new(std::io::ErrorKind::Other, source.to_string());
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(source)

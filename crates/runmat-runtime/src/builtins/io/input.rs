@@ -229,11 +229,18 @@ fn parse_numeric_response(line: &str) -> Result<Value, RuntimeControlFlow> {
     if trimmed.is_empty() || trimmed == "[]" {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
-    call_builtin("str2double", &[Value::String(trimmed.to_string())]).map_err(|err| {
-        build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({})", err.message()))
-            .with_source(err)
-            .build()
-            .into()
+    call_builtin("str2double", &[Value::String(trimmed.to_string())]).map_err(|flow| {
+        match flow {
+            RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+            RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
+                build_runtime_error(format!(
+                    "MATLAB:input:InvalidNumericExpression ({})",
+                    err.message()
+                ))
+                .with_source(err)
+                .build(),
+            ),
+        }
     })
 }
 

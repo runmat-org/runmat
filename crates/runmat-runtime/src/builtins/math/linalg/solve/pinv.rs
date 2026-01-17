@@ -341,7 +341,36 @@ fn pseudoinverse_real(matrix: &DMatrix<f64>, tol: Option<f64>) -> BuiltinResult<
         .map_err(|msg| builtin_error(format!(
             "{NAME}: failed to compute pseudoinverse ({msg})"
         )))
+}
 
+fn pseudoinverse_complex(
+    matrix: &DMatrix<Complex64>,
+    tol: Option<f64>,
+) -> BuiltinResult<DMatrix<Complex64>> {
+    let rows = matrix.nrows();
+    let cols = matrix.ncols();
+    let svd = SVD::new(matrix.clone(), true, true);
+    let cutoff =
+        tol.unwrap_or_else(|| svd_default_tolerance(svd.singular_values.as_slice(), rows, cols));
+    let u = svd.u.ok_or_else(|| {
+        builtin_error(format!(
+            "{NAME}: failed to compute pseudoinverse (missing U)"
+        ))
+    })?;
+    let v_t = svd.v_t.ok_or_else(|| {
+        builtin_error(format!(
+            "{NAME}: failed to compute pseudoinverse (missing Vᴴ)"
+        ))
+    })?;
+    let mut sigma_plus = DMatrix::<Complex64>::zeros(cols, rows);
+    for (idx, value) in svd.singular_values.iter().enumerate() {
+        if value.is_infinite() || *value > cutoff {
+            sigma_plus[(idx, idx)] = Complex64::new(1.0 / *value, 0.0);
+        }
+    }
+    let v = v_t.adjoint();
+    let u_h = u.adjoint();
+    Ok(v * sigma_plus * u_h)
 }
 
 fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {

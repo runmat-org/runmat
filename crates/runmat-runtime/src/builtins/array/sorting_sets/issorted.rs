@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -233,8 +233,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
 
-fn issorted_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("issorted").build()
+fn issorted_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("issorted")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -366,8 +369,7 @@ impl IssortedArgs {
                         if dim_arg.is_some() {
                             return Err(issorted_error(
                                 "issorted: cannot combine 'rows' with a dimension argument",
-                            )
-                            .into());
+                            ));
                         }
                         saw_rows = true;
                         mode = CheckMode::Rows;
@@ -415,12 +417,10 @@ impl IssortedArgs {
                         if idx >= args.len() {
                             return Err(issorted_error(
                                 "issorted: expected a value for 'ComparisonMethod'",
-                            )
-                            .into());
+                            ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
                             issorted_error("issorted: 'ComparisonMethod' expects a string value")
-                                .into()
                         })?;
                         comparison = match value.as_str() {
                             "auto" => ComparisonMethod::Auto,
@@ -429,8 +429,7 @@ impl IssortedArgs {
                             other => {
                                 return Err(issorted_error(format!(
                                     "issorted: unsupported ComparisonMethod '{other}'"
-                                ))
-                                .into());
+                                )));
                             }
                         };
                         idx += 1;
@@ -441,12 +440,10 @@ impl IssortedArgs {
                         if idx >= args.len() {
                             return Err(issorted_error(
                                 "issorted: expected a value for 'MissingPlacement'",
-                            )
-                            .into());
+                            ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
                             issorted_error("issorted: 'MissingPlacement' expects a string value")
-                                .into()
                         })?;
                         missing = match value.as_str() {
                             "auto" => MissingPlacement::Auto,
@@ -455,8 +452,7 @@ impl IssortedArgs {
                             other => {
                                 return Err(issorted_error(format!(
                                     "issorted: unsupported MissingPlacement '{other}'"
-                                ))
-                                .into());
+                                )));
                             }
                         };
                         idx += 1;
@@ -474,7 +470,7 @@ impl IssortedArgs {
                 }
             }
 
-            return Err(issorted_error(format!("issorted: unrecognised argument {:?}", arg)).into());
+            return Err(issorted_error(format!("issorted: unrecognised argument {:?}", arg)));
         }
 
         if let Some(dim) = dim_arg {
@@ -514,7 +510,7 @@ fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::ComplexTensor(ct) => Ok(InputArray::Complex(ct)),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| issorted_error(format!("issorted: {e}")).into())?;
+                .map_err(|e| issorted_error(format!("issorted: {e}")))?;
             Ok(InputArray::Complex(tensor))
         }
         Value::CharArray(ca) => {
@@ -524,7 +520,7 @@ fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::new(vec![s], vec![1, 1]).map_err(|e| issorted_error(format!("issorted: {e}")).into())?;
+                StringArray::new(vec![s], vec![1, 1]).map_err(|e| issorted_error(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
         Value::GpuTensor(handle) => {
@@ -534,8 +530,7 @@ fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
         other => Err(issorted_error(format!(
             "issorted: unsupported input type {:?}; expected numeric, logical, complex, char, or string arrays",
             other
-        ))
-        .into()),
+        ))),
     }
 }
 
@@ -1228,7 +1223,7 @@ fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
             data[idx] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_error(format!("issorted: {e}")).into())
+    Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_error(format!("issorted: {e}")))
 }
 
 #[cfg(test)]

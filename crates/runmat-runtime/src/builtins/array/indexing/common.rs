@@ -4,7 +4,7 @@ use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 
 /// Materialise a value so indexing helpers can operate on host tensors.
-pub(crate) fn materialize_value(value: Value, builtin: &str) -> BuiltinResult<(Value, bool)> {
+pub(crate) fn materialize_value(value: Value, _builtin: &str) -> BuiltinResult<(Value, bool)> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_tensor(&handle)?;

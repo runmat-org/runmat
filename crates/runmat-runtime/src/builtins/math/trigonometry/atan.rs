@@ -213,7 +213,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+    RuntimeControlFlow::from(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan")]
@@ -265,7 +269,7 @@ fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(runtime_error_for)?;
+    let tensor = gpu_helpers::gather_tensor(&handle)?;
     atan_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -398,8 +402,7 @@ fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
             "atan: 'like' prototype must be numeric",
         )),
         other => {
-            let gathered = dispatcher::gather_if_needed(other)
-                .map_err(|e| runtime_error_for(format!("atan: {e}")))?;
+            let gathered = dispatcher::gather_if_needed(other)?;
             if &gathered == other {
                 Err(runtime_error_for(format!(
                     "atan: unsupported 'like' prototype {other:?}"
@@ -414,7 +417,6 @@ fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
 fn ensure_host_value(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(_) = &value {
         gpu_helpers::gather_value(&value)
-            .map_err(|e| runtime_error_for(format!("atan: {e}")))
     } else {
         Ok(value)
     }

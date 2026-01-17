@@ -20,6 +20,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const NAME: &str = "mpower";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "mpower"
 category: "math/linalg/ops"

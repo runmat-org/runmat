@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::gather_if_needed;
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -212,6 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Text operation; not eligible for fusion and materialises host logical results.",
 };
 
+const BUILTIN_NAME: &str = "contains";
+
 #[runtime_builtin(
     name = "contains",
     category = "strings/search",
@@ -221,23 +223,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::strings::search::contains"
 )]
 fn contains_builtin(text: Value, pattern: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(|e| format!("contains: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("contains: {e}"))?;
-    let ignore_case = parse_ignore_case("contains", &rest)?;
-    let subject = TextCollection::from_subject("contains", text)?;
-    let patterns = TextCollection::from_pattern("contains", pattern)?;
-    evaluate_contains(&subject, &patterns, ignore_case).map_err(Into::into)
+    let text = gather_if_needed(&text)?;
+    let pattern = gather_if_needed(&pattern)?;
+    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest)?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
+    evaluate_contains(&subject, &patterns, ignore_case)
 }
 
 fn evaluate_contains(
     subject: &TextCollection,
     patterns: &TextCollection,
     ignore_case: bool,
-) -> Result<Value, String> {
-    let output_shape = broadcast_shapes("contains", &subject.shape, &patterns.shape)?;
+) -> BuiltinResult<Value> {
+    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape).map_err(
+        |err| RuntimeControlFlow::from(build_runtime_error(err).with_builtin(BUILTIN_NAME).build()),
+    )?;
     let total = tensor::element_count(&output_shape);
     if total == 0 {
-        return logical_result("contains", Vec::new(), output_shape);
+        return logical_result(BUILTIN_NAME, Vec::new(), output_shape);
     }
 
     let subject_strides = compute_strides(&subject.shape);
@@ -283,7 +287,7 @@ fn evaluate_contains(
         };
         data.push(if value { 1 } else { 0 });
     }
-    logical_result("contains", data, output_shape)
+    logical_result(BUILTIN_NAME, data, output_shape)
 }
 
 #[cfg(test)]
@@ -433,7 +437,7 @@ pub(crate) mod tests {
             vec![Value::String("IgnoreCases".into()), Value::Bool(true)],
         )
         .unwrap_err();
-        assert!(err.contains("unknown option"));
+        assert!(err.to_string().contains("unknown option"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -478,7 +482,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert!(err.contains("invalid value"));
+        assert!(err.to_string().contains("invalid value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -490,7 +494,7 @@ pub(crate) mod tests {
             vec![Value::String("IgnoreCase".into())],
         )
         .unwrap_err();
-        assert!(err.contains("expected a value after 'IgnoreCase'"));
+        assert!(err.to_string().contains("expected a value after 'IgnoreCase'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -505,7 +509,7 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert!(err.contains("size mismatch"));
+        assert!(err.to_string().contains("size mismatch"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -513,7 +517,7 @@ pub(crate) mod tests {
     fn contains_invalid_subject_type() {
         let err =
             contains_builtin(Value::Num(1.0), Value::String("a".into()), Vec::new()).unwrap_err();
-        assert!(err.contains("first argument must be text"));
+        assert!(err.to_string().contains("first argument must be text"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -521,7 +525,7 @@ pub(crate) mod tests {
     fn contains_invalid_pattern_type() {
         let err =
             contains_builtin(Value::String("foo".into()), Value::Num(1.0), Vec::new()).unwrap_err();
-        assert!(err.contains("pattern must be text"));
+        assert!(err.to_string().contains("pattern must be text"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -530,7 +534,7 @@ pub(crate) mod tests {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let err =
             contains_builtin(Value::Cell(cell), Value::String("a".into()), Vec::new()).unwrap_err();
-        assert!(err.contains("cell array elements"));
+        assert!(err.to_string().contains("cell array elements"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

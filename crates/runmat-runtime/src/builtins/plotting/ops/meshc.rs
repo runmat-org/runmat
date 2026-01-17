@@ -28,6 +28,7 @@ use std::sync::Arc;
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "meshc";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "meshc"
 category: "plotting"
@@ -140,7 +141,12 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate:
             }
         }
 
-        let grid = tensor_to_surface_grid(z_arg.into_tensor("meshc")?, x_vec.len(), y_vec.len())?;
+        let grid = tensor_to_surface_grid(
+            z_arg.into_tensor(BUILTIN_NAME)?,
+            x_vec.len(),
+            y_vec.len(),
+            BUILTIN_NAME,
+        )?;
         let mut surface = build_mesh_surface(x_vec.clone(), y_vec.clone(), grid.clone())?;
         style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;

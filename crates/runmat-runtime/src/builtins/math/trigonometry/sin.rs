@@ -188,7 +188,11 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+    RuntimeControlFlow::from(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
@@ -237,7 +241,7 @@ fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor(&handle).map_err(runtime_error_for)?;
+    let tensor = gpu_helpers::gather_tensor(&handle)?;
     sin_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -371,7 +375,7 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| runtime_error_for(format!("sin: {e}")))
+            gpu_helpers::gather_value(&proxy)
         }
         other => Ok(other),
     }

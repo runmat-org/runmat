@@ -182,23 +182,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "filewrite";
 
 fn filewrite_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()
+    RuntimeControlFlow::Error(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+            let message = err.message().to_string();
+            let identifier = err.identifier().map(|value| value.to_string());
+            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
-            builder.build().into()
+            RuntimeControlFlow::Error(builder.build())
         }
     }
 }
@@ -207,13 +210,15 @@ fn map_control_flow_with_context(flow: RuntimeControlFlow, context: &str) -> Run
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(format!("{context}: {}", err.message()))
+            let message = err.message().to_string();
+            let identifier = err.identifier().map(|value| value.to_string());
+            let mut builder = build_runtime_error(format!("{context}: {message}"))
                 .with_builtin(BUILTIN_NAME)
                 .with_source(err);
-            if let Some(identifier) = err.identifier() {
+            if let Some(identifier) = identifier {
                 builder = builder.with_identifier(identifier);
             }
-            builder.build().into()
+            RuntimeControlFlow::Error(builder.build())
         }
     }
 }
@@ -661,39 +666,42 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
     }
 
     let mut file = options.open(path).map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to open '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
-        .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!(
+                "filewrite: unable to open '{}': {}",
+                path.display(),
+                err
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build(),
+        )
     })?;
 
     file.write_all(payload).map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to write to '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
-        .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!(
+                "filewrite: unable to write to '{}': {}",
+                path.display(),
+                err
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build(),
+        )
     })?;
 
     file.flush().map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to flush '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
-        .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!(
+                "filewrite: unable to flush '{}': {}",
+                path.display(),
+                err
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build(),
+        )
     })?;
 
     Ok(payload.len())

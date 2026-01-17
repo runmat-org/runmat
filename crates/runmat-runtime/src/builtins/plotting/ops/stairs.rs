@@ -38,6 +38,7 @@ use crate::{BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
 const BUILTIN_NAME: &str = "stairs";
 
+#[allow(dead_code)]
 pub const DOC_MD: &str = r#"---
 title: "stairs"
 category: "plotting"
@@ -303,7 +304,7 @@ impl StairsInput {
         }
     }
 
-    fn into_tensor(self, name: &str) -> BuiltinResult<Tensor> {
+    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
         match self {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),

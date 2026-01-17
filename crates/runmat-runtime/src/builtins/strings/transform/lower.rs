@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -197,10 +198,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
 };
 
+const BUILTIN_NAME: &str = "lower";
 const ARG_TYPE_ERROR: &str =
     "lower: first argument must be a string array, character array, or cell array of character vectors";
 const CELL_ELEMENT_ERROR: &str =
     "lower: cell array elements must be string scalars or character vectors";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[runtime_builtin(
     name = "lower",
@@ -210,28 +223,28 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
-fn lower_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("lower: {e}"))?;
+fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed(&value).map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
-        Value::StringArray(array) => (lower_string_array(array)).map_err(Into::into),
-        Value::CharArray(array) => (lower_char_array(array)).map_err(Into::into),
-        Value::Cell(cell) => (lower_cell_array(cell)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::StringArray(array) => lower_string_array(array),
+        Value::CharArray(array) => lower_char_array(array),
+        Value::Cell(cell) => lower_cell_array(cell),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn lower_string_array(array: StringArray) -> Result<Value, String> {
+fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let lowered = data
         .into_iter()
         .map(lowercase_preserving_missing)
         .collect::<Vec<_>>();
-    let lowered_array = StringArray::new(lowered, shape).map_err(|e| format!("lower: {e}"))?;
+    let lowered_array = StringArray::new(lowered, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(lowered_array))
 }
 
-fn lower_char_array(array: CharArray) -> Result<Value, String> {
+fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 || cols == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -257,10 +270,10 @@ fn lower_char_array(array: CharArray) -> Result<Value, String> {
 
     CharArray::new(lowered_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("lower: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn lower_cell_array(cell: CellArray) -> Result<Value, String> {
+fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -272,18 +285,18 @@ fn lower_cell_array(cell: CellArray) -> Result<Value, String> {
             lowered_values.push(lowered);
         }
     }
-    make_cell(lowered_values, rows, cols).map_err(|e| format!("lower: {e}"))
+    make_cell(lowered_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn lower_cell_element(value: &Value) -> Result<Value, String> {
+fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text.clone()))),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
             lowercase_preserving_missing(sa.data[0].clone()),
         )),
         Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
-        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
     }
 }
 
@@ -407,7 +420,7 @@ pub(crate) mod tests {
     #[test]
     fn lower_errors_on_invalid_input() {
         let err = lower_builtin(Value::Num(1.0)).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -415,7 +428,7 @@ pub(crate) mod tests {
     fn lower_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let err = lower_builtin(Value::Cell(cell)).unwrap_err();
-        assert_eq!(err, CELL_ELEMENT_ERROR);
+        assert_eq!(err.to_string(), CELL_ELEMENT_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -457,7 +470,7 @@ pub(crate) mod tests {
             })
             .expect("upload");
         let err = lower_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
         provider.free(&handle).ok();
     }
 

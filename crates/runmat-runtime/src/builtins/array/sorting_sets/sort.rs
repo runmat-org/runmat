@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
+use crate::build_runtime_error;
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -217,8 +217,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sorting breaks fusion chains and acts as a residency sink; upstream tensors are gathered to host memory.",
 };
 
-fn sort_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("sort").build()
+fn sort_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin("sort")
+        .build()
+        .into()
 }
 
 #[runtime_builtin(
@@ -257,10 +260,10 @@ fn sort_gpu(handle: GpuTensorHandle, args: &SortArgs) -> crate::BuiltinResult<So
             let zero_based = dim - 1;
             if let Ok(result) = provider.sort_dim(&handle, zero_based, order, comparison) {
                 let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-                    .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+                    .map_err(|e| sort_error(format!("sort: {e}")))?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
                 let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-                    .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+                    .map_err(|e| sort_error(format!("sort: {e}")))?;
                 return Ok(SortEvaluation {
                     sorted: sorted_value,
                     indices: indices_tensor,
@@ -277,7 +280,7 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
         Value::ComplexTensor(ct) => sort_complex_tensor(ct, args),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+                .map_err(|e| sort_error(format!("sort: {e}")))?;
             sort_complex_tensor(tensor, args)
         }
         other => {
@@ -300,7 +303,7 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
         let index_tensor = Tensor::new(indices, tensor.shape.clone())
-            .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+            .map_err(|e| sort_error(format!("sort: {e}")))?;
         let sorted_value = tensor::tensor_into_value(tensor);
         return Ok(SortEvaluation {
             sorted: sorted_value,
@@ -332,9 +335,9 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
     }
 
     let sorted_tensor = Tensor::new(sorted, tensor.shape.clone())
-        .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+        .map_err(|e| sort_error(format!("sort: {e}")))?;
     let index_tensor = Tensor::new(indices, tensor.shape.clone())
-        .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+        .map_err(|e| sort_error(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
@@ -354,7 +357,7 @@ fn sort_complex_tensor(tensor: ComplexTensor, args: &SortArgs) -> crate::Builtin
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
         let index_tensor = Tensor::new(indices, tensor.shape.clone())
-            .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+            .map_err(|e| sort_error(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
             sorted: complex_tensor_into_value(tensor),
             indices: index_tensor,
@@ -384,11 +387,10 @@ fn sort_complex_tensor(tensor: ComplexTensor, args: &SortArgs) -> crate::Builtin
         }
     }
 
-    let sorted_tensor = Tensor::new(sorted, tensor.shape.clone())
-        .map_err(|e| sort_error(format!("sort: {e}")).into())?;
+    let sorted_tensor = ComplexTensor::new(sorted, tensor.shape.clone())
+        .map_err(|e| sort_error(format!("sort: {e}")))?;
     let index_tensor = Tensor::new(indices, tensor.shape.clone())
-        .map_err(|e| sort_error(format!("sort: {e}")).into())?;
-
+        .map_err(|e| sort_error(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: complex_tensor_into_value(sorted_tensor),
@@ -619,7 +621,9 @@ impl SortArgs {
                         let value = match raw {
                             Value::String(s) => s.clone(),
                             Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-                            Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
+                            Value::CharArray(ca) if ca.rows == 1 => {
+                                ca.data.iter().copied().collect()
+                            }
                             _ => {
                                 return Err(
                                     sort_error("sort: 'ComparisonMethod' requires a string value")
@@ -650,7 +654,7 @@ impl SortArgs {
                     _ => {}
                 }
             }
-            return Err(sort_error(format!("sort: unrecognised argument {:?}", rest[i])).into());
+            return Err(sort_error(format!("sort: unrecognised argument {:?}", rest[i])));
         }
         Ok(args)
     }

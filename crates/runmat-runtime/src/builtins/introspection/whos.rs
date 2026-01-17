@@ -227,7 +227,7 @@ fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let rows = values.len();
     make_cell(values, rows, 1).map_err(|err| {
-        build_runtime_error(err).with_builtin("whos").build().into()
+        RuntimeControlFlow::Error(build_runtime_error(err).with_builtin("whos").build())
     })
 }
 
@@ -328,13 +328,14 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
                         }
                         for pattern in candidates {
                             let regex = Regex::new(&pattern).map_err(|err| {
-                                build_runtime_error(format!(
-                                    "whos: invalid regular expression '{pattern}': {err}"
-                                ))
-                                .with_builtin("whos")
-                                .with_source(err)
-                                .build()
-                                .into()
+                                RuntimeControlFlow::Error(
+                                    build_runtime_error(format!(
+                                        "whos: invalid regular expression '{pattern}': {err}"
+                                    ))
+                                    .with_builtin("whos")
+                                    .with_source(err)
+                                    .build(),
+                                )
                             })?;
                             regex_patterns.push(regex);
                         }
@@ -404,21 +405,15 @@ enum NameSelector {
 }
 
 fn whos_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("whos").build().into()
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("whos").build())
 }
 
 fn whos_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
         RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|id| id.to_string());
-            let mut builder = build_runtime_error(err.message().to_string())
-                .with_builtin("whos")
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
+        RuntimeControlFlow::Error(mut err) => {
+            err.context = err.context.with_builtin("whos");
+            RuntimeControlFlow::Error(err)
         }
     }
 }
@@ -441,11 +436,12 @@ fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
     for name in names {
         if contains_wildcards(name) {
             let pattern = Pattern::new(name).map_err(|err| {
-                build_runtime_error(format!("whos: invalid pattern '{name}': {err}"))
-                    .with_builtin("whos")
-                    .with_source(err)
-                    .build()
-                    .into()
+                RuntimeControlFlow::Error(
+                    build_runtime_error(format!("whos: invalid pattern '{name}': {err}"))
+                        .with_builtin("whos")
+                        .with_source(err)
+                        .build(),
+                )
             })?;
             selectors.push(NameSelector::Wildcard(pattern));
         } else {
@@ -566,10 +562,11 @@ fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_builtins::Tensor> {
     }
     let data: Vec<f64> = normalized.iter().map(|dim| *dim as f64).collect();
     runmat_builtins::Tensor::new(data, vec![1, normalized.len()]).map_err(|err| {
-        build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
-            .with_builtin("whos")
-            .build()
-            .into()
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
+                .with_builtin("whos")
+                .build(),
+        )
     })
 }
 

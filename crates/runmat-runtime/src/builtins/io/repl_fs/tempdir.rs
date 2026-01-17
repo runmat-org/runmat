@@ -209,10 +209,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "tempdir";
 
 fn tempdir_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()
+    RuntimeControlFlow::Error(
+        build_runtime_error(message)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+    )
 }
 
 #[runtime_builtin(

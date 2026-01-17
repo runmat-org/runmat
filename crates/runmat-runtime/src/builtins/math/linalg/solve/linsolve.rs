@@ -624,7 +624,7 @@ impl PreparedOperand {
 fn prepare_gpu_operand(
     value: &Value,
     provider: &'static dyn AccelProvider,
-) -> Result<Option<PreparedOperand>, String> {
+) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
             if is_scalar_handle(handle) {
@@ -645,7 +645,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }

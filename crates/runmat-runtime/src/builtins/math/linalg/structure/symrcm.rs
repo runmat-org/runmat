@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -235,6 +235,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "symrcm";
 
+fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin(name).build())
+}
+
 #[runtime_builtin(
     name = "symrcm",
     category = "math/linalg/structure",
@@ -250,12 +254,8 @@ fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
             Ok(permutation_to_value(&ordering)?)
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
-                build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
-                    .with_builtin(BUILTIN_NAME)
-                    .build()
-                    .into()
-            })?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
             let ordering = symrcm_host_complex_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
@@ -272,31 +272,16 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
-            build_runtime_error(format!("{name}: {e}"))
-                .with_builtin(name)
-                .build()
-                .into()
-        }),
-        other => Err(build_runtime_error(format!(
-            "{name}: unsupported input type {:?}; expected numeric or logical values",
-            other
-        ))
-        .with_builtin(name)
-        .build()
-        .into()),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+        other => Err(runtime_error(
+            name,
+            format!("{name}: unsupported input type {:?}; expected numeric or logical values", other),
+        )),
     }
 }
 
@@ -306,12 +291,8 @@ fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor
         .iter()
         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
         .collect();
-    Tensor::new(data, logical.shape.clone()).map_err(|e| {
-        build_runtime_error(format!("{name}: {e}"))
-            .with_builtin(name)
-            .build()
-            .into()
-    })
+    Tensor::new(data, logical.shape.clone())
+        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
 }
 
 fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -368,17 +349,23 @@ fn adjacency_from_complex_data(
 }
 
 fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
-    let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape).map_err(|_| {
-        build_runtime_error("symrcm: input must be a 2-D matrix")
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()
-    })?;
+    let (rows, cols) = match super::bandwidth::ensure_matrix_shape(shape) {
+        Ok(dimensions) => dimensions,
+        Err(RuntimeControlFlow::Suspend(pending)) => {
+            return Err(RuntimeControlFlow::Suspend(pending));
+        }
+        Err(RuntimeControlFlow::Error(_)) => {
+            return Err(runtime_error(
+                BUILTIN_NAME,
+                "symrcm: input must be a 2-D matrix",
+            ));
+        }
+    };
     if rows != cols {
-        return Err(build_runtime_error("symrcm: input matrix must be square")
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into());
+        return Err(runtime_error(
+            BUILTIN_NAME,
+            "symrcm: input matrix must be square",
+        ));
     }
     Ok(rows)
 }
@@ -397,16 +384,16 @@ where
     }
 
     let expected = rows.checked_mul(cols).ok_or_else(|| {
-        build_runtime_error("symrcm: matrix dimensions overflow when computing adjacency")
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()
+        runtime_error(
+            BUILTIN_NAME,
+            "symrcm: matrix dimensions overflow when computing adjacency",
+        )
     })?;
     if data.len() < expected {
-        return Err(build_runtime_error("symrcm: data does not match matrix dimensions")
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into());
+        return Err(runtime_error(
+            BUILTIN_NAME,
+            "symrcm: data does not match matrix dimensions",
+        ));
     }
 
     let mut adjacency: Vec<HashSet<usize>> = vec![HashSet::new(); rows];
@@ -504,12 +491,8 @@ fn permutation_to_value(ordering: &[usize]) -> BuiltinResult<Value> {
         data.push((idx + 1) as f64);
     }
     let shape = if n == 0 { vec![1, 0] } else { vec![1, n] };
-    let tensor = Tensor::new(data, shape).map_err(|e| {
-        build_runtime_error(format!("{BUILTIN_NAME}: {e}"))
-            .with_builtin(BUILTIN_NAME)
-            .build()
-            .into()
-    })?;
+    let tensor = Tensor::new(data, shape)
+        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 

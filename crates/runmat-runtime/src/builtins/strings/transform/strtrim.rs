@@ -7,8 +7,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -204,10 +205,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
 };
 
+const BUILTIN_NAME: &str = "strtrim";
 const ARG_TYPE_ERROR: &str =
     "strtrim: first argument must be a string array, character array, or cell array of character vectors";
 const CELL_ELEMENT_ERROR: &str =
     "strtrim: cell array elements must be string scalars or character vectors";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[runtime_builtin(
     name = "strtrim",
@@ -217,33 +230,25 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
-fn strtrim_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let gathered = gather_if_needed(&value).map_err(|e| format!("strtrim: {e}"))?;
+fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
+    let gathered = gather_if_needed(&value).map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(trim_string(text))),
-        Value::StringArray(array) => (strtrim_string_array(array)).map_err(Into::into),
-        Value::CharArray(array) => (strtrim_char_array(array)).map_err(Into::into),
-        Value::Cell(cell) => (strtrim_cell_array(cell)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::StringArray(array) => strtrim_string_array(array),
+        Value::CharArray(array) => strtrim_char_array(array),
+        Value::Cell(cell) => strtrim_cell_array(cell),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
-fn trim_string(text: String) -> String {
-    if is_missing_string(&text) {
-        text
-    } else {
-        trim_whitespace(&text)
-    }
-}
-
-fn strtrim_string_array(array: StringArray) -> Result<Value, String> {
+fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let trimmed = data.into_iter().map(trim_string).collect::<Vec<_>>();
-    let out = StringArray::new(trimmed, shape).map_err(|e| format!("strtrim: {e}"))?;
+    let out = StringArray::new(trimmed, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
     Ok(Value::StringArray(out))
 }
 
-fn strtrim_char_array(array: CharArray) -> Result<Value, String> {
+fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -269,10 +274,10 @@ fn strtrim_char_array(array: CharArray) -> Result<Value, String> {
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("strtrim: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strtrim_cell_array(cell: CellArray) -> Result<Value, String> {
+fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -281,11 +286,11 @@ fn strtrim_cell_array(cell: CellArray) -> Result<Value, String> {
         let trimmed = strtrim_cell_element(value)?;
         trimmed_values.push(trimmed);
     }
-    make_cell(trimmed_values, rows, cols).map_err(|e| format!("strtrim: {e}"))
+    make_cell(trimmed_values, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn strtrim_cell_element(value: &Value) -> Result<Value, String> {
-    match gather_if_needed(value).map_err(|e| format!("strtrim: {e}"))? {
+fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
+    match gather_if_needed(value).map_err(map_flow)? {
         Value::String(text) => Ok(Value::String(trim_string(text))),
         Value::StringArray(sa) if sa.data.len() == 1 => {
             let text = sa.data.into_iter().next().unwrap();
@@ -301,10 +306,18 @@ fn strtrim_cell_element(value: &Value) -> Result<Value, String> {
             let cols = chars.len();
             CharArray::new(chars, ca.rows, cols)
                 .map(Value::CharArray)
-                .map_err(|e| format!("strtrim: {e}"))
+                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
         }
-        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+    }
+}
+
+fn trim_string(text: String) -> String {
+    if is_missing_string(&text) {
+        text
+    } else {
+        trim_whitespace(&text)
     }
 }
 
@@ -464,14 +477,14 @@ pub(crate) mod tests {
     fn strtrim_cell_array_rejects_non_text() {
         let cell = CellArray::new(vec![Value::Num(5.0)], 1, 1).unwrap();
         let err = strtrim_builtin(Value::Cell(cell)).expect_err("strtrim cell non-text");
-        assert!(err.contains("cell array elements"));
+        assert!(err.to_string().contains("cell array elements"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_errors_on_invalid_input() {
         let err = strtrim_builtin(Value::Num(1.0)).unwrap_err();
-        assert!(err.contains("strtrim"));
+        assert!(err.to_string().contains("strtrim"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

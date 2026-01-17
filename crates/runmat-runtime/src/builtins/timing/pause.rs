@@ -157,9 +157,27 @@ impl Default for PauseState {
     }
 }
 
+const BUILTIN_NAME: &str = "pause";
 const ERR_INVALID_ARG: &str = "MATLAB:pause:InvalidInputArgument";
 const ERR_TOO_MANY_INPUTS: &str = "MATLAB:pause:TooManyInputs";
-const ERR_STATE_LOCK: &str = "pause: failed to acquire pause state";
+const MSG_INVALID_ARG: &str = "pause: invalid input argument";
+const MSG_TOO_MANY_INPUTS: &str = "pause: too many input arguments";
+const MSG_STATE_LOCK: &str = "pause: failed to acquire pause state";
+
+fn pause_error(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn pause_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .build()
+        .into()
+}
 
 #[derive(Debug, Clone, Copy)]
 enum PauseArgument {
@@ -196,21 +214,23 @@ fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 Ok(empty_return_value())
             }
             PauseArgument::SetState(next_state) => {
-                let previous = set_pause_enabled(next_state).map_err(Into::into)?;
+                let previous = set_pause_enabled(next_state)?;
                 Ok(state_value(previous))
             }
             PauseArgument::Query => {
-                let current =
-                    pause_enabled().map_err(Into::into)?;
+                let current = pause_enabled()?;
                 Ok(state_value(current))
             }
         },
-        _ => Err(build_runtime_error(ERR_TOO_MANY_INPUTS).build().into()),
+        _ => Err(pause_error_with_identifier(
+            MSG_TOO_MANY_INPUTS,
+            ERR_TOO_MANY_INPUTS,
+        )),
     }
 }
 
 fn perform_wait(wait: PauseWait) -> Result<(), RuntimeControlFlow> {
-    if !pause_enabled().map_err(Into::into)? {
+    if !pause_enabled()? {
         return Ok(());
     }
 
@@ -241,33 +261,39 @@ fn wait_for_key_press() -> Result<(), RuntimeControlFlow> {
 
 fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
     let host_value = gpu_helpers::gather_value(arg)
-        .map_err(|e| build_runtime_error(format!("pause: {e}")).build().into())?;
+        .map_err(|e| pause_error(format!("pause: {e}")))?;
     match host_value {
-        Value::String(text) => parse_command(&text).map_err(Into::into),
+        Value::String(text) => parse_command(&text),
         Value::CharArray(ca) => {
             if ca.rows == 0 || ca.data.is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if ca.rows == 1 {
                 let text: String = ca.data.iter().collect();
-                parse_command(&text).map_err(Into::into)
+                parse_command(&text)
             } else {
-                Err(build_runtime_error(ERR_INVALID_ARG).build().into())
+                Err(pause_error_with_identifier(
+                    MSG_INVALID_ARG,
+                    ERR_INVALID_ARG,
+                ))
             }
         }
         Value::StringArray(sa) => {
             if sa.data.is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if sa.data.len() == 1 {
-                parse_command(&sa.data[0]).map_err(Into::into)
+                parse_command(&sa.data[0])
             } else {
-                Err(build_runtime_error(ERR_INVALID_ARG).build().into())
+                Err(pause_error_with_identifier(
+                    MSG_INVALID_ARG,
+                    ERR_INVALID_ARG,
+                ))
             }
         }
-        Value::Num(value) => parse_numeric(value).map_err(Into::into),
-        Value::Int(int_value) => parse_numeric(int_value.to_f64()).map_err(Into::into),
-        Value::Bool(flag) => parse_numeric(if flag { 1.0 } else { 0.0 }).map_err(Into::into),
-        Value::Tensor(tensor) => parse_tensor(tensor).map_err(Into::into),
-        Value::LogicalArray(logical) => parse_logical(logical).map_err(Into::into),
+        Value::Num(value) => parse_numeric(value),
+        Value::Int(int_value) => parse_numeric(int_value.to_f64()),
+        Value::Bool(flag) => parse_numeric(if flag { 1.0 } else { 0.0 }),
+        Value::Tensor(tensor) => parse_tensor(tensor),
+        Value::LogicalArray(logical) => parse_logical(logical),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             parse_tensor(tensor)
@@ -282,11 +308,14 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(build_runtime_error(ERR_INVALID_ARG).build().into()),
+        | Value::MException(_) => Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        )),
     }
 }
 
-fn parse_command(raw: &str) -> Result<PauseArgument, String> {
+fn parse_command(raw: &str) -> Result<PauseArgument, RuntimeControlFlow> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
@@ -296,39 +325,54 @@ fn parse_command(raw: &str) -> Result<PauseArgument, String> {
         "on" => Ok(PauseArgument::SetState(true)),
         "off" => Ok(PauseArgument::SetState(false)),
         "query" => Ok(PauseArgument::Query),
-        _ => Err(ERR_INVALID_ARG.to_string()),
+        _ => Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        )),
     }
 }
 
-fn parse_numeric(value: f64) -> Result<PauseArgument, String> {
+fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeControlFlow> {
     if !value.is_finite() {
         if value.is_sign_positive() {
             return Ok(PauseArgument::Wait(PauseWait::Default));
         }
-        return Err(ERR_INVALID_ARG.to_string());
+        return Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        ));
     }
     if value < 0.0 {
-        return Err(ERR_INVALID_ARG.to_string());
+        return Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        ));
     }
     Ok(PauseArgument::Wait(PauseWait::Seconds(value)))
 }
 
-fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, String> {
+fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeControlFlow> {
     if tensor.data.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
     if tensor.data.len() != 1 {
-        return Err(ERR_INVALID_ARG.to_string());
+        return Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        ));
     }
     parse_numeric(tensor.data[0])
 }
 
-fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, String> {
+fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeControlFlow> {
     if logical.data.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
     if logical.data.len() != 1 {
-        return Err(ERR_INVALID_ARG.to_string());
+        return Err(pause_error_with_identifier(
+            MSG_INVALID_ARG,
+            ERR_INVALID_ARG,
+        ));
     }
     let scalar = if logical.data[0] != 0 { 1.0 } else { 0.0 };
     parse_numeric(scalar)
@@ -343,17 +387,17 @@ fn state_value(enabled: bool) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn pause_enabled() -> Result<bool, String> {
+fn pause_enabled() -> Result<bool, RuntimeControlFlow> {
     PAUSE_STATE
         .read()
         .map(|guard| guard.enabled)
-        .map_err(|_| ERR_STATE_LOCK.to_string())
+        .map_err(|_| pause_error(MSG_STATE_LOCK))
 }
 
-fn set_pause_enabled(next: bool) -> Result<bool, String> {
+fn set_pause_enabled(next: bool) -> Result<bool, RuntimeControlFlow> {
     let mut guard = PAUSE_STATE
         .write()
-        .map_err(|_| ERR_STATE_LOCK.to_string())?;
+        .map_err(|_| pause_error(MSG_STATE_LOCK))?;
     let previous = guard.enabled;
     guard.enabled = next;
     Ok(previous)
@@ -378,6 +422,17 @@ pub(crate) mod tests {
         match value {
             Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
             other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    fn assert_pause_error_identifier(err: RuntimeControlFlow, identifier: &str) {
+        match err {
+            RuntimeControlFlow::Error(err) => {
+                assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
+            }
+            RuntimeControlFlow::Suspend(pending) => {
+                panic!("unexpected suspend: {pending:?}");
+            }
         }
     }
 
@@ -464,7 +519,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let err = pause_builtin(vec![Value::Num(-0.1)]).unwrap_err();
-        assert_eq!(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -474,7 +529,7 @@ pub(crate) mod tests {
         reset_state(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = pause_builtin(vec![Value::Tensor(tensor)]).unwrap_err();
-        assert_eq!(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -566,7 +621,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
         let err = pause_builtin(vec![Value::from("invalid")]).unwrap_err();
-        assert_eq!(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, ERR_INVALID_ARG);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

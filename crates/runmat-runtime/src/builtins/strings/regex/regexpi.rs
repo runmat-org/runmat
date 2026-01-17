@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-use crate::make_cell;
+use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -213,14 +213,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow-heavy regex evaluation is not eligible for fusion.",
 };
 
+const BUILTIN_NAME: &str = "regexpi";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
 pub fn evaluate(
     subject: Value,
     pattern: Value,
     rest: &[Value],
-) -> Result<RegexpEvaluation, String> {
+) -> BuiltinResult<RegexpEvaluation> {
     let options = build_options(rest);
-    regexp::evaluate(subject, pattern, &options)
+    regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options)
 }
 
 #[runtime_builtin(
@@ -241,7 +250,8 @@ fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> crate::B
         Ok(outputs.remove(0))
     } else {
         let len = outputs.len();
-        make_cell(outputs, 1, len).map_err(Into::into)
+        make_cell(outputs, 1, len)
+            .map_err(|err| runtime_error_for(format!("{BUILTIN_NAME}: {err}")))
     }
 }
 
@@ -538,9 +548,15 @@ pub(crate) mod tests {
         let err = evaluate(Value::Cell(cell), Value::String("a".into()), &[])
             .err()
             .expect("expected regexpi to reject non-text cell elements");
+        let message = match err {
+            RuntimeControlFlow::Error(err) => err.message().to_string(),
+            RuntimeControlFlow::Suspend(_) => {
+                panic!("expected regexpi error, got suspension")
+            }
+        };
         assert!(
-            err.contains("cell array elements"),
-            "unexpected error message: {err}"
+            message.contains("cell array elements"),
+            "unexpected error message: {message}"
         );
     }
 

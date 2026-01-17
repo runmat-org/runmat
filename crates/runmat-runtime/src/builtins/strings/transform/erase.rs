@@ -6,8 +6,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{gather_if_needed, make_cell_with_shape};
+use crate::{build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeControlFlow};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -203,12 +204,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "String manipulation builtin; not eligible for fusion plans and always gathers GPU inputs before execution.",
 };
 
+const BUILTIN_NAME: &str = "erase";
 const ARG_TYPE_ERROR: &str =
     "erase: first argument must be a string array, character array, or cell array of character vectors";
 const PATTERN_TYPE_ERROR: &str =
     "erase: second argument must be a string array, character array, or cell array of character vectors";
 const CELL_ELEMENT_ERROR: &str =
     "erase: cell array elements must be string scalars or character vectors";
+
+fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+        .into()
+}
+
+fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
+    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+}
 
 #[runtime_builtin(
     name = "erase",
@@ -218,18 +231,18 @@ const CELL_ELEMENT_ERROR: &str =
     accel = "sink",
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
-fn erase_builtin(text: Value, pattern: Value) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed(&text).map_err(|e| format!("erase: {e}"))?;
-    let pattern = gather_if_needed(&pattern).map_err(|e| format!("erase: {e}"))?;
+fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
+    let text = gather_if_needed(&text).map_err(map_flow)?;
+    let pattern = gather_if_needed(&pattern).map_err(map_flow)?;
 
     let patterns = PatternList::from_value(&pattern)?;
 
     match text {
         Value::String(s) => Ok(Value::String(erase_string_scalar(s, &patterns))),
-        Value::StringArray(sa) => (erase_string_array(sa, &patterns)).map_err(Into::into),
-        Value::CharArray(ca) => (erase_char_array(ca, &patterns)).map_err(Into::into),
-        Value::Cell(cell) => (erase_cell_array(cell, &patterns)).map_err(Into::into),
-        _ => Err(((ARG_TYPE_ERROR.to_string())).into()),
+        Value::StringArray(sa) => erase_string_array(sa, &patterns),
+        Value::CharArray(ca) => erase_char_array(ca, &patterns),
+        Value::Cell(cell) => erase_cell_array(cell, &patterns),
+        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
     }
 }
 
@@ -238,7 +251,7 @@ struct PatternList {
 }
 
 impl PatternList {
-    fn from_value(value: &Value) -> Result<Self, String> {
+    fn from_value(value: &Value) -> BuiltinResult<Self> {
         let entries = match value {
             Value::String(text) => vec![text.clone()],
             Value::StringArray(array) => array.data.clone(),
@@ -265,13 +278,13 @@ impl PatternList {
                         Value::CharArray(ca) if ca.rows == 1 => {
                             list.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
                         }
-                        Value::CharArray(_) => return Err(CELL_ELEMENT_ERROR.to_string()),
-                        _ => return Err(CELL_ELEMENT_ERROR.to_string()),
+                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
                     }
                 }
                 list
             }
-            _ => return Err(PATTERN_TYPE_ERROR.to_string()),
+            _ => return Err(runtime_error_for(PATTERN_TYPE_ERROR)),
         };
         Ok(Self { entries })
     }
@@ -302,7 +315,7 @@ fn erase_string_scalar(text: String, patterns: &PatternList) -> String {
     }
 }
 
-fn erase_string_array(array: StringArray, patterns: &PatternList) -> Result<Value, String> {
+fn erase_string_array(array: StringArray, patterns: &PatternList) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut erased = Vec::with_capacity(data.len());
     for entry in data {
@@ -314,10 +327,10 @@ fn erase_string_array(array: StringArray, patterns: &PatternList) -> Result<Valu
     }
     StringArray::new(erased, shape)
         .map(Value::StringArray)
-        .map_err(|e| format!("erase: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn erase_char_array(array: CharArray, patterns: &PatternList) -> Result<Value, String> {
+fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<Value> {
     let CharArray { data, rows, cols } = array;
     if rows == 0 {
         return Ok(Value::CharArray(CharArray { data, rows, cols }));
@@ -346,19 +359,19 @@ fn erase_char_array(array: CharArray, patterns: &PatternList) -> Result<Value, S
 
     CharArray::new(flattened, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| format!("erase: {e}"))
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> Result<Value, String> {
+fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Value> {
     let shape = cell.shape.clone();
     let mut values = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
         values.push(erase_cell_element(handle, patterns)?);
     }
-    make_cell_with_shape(values, shape).map_err(|e| format!("erase: {e}"))
+    make_cell_with_shape(values, shape).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn erase_cell_element(value: &Value, patterns: &PatternList) -> Result<Value, String> {
+fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::String(erase_string_scalar(text.clone(), patterns))),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(erase_string_scalar(
@@ -371,8 +384,8 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> Result<Value, St
             let erased = patterns.apply(&slice);
             Ok(Value::CharArray(CharArray::new_row(&erased)))
         }
-        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
-        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
     }
 }
 
@@ -595,14 +608,14 @@ pub(crate) mod tests {
     #[test]
     fn erase_errors_on_invalid_first_argument() {
         let err = erase_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
-        assert_eq!(err, PATTERN_TYPE_ERROR);
+        assert_eq!(err.to_string(), PATTERN_TYPE_ERROR);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
