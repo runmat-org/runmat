@@ -955,14 +955,12 @@ impl RunMatSession {
     }
 
     /// Execute MATLAB/Octave code
-    pub fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
-        let _active = ActiveExecutionGuard::new(self)?;
-        match self.execute_internal(input)? {
-            ExecuteStep::Completed(result) => Ok(result),
-            ExecuteStep::Pending(_frame) => Err(anyhow::anyhow!(
-                "Execution suspended (async required). Use ExecuteFuture/execute_async."
-            )),
-        }
+    pub async fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
+        let mut session = std::mem::take(self);
+        let _active = ActiveExecutionGuard::new(&mut session)?;
+        let (session, result) = session.execute_future(input).await?;
+        *self = session;
+        Ok(result)
     }
 
     fn execute_internal(&mut self, input: &str) -> Result<ExecuteStep> {
@@ -2393,9 +2391,9 @@ pub fn format_tokens(input: &str) -> String {
 }
 
 /// Execute MATLAB/Octave code and return the result as a formatted string
-pub fn execute_and_format(input: &str) -> String {
+pub async fn execute_and_format(input: &str) -> String {
     match RunMatSession::new() {
-        Ok(mut engine) => match engine.execute(input) {
+        Ok(mut engine) => match engine.execute(input).await {
             Ok(result) => {
                 if let Some(error) = result.error {
                     format!("Error: {error}")

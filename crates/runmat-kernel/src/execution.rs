@@ -123,7 +123,7 @@ impl ExecutionEngine {
     }
 
     /// Execute code
-    pub fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
+    pub async fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
         let start_time = Instant::now();
         self.execution_count += 1;
 
@@ -132,7 +132,7 @@ impl ExecutionEngine {
         }
 
         // Execute using the underlying RunMatSession
-        match self.repl_engine.execute(code) {
+        match self.repl_engine.execute(code).await {
             Ok(repl_result) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
@@ -203,14 +203,14 @@ impl ExecutionEngine {
     }
 
     /// Execute code with a specific timeout
-    pub fn execute_with_timeout(
+    pub async fn execute_with_timeout(
         &mut self,
         code: &str,
         timeout: Duration,
     ) -> Result<ExecutionResult> {
         let original_timeout = self.timeout;
         self.timeout = Some(timeout);
-        let result = self.execute(code);
+        let result = self.execute(code).await;
         self.timeout = original_timeout;
         result
     }
@@ -291,6 +291,7 @@ pub struct ExecutionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn test_execution_engine_creation() {
@@ -309,7 +310,7 @@ mod tests {
     #[test]
     fn test_simple_execution() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = 1 + 2").unwrap();
+        let result = block_on(engine.execute("x = 1 + 2")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Success);
         assert_eq!(engine.execution_count(), 1);
@@ -321,7 +322,7 @@ mod tests {
     #[test]
     fn test_parse_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = 1 +").unwrap();
+        let result = block_on(engine.execute("x = 1 +")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
@@ -334,7 +335,7 @@ mod tests {
     #[test]
     fn test_runtime_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = engine.execute("x = undefined_var").unwrap();
+        let result = block_on(engine.execute("x = undefined_var")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
@@ -347,21 +348,21 @@ mod tests {
     fn test_execution_count_increment() {
         let mut engine = ExecutionEngine::new();
 
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
-        engine.execute("y = 2").unwrap();
+        block_on(engine.execute("y = 2")).unwrap();
         assert_eq!(engine.execution_count(), 2);
 
         // Even failed executions increment the counter
-        engine.execute("invalid syntax").unwrap();
+        block_on(engine.execute("invalid syntax")).unwrap();
         assert_eq!(engine.execution_count(), 3);
     }
 
     #[test]
     fn test_engine_reset() {
         let mut engine = ExecutionEngine::new();
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
         engine.reset();
@@ -384,7 +385,7 @@ mod tests {
     fn test_stats() {
         let mut engine = ExecutionEngine::new();
         engine.set_debug(true);
-        engine.execute("x = 1").unwrap();
+        block_on(engine.execute("x = 1")).unwrap();
 
         let stats = engine.stats();
         assert_eq!(stats.execution_count, 1);

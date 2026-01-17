@@ -6122,6 +6122,7 @@ name = "runmat-core"
 version = "0.2.8"
 dependencies = [
  "anyhow",
+ "futures",
  "log",
  "runmat-accelerate",
  "runmat-accelerate-api",

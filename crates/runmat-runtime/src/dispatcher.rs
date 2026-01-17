@@ -110,6 +110,14 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
 /// Supports function overloading by trying different argument patterns.
 /// Returns an error if no builtin with that name and compatible arguments is found.
 pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
+    call_builtin_sync(name, args)
+}
+
+pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
+    call_builtin_sync(name, args)
+}
+
+fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name

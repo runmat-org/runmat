@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_core::RunMatSession;
 use runmat_gc::{gc_test_context, GcConfig};
 
@@ -37,7 +38,7 @@ fn test_repl_engine_with_jit_disabled() {
 fn test_simple_arithmetic_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("x = 1 + 2");
+        let result = block_on(engine.execute("x = 1 + 2"));
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -55,12 +56,12 @@ fn test_matrix_operations() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Test vector creation
-        let result = engine.execute("y = [1, 2, 3]");
+        let result = block_on(engine.execute("y = [1, 2, 3]"));
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
 
         // Test matrix creation
-        let result = engine.execute("z = [1, 2; 3, 4]");
+        let result = block_on(engine.execute("z = [1, 2; 3, 4]"));
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
 
@@ -77,7 +78,7 @@ fn test_execution_statistics_tracking() {
         // Execute multiple statements (testing individual execution)
         let inputs = ["x = 1", "y = 2", "z = 3"];
         for input in &inputs {
-            let result = engine.execute(input);
+            let result = block_on(engine.execute(input));
             assert!(result.is_ok(), "Failed to execute: {input}");
         }
 
@@ -92,7 +93,7 @@ fn test_execution_statistics_tracking() {
 fn test_verbose_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::with_options(true, true).unwrap();
-        let result = engine.execute("x = 42");
+        let result = block_on(engine.execute("x = 42"));
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -104,7 +105,7 @@ fn test_verbose_mode() {
 fn test_parse_error_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("x = [1, 2,"); // Incomplete matrix
+        let result = block_on(engine.execute("x = [1, 2,")); // Incomplete matrix
         assert!(result.is_err()); // Should fail at parse stage
     });
 }
@@ -113,7 +114,44 @@ fn test_parse_error_handling() {
 fn test_invalid_syntax_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("x = $invalid$");
+        let result = block_on(engine.execute("x = $invalid$"));
+        assert!(result.is_err()); // Should fail due to invalid tokens
+    });
+}
+
+        let stats = engine.stats();
+        assert_eq!(stats.total_executions, inputs.len());
+        assert!(stats.average_execution_time_ms >= 0.0);
+        // Total execution time is always valid (u64 type)
+    });
+}
+
+#[test]
+fn test_verbose_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::with_options(true, true).unwrap();
+        let result = block_on(engine.execute("x = 42"));
+        assert!(result.is_ok());
+
+        let execution_result = result.unwrap();
+        assert!(execution_result.error.is_none());
+    });
+}
+
+#[test]
+fn test_parse_error_handling() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        let result = block_on(engine.execute("x = [1, 2,")); // Incomplete matrix
+        assert!(result.is_err()); // Should fail at parse stage
+    });
+}
+
+#[test]
+fn test_invalid_syntax_handling() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        let result = block_on(engine.execute("x = $invalid$"));
         assert!(result.is_err()); // Should fail due to invalid tokens
     });
 }
@@ -124,7 +162,7 @@ fn test_execution_with_control_flow() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Test if statement - control flow may not be fully implemented yet
-        let result = engine.execute("if 1 > 0; x = 5; end");
+        let result = block_on(engine.execute("if 1 > 0; x = 5; end"));
         if result.is_ok() {
             assert!(result.unwrap().error.is_none());
         } else {
@@ -133,7 +171,7 @@ fn test_execution_with_control_flow() {
         }
 
         // Test for loop - may not be implemented yet
-        let result = engine.execute("for i = 1:3; y = i; end");
+        let result = block_on(engine.execute("for i = 1:3; y = i; end"));
         if result.is_ok() {
             assert!(result.unwrap().error.is_none());
         } else {
@@ -180,7 +218,7 @@ fn test_stats_reset() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Execute something to generate stats
-        let _ = engine.execute("x = 1");
+        let _ = block_on(engine.execute("x = 1"));
         assert!(engine.stats().total_executions > 0);
 
         // Reset stats
@@ -199,7 +237,7 @@ fn test_multiple_executions_performance_tracking() {
         // Execute the same operation multiple times to potentially trigger JIT
         for i in 1..=20 {
             let input = format!("x{i} = {i} + {i}");
-            let result = engine.execute(&input);
+            let result = block_on(engine.execute(&input));
             assert!(result.is_ok());
         }
 
@@ -214,7 +252,7 @@ fn test_multiple_executions_performance_tracking() {
 fn test_empty_input_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("");
+        let result = block_on(engine.execute(""));
         // Empty input behavior may vary - just ensure it doesn't crash
         // Some parsers accept empty input, others don't
         if let Err(e) = result {
@@ -228,7 +266,7 @@ fn test_empty_input_handling() {
 fn test_whitespace_only_input() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("   \t\n  ");
+        let result = block_on(engine.execute("   \t\n  "));
         // Whitespace-only input behavior may vary - just ensure it doesn't crash
         if let Err(e) = result {
             // If it errors, that's also valid behavior
@@ -241,7 +279,7 @@ fn test_whitespace_only_input() {
 fn test_complex_expression_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("result = (1 + 2) * 3 - 4 / 2");
+        let result = block_on(engine.execute("result = (1 + 2) * 3 - 4 / 2"));
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -265,7 +303,7 @@ fn test_concurrent_safety() {
             let handle = thread::spawn(move || {
                 let input = format!("x{i} = {i} * 2");
                 let mut eng = engine_clone.lock().unwrap();
-                eng.execute(&input)
+                futures::executor::block_on(eng.execute(&input))
             });
             handles.push(handle);
         }
@@ -282,7 +320,7 @@ fn test_concurrent_safety() {
 fn test_execution_result_structure() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = engine.execute("x = 42").unwrap();
+        let result = block_on(engine.execute("x = 42")).unwrap();
 
         // Check ExecutionResult structure
         // Execution time can be 0 for very fast operations
@@ -307,7 +345,7 @@ fn test_format_tokens_compatibility() {
 #[test]
 fn test_execute_and_format_function() {
     gc_test_context(|| {
-        let result = runmat_core::execute_and_format("x = 1 + 2");
+        let result = block_on(runmat_core::execute_and_format("x = 1 + 2"));
         // Should not be an error string
         assert!(!result.starts_with("Error:"));
         assert!(!result.starts_with("Engine Error:"));
@@ -317,7 +355,7 @@ fn test_execute_and_format_function() {
 #[test]
 fn test_execute_and_format_error_handling() {
     gc_test_context(|| {
-        let result = runmat_core::execute_and_format("invalid syntax $");
+        let result = block_on(runmat_core::execute_and_format("invalid syntax $"));
         // Should return an error string
         assert!(result.starts_with("Error:") || result.starts_with("Engine Error:"));
     });

@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_core::RunMatSession;
 use runmat_gc::{gc_test_context, GcConfig};
 use runmat_time::Instant;
@@ -8,11 +9,11 @@ fn test_jit_vs_interpreter_execution() {
     gc_test_context(|| {
         // Test with JIT enabled
         let mut jit_engine = RunMatSession::with_options(true, false).unwrap();
-        let jit_result = jit_engine.execute("x = 5 + 3").unwrap();
+        let jit_result = block_on(jit_engine.execute("x = 5 + 3")).unwrap();
 
         // Test with JIT disabled
         let mut interp_engine = RunMatSession::with_options(false, false).unwrap();
-        let interp_result = interp_engine.execute("x = 5 + 3").unwrap();
+        let interp_result = block_on(interp_engine.execute("x = 5 + 3")).unwrap();
 
         // Both should succeed
         assert!(jit_result.error.is_none());
@@ -35,7 +36,7 @@ fn test_hotspot_compilation_simulation() {
 
         for _ in 0..15 {
             // Execute multiple times to cross JIT threshold
-            let result = engine.execute(code).unwrap();
+            let result = block_on(engine.execute(code)).unwrap();
             assert!(result.error.is_none());
 
             if result.used_jit {
@@ -69,7 +70,7 @@ fn test_gc_integration_during_execution() {
         // Execute operations that create objects
         for i in 0..10 {
             let code = format!("matrix{i} = [1, 2; 3, 4]");
-            let result = engine.execute(&code);
+            let result = block_on(engine.execute(&code));
             assert!(result.is_ok());
         }
 
@@ -88,15 +89,15 @@ fn test_error_recovery_and_continued_execution() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Execute valid code
-        let result1 = engine.execute("x = 1");
+        let result1 = block_on(engine.execute("x = 1"));
         assert!(result1.is_ok());
 
         // Execute invalid code
-        let result2 = engine.execute("y = [1, 2,"); // Incomplete
+        let result2 = block_on(engine.execute("y = [1, 2,")); // Incomplete
         assert!(result2.is_err());
 
         // Engine should recover and continue working
-        let result3 = engine.execute("z = 3");
+        let result3 = block_on(engine.execute("z = 3"));
         assert!(result3.is_ok());
 
         // Statistics should reflect execution attempts (behavior may vary)
@@ -123,7 +124,7 @@ fn test_complex_mathematical_operations() {
         ];
 
         for op in &complex_operations {
-            let result = engine.execute(op);
+            let result = block_on(engine.execute(op));
             assert!(result.is_ok(), "Failed to execute: {op}");
             assert!(result.unwrap().error.is_none());
         }
@@ -132,6 +133,7 @@ fn test_complex_mathematical_operations() {
         assert_eq!(stats.total_executions, complex_operations.len());
     });
 }
+
 
 #[test]
 fn test_control_flow_execution() {
@@ -146,7 +148,7 @@ fn test_control_flow_execution() {
         ];
 
         for test in &control_flow_tests {
-            let result = engine.execute(test);
+            let result = block_on(engine.execute(test));
             // Control flow may not be fully implemented yet
             if result.is_ok() {
                 assert!(result.unwrap().error.is_none());
@@ -166,7 +168,7 @@ fn test_memory_usage_under_load() {
         // Create many objects to test memory management
         for i in 0..50 {
             let code = format!("var{} = [{}; {}; {}]", i, i, i + 1, i + 2);
-            let result = engine.execute(&code);
+            let result = block_on(engine.execute(&code));
             assert!(result.is_ok());
         }
 
@@ -180,7 +182,7 @@ fn test_memory_usage_under_load() {
         let _ = runmat_gc::gc_collect_major();
 
         // Should still be able to execute after GC
-        let result = engine.execute("final = 42");
+        let result = block_on(engine.execute("final = 42"));
         assert!(result.is_ok());
     });
 }
@@ -191,7 +193,7 @@ fn test_execution_timing_accuracy() {
         let mut engine = RunMatSession::new().unwrap();
 
         let start = Instant::now();
-        let result = engine.execute("x = 1 + 1");
+        let result = block_on(engine.execute("x = 1 + 1"));
         let elapsed = start.elapsed();
 
         assert!(result.is_ok());
@@ -213,8 +215,8 @@ fn test_verbose_mode_output() {
 
         let code = "test = 1 + 2";
 
-        let verbose_result = verbose_engine.execute(code);
-        let quiet_result = quiet_engine.execute(code);
+        let verbose_result = block_on(verbose_engine.execute(code));
+        let quiet_result = block_on(quiet_engine.execute(code));
 
         assert!(verbose_result.is_ok());
         assert!(quiet_result.is_ok());
@@ -235,7 +237,7 @@ fn test_statistics_accuracy() {
         let num_executions = 7;
         for i in 0..num_executions {
             let code = format!("val{i} = {i}");
-            let result = engine.execute(&code);
+            let result = block_on(engine.execute(&code));
             assert!(result.is_ok());
         }
 
@@ -257,8 +259,8 @@ fn test_engine_state_isolation() {
         let mut engine2 = RunMatSession::new().unwrap();
 
         // Execute different code in each engine
-        engine1.execute("x = 10").unwrap();
-        engine2.execute("y = 20").unwrap();
+        block_on(engine1.execute("x = 10")).unwrap();
+        block_on(engine2.execute("y = 20")).unwrap();
 
         let stats1 = engine1.stats();
         let stats2 = engine2.stats();
@@ -288,7 +290,7 @@ fn test_concurrent_engine_usage() {
                 // Don't nest gc_test_context - create engine directly in thread
                 let mut engine = RunMatSession::new().unwrap();
                 let code = format!("thread_var = {thread_id} + 1");
-                let result = engine.execute(&code);
+                let result = block_on(engine.execute(&code));
 
                 let mut results_guard = results_clone.lock().unwrap();
                 results_guard.push((thread_id, result.is_ok()));
@@ -325,7 +327,7 @@ fn test_matrix_operations_integration() {
         ];
 
         for test in &matrix_tests {
-            let result = engine.execute(test);
+            let result = block_on(engine.execute(test));
             assert!(result.is_ok(), "Matrix operation failed: {test}");
 
             let exec_result = result.unwrap();
@@ -347,7 +349,7 @@ fn test_performance_degradation_detection() {
 
         for i in 0..20 {
             let code = format!("perf_test_{i} = {i} * 2 + 1");
-            let result = engine.execute(&code).unwrap();
+            let result = block_on(engine.execute(&code)).unwrap();
             execution_times.push(result.execution_time_ms);
         }
 
@@ -380,7 +382,9 @@ fn test_repl_function_definition_and_call_same_statement() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Define and call function in the same statement (this should work)
-        let result = engine.execute("function y = double(x); y = x * 2; end; result = double(21)");
+        let result = block_on(
+            engine.execute("function y = double(x); y = x * 2; end; result = double(21)"),
+        );
         assert!(
             result.is_ok(),
             "Function definition and call should succeed"
@@ -403,11 +407,11 @@ fn test_repl_function_persistence() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Define function in one command
-        let result1 = engine.execute("function y = add(a, b); y = a + b; end");
+        let result1 = block_on(engine.execute("function y = add(a, b); y = a + b; end"));
         assert!(result1.is_ok(), "Function definition should succeed");
 
         // Use function in another command
-        let result2 = engine.execute("x = add(10, 20)");
+        let result2 = block_on(engine.execute("x = add(10, 20)"));
         assert!(result2.is_ok(), "Function call should succeed");
 
         // Functions should persist across REPL commands
@@ -424,17 +428,17 @@ fn test_debug_function_context() {
         let mut engine = RunMatSession::new().unwrap();
 
         // First, just define a function
-        let result1 = engine.execute("function y = test_func(x); y = x + 1; end");
+        let result1 = block_on(engine.execute("function y = test_func(x); y = x + 1; end"));
         println!("Function definition result: {result1:?}");
         assert!(result1.is_ok(), "Function definition should succeed");
 
         // Try to call a simple builtin to verify engine works
-        let result2 = engine.execute("builtin_test = abs(-5)");
+        let result2 = block_on(engine.execute("builtin_test = abs(-5)"));
         println!("Builtin call result: {result2:?}");
         assert!(result2.is_ok(), "Builtin call should succeed");
 
         // Now try to call our user-defined function
-        let result3 = engine.execute("user_func_test = test_func(10)");
+        let result3 = block_on(engine.execute("user_func_test = test_func(10)"));
         println!("User function call result: {result3:?}");
 
         if let Err(e) = &result3 {

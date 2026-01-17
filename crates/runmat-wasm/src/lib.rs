@@ -259,8 +259,8 @@ impl RunMatWasm {
         let session = std::mem::take(&mut *slot);
         drop(slot);
 
-        let (session, result) = session
-            .execute_future(source)
+        let result = session
+            .execute(&source)
             .await
             .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
 

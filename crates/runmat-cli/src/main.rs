@@ -1008,7 +1008,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
             .read_to_string(&mut buffer)
             .context("Failed to read piped input")?;
         for raw_line in buffer.lines() {
-            if !process_repl_line(raw_line, &mut engine, config)? {
+            if !process_repl_line(raw_line, &mut engine, config).await? {
                 break;
             }
         }
@@ -1023,7 +1023,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
                 let line = line.trim();
                 let _ = rl.add_history_entry(line);
 
-                if !process_repl_line(line, &mut engine, config)? {
+                if !process_repl_line(line, &mut engine, config).await? {
                     break;
                 }
             }
@@ -1046,7 +1046,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     Ok(())
 }
 
-fn process_repl_line(
+async fn process_repl_line(
     line: &str,
     engine: &mut RunMatSession,
     config: &RunMatConfig,
@@ -1099,7 +1099,7 @@ fn process_repl_line(
         return Ok(true);
     }
 
-    match engine.execute(line) {
+    match engine.execute(line).await {
         Ok(result) => {
             emit_execution_streams(&result.streams);
             if let Some(error) = result.error {
@@ -1300,6 +1300,7 @@ async fn execute_script_with_args(
     let start_time = Instant::now();
     let result = engine
         .execute(&content)
+        .await
         .context("Failed to execute script")?;
 
     let execution_time = start_time.elapsed();
@@ -1582,12 +1583,12 @@ async fn execute_benchmark(
     println!("Warming up...");
     // Warmup runs
     for _ in 0..3 {
-        let _ = engine.execute(&content)?;
+        let _ = engine.execute(&content).await?;
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = engine.execute(&content)?;
+        let result = engine.execute(&content).await?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
         if let Some(error) = result.error.clone() {

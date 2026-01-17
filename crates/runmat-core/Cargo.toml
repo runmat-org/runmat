@@ -44,4 +44,5 @@ runmat-snapshot = { workspace = true, features = ["compression-wasm", "validatio
 
 [dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }
+futures = "0.3"
 wasm-bindgen-test = "0.3"
