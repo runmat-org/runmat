@@ -10,6 +10,7 @@ pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
+use runmat_runtime::RuntimeControlFlow;
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -1652,7 +1653,7 @@ impl RunMatSession {
     fn interpret_with_context(
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
-    ) -> Result<runmat_ignition::InterpreterOutcome, String> {
+    ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeControlFlow> {
         runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
     }
 
@@ -2132,7 +2133,7 @@ impl ExecuteFuture {
                 frame.pending_since = Instant::now();
                 Ok(ExecuteStep::Pending(frame))
             }
-            Err(err) => Err(anyhow::anyhow!(err)),
+            Err(err) => Err(anyhow::anyhow!(err.to_string())),
         }
     }
 }

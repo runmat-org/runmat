@@ -690,7 +690,8 @@ fn execute_user_function_isolated(
             "interaction pending is unsupported in turbine execution".to_string(),
         )),
         Err(e) => Err(TurbineError::ExecutionError(format!(
-            "Failed to execute function: {e}"
+            "Failed to execute function: {}",
+            e.to_string()
         ))),
     }?;
 
@@ -1076,7 +1077,7 @@ impl TurbineEngine {
                     "interaction pending is unsupported in turbine interpreter".to_string(),
                 ))
             }
-            Err(e) => Err(TurbineError::ExecutionError(e)),
+            Err(e) => Err(TurbineError::ExecutionError(e.to_string())),
         }
     }
 
