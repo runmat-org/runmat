@@ -390,12 +390,8 @@ pub(crate) mod tests {
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected numeric"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("expected numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -404,12 +400,8 @@ pub(crate) mod tests {
         let arr =
             StringArray::new(vec!["a".to_string(), "b".to_string()], vec![2, 1]).expect("array");
         let err = imag_builtin(Value::StringArray(arr)).expect_err("imag should error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected numeric"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("expected numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

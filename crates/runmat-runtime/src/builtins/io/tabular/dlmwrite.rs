@@ -249,7 +249,6 @@ where
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let identifier = err.identifier().map(|value| value.to_string());
             let message = err.message().to_string();
@@ -1387,7 +1386,6 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend from dlmwrite"),
         }
     }
 

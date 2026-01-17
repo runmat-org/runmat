@@ -1316,16 +1316,12 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![0.2, 0.8], vec![1, 2]).unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("std: dimension entries must be integers")
-                        || err.message().contains("std: dimension vector must not be empty"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(
+            err.message().contains("std: dimension entries must be integers")
+                || err.message().contains("std: dimension vector must not be empty"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

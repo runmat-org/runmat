@@ -213,7 +213,6 @@ fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
             if let Some(identifier) = err.identifier() {
@@ -1074,7 +1073,6 @@ pub(crate) mod tests {
     fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
         match flow {
             RuntimeControlFlow::Error(err) => err,
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

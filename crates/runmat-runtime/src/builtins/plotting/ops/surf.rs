@@ -158,9 +158,6 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::Bu
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
-                }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("surf GPU path unavailable: {err}");
                 }

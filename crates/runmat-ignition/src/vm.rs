@@ -32,7 +32,6 @@ type Instant = ();
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use std::fmt;
 #[cfg(feature = "native-accel")]
 use std::sync::Arc;
 use std::sync::Once;
@@ -1197,20 +1196,6 @@ runmat_thread_local! {
 #[derive(Debug)]
 pub enum InterpreterOutcome {
     Completed(Vec<Value>),
-    Pending(Box<PendingExecution>),
-}
-
-pub struct PendingExecution {
-    pub state: InterpreterState,
-    pub interaction: runmat_runtime::interaction::PendingInteraction,
-}
-
-impl fmt::Debug for PendingExecution {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PendingExecution")
-            .field("prompt", &self.interaction.prompt)
-            .finish()
-    }
 }
 
 #[derive(Debug)]
@@ -1279,10 +1264,6 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn is_suspend_flow(flow: &runmat_runtime::RuntimeControlFlow) -> bool {
-    matches!(flow, runmat_runtime::RuntimeControlFlow::Suspend(_))
-}
-
 fn resolve_emit_label_text(
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
@@ -1311,13 +1292,6 @@ pub async fn interpret_with_vars(
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
-    run_interpreter(state, initial_vars).await
-}
-
-pub async fn resume_with_state(
-    state: InterpreterState,
-    initial_vars: &mut [Value],
-) -> VmResult<InterpreterOutcome> {
     run_interpreter(state, initial_vars).await
 }
 
@@ -1354,32 +1328,6 @@ async fn run_interpreter(
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    macro_rules! suspend_pending {
-        ($restore:expr, $pending:expr) => {{
-            $restore;
-            let pending = $pending;
-            sync_initial_vars(initial_vars, &vars);
-            return Ok(InterpreterOutcome::Pending(Box::new(PendingExecution {
-                state: InterpreterState {
-                    bytecode,
-                    stack,
-                    vars,
-                    pc,
-                    context,
-                    try_stack,
-                    last_exception,
-                    imports,
-                    global_aliases,
-                    persistent_aliases,
-                    current_function_name,
-                    call_counts,
-                    #[cfg(feature = "native-accel")]
-                    fusion_plan,
-                },
-                interaction: pending,
-            })));
-        }};
-    }
     let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
     let _workspace_guard = pending_state.map(|(names, assigned)| {
         let filtered_assigned: HashSet<String> = assigned
@@ -1439,27 +1387,23 @@ async fn run_interpreter(
     macro_rules! vm_bail {
         ($err:expr) => {{
             let flow: RuntimeControlFlow = $err.into();
-            match flow {
-                RuntimeControlFlow::Suspend(pending) => {
-                    suspend_pending!({}, pending);
-                }
-                RuntimeControlFlow::Error(err) => {
-                    if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                        if let Some(var_idx) = catch_var {
-                            if var_idx >= vars.len() {
-                                vars.resize(var_idx + 1, Value::Num(0.0));
-                                refresh_workspace_state(&vars);
-                            }
-                            let mex = parse_exception(&err);
-                            last_exception = Some(mex.clone());
-                            vars[var_idx] = Value::MException(mex);
-                        }
-                        pc = catch_pc;
-                        continue;
-                    } else {
-                        return Err(RuntimeControlFlow::Error(err));
+            let err = match flow {
+                RuntimeControlFlow::Error(err) => err,
+            };
+            if let Some((catch_pc, catch_var)) = try_stack.pop() {
+                if let Some(var_idx) = catch_var {
+                    if var_idx >= vars.len() {
+                        vars.resize(var_idx + 1, Value::Num(0.0));
+                        refresh_workspace_state(&vars);
                     }
+                    let mex = parse_exception(&err);
+                    last_exception = Some(mex.clone());
+                    vars[var_idx] = Value::MException(mex);
                 }
+                pc = catch_pc;
+                continue;
+            } else {
+                return Err(RuntimeControlFlow::Error(err));
             }
         }};
     }
@@ -2968,19 +2912,8 @@ async fn run_interpreter(
                 match call_builtin_vm!(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
-                        if is_suspend_flow(&e) {
-                            for arg in args.iter().rev() {
-                                stack.push(arg.clone());
-                            }
-                            match e {
-                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                    suspend_pending!({}, pending);
-                                }
-                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                            }
-                        }
-                        let runmat_runtime::RuntimeControlFlow::Error(e) = e else {
-                            unreachable!("suspend handled above");
+                        let e = match e {
+                            runmat_runtime::RuntimeControlFlow::Error(e) => e,
                         };
                         // Specific-import matches: import pkg.foo; name == foo
                         let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
@@ -2993,19 +2926,7 @@ async fn run_interpreter(
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
                                 match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => specific_matches.push((qual, qual_args, value)),
-                                    Err(err) => {
-                                        if is_suspend_flow(&err) {
-                                            for arg in args.iter().rev() {
-                                                stack.push(arg.clone());
-                                            }
-                                            match err {
-                                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                                    suspend_pending!({}, pending);
-                                                }
-                                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                            }
-                                        }
-                                    }
+                                    Err(_err) => {}
                                 }
                             }
                         }
@@ -3042,19 +2963,7 @@ async fn run_interpreter(
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
                                 match call_builtin_vm!(&qual, &qual_args) {
                                     Ok(value) => wildcard_matches.push((qual, qual_args, value)),
-                                    Err(err) => {
-                                        if is_suspend_flow(&err) {
-                                            for arg in args.iter().rev() {
-                                                stack.push(arg.clone());
-                                            }
-                                            match err {
-                                                runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                                    suspend_pending!({}, pending);
-                                                }
-                                                runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                            }
-                                        }
-                                    }
+                                    Err(_err) => {}
                                 }
                             }
                             if wildcard_matches.len() > 1 {
@@ -4565,20 +4474,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
-                                    suspend_pending!({}, pending);
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(err)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     match out_count {
                         0 => continue,
@@ -4615,20 +4511,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
-                                    suspend_pending!({}, pending);
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(err)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     match out_count {
                         0 => continue,
@@ -4695,20 +4578,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
-                                    suspend_pending!({}, pending);
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(err)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     match out_count {
                         0 => {
@@ -4748,20 +4618,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(v) => v,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
-                                    suspend_pending!({}, pending);
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(err)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     match out_count {
                         0 => continue,
@@ -4797,20 +4654,7 @@ async fn run_interpreter(
                         require_left,
                     ) {
                         Ok(v) => v,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                if let runmat_runtime::RuntimeControlFlow::Suspend(pending) = err {
-                                    suspend_pending!({}, pending);
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(err)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     match out_count {
                         0 => continue,
@@ -4826,22 +4670,11 @@ async fn run_interpreter(
                         3 => {
                             stack.push(eval.right());
                             stack.push(eval.diagonal());
-                            let left = match eval.left() {
-                                Ok(value) => value,
-                                Err(err) => {
-                                    if is_suspend_flow(&err) {
-                                        if let runmat_runtime::RuntimeControlFlow::Suspend(pending) =
-                                            err
-                                        {
-                                            suspend_pending!({}, pending);
-                                        }
-                                    }
-                                    let runmat_runtime::RuntimeControlFlow::Error(err) = err else {
-                                        unreachable!("suspend handled above");
-                                    };
-                                    vm_bail!(err)
-                                }
-                            };
+                                let left = match eval.left() {
+                                    Ok(value) => value,
+                                    Err(err) => vm_bail!(err),
+                                };
+
                             stack.push(left);
                             continue;
                         }
@@ -5074,23 +4907,7 @@ async fn run_interpreter(
                         &args[3..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                match err {
-                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                        suspend_pending!({}, pending);
-                                    }
-                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(e)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
                         continue;
@@ -5115,23 +4932,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                match err {
-                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                        suspend_pending!({}, pending);
-                                    }
-                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(e)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
                         continue;
@@ -5201,23 +5002,7 @@ async fn run_interpreter(
                             &args[1..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => {
-                                if is_suspend_flow(&err) {
-                                    for arg in args.iter().rev() {
-                                        stack.push(arg.clone());
-                                    }
-                                    match err {
-                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                            suspend_pending!({}, pending);
-                                        }
-                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                    }
-                                }
-                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                    unreachable!("suspend handled above");
-                                };
-                                vm_bail!(e)
-                            }
+                            Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
                         continue;
@@ -5242,23 +5027,7 @@ async fn run_interpreter(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => {
-                                if is_suspend_flow(&err) {
-                                    for arg in args.iter().rev() {
-                                        stack.push(arg.clone());
-                                    }
-                                    match err {
-                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                            suspend_pending!({}, pending);
-                                        }
-                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                    }
-                                }
-                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                    unreachable!("suspend handled above");
-                                };
-                                vm_bail!(e)
-                            }
+                            Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
                         continue;
@@ -5285,23 +5054,7 @@ async fn run_interpreter(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => {
-                                if is_suspend_flow(&err) {
-                                    for arg in args.iter().rev() {
-                                        stack.push(arg.clone());
-                                    }
-                                    match err {
-                                        runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                            suspend_pending!({}, pending);
-                                        }
-                                        runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                    }
-                                }
-                                let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                    unreachable!("suspend handled above");
-                                };
-                                vm_bail!(e)
-                            }
+                            Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
                         continue;
@@ -5334,23 +5087,7 @@ async fn run_interpreter(
                         &args[2..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                match err {
-                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                        suspend_pending!({}, pending);
-                                    }
-                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(e)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
                         continue;
@@ -5476,23 +5213,7 @@ async fn run_interpreter(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => {
-                            if is_suspend_flow(&err) {
-                                for arg in args.iter().rev() {
-                                    stack.push(arg.clone());
-                                }
-                                match err {
-                                    runmat_runtime::RuntimeControlFlow::Suspend(pending) => {
-                                        suspend_pending!({}, pending);
-                                    }
-                                    runmat_runtime::RuntimeControlFlow::Error(_) => {}
-                                }
-                            }
-                            let runmat_runtime::RuntimeControlFlow::Error(e) = err else {
-                                unreachable!("suspend handled above");
-                            };
-                            vm_bail!(e)
-                        }
+                        Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
                         continue;
@@ -10585,14 +10306,10 @@ fn stochastic_evolution_dispatch(
     };
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
-    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32).map_err(
-        |flow| match flow {
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)
+        .map_err(|flow| match flow {
             runmat_runtime::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                "stochastic_evolution: unexpected suspension".to_string()
-            }
-        },
-    )?;
+        })?;
     Ok(Value::Tensor(tensor_value))
 }
 
@@ -11615,28 +11332,23 @@ fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MExce
 }
 
 fn map_slice_plan_error(context: &str, flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let is_oob = err
-                .identifier()
-                .map(|id| id.contains("IndexOutOfBounds"))
-                .unwrap_or_else(|| err.message().contains("IndexOutOfBounds"));
-            if is_oob {
-                RuntimeControlFlow::Error(err)
-            } else {
-                build_runtime_error(format!("{context}: {}", err.message()))
-                    .build()
-                    .into()
-            }
-        }
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+    let RuntimeControlFlow::Error(err) = flow;
+    let is_oob = err
+        .identifier()
+        .map(|id| id.contains("IndexOutOfBounds"))
+        .unwrap_or_else(|| err.message().contains("IndexOutOfBounds"));
+    if is_oob {
+        RuntimeControlFlow::Error(err)
+    } else {
+        build_runtime_error(format!("{context}: {}", err.message()))
+            .build()
+            .into()
     }
 }
 
 fn flow_to_string(flow: RuntimeControlFlow) -> String {
     match flow {
         RuntimeControlFlow::Error(err) => err.message().to_string(),
-        RuntimeControlFlow::Suspend(_) => "interaction pending is unsupported here".to_string(),
     }
 }
 
@@ -11645,9 +11357,6 @@ pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Ok(InterpreterOutcome::Pending(_)) => {
-            Err("interaction pending is unsupported in interpret".to_string())
-        }
         Err(e) => Err(flow_to_string(e)),
     }
 }
@@ -11674,9 +11383,6 @@ async fn interpret_function_with_counts(
     });
     let res = match res {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Ok(InterpreterOutcome::Pending(_)) => {
-            Err("interaction pending is unsupported in interpret_function".to_string())
-        }
         Err(e) => Err(flow_to_string(e)),
     }?;
     // Persist any variables declared persistent in this bytecode under the given function name

@@ -1,16 +1,10 @@
 use std::fmt;
-use std::sync::{Mutex, OnceLock};
-use std::task::Waker;
-
 use thiserror::Error;
 
 pub mod runtime_error;
 pub use runtime_error::{runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
 
-/// Narrow set of interaction kinds that can suspend execution.
-///
-/// Note: this is transitional scaffolding for Phase 1. It will evolve into a richer typed
-/// awaitable/pending-request model once `ExecuteFuture` lands.
+/// Narrow set of interaction kinds used for host I/O hooks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionKind {
     Line { echo: bool },
@@ -70,40 +64,6 @@ impl SuspendMarker {
             kind: InteractionKind::GpuMapRead,
             prompt: prompt.into(),
         }
-    }
-}
-
-// ---- Internal waker hooks (Phase 2) -----------------------------------------
-//
-// These allow runtime-internal subsystems (e.g. wasm WebGPU map_async callbacks) to wake the
-// poll-driven `ExecuteFuture` without any host-side polling loops.
-//
-// This intentionally starts narrow (GpuMapRead only). We'll generalize once ExecuteFuture is the
-// only execution path.
-
-static GPU_MAP_READ_WAKER: OnceLock<Mutex<Option<Waker>>> = OnceLock::new();
-
-fn gpu_map_read_waker_slot() -> &'static Mutex<Option<Waker>> {
-    GPU_MAP_READ_WAKER.get_or_init(|| Mutex::new(None))
-}
-
-/// Register (or refresh) the waker for a task currently suspended on a GPU map/readback.
-pub fn register_gpu_map_read_waker(waker: &Waker) {
-    let mut slot = gpu_map_read_waker_slot()
-        .lock()
-        .unwrap_or_else(|_| panic!("GPU_MAP_READ_WAKER poisoned"));
-    // Always replace: wakers can change between polls.
-    *slot = Some(waker.clone());
-}
-
-/// Wake any task currently waiting on a GPU map/readback.
-pub fn wake_gpu_map_read() {
-    let waker = gpu_map_read_waker_slot()
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
-    if let Some(waker) = waker {
-        waker.wake();
     }
 }
 

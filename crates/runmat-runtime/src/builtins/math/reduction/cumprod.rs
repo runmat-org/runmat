@@ -816,7 +816,6 @@ pub(crate) mod tests {
                     "unexpected result: {err}"
                 );
             }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspension"),
             Ok(_) => panic!("expected error"),
         }
     }

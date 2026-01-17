@@ -215,7 +215,6 @@ fn with_builtin_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
             }
             RuntimeControlFlow::Error(err)
         }
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
     }
 }
 
@@ -1267,7 +1266,6 @@ pub(crate) mod tests {
         .expect_err("expected error");
         let message = match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("expected regexprep error, got suspension"),
         };
         assert!(
             message.contains("unrecognised option"),
@@ -1353,7 +1351,6 @@ pub(crate) mod tests {
             .expect_err("expected error");
         let message = match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("expected regexprep error, got suspension"),
         };
         assert!(
             message.contains("replacement sequence is incompatible with element-wise patterns"),

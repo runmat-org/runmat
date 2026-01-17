@@ -230,7 +230,6 @@ where
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let identifier = err.identifier().map(|value| value.to_string());
             let message = err.message().to_string();

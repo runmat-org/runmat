@@ -385,12 +385,8 @@ pub(crate) mod tests {
     #[test]
     fn abs_string_rejected() {
         let err = abs_builtin(Value::from("hello")).expect_err("should error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected numeric"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("expected numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

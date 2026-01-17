@@ -157,9 +157,6 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
                         figure.add_scatter_plot_on_axes(plot, axes);
                         return Ok(());
                     }
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending));
-                    }
                     Err(RuntimeControlFlow::Error(err)) => {
                         warn!("scatter GPU path unavailable: {err}");
                     }
@@ -691,7 +688,6 @@ pub(crate) mod tests {
                     "unexpected error: {err}"
                 );
             }
-            RuntimeControlFlow::Suspend(_) => panic!("scatter suspended unexpectedly"),
         }
     }
 
@@ -783,7 +779,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert!(err.to_string().contains("requires per-point color data"));
             }
-            RuntimeControlFlow::Suspend(_) => panic!("scatter style resolution suspended unexpectedly"),
         }
     }
 

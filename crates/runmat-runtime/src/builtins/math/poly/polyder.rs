@@ -629,8 +629,8 @@ pub(crate) mod tests {
                 "expected error containing '{needle}', got '{}'",
                 err.message()
             ),
-            RuntimeControlFlow::Suspend(pending) => {
-                panic!("unexpected suspension in polyder tests: {pending:?}");
+            other => {
+                panic!("unexpected runtime control flow in polyder tests: {other:?}");
             }
         }
     }

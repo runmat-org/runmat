@@ -430,9 +430,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
             }
-            RuntimeControlFlow::Suspend(pending) => {
-                panic!("unexpected suspend: {pending:?}");
-            }
         }
     }
 

@@ -250,7 +250,9 @@ fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match crate::call_builtin("cat", &forwarded) {
         Ok(value) => Ok(value),
         Err(RuntimeControlFlow::Error(err)) => Err(adapt_cat_error(err).into()),
-        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending)),
+        Err(_) => Err(RuntimeControlFlow::Error(
+            build_runtime_error("interaction pending").build(),
+        )),
     }
 }
 

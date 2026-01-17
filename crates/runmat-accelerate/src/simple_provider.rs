@@ -61,8 +61,8 @@ const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
     match flow {
         RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
-        RuntimeControlFlow::Suspend(_) => anyhow::Error::new(
-            build_runtime_error(format!("{context}: unexpected suspension"))
+        _ => anyhow::Error::new(
+            build_runtime_error("interaction pending")
                 .with_builtin(context)
                 .build(),
         ),
@@ -1734,17 +1734,11 @@ impl AccelProvider for InProcessProvider {
             runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
                 .map_err(|err| match err {
                     RuntimeControlFlow::Error(error) => anyhow!(error),
-                    RuntimeControlFlow::Suspend(pending) => anyhow!(
-                        "fspecial: unexpected suspend while parsing request ({})",
-                        pending.prompt
-                    ),
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 })?;
         let tensor = spec.generate_tensor().map_err(|err| match err {
             RuntimeControlFlow::Error(error) => anyhow!(error),
-            RuntimeControlFlow::Suspend(pending) => anyhow!(
-                "fspecial: unexpected suspend while generating tensor ({})",
-                pending.prompt
-            ),
+            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
         })?;
         Ok(self.allocate_tensor(tensor.data.clone(), tensor.shape.clone()))
     }
@@ -1779,10 +1773,7 @@ impl AccelProvider for InProcessProvider {
         )
         .map_err(|err| match err {
             RuntimeControlFlow::Error(error) => anyhow!(error),
-            RuntimeControlFlow::Suspend(pending) => anyhow!(
-                "imfilter: unexpected suspension while computing fallback ({})",
-                pending.prompt
-            ),
+            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
         })?;
         let Tensor { data, shape, .. } = result;
         Ok(self.allocate_tensor(data, shape))
@@ -3659,9 +3650,7 @@ impl AccelProvider for InProcessProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                        anyhow!("unique: unexpected suspend")
-                    }
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -3669,7 +3658,7 @@ impl AccelProvider for InProcessProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("unique: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }
@@ -3703,9 +3692,7 @@ impl AccelProvider for InProcessProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                        anyhow!("setdiff: unexpected suspend")
-                    }
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -3713,7 +3700,7 @@ impl AccelProvider for InProcessProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }

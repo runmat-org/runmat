@@ -296,12 +296,9 @@ fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 let tensor = gpu_helpers::gather_tensor(&handle)?;
                 return asin_tensor_real(tensor);
             }
-            Err(err) => match err {
-                RuntimeControlFlow::Suspend(_) => return Err(err),
-                RuntimeControlFlow::Error(_) => {
-                    // Fall through to host fallback.
-                }
-            },
+            Err(RuntimeControlFlow::Error(_)) => {
+                // Fall through to host fallback.
+            }
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -449,7 +446,6 @@ pub(crate) mod tests {
     fn error_message(err: RuntimeControlFlow) -> String {
         match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

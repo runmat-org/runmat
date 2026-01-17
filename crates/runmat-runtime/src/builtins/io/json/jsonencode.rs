@@ -237,12 +237,16 @@ fn jsonencode_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn jsonencode_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => build_runtime_error(err.message().to_string())
             .with_builtin("jsonencode")
             .with_source(err)
             .build()
             .into(),
+        _ => RuntimeControlFlow::Error(
+            build_runtime_error("interaction pending")
+                .with_builtin("jsonencode")
+                .build(),
+        ),
     }
 }
 
@@ -946,7 +950,7 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(pending) => format!("suspend: {}", pending.prompt),
+            _ => "interaction pending".to_string(),
         }
     }
 

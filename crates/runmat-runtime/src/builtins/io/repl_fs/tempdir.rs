@@ -266,7 +266,6 @@ pub(crate) mod tests {
     fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
         match flow {
             RuntimeControlFlow::Error(err) => err,
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in tempdir tests"),
         }
     }
 

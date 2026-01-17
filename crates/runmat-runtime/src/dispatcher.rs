@@ -1,7 +1,5 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
-use runmat_async::{PendingInteraction, SuspendMarker};
-
-use crate::{make_cell_with_shape, new_object_builtin, build_runtime_error, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, flow_to_error, make_cell_with_shape, new_object_builtin, RuntimeControlFlow, RuntimeError};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -40,12 +38,6 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
             let host = match provider.download(handle) {
                 Ok(host) => host,
                 Err(err) => {
-                    if let Some(marker) = err.downcast_ref::<SuspendMarker>() {
-                        return Err(RuntimeControlFlow::Suspend(PendingInteraction {
-                            prompt: marker.prompt.clone(),
-                            kind: marker.kind,
-                        }));
-                    }
                     return Err(RuntimeControlFlow::Error(
                         build_runtime_error(format!("gather: {err}")).build(),
                     ));
@@ -177,26 +169,32 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControl
                 return Ok(result);
             }
             Err(flow) => match flow {
-                RuntimeControlFlow::Suspend(pending) => return Err(RuntimeControlFlow::Suspend(pending)),
                 RuntimeControlFlow::Error(err) => {
                     if should_retry_with_gpu_gather(&err, args) {
                         match gather_args_for_retry(args) {
-                        Ok(Some(gathered_args)) => match (f)(&gathered_args) {
-                            Ok(result) => return Ok(result),
-                            Err(RuntimeControlFlow::Suspend(pending)) => {
-                                return Err(RuntimeControlFlow::Suspend(pending))
-                            }
-                            Err(RuntimeControlFlow::Error(retry_err)) => last_error = retry_err,
-                        },
-                        Ok(None) => last_error = err,
-                        Err(RuntimeControlFlow::Suspend(pending)) => {
-                            return Err(RuntimeControlFlow::Suspend(pending))
+                            Ok(Some(gathered_args)) => match (f)(&gathered_args) {
+                                Ok(result) => return Ok(result),
+                                Err(flow) => match flow {
+                                    RuntimeControlFlow::Error(retry_err) => last_error = retry_err,
+                                    other => {
+                                        return Err(RuntimeControlFlow::Error(flow_to_error(other)))
+                                    }
+                                },
+                            },
+                            Ok(None) => last_error = err,
+                            Err(flow) => match flow {
+                                RuntimeControlFlow::Error(gather_err) => last_error = gather_err,
+                                other => {
+                                    return Err(RuntimeControlFlow::Error(flow_to_error(other)))
+                                }
+                            },
                         }
-                        Err(RuntimeControlFlow::Error(gather_err)) => last_error = gather_err,
-                    }
                     } else {
                         last_error = err;
                     }
+                }
+                other => {
+                    return Err(RuntimeControlFlow::Error(flow_to_error(other)));
                 }
             },
         }

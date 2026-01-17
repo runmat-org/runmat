@@ -27,13 +27,9 @@ pub(crate) fn map_control_flow_with_builtin(
     flow: crate::RuntimeControlFlow,
     builtin: &str,
 ) -> crate::RuntimeControlFlow {
-    match flow {
-        crate::RuntimeControlFlow::Suspend(pending) => crate::RuntimeControlFlow::Suspend(pending),
-        crate::RuntimeControlFlow::Error(mut err) => {
-            if err.context.builtin.is_none() {
-                err.context = err.context.with_builtin(builtin);
-            }
-            crate::RuntimeControlFlow::Error(err)
-        }
+    let mut err = crate::flow_to_error(flow);
+    if err.context.builtin.is_none() {
+        err.context = err.context.with_builtin(builtin);
     }
+    crate::RuntimeControlFlow::Error(err)
 }

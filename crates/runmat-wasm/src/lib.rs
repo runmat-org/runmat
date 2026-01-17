@@ -807,7 +807,11 @@ fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
 fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
     let handler = match JS_STDIN_HANDLER.with(|slot| slot.borrow().clone()) {
         Some(func) => func,
-        None => return InputHandlerAction::Pending,
+        None => {
+            return InputHandlerAction::Respond(Err(
+                "stdin requested but no input handler is installed".to_string(),
+            ))
+        }
     };
     let js_request = js_sys::Object::new();
     if let Err(err) = Reflect::set(
@@ -841,7 +845,9 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
                 }
             };
             if value_should_pending(&value) {
-                return InputHandlerAction::Pending;
+                return InputHandlerAction::Respond(Err(
+                    "stdin handler returned pending without a value".to_string(),
+                ));
             }
             if let Some(err) = extract_error_message(&value) {
                 return InputHandlerAction::Respond(Err(err));
@@ -867,7 +873,9 @@ fn invoke_js_stdin_handler(request: &InputRequest) -> InputHandlerAction {
                 }
             };
             if value_should_pending(&value) {
-                return InputHandlerAction::Pending;
+                return InputHandlerAction::Respond(Err(
+                    "stdin handler returned pending without a value".to_string(),
+                ));
             }
             if let Some(err) = extract_error_message(&value) {
                 return InputHandlerAction::Respond(Err(err));
@@ -1137,10 +1145,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                                 let message = err.message().to_string();
                                 (message.clone(), message)
                             }
-                            RuntimeControlFlow::Suspend(pending) => {
-                                let message = format!("suspend: {}", pending.prompt);
-                                (message.clone(), pending.prompt)
-                            }
                         };
                         warn!(
                             "RunMat wasm: unable to install shared plotting context: {log_message}"
@@ -1375,10 +1379,6 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
 fn runtime_flow_to_js(flow: RuntimeControlFlow) -> JsValue {
     match flow {
         RuntimeControlFlow::Error(err) => js_error(err.message()),
-        RuntimeControlFlow::Suspend(pending) => {
-            let message = format!("Execution suspended: {}", pending.prompt);
-            js_error(&message)
-        }
     }
 }
 

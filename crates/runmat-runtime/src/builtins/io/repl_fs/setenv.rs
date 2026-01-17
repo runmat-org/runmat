@@ -225,7 +225,6 @@ fn setenv_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let identifier = err.identifier().map(str::to_string);
             let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
@@ -415,7 +414,6 @@ pub(crate) mod tests {
     fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
         match flow {
             RuntimeControlFlow::Error(err) => err,
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in setenv tests"),
         }
     }
 

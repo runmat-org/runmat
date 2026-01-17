@@ -445,8 +445,10 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<V
                     error.message()
                 );
             }
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
+            Err(_) => {
+                return Err(RuntimeControlFlow::Error(
+                    build_runtime_error("interaction pending").build(),
+                ));
             }
         }
     }
@@ -1100,7 +1102,7 @@ pub(crate) mod tests {
     fn error_message(err: RuntimeControlFlow) -> String {
         match err {
             RuntimeControlFlow::Error(error) => error.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+            other => panic!("unexpected runtime control flow: {other:?}"),
         }
     }
 

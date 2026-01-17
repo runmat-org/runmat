@@ -216,7 +216,6 @@ fn jsondecode_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn jsondecode_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
             build_runtime_error(err.message().to_string())
                 .with_builtin("jsondecode")
@@ -642,7 +641,6 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(pending) => format!("suspend: {}", pending.prompt),
         }
     }
 

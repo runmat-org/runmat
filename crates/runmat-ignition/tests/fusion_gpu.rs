@@ -176,17 +176,11 @@ impl AccelProvider for TestProvider {
         let spec =
             test_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
                 RuntimeControlFlow::Error(error) => anyhow!(error),
-                RuntimeControlFlow::Suspend(pending) => anyhow!(
-                    "fspecial: unexpected suspend while parsing request ({})",
-                    pending.prompt
-                ),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             })?;
         let tensor = spec.generate_tensor().map_err(|err| match err {
             RuntimeControlFlow::Error(error) => anyhow!(error),
-            RuntimeControlFlow::Suspend(pending) => anyhow!(
-                "fspecial: unexpected suspend while generating tensor ({})",
-                pending.prompt
-            ),
+            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
         })?;
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
@@ -519,9 +513,7 @@ impl AccelProvider for TestProvider {
                     runmat_runtime::RuntimeControlFlow::Error(err) => {
                         anyhow!("unique (test provider): {err}")
                     }
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                        anyhow!("unique (test provider): unexpected suspend")
-                    }
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -531,9 +523,7 @@ impl AccelProvider for TestProvider {
                 runmat_runtime::RuntimeControlFlow::Error(err) => {
                     anyhow!("unique (test provider): {err}")
                 }
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                    anyhow!("unique (test provider): unexpected suspend")
-                }
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }

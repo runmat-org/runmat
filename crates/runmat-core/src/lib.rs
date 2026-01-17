@@ -123,7 +123,6 @@ pub enum InputResponse {
 #[derive(Debug, Clone)]
 pub enum InputHandlerAction {
     Respond(Result<InputResponse, String>),
-    Pending,
 }
 
 type SharedInputHandler = Arc<dyn Fn(&InputRequest) -> InputHandlerAction + Send + Sync>;
@@ -716,14 +715,6 @@ impl RunMatSession {
     > {
         let session_handler = self.input_handler.clone();
         Arc::new(move |prompt| {
-            if matches!(
-                prompt.kind,
-                runmat_runtime::interaction::InteractionKind::GpuMapRead
-            ) {
-                // GPU map suspensions are handled internally by the runtime/provider and are
-                // not forwarded to user input handlers.
-                return runmat_runtime::interaction::InteractionDecision::Pending;
-            }
             let request_kind = match prompt.kind {
                 runmat_runtime::interaction::InteractionKind::Line { echo } => {
                     InputRequestKind::Line { echo }
@@ -731,9 +722,6 @@ impl RunMatSession {
                 runmat_runtime::interaction::InteractionKind::KeyPress => {
                     InputRequestKind::KeyPress
                 }
-                runmat_runtime::interaction::InteractionKind::GpuMapRead => unreachable!(
-                    "GpuMapRead is handled as an internal suspension and should have returned early"
-                ),
             };
             let request = InputRequest {
                 prompt: prompt.prompt.to_string(),
@@ -789,12 +777,6 @@ impl RunMatSession {
                             }
                         });
                     runmat_runtime::interaction::InteractionDecision::Respond(mapped)
-                }
-                InputHandlerAction::Pending => {
-                    if let Ok(mut guard) = stdin_events.lock() {
-                        guard.push(event);
-                    }
-                    runmat_runtime::interaction::InteractionDecision::Pending
                 }
             }
         })
@@ -1224,11 +1206,7 @@ impl RunMatSession {
                     }
                     debug!("Interpreter execution successful");
                 }
-                Ok(runmat_ignition::InterpreterOutcome::Pending(_pending_exec)) => {
-                    return Err(anyhow::anyhow!(
-                        "Execution suspended unexpectedly; async interpreter should handle awaits"
-                    ));
-                }
+
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
                     error = Some(format!("Execution failed: {e}"));

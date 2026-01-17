@@ -407,9 +407,6 @@ fn execute_uniform(
 
         let result = match callable.call(&call_args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
-            }
             Err(RuntimeControlFlow::Error(err)) => {
                 let Some(handler) = error_handler.as_ref() else {
                     return Err(RuntimeControlFlow::Error(err));
@@ -462,9 +459,6 @@ fn execute_cell(
 
         let result = match callable.call(&call_args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
-            }
             Err(RuntimeControlFlow::Error(err)) => {
                 let Some(handler) = error_handler.as_ref() else {
                     return Err(RuntimeControlFlow::Error(err));

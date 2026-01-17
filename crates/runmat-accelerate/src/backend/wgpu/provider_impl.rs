@@ -95,8 +95,8 @@ use crate::telemetry::AccelTelemetry;
 fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
     match flow {
         RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
-        RuntimeControlFlow::Suspend(_) => anyhow::Error::new(
-            build_runtime_error(format!("{context}: unexpected suspension"))
+        _ => anyhow::Error::new(
+            build_runtime_error("interaction pending")
                 .with_builtin(context)
                 .build(),
         ),
@@ -9455,10 +9455,9 @@ impl WgpuProvider {
         let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options, "imfilter") {
             Ok(plan) => plan,
             Err(RuntimeControlFlow::Error(err)) => return Err(anyhow!(err)),
-            Err(RuntimeControlFlow::Suspend(pending)) => {
+            Err(_) => {
                 return Err(anyhow!(
-                    "imfilter: unexpected suspension while building plan ({})",
-                    pending.prompt
+                    runmat_runtime::build_runtime_error("interaction pending").build()
                 ))
             }
         };
@@ -9839,10 +9838,7 @@ impl WgpuProvider {
         )
         .map_err(|err| match err {
             RuntimeControlFlow::Error(error) => anyhow!(error),
-            RuntimeControlFlow::Suspend(pending) => anyhow!(
-                "imfilter: unexpected suspension while computing fallback ({})",
-                pending.prompt
-            ),
+            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
         })?;
         let data_owned = result.data;
         let shape_owned = result.shape;
@@ -10180,10 +10176,7 @@ impl WgpuProvider {
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec = runtime_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
             RuntimeControlFlow::Error(error) => anyhow!(error),
-            RuntimeControlFlow::Suspend(pending) => anyhow!(
-                "fspecial: unexpected suspension while building request ({})",
-                pending.prompt
-            ),
+            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
         })?;
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
@@ -13660,10 +13653,7 @@ impl AccelProvider for WgpuProvider {
             polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
                 .map_err(|flow| match flow {
                     RuntimeControlFlow::Error(err) => anyhow!(err),
-                    RuntimeControlFlow::Suspend(pending) => anyhow!(
-                        "polyfit: unexpected suspension while computing host fallback: {}",
-                        pending.prompt
-                    ),
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 })?;
         Ok(ProviderPolyfitResult {
             coefficients: host_result.coefficients,
@@ -14149,9 +14139,7 @@ impl AccelProvider for WgpuProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                        anyhow!("unique: unexpected suspend")
-                    }
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -14159,7 +14147,7 @@ impl AccelProvider for WgpuProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("unique: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }
@@ -14184,9 +14172,7 @@ impl AccelProvider for WgpuProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => {
-                        anyhow!("ismember: unexpected suspend")
-                    }
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -14194,7 +14180,7 @@ impl AccelProvider for WgpuProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("ismember: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }
@@ -14216,7 +14202,7 @@ impl AccelProvider for WgpuProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("union: unexpected suspend"),
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -14224,7 +14210,7 @@ impl AccelProvider for WgpuProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("union: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }
@@ -14247,7 +14233,7 @@ impl AccelProvider for WgpuProvider {
             Err(flow) => {
                 return Err(match flow {
                     runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                    runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
                 });
             }
         };
@@ -14255,7 +14241,7 @@ impl AccelProvider for WgpuProvider {
             Ok(result) => Ok(result),
             Err(flow) => Err(match flow {
                 runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                runmat_runtime::RuntimeControlFlow::Suspend(_) => anyhow!("setdiff: unexpected suspend"),
+                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
             }),
         }
     }
@@ -16514,10 +16500,7 @@ impl AccelProvider for WgpuProvider {
                                 "wgpu pending map_async id={} bytes={}",
                                 h.buffer_id, state.size_bytes
                             );
-                            return Err(anyhow!(runmat_async::SuspendMarker {
-                                kind: runmat_async::InteractionKind::GpuMapRead,
-                                prompt: label,
-                            }));
+                            return Err(anyhow!(label));
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             pending.remove(&h.buffer_id);
@@ -16560,8 +16543,6 @@ impl AccelProvider for WgpuProvider {
                     res
                 );
                 let _ = tx.send(res);
-                // Wake any poll-driven execution waiting on a GPU map/readback.
-                runmat_async::wake_gpu_map_read();
             });
 
             if let Ok(mut pending) = self.pending_map_reads.lock() {
@@ -16576,10 +16557,7 @@ impl AccelProvider for WgpuProvider {
             }
 
             let label = format!("wgpu pending map_async id={} bytes={}", h.buffer_id, size_bytes);
-            return Err(anyhow!(runmat_async::SuspendMarker {
-                kind: runmat_async::InteractionKind::GpuMapRead,
-                prompt: label,
-            }));
+            return Err(anyhow!(label));
         }
 
         #[cfg(not(target_arch = "wasm32"))]

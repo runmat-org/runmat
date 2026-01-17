@@ -1346,7 +1346,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert!(err.message().contains("prototype"));
             }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
         }
     }
 

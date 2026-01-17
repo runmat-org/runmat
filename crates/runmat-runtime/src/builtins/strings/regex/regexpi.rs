@@ -550,9 +550,6 @@ pub(crate) mod tests {
             .expect("expected regexpi to reject non-text cell elements");
         let message = match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => {
-                panic!("expected regexpi error, got suspension")
-            }
         };
         assert!(
             message.contains("cell array elements"),

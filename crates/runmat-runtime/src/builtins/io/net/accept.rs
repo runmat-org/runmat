@@ -708,7 +708,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert_eq!(err.identifier(), Some(expected));
             }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

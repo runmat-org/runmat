@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string}, registry};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, flow_to_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -221,20 +221,16 @@ fn fclose_error(message: impl Into<String>) -> RuntimeControlFlow {
 }
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+    let err = flow_to_error(flow);
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    RuntimeControlFlow::Error(builder.build())
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
@@ -456,7 +452,6 @@ pub(crate) mod tests {
     fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
         }
     }
 

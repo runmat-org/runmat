@@ -410,9 +410,6 @@ impl ContourCall {
                     figure.add_contour_plot_on_axes(contour, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
-                }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("{name} GPU path unavailable: {err}");
                 }

@@ -438,7 +438,6 @@ pub(crate) mod tests {
     fn error_message(err: RuntimeControlFlow) -> String {
         match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

@@ -632,12 +632,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(-1))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("non-negative"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("non-negative"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -646,12 +642,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Num(1.5)];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("non-negative integer"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("non-negative integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -660,12 +652,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(0))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("dimension must be >= 1"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(err.message().contains("dimension must be >= 1"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

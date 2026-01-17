@@ -351,9 +351,6 @@ fn adjacency_from_complex_data(
 fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
     let (rows, cols) = match super::bandwidth::ensure_matrix_shape(shape) {
         Ok(dimensions) => dimensions,
-        Err(RuntimeControlFlow::Suspend(pending)) => {
-            return Err(RuntimeControlFlow::Suspend(pending));
-        }
         Err(RuntimeControlFlow::Error(_)) => {
             return Err(runtime_error(
                 BUILTIN_NAME,

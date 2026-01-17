@@ -273,7 +273,6 @@ fn who_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn who_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(mut err) => {
             err.context = err.context.with_builtin("who");
             RuntimeControlFlow::Error(err)
@@ -528,9 +527,6 @@ pub(crate) mod tests {
     fn error_message(flow: crate::RuntimeControlFlow) -> String {
         match flow {
             crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => {
-                panic!("expected error flow, got suspend")
-            }
         }
     }
 

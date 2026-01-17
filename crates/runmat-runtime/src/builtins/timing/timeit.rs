@@ -445,9 +445,6 @@ pub(crate) mod tests {
                     err.message()
                 );
             }
-            crate::RuntimeControlFlow::Suspend(pending) => {
-                panic!("unexpected suspend: {pending:?}");
-            }
         }
     }
 

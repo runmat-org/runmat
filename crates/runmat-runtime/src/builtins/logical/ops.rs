@@ -451,7 +451,7 @@ pub(crate) mod tests {
     fn assert_error_message(err: RuntimeControlFlow, expected: &str) {
         match err {
             RuntimeControlFlow::Error(err) => assert_eq!(err.message(), expected),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+            other => panic!("unexpected runtime control flow: {other:?}"),
         }
     }
 
@@ -460,7 +460,7 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert!(err.message().contains(expected), "unexpected error: {}", err.message())
             }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
+            other => panic!("unexpected runtime control flow: {other:?}"),
         }
     }
 

@@ -141,9 +141,6 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
-                }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("mesh GPU path unavailable: {err}");
                 }

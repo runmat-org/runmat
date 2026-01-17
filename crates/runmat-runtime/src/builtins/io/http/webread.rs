@@ -206,7 +206,6 @@ where
     F: FnOnce(&RuntimeError) -> String,
 {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
             build_runtime_error(message(&err))
                 .with_builtin("webread")
@@ -508,7 +507,6 @@ fn execute_request(
 
 fn map_json_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
                 format!("webread: failed to parse JSON response ({rest})")
@@ -770,7 +768,6 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(pending) => format!("suspend: {}", pending.prompt),
         }
     }
 

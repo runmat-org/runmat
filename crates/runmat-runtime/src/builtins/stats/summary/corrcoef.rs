@@ -815,8 +815,8 @@ pub(crate) mod tests {
                     err.message()
                 );
             }
-            RuntimeControlFlow::Suspend(_) => {
-                panic!("unexpected suspension in corrcoef error test");
+            other => {
+                panic!("unexpected runtime control flow in corrcoef error test: {other:?}");
             }
         }
     }

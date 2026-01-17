@@ -122,7 +122,9 @@ fn pause_uses_keypress_handler() -> Result<()> {
 fn pending_handler_returns_error() -> Result<()> {
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    session.install_input_handler(|_| InputHandlerAction::Pending);
+    session.install_input_handler(|_| {
+        InputHandlerAction::Respond(Err("input handler is unavailable".to_string()))
+    });
 
     let result = block_on(session.execute("pause; value = 1; value;"));
     assert!(result.is_err());

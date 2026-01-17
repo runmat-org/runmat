@@ -158,9 +158,6 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate
                         figure.add_scatter3_plot_on_axes(plot, axes);
                         return Ok(());
                     }
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending));
-                    }
                     Err(RuntimeControlFlow::Error(err)) => {
                         warn!("scatter3 GPU path unavailable: {err}");
                     }
@@ -598,7 +595,6 @@ pub(crate) mod tests {
                     "unexpected error: {err}"
                 );
             }
-            RuntimeControlFlow::Suspend(_) => panic!("scatter3 suspended unexpectedly"),
         }
     }
 

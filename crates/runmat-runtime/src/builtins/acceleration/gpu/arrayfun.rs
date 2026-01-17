@@ -440,9 +440,6 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
 
         let result = match callable.call(&args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending))
-            }
             Err(RuntimeControlFlow::Error(err)) => {
                 let handler = match error_handler.as_ref() {
                     Some(handler) => handler,

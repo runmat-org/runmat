@@ -830,15 +830,11 @@ pub(crate) mod tests {
     #[test]
     fn median_rejects_unknown_keyword() {
         let err = median_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("unrecognised argument"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(
+            err.message().contains("unrecognised argument"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

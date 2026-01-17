@@ -116,18 +116,12 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                             Ok(contours) => {
                                 figure.add_contour_plot_on_axes(contours, axes);
                             }
-                            Err(RuntimeControlFlow::Suspend(pending)) => {
-                                return Err(RuntimeControlFlow::Suspend(pending));
-                            }
                             Err(RuntimeControlFlow::Error(err)) => {
                                 warn!("contourf contour overlay unavailable: {err}");
                             }
                         }
                     }
                     return Ok(());
-                }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
                 }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("contourf GPU path unavailable: {err}");
@@ -164,9 +158,6 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             ) {
                 Ok(contours) => {
                     figure.add_contour_plot_on_axes(contours, axes);
-                }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
                 }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("contourf overlay contour unavailable: {err}");

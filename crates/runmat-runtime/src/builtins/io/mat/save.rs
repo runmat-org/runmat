@@ -5,7 +5,6 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use runmat_async::{PendingInteraction, SuspendMarker};
 use runmat_builtins::{CharArray, StructValue, Tensor, Value};
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -760,12 +759,6 @@ fn convert_value(value: &Value) -> BuiltinResult<MatArray> {
             let host = match provider.download(handle) {
                 Ok(host) => host,
                 Err(err) => {
-                    if let Some(marker) = err.downcast_ref::<SuspendMarker>() {
-                        return Err(RuntimeControlFlow::Suspend(PendingInteraction {
-                            prompt: marker.prompt.clone(),
-                            kind: marker.kind,
-                        }));
-                    }
                     return Err(save_error_with_source(format!("save: {err}"), err));
                 }
             };
@@ -1002,9 +995,6 @@ pub(crate) mod tests {
                     "expected error to contain '{snippet}', got '{}'",
                     err.message()
                 );
-            }
-            Err(crate::RuntimeControlFlow::Suspend(_)) => {
-                panic!("unexpected suspension while expecting error")
             }
             Ok(_) => panic!("expected error containing '{snippet}'"),
         }

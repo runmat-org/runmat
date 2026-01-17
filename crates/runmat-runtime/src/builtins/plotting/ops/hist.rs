@@ -1369,7 +1369,6 @@ pub(crate) mod tests {
                     "unexpected error: {err}"
                 );
             }
-            RuntimeControlFlow::Suspend(_) => panic!("hist suspended unexpectedly"),
         }
     }
 

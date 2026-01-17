@@ -191,7 +191,6 @@ fn filewrite_error(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let message = err.message().to_string();
             let identifier = err.identifier().map(|value| value.to_string());
@@ -208,7 +207,6 @@ fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
 
 fn map_control_flow_with_context(flow: RuntimeControlFlow, context: &str) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let message = err.message().to_string();
             let identifier = err.identifier().map(|value| value.to_string());
@@ -719,7 +717,6 @@ pub(crate) mod tests {
     fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
         }
     }
 

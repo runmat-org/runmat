@@ -1709,13 +1709,10 @@ where
     let start = Instant::now();
     let _ = f().map_err(|flow| match flow {
         runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!(err),
-        runmat_runtime::RuntimeControlFlow::Suspend(pending) => anyhow!(
-            runmat_runtime::build_runtime_error(format!(
-                "auto-offload calibration suspended: {}",
-                pending.prompt
-            ))
-            .with_phase("auto_offload")
-            .build()
+        _ => anyhow!(
+            runmat_runtime::build_runtime_error("interaction pending")
+                .with_phase("auto_offload")
+                .build()
         ),
     })?;
     Ok(start.elapsed())

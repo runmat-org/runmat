@@ -23,16 +23,11 @@ pub struct InteractionPrompt<'a> {
 pub enum InteractionResponse {
     Line(String),
     KeyPress,
-    /// Resume token for `InteractionKind::GpuMapRead`.
-    GpuMapReady,
 }
-
-pub use runmat_async::PendingInteraction;
 
 #[derive(Clone)]
 pub enum InteractionDecision {
     Respond(Result<InteractionResponse, String>),
-    Pending,
 }
 
 type InteractionHandler =
@@ -99,16 +94,11 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeControlFl
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
         return match response.map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))? {
             InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => {
-                Err(build_runtime_error("queued keypress response used for line request")
-                    .build()
-                    .into())
-            }
-            InteractionResponse::GpuMapReady => Err(build_runtime_error(
-                "queued gpu map response used for line request",
+            InteractionResponse::KeyPress => Err(build_runtime_error(
+                "queued keypress response used for line request",
             )
             .build()
-            .into())
+            .into()),
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -123,18 +113,7 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeControlFl
                 )
                 .build()
                 .into()),
-                InteractionResponse::GpuMapReady => Err(build_runtime_error(
-                    "interaction handler returned gpu map response for line request",
-                )
-                .build()
-                .into()),
             },
-            InteractionDecision::Pending => {
-                return Err(RuntimeControlFlow::Suspend(PendingInteraction {
-                    prompt: prompt.to_string(),
-                    kind: InteractionKind::Line { echo },
-                }));
-            }
         }
     } else {
         default_read_line(prompt, echo).map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))
@@ -150,11 +129,6 @@ pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeControlFlow> {
             .build()
             .into()),
             InteractionResponse::KeyPress => Ok(()),
-            InteractionResponse::GpuMapReady => Err(build_runtime_error(
-                "queued gpu map response used for keypress request",
-            )
-            .build()
-            .into())
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -169,18 +143,7 @@ pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeControlFlow> {
                 .build()
                 .into()),
                 InteractionResponse::KeyPress => Ok(()),
-                InteractionResponse::GpuMapReady => Err(build_runtime_error(
-                    "interaction handler returned gpu map response for keypress request",
-                )
-                .build()
-                .into()),
             },
-            InteractionDecision::Pending => {
-                return Err(RuntimeControlFlow::Suspend(PendingInteraction {
-                    prompt: prompt.to_string(),
-                    kind: InteractionKind::KeyPress,
-                }));
-            }
         }
     } else {
         default_wait_for_key(prompt).map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))
@@ -250,5 +213,4 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
     });
 }
 
-// NOTE: The old `suspend()` + sentinel string bridge has been removed. Typed suspension is now
-// represented by `RuntimeControlFlow::Suspend(PendingInteraction)`.
+// NOTE: The old suspend/resume control flow has been removed.

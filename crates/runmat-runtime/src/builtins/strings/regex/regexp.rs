@@ -246,7 +246,6 @@ fn with_builtin_context(builtin: &'static str, flow: RuntimeControlFlow) -> Runt
             }
             RuntimeControlFlow::Error(err)
         }
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
     }
 }
 

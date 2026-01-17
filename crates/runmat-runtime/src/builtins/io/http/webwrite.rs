@@ -212,7 +212,6 @@ where
     F: FnOnce(&RuntimeError) -> String,
 {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
             build_runtime_error(message(&err))
                 .with_builtin("webwrite")
@@ -816,7 +815,6 @@ fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
 
 fn map_json_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
                 format!("webwrite: failed to parse JSON response ({rest})")

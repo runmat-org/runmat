@@ -1620,7 +1620,6 @@ pub(crate) mod tests {
     fn error_message(flow: crate::RuntimeControlFlow) -> String {
         match flow {
             crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

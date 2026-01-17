@@ -986,7 +986,6 @@ pub(crate) mod tests {
             Err(RuntimeControlFlow::Error(err)) => {
                 assert!(err.message().contains("direction specified more than once"));
             }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspension"),
             Ok(_) => panic!("expected error"),
         }
     }
@@ -1004,7 +1003,6 @@ pub(crate) mod tests {
                     .message()
                     .contains("missing-value handling specified more than once"));
             }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspension"),
             Ok(_) => panic!("expected error"),
         }
     }
@@ -1078,7 +1076,6 @@ pub(crate) mod tests {
             Err(RuntimeControlFlow::Error(err)) => {
                 assert!(err.message().contains("dimension must be >= 1"));
             }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspension"),
         }
     }
 

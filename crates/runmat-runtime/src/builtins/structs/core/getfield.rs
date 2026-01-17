@@ -228,7 +228,6 @@ fn getfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
 
 fn remap_getfield_flow(flow: RuntimeControlFlow, prefix: Option<&str>) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => {
             let mut message = err.message().to_string();
             if let Some(prefix) = prefix {
@@ -365,7 +364,6 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
         _ => {
             let idx = parse_positive_scalar(value).map_err(|flow| match flow {
-                RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
                 RuntimeControlFlow::Error(err) => getfield_flow(format!(
                     "getfield: invalid index element ({})",
                     err.message()
@@ -820,16 +818,11 @@ fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
             let getter = format!("get.{name}");
             match call_builtin(&getter, &[Value::Object(obj.clone())]) {
                 Ok(value) => return Ok(value),
-                Err(flow) => match flow {
-                    RuntimeControlFlow::Suspend(pending) => {
-                        return Err(RuntimeControlFlow::Suspend(pending))
+                Err(RuntimeControlFlow::Error(err)) => {
+                    if !is_undefined_function(&err) {
+                        return Err(remap_getfield_flow(RuntimeControlFlow::Error(err), None));
                     }
-                    RuntimeControlFlow::Error(err) => {
-                        if !is_undefined_function(&err) {
-                            return Err(remap_getfield_flow(RuntimeControlFlow::Error(err), None));
-                        }
-                    }
-                },
+                }
             }
             if let Some(val) = obj.properties.get(&format!("{name}_backing")) {
                 return Ok(val.clone());
@@ -958,7 +951,6 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
         }
     }
 

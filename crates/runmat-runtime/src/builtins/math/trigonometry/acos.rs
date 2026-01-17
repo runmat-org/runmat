@@ -281,12 +281,9 @@ fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 let tensor = gpu_helpers::gather_tensor(&handle)?;
                 return acos_tensor_real(tensor);
             }
-            Err(err) => match err {
-                RuntimeControlFlow::Suspend(_) => return Err(err),
-                RuntimeControlFlow::Error(_) => {
-                    // Fall back to host path below.
-                }
-            },
+            Err(RuntimeControlFlow::Error(_)) => {
+                // Fall back to host path below.
+            }
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -436,7 +433,6 @@ pub(crate) mod tests {
     fn error_message(err: RuntimeControlFlow) -> String {
         match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

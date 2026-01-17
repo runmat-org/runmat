@@ -425,7 +425,6 @@ pub(crate) fn read_mat_file_for_builtin(
 ) -> crate::BuiltinResult<Vec<(String, Value)>> {
     match read_mat_file(path) {
         Ok(entries) => Ok(entries),
-        Err(RuntimeControlFlow::Suspend(pending)) => Err(RuntimeControlFlow::Suspend(pending)),
         Err(RuntimeControlFlow::Error(err)) => {
             let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
             let mut builder = build_runtime_error(message).with_builtin(builtin);
@@ -1010,9 +1009,6 @@ pub(crate) mod tests {
                     "expected error to contain '{snippet}', got '{}'",
                     err.message()
                 );
-            }
-            Err(crate::RuntimeControlFlow::Suspend(_)) => {
-                panic!("unexpected suspension while expecting error")
             }
             Ok(_) => panic!("expected error containing '{snippet}'"),
         }

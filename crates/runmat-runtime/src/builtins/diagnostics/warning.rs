@@ -212,13 +212,18 @@ where
     F: FnOnce(&crate::RuntimeError) -> String,
 {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
             .with_builtin("warning")
             .with_identifier(normalize_identifier(identifier))
             .with_source(err)
             .build()
             .into(),
+        _ => RuntimeControlFlow::Error(
+            build_runtime_error("interaction pending")
+                .with_builtin("warning")
+                .with_identifier(normalize_identifier(identifier))
+                .build(),
+        ),
     }
 }
 

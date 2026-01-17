@@ -687,9 +687,7 @@ fn execute_user_function_isolated(
         Some(function_def.name.as_str()),
     )) {
         Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
-        Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => Err(TurbineError::ExecutionError(
-            "interaction pending is unsupported in turbine execution".to_string(),
-        )),
+
         Err(e) => Err(TurbineError::ExecutionError(format!(
             "Failed to execute function: {}",
             e.to_string()
@@ -1073,11 +1071,7 @@ impl TurbineEngine {
         // Use the main Ignition interpreter which has full feature support
         match block_on(runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>"))) {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
-            Ok(runmat_ignition::InterpreterOutcome::Pending(_)) => {
-                Err(TurbineError::ExecutionError(
-                    "interaction pending is unsupported in turbine interpreter".to_string(),
-                ))
-            }
+
             Err(e) => Err(TurbineError::ExecutionError(e.to_string())),
         }
     }

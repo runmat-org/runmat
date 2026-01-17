@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::interaction;
-use crate::{call_builtin, gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, call_builtin, flow_to_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
 
 const DEFAULT_PROMPT: &str = "Input: ";
 
@@ -160,13 +160,13 @@ fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         DEFAULT_PROMPT.to_string()
     };
     let return_string = parsed_flag.unwrap_or(false);
-    let line = interaction::request_line(&prompt, true).map_err(|flow| match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
+    let line = interaction::request_line(&prompt, true).map_err(|flow| {
+        let err = flow_to_error(flow);
+        RuntimeControlFlow::Error(
             build_runtime_error(format!("input: {}", err.message()))
                 .with_source(err)
                 .build(),
-        ),
+        )
     })?;
     if return_string {
         return Ok(Value::CharArray(CharArray::new_row(&line)));
@@ -230,17 +230,15 @@ fn parse_numeric_response(line: &str) -> Result<Value, RuntimeControlFlow> {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
     call_builtin("str2double", &[Value::String(trimmed.to_string())]).map_err(|flow| {
-        match flow {
-            RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-            RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
-                build_runtime_error(format!(
-                    "MATLAB:input:InvalidNumericExpression ({})",
-                    err.message()
-                ))
-                .with_source(err)
-                .build(),
-            ),
-        }
+        let err = flow_to_error(flow);
+        RuntimeControlFlow::Error(
+            build_runtime_error(format!(
+                "MATLAB:input:InvalidNumericExpression ({})",
+                err.message()
+            ))
+            .with_source(err)
+            .build(),
+        )
     })
 }
 

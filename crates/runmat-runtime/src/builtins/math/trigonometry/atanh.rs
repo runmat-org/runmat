@@ -289,12 +289,9 @@ fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Ok(false) => {
                 // fall back to host below
             }
-            Err(err) => match err {
-                RuntimeControlFlow::Suspend(_) => return Err(err),
-                RuntimeControlFlow::Error(_) => {
-                    // fall back to host below
-                }
-            },
+            Err(RuntimeControlFlow::Error(_)) => {
+                // fall back to host below
+            }
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -462,7 +459,6 @@ pub(crate) mod tests {
     fn error_message(err: RuntimeControlFlow) -> String {
         match err {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
         }
     }
 

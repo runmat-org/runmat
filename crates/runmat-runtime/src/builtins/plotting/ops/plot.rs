@@ -427,9 +427,6 @@ fn render_series(
                         figure.add_line_plot_on_axes(line_plot, axes_index);
                         continue;
                     }
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending));
-                    }
                     Err(RuntimeControlFlow::Error(err)) => {
                         warn!("plot GPU path unavailable: {err}");
                     }
@@ -510,7 +507,6 @@ pub(crate) mod tests {
                     "unexpected error: {err}"
                 );
             }
-            RuntimeControlFlow::Suspend(_) => panic!("plot suspended unexpectedly"),
         }
     }
 
@@ -572,7 +568,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert!(err.to_string().contains("expected numeric Y argument"));
             }
-            RuntimeControlFlow::Suspend(_) => panic!("plot series parsing suspended unexpectedly"),
         }
     }
 
@@ -586,7 +581,6 @@ pub(crate) mod tests {
             RuntimeControlFlow::Error(err) => {
                 assert!(err.to_string().contains("expected numeric X data"));
             }
-            RuntimeControlFlow::Suspend(_) => panic!("plot series parsing suspended unexpectedly"),
         }
     }
 

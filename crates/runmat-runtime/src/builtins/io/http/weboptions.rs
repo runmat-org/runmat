@@ -229,12 +229,16 @@ where
     F: FnOnce(&RuntimeError) -> String,
 {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
             .with_builtin("weboptions")
             .with_source(err)
             .build()
             .into(),
+        _ => RuntimeControlFlow::Error(
+            build_runtime_error("interaction pending")
+                .with_builtin("weboptions")
+                .build(),
+        ),
     }
 }
 
@@ -568,9 +572,7 @@ pub(crate) mod tests {
     fn error_message(flow: RuntimeControlFlow) -> String {
         match flow {
             RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(pending) => {
-                panic!("unexpected suspend in weboptions tests: {pending:?}")
-            }
+            other => panic!("unexpected runtime control flow in weboptions tests: {other:?}"),
         }
     }
 

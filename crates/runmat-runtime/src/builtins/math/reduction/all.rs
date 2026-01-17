@@ -1010,15 +1010,11 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("all"), Value::Int(IntValue::I32(1))];
         let err = all_builtin(Value::Tensor(tensor), args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("dimension"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        let err = crate::flow_to_error(err);
+        assert!(
+            err.message().contains("dimension"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

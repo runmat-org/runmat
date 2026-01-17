@@ -124,16 +124,10 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate:
                             figure.add_contour_plot_on_axes(contour, axes);
                             return Ok(());
                         }
-                        Err(RuntimeControlFlow::Suspend(pending)) => {
-                            return Err(RuntimeControlFlow::Suspend(pending));
-                        }
                         Err(RuntimeControlFlow::Error(err)) => {
                             warn!("meshc contour GPU path unavailable: {err}");
                         }
                     }
-                }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
                 }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("meshc surface GPU path unavailable: {err}");

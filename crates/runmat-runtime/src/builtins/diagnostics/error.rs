@@ -165,13 +165,18 @@ fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeControlFlo
 
 fn remap_error_flow(flow: RuntimeControlFlow, identifier: &str) -> RuntimeControlFlow {
     match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
         RuntimeControlFlow::Error(err) => build_runtime_error(err.message().to_string())
             .with_builtin("error")
             .with_identifier(normalize_identifier(identifier))
             .with_source(err)
             .build()
             .into(),
+        _ => RuntimeControlFlow::Error(
+            build_runtime_error("interaction pending")
+                .with_builtin("error")
+                .with_identifier(normalize_identifier(identifier))
+                .build(),
+        ),
     }
 }
 

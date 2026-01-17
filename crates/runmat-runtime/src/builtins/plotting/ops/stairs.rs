@@ -142,9 +142,6 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
                     figure.add_stairs_plot_on_axes(plot, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending));
-                }
                 Err(RuntimeControlFlow::Error(err)) => {
                     warn!("stairs GPU path unavailable: {err}");
                 }

@@ -145,9 +145,6 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<Stri
                         return Ok(());
                     }
                     Ok(_) => {}
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending));
-                    }
                     Err(RuntimeControlFlow::Error(err)) => {
                         warn!("bar GPU path unavailable: {err}");
                     }
@@ -640,7 +637,6 @@ pub(crate) mod tests {
                         "unexpected error: {err}"
                     );
                 }
-                RuntimeControlFlow::Suspend(_) => panic!("bar suspended unexpectedly"),
             }
         }
     }
