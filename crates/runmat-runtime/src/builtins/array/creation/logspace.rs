@@ -658,7 +658,7 @@ pub(crate) mod tests {
     fn logspace_rejects_non_integer_count() {
         let err = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
             .expect_err("expected error");
-        assert!(err.contains("integer"));
+        assert!(err.message().contains("integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -670,7 +670,7 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(-1))],
         )
         .expect_err("expected error");
-        assert!(err.contains(">="));
+        assert!(err.message().contains(">="));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -682,7 +682,7 @@ pub(crate) mod tests {
             vec![Value::Num(f64::INFINITY)],
         )
         .expect_err("expected error");
-        assert!(err.contains("finite"));
+        assert!(err.message().contains("finite"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -691,7 +691,7 @@ pub(crate) mod tests {
         let start = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let err =
             logspace_builtin(Value::Tensor(start), Value::Num(1.0), Vec::new()).expect_err("error");
-        assert!(err.contains("scalar"));
+        assert!(err.message().contains("scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

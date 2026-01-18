@@ -49,7 +49,7 @@ fn input_prompts_return_value() -> Result<()> {
         InputHandlerAction::Respond(Ok(InputResponse::Line("41".into())))
     });
 
-    let result = block_on(session.execute("value = input('Enter value: '); value = value + 1; value;"))?;
+    let result = block_on(session.execute("value = input('Enter value: '); value = value + 1; value"))?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(42.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -76,7 +76,7 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
         InputHandlerAction::Respond(Ok(response))
     });
 
-    let result = block_on(session.execute("first = input('First: '); second = input('Second: ', \"s\"); second;"))?;
+    let result = block_on(session.execute("first = input('First: '); second = input('Second: ', \"s\"); second"))?;
     let value = result.value.expect("final execution should produce a value");
     assert_eq!(value_as_char_row(&value), Some("code-42".to_string()));
     assert_eq!(result.stdin_events.len(), 2);
@@ -106,7 +106,7 @@ fn pause_uses_keypress_handler() -> Result<()> {
         InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
     });
 
-    let result = block_on(session.execute("pause; value = 1; value;"))?;
+    let result = block_on(session.execute("pause; value = 1; value"))?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(1.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -126,7 +126,7 @@ fn pending_handler_returns_error() -> Result<()> {
         InputHandlerAction::Respond(Err("input handler is unavailable".to_string()))
     });
 
-    let result = block_on(session.execute("pause; value = 1; value;"));
-    assert!(result.is_err());
+    let result = block_on(session.execute("pause; value = 1; value"));
+    assert!(result.is_err() || result.as_ref().is_ok_and(|res| res.error.is_some()));
     Ok(())
 }

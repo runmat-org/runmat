@@ -789,6 +789,7 @@ pub fn norm_host_real_for_provider(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::CharArray;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

@@ -3,7 +3,7 @@
 //! Translates RunMat bytecode instructions into Cranelift intermediate representation
 //! for subsequent compilation to native machine code.
 
-use crate::{Result, TurbineError};
+use crate::{execution_error, Result, TurbineError};
 use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
@@ -191,15 +191,11 @@ impl ControlFlowGraph {
 }
 
 /// Compiles bytecode instructions to Cranelift IR
-pub struct BytecodeCompiler {
-    builder_context: FunctionBuilderContext,
-}
+pub struct BytecodeCompiler;
 
 impl BytecodeCompiler {
     pub fn new() -> Self {
-        Self {
-            builder_context: FunctionBuilderContext::new(),
-        }
+        Self
     }
 
     /// Compile a sequence of bytecode instructions to Cranelift IR
@@ -213,7 +209,8 @@ impl BytecodeCompiler {
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
     ) -> Result<()> {
-        let mut builder = FunctionBuilder::new(func, &mut self.builder_context);
+        let mut builder_context = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(func, &mut builder_context);
 
         let entry_block = builder.create_block();
         builder.append_block_params_for_function_params(entry_block);
@@ -292,7 +289,7 @@ impl BytecodeCompiler {
 
                 match instr {
                     &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "PackToRow/PackToCol not supported in JIT; use interpreter".to_string(),
                         ));
                     }
@@ -300,7 +297,7 @@ impl BytecodeCompiler {
                         // Ignore; VM manages globals/persistents
                     }
                     Instr::EmitStackTop { .. } | Instr::EmitVar { .. } => {
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "Console emission not supported in JIT; use interpreter".to_string(),
                         ));
                     }
@@ -313,7 +310,7 @@ impl BytecodeCompiler {
                     | Instr::LoadBool(_)
                     | Instr::LoadComplex(_, _) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "Non-numeric literal not supported in JIT mode".to_string(),
                         ));
                     }
@@ -365,13 +362,13 @@ impl BytecodeCompiler {
                     }
                     Instr::Transpose => {
                         // Matrix transpose is complex - fall back to interpreter
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "Matrix transpose not supported in JIT mode".to_string(),
                         ));
                     }
                     Instr::ConjugateTranspose => {
                         // Matrix transpose is complex - fall back to interpreter
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "Matrix transpose not supported in JIT mode".to_string(),
                         ));
                     }
@@ -427,7 +424,7 @@ impl BytecodeCompiler {
                     }
                     Instr::CallBuiltin(name, arg_count) => {
                         if matches!(name.as_str(), "max" | "min") {
-                            return Err(TurbineError::ExecutionError(format!(
+                            return Err(execution_error(format!(
                                 "Builtin '{name}' is not yet supported in Turbine JIT; falling back to interpreter"
                             )));
                         }
@@ -440,7 +437,7 @@ impl BytecodeCompiler {
                         local_stack.push(result);
                     }
                     Instr::StochasticEvolution => {
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "StochasticEvolution loops require the interpreter (JIT not yet supported)"
                                 .to_string(),
                         ));
@@ -465,7 +462,7 @@ impl BytecodeCompiler {
                             // Pop row length
                             let row_len_val = local_stack.pop()?;
                             let row_len = Self::extract_f64_from_value(builder, row_len_val)
-                                .map_err(TurbineError::ExecutionError)?;
+                                .map_err(|err| execution_error(err))?;
 
                             // Pop row elements
                             let mut row_values = Vec::new();
@@ -507,7 +504,7 @@ impl BytecodeCompiler {
                         indices.reverse();
                         let base = local_stack.pop()?;
                         let result = Self::compile_matrix_indexing(builder, base, &indices)
-                            .map_err(TurbineError::ExecutionError)?;
+                            .map_err(|err| execution_error(err))?;
                         local_stack.push(result);
                     }
                     Instr::Pop => {
@@ -652,7 +649,7 @@ impl BytecodeCompiler {
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFeval(_)
                     | Instr::CallFevalExpandMulti(_) => {
-                        return Err(TurbineError::ExecutionError(
+                        return Err(execution_error(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));
                     }
@@ -709,12 +706,12 @@ impl BytecodeCompiler {
     ) -> Result<Value> {
         // Look up the function definition
         let function_def = function_definitions.get(func_name).ok_or_else(|| {
-            TurbineError::ExecutionError(format!("Unknown function: {func_name}"))
+            execution_error(format!("Unknown function: {func_name}"))
         })?;
 
         // Validate argument count
         if args.len() != function_def.params.len() {
-            return Err(TurbineError::ExecutionError(format!(
+            return Err(execution_error(format!(
                 "Function {} expects {} arguments, got {}",
                 func_name,
                 function_def.params.len(),

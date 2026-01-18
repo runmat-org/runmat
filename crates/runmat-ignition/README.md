@@ -20,9 +20,9 @@ Sibling docs for deep dives:
 ## Public API
 - `compile(&HirProgram) -> Bytecode`
 - `compile_with_functions(&HirProgram, &HashMap<String, UserFunction>) -> Bytecode`
-- `interpret(&Bytecode) -> Result<Vec<Value>, String>`
-- `interpret_with_vars(&Bytecode, &mut [Value]) -> Result<Vec<Value>, String>`
-- `execute(&HirProgram) -> Result<Vec<Value>, String>`
+- `interpret(&Bytecode) -> Result<Vec<Value>, RuntimeError>`
+- `interpret_with_vars(&Bytecode, &mut [Value]) -> Result<Vec<Value>, RuntimeError>`
+- `execute(&HirProgram) -> Result<Vec<Value>, RuntimeError>`
 
 ## Execution model
 - Each function compiles to bytecode + constants. Calls create frames holding PC, locals, return arity, and a base stack pointer.
@@ -53,7 +53,8 @@ Sibling docs for deep dives:
 - Cells and function returns expand in argument lists and (when applicable) into slice targets.
 
 ## Error model (mex)
-- All interpreter errors are normalized: `mex(id, message)` returns `"<ID>: <message>"`.
+- All interpreter errors are normalized: `mex(id, message)` stores the identifier on `RuntimeError` and keeps `message` as the human-readable diagnostic.
+- CLI/REPL formatting renders the identifier as a separate labeled line; tests assert `err.identifier()` to prevent drift.
 - Identifiers include: `MATLAB:UndefinedFunction`, `MATLAB:UndefinedVariable`, `MATLAB:NotEnoughInputs`, `MATLAB:TooManyInputs`, `MATLAB:TooManyOutputs`, `MATLAB:VarargoutMismatch`, `MATLAB:SliceNonTensor`, `MATLAB:IndexOutOfBounds`, `MATLAB:CellIndexType`, `MATLAB:CellSubscriptOutOfBounds`, `MATLAB:ExpandError`, `MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`.
 
 ## OOP semantics (summary)
@@ -67,7 +68,7 @@ Sibling docs for deep dives:
   - Gather/scatter round-trip invariants, column-major mapping, broadcast laws.
   - Negative paths: invalid indices, arity/output errors, expansion/type mismatches, OOP dispatch failures.
   - Parser+compiler+VM end-to-end for command-form, metaclass postfix, imports.
-- Tests assert mex identifiers to prevent semantic drift.
+- Tests assert mex identifiers via `RuntimeError.identifier()` to prevent semantic drift.
 
 ## Performance
 - Correctness-first generic paths, plus 2-D fast paths for `A(:, j)` and `A(i, :)` with strict shape checks and column-major writes.

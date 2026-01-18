@@ -119,43 +119,6 @@ fn test_invalid_syntax_handling() {
     });
 }
 
-        let stats = engine.stats();
-        assert_eq!(stats.total_executions, inputs.len());
-        assert!(stats.average_execution_time_ms >= 0.0);
-        // Total execution time is always valid (u64 type)
-    });
-}
-
-#[test]
-fn test_verbose_mode() {
-    gc_test_context(|| {
-        let mut engine = RunMatSession::with_options(true, true).unwrap();
-        let result = block_on(engine.execute("x = 42"));
-        assert!(result.is_ok());
-
-        let execution_result = result.unwrap();
-        assert!(execution_result.error.is_none());
-    });
-}
-
-#[test]
-fn test_parse_error_handling() {
-    gc_test_context(|| {
-        let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = [1, 2,")); // Incomplete matrix
-        assert!(result.is_err()); // Should fail at parse stage
-    });
-}
-
-#[test]
-fn test_invalid_syntax_handling() {
-    gc_test_context(|| {
-        let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = $invalid$"));
-        assert!(result.is_err()); // Should fail due to invalid tokens
-    });
-}
-
 #[test]
 fn test_execution_with_control_flow() {
     gc_test_context(|| {

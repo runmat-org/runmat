@@ -1760,13 +1760,14 @@ impl From<ExecutionResult> for ExecutionPayload {
     fn from(result: ExecutionResult) -> Self {
         let value_text = result.value.as_ref().map(|v| v.to_string());
         let value_json = result.value.as_ref().map(|v| value_to_json(v, 0));
+        let error = result.error.map(|err| err.format_diagnostic());
         Self {
             value_text,
             value_json,
             type_info: result.type_info,
             execution_time_ms: result.execution_time_ms,
             used_jit: result.used_jit,
-            error: result.error,
+            error,
             stdout: result
                 .streams
                 .into_iter()

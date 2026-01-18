@@ -17,8 +17,9 @@ pub use vm::{
 
 use runmat_builtins::Value;
 use runmat_hir::HirProgram;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 
-pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
-    let bc = compile(program)?;
+pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
+    let bc = compile(program).map_err(|err| build_runtime_error(err).build())?;
     interpret(&bc).await
 }

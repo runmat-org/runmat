@@ -1,6 +1,6 @@
 # Error Model (mex normalization)
 
-Ignition normalizes all runtime errors to MATLAB-style identifiers via a tiny helper `mex(id, message)`. The VM constructs a canonical string `"<IDENTIFIER>: <message>"` and uses it consistently across all error sites. Tests assert on identifiers to prevent drift.
+Ignition normalizes all runtime errors to MATLAB-style identifiers via a tiny helper `mex(id, message)`. The helper sets `RuntimeError.identifier` to the fully-qualified identifier and keeps `RuntimeError.message` as the human-readable diagnostic. CLI/REPL formatting renders the identifier as a separate labeled field, and tests assert on `err.identifier()` to prevent drift.
 
 ## Namespacing
 
@@ -34,13 +34,13 @@ The VM also produces plain strings for some internal plumbing; they are wrapped 
 - `PopTry` pops the top try frame on successful completion of the try block
 - `rethrow` with no argument rethrows the last caught exception (tracked thread-locally)
 
-Internally, `parse_exception` splits `"IDENT: message"` using the last `": "`, preserving nested identifiers.
+Internally, `parse_exception` prefers `RuntimeError.identifier` when present; otherwise it splits `"IDENT: message"` using the last `": "`, preserving nested identifiers.
 
 ## Guidelines for contributors
 
 - Prefer one canonical site per error condition and share it via helpers
 - Include actionable details (function name, expected vs. got, etc.)
-- Do not emit raw strings from VM instruction handlers; always normalize via `mex`
+- Do not embed identifiers in message strings; always normalize via `mex`
 - Keep test coverage in sync with error identifiers to prevent regressions
 
 See `vm.rs` for concrete mappings and tests under ignition and runtime crates (e.g., `tests/control_flow.rs`, `tests/indexing_properties.rs`).

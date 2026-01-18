@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use runmat_kernel::{
     execution::ExecutionStatus,
     protocol::{ExecuteRequest, JupyterMessage, MessageType},
@@ -62,17 +63,17 @@ fn test_execution_engine_integration() {
     let mut engine = ExecutionEngine::new();
 
     // Test successful execution
-    let result = engine.execute("a = 1; b = 2; c = a + b").unwrap();
+    let result = block_on(engine.execute("a = 1; b = 2; c = a + b")).unwrap();
     assert_eq!(result.status, ExecutionStatus::Success);
     assert_eq!(engine.execution_count(), 1);
 
     // Test parse error
-    let result = engine.execute("invalid syntax here").unwrap();
+    let result = block_on(engine.execute("invalid syntax here")).unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert_eq!(engine.execution_count(), 2);
 
     // Test runtime error
-    let result = engine.execute("x = unknown_variable").unwrap();
+    let result = block_on(engine.execute("x = unknown_variable")).unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert_eq!(engine.execution_count(), 3);
 }
@@ -105,7 +106,7 @@ async fn test_execution_engine_async() {
     ];
 
     for (i, code) in codes.iter().enumerate() {
-        let result = engine.execute(code).unwrap();
+        let result = block_on(engine.execute(code)).unwrap();
         assert_eq!(
             result.status,
             ExecutionStatus::Success,
@@ -139,7 +140,7 @@ fn test_matlab_syntax_execution() {
     ];
 
     for (code, expected_status) in test_cases {
-        let result = engine.execute(code).unwrap();
+        let result = block_on(engine.execute(code)).unwrap();
         assert_eq!(result.status, expected_status, "Failed for code: {code}");
     }
 }
@@ -156,7 +157,7 @@ fn test_unsupported_syntax_errors() {
     ];
 
     for (code, expected_status) in test_cases {
-        let result = engine.execute(code).unwrap();
+        let result = block_on(engine.execute(code)).unwrap();
         assert_eq!(
             result.status, expected_status,
             "Failed for code: {code} (should have failed)"
@@ -176,7 +177,7 @@ fn test_matrix_syntax_support() {
     ];
 
     for (code, expected_status) in test_cases {
-        let result = engine.execute(code).unwrap();
+        let result = block_on(engine.execute(code)).unwrap();
         assert_eq!(result.status, expected_status, "Failed for code: {code}");
     }
 }
@@ -186,7 +187,7 @@ fn test_error_handling_details() {
     let mut engine = ExecutionEngine::new();
 
     // Test parse error details
-    let result = engine.execute("x = 1 +").unwrap();
+    let result = block_on(engine.execute("x = 1 +")).unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert!(result.error.is_some());
 
@@ -196,7 +197,7 @@ fn test_error_handling_details() {
     assert!(!error.traceback.is_empty());
 
     // Test undefined variable error
-    let result = engine.execute("y = undefined_var").unwrap();
+    let result = block_on(engine.execute("y = undefined_var")).unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert!(result.error.is_some());
 }

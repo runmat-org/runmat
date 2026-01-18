@@ -466,7 +466,6 @@ fn char_array_value(text: &str) -> Value {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::RuntimeError;
     use std::fs;
     use std::fs::File;
     use std::io::Write;

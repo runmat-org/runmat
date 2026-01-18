@@ -48,11 +48,6 @@ fn set_vm_pc(pc: usize) {
     CURRENT_PC.with(|cell| cell.set(pc));
 }
 
-#[inline]
-fn current_pc() -> usize {
-    CURRENT_PC.with(|cell| cell.get())
-}
-
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
 
@@ -300,8 +295,7 @@ fn mex(id: &str, msg: &str) -> RuntimeError {
         None => id,
     };
     let ident = format!("{ERROR_NAMESPACE}:{suffix}");
-    let pc = current_pc();
-    let message = format!("{msg} (pc={pc})");
+    let message = msg.to_string();
     build_runtime_error(message).with_identifier(ident).build()
 }
 
@@ -3623,6 +3617,183 @@ async fn run_interpreter(
                     stack.push(Value::Num(0.0));
                 }
             }
+            Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
+                // Stack layout: [..., a1..abefore, base, idx..., a_after...]
+                let mut after: Vec<Value> = Vec::with_capacity(after_count);
+                for _ in 0..after_count {
+                    after.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                after.reverse();
+                let mut indices = Vec::with_capacity(num_indices);
+                for _ in 0..num_indices {
+                    indices.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                indices.reverse();
+                let base = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let mut before: Vec<Value> = Vec::with_capacity(before_count);
+                for _ in 0..before_count {
+                    before.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                before.reverse();
+                let expanded = match (base, indices.len()) {
+                    (Value::Cell(ca), 1) => match &indices[0] {
+                        Value::Num(n) => {
+                            let idx = *n as usize;
+                            if idx == 0 || idx > ca.data.len() {
+                                return Err(mex(
+                                    "CellIndexOutOfBounds",
+                                    "Cell index out of bounds",
+                                ));
+                            }
+                            vec![(*ca.data[idx - 1]).clone()]
+                        }
+                        Value::Int(i) => {
+                            let idx = i.to_i64() as usize;
+                            if idx == 0 || idx > ca.data.len() {
+                                return Err(mex(
+                                    "CellIndexOutOfBounds",
+                                    "Cell index out of bounds",
+                                ));
+                            }
+                            vec![(*ca.data[idx - 1]).clone()]
+                        }
+                        Value::Tensor(t) => {
+                            let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
+                            for &val in &t.data {
+                                let iu = val as usize;
+                                if iu == 0 || iu > ca.data.len() {
+                                    return Err(mex(
+                                        "CellIndexOutOfBounds",
+                                        "Cell index out of bounds",
+                                    ));
+                                }
+                                out.push((*ca.data[iu - 1]).clone());
+                            }
+                            out
+                        }
+                        _ => return Err(mex("CellIndexType", "Unsupported cell index type")),
+                    },
+                    (Value::Cell(ca), 2) => {
+                        let r: f64 = (&indices[0]).try_into()?;
+                        let c: f64 = (&indices[1]).try_into()?;
+                        let (ir, ic) = (r as usize, c as usize);
+                        if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
+                            return Err(mex(
+                                "CellSubscriptOutOfBounds",
+                                "Cell subscript out of bounds",
+                            ));
+                        }
+                        vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
+                    }
+                    (Value::Object(obj), _) => {
+                        let cell = runmat_builtins::CellArray::new(
+                            indices.clone(),
+                            1,
+                            indices.len(),
+                        )
+                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        let v = match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                Value::Cell(cell),
+                            ],
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => vm_bail!(e),
+                        };
+                        vec![v]
+                    }
+                    _ => {
+                        return Err(mex(
+                            "ExpandError",
+                            "CallFunctionExpandAt requires cell or object cell access",
+                        ))
+                    }
+                };
+                let mut args = before;
+                args.extend(expanded.into_iter());
+                args.extend(after.into_iter());
+                let func: UserFunction = match bytecode.functions.get(&name) {
+                    Some(f) => f.clone(),
+                    None => vm_bail!(mex(
+                        "UndefinedFunction",
+                        &format!("Undefined function: {name}")
+                    )),
+                };
+                let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                    &func.params,
+                    &func.outputs,
+                    &func.body,
+                );
+                let local_var_count = var_map.len();
+                let remapped_body =
+                    runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                let func_vars_count = local_var_count.max(func.params.len());
+                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                for (i, _param_id) in func.params.iter().enumerate() {
+                    if i < args.len() && i < func_vars.len() {
+                        func_vars[i] = args[i].clone();
+                    }
+                }
+                for (original_var_id, local_var_id) in &var_map {
+                    let local_index = local_var_id.0;
+                    let global_index = original_var_id.0;
+                    if local_index < func_vars.len() && global_index < vars.len() {
+                        let is_parameter = func
+                            .params
+                            .iter()
+                            .any(|param_id| param_id == original_var_id);
+                        if !is_parameter {
+                            func_vars[local_index] = vars[global_index].clone();
+                        }
+                    }
+                }
+                let mut func_var_types = func.var_types.clone();
+                if func_var_types.len() < local_var_count {
+                    func_var_types.resize(local_var_count, Type::Unknown);
+                }
+                let func_program = runmat_hir::HirProgram {
+                    body: remapped_body,
+                    var_types: func_var_types,
+                };
+                let func_bytecode =
+                    crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                // Make nested closures visible to outer frames
+                for (k, v) in func_bytecode.functions.iter() {
+                    context.functions.insert(k.clone(), v.clone());
+                }
+                let func_result_vars = match interpret_function(&func_bytecode, func_vars).await {
+                    Ok(v) => v,
+                    Err(e) => vm_bail!(e),
+                };
+                if let Some(output_var_id) = func.outputs.first() {
+                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                    if local_output_index < func_result_vars.len() {
+                        stack.push(func_result_vars[local_output_index].clone());
+                    } else {
+                        stack.push(Value::Num(0.0));
+                    }
+                } else {
+                    stack.push(Value::Num(0.0));
+                }
+            }
             Instr::CallFunction(name, arg_count) => {
                 // First, try runtime builtin fallback (some helpers like call_method)
                 {
@@ -3662,6 +3833,7 @@ async fn run_interpreter(
                     );
                 }
                 args.reverse();
+                let out_count = 1usize;
                 if !func.has_varargin {
                     if arg_count < func.params.len() {
                         vm_bail!(mex(
@@ -3786,8 +3958,8 @@ async fn run_interpreter(
                                     vars.resize(var_idx + 1, Value::Num(0.0));
                                     refresh_workspace_state(&vars);
                                 }
-                                let runtime_error = build_runtime_error(e.clone()).build();
-                                let mex = parse_exception(&runtime_error);
+                                let mex = parse_exception(&e);
+
                                 last_exception = Some(mex.clone());
                                 vars[var_idx] = Value::MException(mex);
                             }
@@ -3799,160 +3971,97 @@ async fn run_interpreter(
                     }
                 };
                 if func.has_varargout {
-                    // Single-output call: return first varargout element if any, else 0
-                    // For true multi-assign we already have CallFunctionMulti path
-                    let first = func
-                        .outputs
-                        .first()
-                        .and_then(|oid| var_map.get(oid))
-                        .map(|lid| lid.0)
-                        .unwrap_or(0);
-                    if let Some(Value::Cell(ca)) = func_result_vars.get(first) {
-                        if !ca.data.is_empty() {
-                            stack.push((*ca.data[0]).clone());
-                        } else {
-                            stack.push(Value::Num(0.0));
-                        }
-                    } else if let Some(v) = func_result_vars.get(first) {
-                        stack.push(v.clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
-                } else if let Some(output_var_id) = func.outputs.first() {
-                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-                    if local_output_index < func_result_vars.len() {
-                        stack.push(func_result_vars[local_output_index].clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
-                } else {
-                    vm_bail!(mex(
-                        "TooManyOutputs",
-                        &format!("Function '{name}' does not return outputs")
-                    ));
-                }
-            }
-            Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
-                // Assemble argument list with expansion at position
-                let mut after: Vec<Value> = Vec::with_capacity(after_count);
-                for _ in 0..after_count {
-                    after.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                after.reverse();
-                let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices {
-                    indices.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut before: Vec<Value> = Vec::with_capacity(before_count);
-                for _ in 0..before_count {
-                    before.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                before.reverse();
-                let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) => match &indices[0] {
-                        Value::Num(n) => {
-                            let idx = *n as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
+                    // Push named outputs first (excluding varargout itself), then fill from varargout cell, then pad with 0.0
+                    let total_named = func.outputs.len().saturating_sub(1);
+                    let mut pushed = 0usize;
+                    // Push named outputs in order
+                    for i in 0..total_named.min(out_count) {
+                        if let Some(oid) = func.outputs.get(i) {
+                            if let Some(local_id) = var_map.get(oid) {
+                                let idx = local_id.0;
+                                let v = func_result_vars
+                                    .get(idx)
+                                    .cloned()
+                                    .unwrap_or(Value::Num(0.0));
+                                stack.push(v);
+                                pushed += 1;
                             }
-                            vec![(*ca.data[idx - 1]).clone()]
                         }
-                        Value::Int(i) => {
-                            let idx = i.to_i64() as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            vec![(*ca.data[idx - 1]).clone()]
-                        }
-                        Value::Tensor(t) => {
-                            let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                            for &val in &t.data {
-                                let iu = val as usize;
-                                if iu == 0 || iu > ca.data.len() {
-                                    return Err(mex(
-                                        "CellIndexOutOfBounds",
-                                        "Cell index out of bounds",
-                                    ));
+                    }
+                    if pushed < out_count {
+                        // Now consume from varargout cell (last output)
+                        if let Some(varargout_oid) = func.outputs.last() {
+                            if let Some(local_id) = var_map.get(varargout_oid) {
+                                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
+                                    let available = ca.data.len();
+                                    let need = out_count - pushed;
+                                    if need > available {
+                                        vm_bail!(mex("VarargoutMismatch", &format!("Function '{name}' returned {available} varargout values, {need} requested")));
+                                    }
+                                    for vi in 0..need {
+                                        stack.push((*ca.data[vi]).clone());
+                                    }
                                 }
-                                out.push((*ca.data[iu - 1]).clone());
                             }
-                            out
                         }
-                        _ => return Err(mex("CellIndexType", "Unsupported cell index type")),
-                    },
-                    (Value::Cell(ca), 2) => {
-                        let r: f64 = (&indices[0]).try_into()?;
-                        let c: f64 = (&indices[1]).try_into()?;
-                        let (ir, ic) = (r as usize, c as usize);
-                        if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                            return Err(mex(
-                                "CellSubscriptOutOfBounds",
-                                "Cell subscript out of bounds",
-                            ));
-                        }
-                        vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
                     }
-                    (Value::Object(obj), _) => {
-                        let idx_vals: Vec<Value> = indices
-                            .iter()
-                            .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
-                            .collect();
-                        let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
-                        let v = match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
-                        vec![v]
+                    // No padding
+                } else {
+                    // Push out_count values; error if requesting more than defined
+                    let defined = func.outputs.len();
+                    if out_count > defined {
+                        vm_bail!(mex(
+                            "TooManyOutputs",
+                            &format!("Function '{name}' defines {defined} outputs, {out_count} requested")
+                        ));
                     }
-                    _ => {
-                        return Err(mex(
-                            "ExpandError",
-                            "CallBuiltinExpandAt requires cell or object cell access",
-                        ))
+                    for i in 0..out_count {
+                        let v = func
+                            .outputs
+                            .get(i)
+                            .and_then(|oid| var_map.get(oid))
+                            .map(|lid| lid.0)
+                            .and_then(|idx| func_result_vars.get(idx))
+                            .cloned()
+                            .unwrap_or(Value::Num(0.0));
+                        stack.push(v);
                     }
-                };
-                let mut args = before;
-                args.extend(expanded.into_iter());
-                args.extend(after.into_iter());
-                match call_builtin_vm!(&name, &args) {
-                    Ok(v) => stack.push(v),
-                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
+                // First, try runtime builtin fallback (some helpers like call_method)
+                {
+                    let mut args = Vec::new();
+                    for _ in 0..arg_count {
+                        args.push(
+                            stack
+                                .pop()
+                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                        );
+                    }
+                    args.reverse();
+                    let prepared_primary = accel_prepare_args(&name, &args)?;
+                    if let Ok(result) = call_builtin_vm!(&name, &prepared_primary) {
+                        if out_count > 0 {
+                            stack.push(result);
+                            for _ in 1..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                        pc += 1;
+                        continue;
+                    }
+                    // Put args back if not a builtin: we'll handle as user function below
+                    for v in prepared_primary.into_iter().rev() {
+                        stack.push(v);
+                    }
+                }
                 let func: UserFunction = match bytecode.functions.get(&name) {
                     Some(f) => f.clone(),
-                    None => vm_bail!(format!("undefined function: {name}")),
+                    None => vm_bail!(mex(
+                        "UndefinedFunction",
+                        &format!("Undefined function: {name}")
+                    )),
                 };
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
@@ -4013,6 +4122,7 @@ async fn run_interpreter(
                     } else {
                         Vec::new()
                     };
+                    // Create row cell for varargin
                     let cell = runmat_builtins::CellArray::new(
                         std::mem::take(&mut rest),
                         1,
@@ -4033,6 +4143,7 @@ async fn run_interpreter(
                         }
                     }
                 }
+                // Copy referenced globals into local frame
                 for (original_var_id, local_var_id) in &var_map {
                     let local_index = local_var_id.0;
                     let global_index = original_var_id.0;
@@ -4084,8 +4195,7 @@ async fn run_interpreter(
                                     vars.resize(var_idx + 1, Value::Num(0.0));
                                     refresh_workspace_state(&vars);
                                 }
-                                let runtime_error = build_runtime_error(e.clone()).build();
-                                let mex = parse_exception(&runtime_error);
+                                let mex = parse_exception(&e);
                                 last_exception = Some(mex.clone());
                                 vars[var_idx] = Value::MException(mex);
                             }
@@ -11329,24 +11439,24 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     if is_oob {
         err
     } else {
-        build_runtime_error(format!("{context}: {}", err.message())).build()
+        let mut builder = build_runtime_error(format!("{context}: {}", err.message()));
+        if let Some(identifier) = err.identifier() {
+            builder = builder.with_identifier(identifier.to_string());
+        }
+        builder.build()
     }
-}
-
-fn flow_to_string(err: RuntimeError) -> String {
-    err.message().to_string()
 }
 
 /// Interpret bytecode with default variable initialization
-pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
+pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Err(e) => Err(flow_to_string(e)),
+        Err(e) => Err(e),
     }
 }
 
-pub async fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, String> {
+pub async fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
     // Delegate to the counted variant with anonymous name and zero counts
     interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0).await
 }
@@ -11357,7 +11467,7 @@ async fn interpret_function_with_counts(
     name: &str,
     out_count: usize,
     in_count: usize,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<Value>, RuntimeError> {
     // Push (nargin, nargout), run, then pop
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().push((in_count, out_count));
@@ -11368,7 +11478,7 @@ async fn interpret_function_with_counts(
     });
     let res = match res {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Err(e) => Err(flow_to_string(e)),
+        Err(e) => Err(e),
     }?;
     // Persist any variables declared persistent in this bytecode under the given function name
     let func_name = name.to_string();

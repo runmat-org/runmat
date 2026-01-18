@@ -10,25 +10,20 @@
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
-use futures::executor::block_on;
+use futures::task::noop_waker;
 use log::{debug, error, info, warn};
+use std::cell::Cell;
+use std::ffi::CStr;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
 use runmat_builtins::{Type, Value};
-use runmat_gc::gc_allocate;
 use runmat_ignition::{Bytecode, Instr};
+use runmat_runtime::{build_runtime_error, RuntimeError};
 
 use target_lexicon::Triple;
 use thiserror::Error;
 use tracing::info_span;
-
-#[cfg(feature = "native-accel")]
-fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
-    runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
-}
-
-#[cfg(not(feature = "native-accel"))]
-fn accel_prepare_args(_name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
-    Ok(args.to_vec())
-}
 
 pub mod cache;
 pub mod compiler;
@@ -38,607 +33,69 @@ pub mod profiler;
 pub use cache::*;
 pub use compiler::*;
 pub use jit_memory::*;
-pub use profiler::*;
+pub use profiler::HotspotProfiler;
 
-// Runtime interface functions for JIT compiled code
-// These functions are called from JIT compiled code to interact with the Rust runtime
-
-/// Create a new Value::Num and return a pointer to it
-#[no_mangle]
-pub extern "C" fn runmat_create_value_num(val: f64) -> *mut Value {
-    match gc_allocate(Value::Num(val)) {
-        Ok(gc_ptr) => unsafe { gc_ptr.as_raw_mut() },
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
-/// Free a Value object (no-op with GC, kept for compatibility)
-#[no_mangle]
-pub extern "C" fn runmat_free_value(_ptr: *mut Value) {
-    // With garbage collection, explicit freeing is not needed
-    // The GC will automatically collect unreachable objects
-}
-
-/// Add two Value objects
-#[no_mangle]
-pub extern "C" fn runmat_value_add(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
-            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() + y.to_f64()),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x + y.to_f64()),
-            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() + y),
-            _ => {
-                error!("Unsupported addition: {a:?} + {b:?}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Subtract two Value objects
-#[no_mangle]
-pub extern "C" fn runmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
-            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() - y.to_f64()),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x - y.to_f64()),
-            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() - y),
-            _ => {
-                error!("Unsupported subtraction: {a:?} - {b:?}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Multiply two Value objects
-#[no_mangle]
-pub extern "C" fn runmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
-            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() * y.to_f64()),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x * y.to_f64()),
-            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() * y),
-            _ => {
-                error!("Unsupported multiplication: {a:?} * {b:?}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Divide two Value objects
-#[no_mangle]
-pub extern "C" fn runmat_value_div(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => {
-                if *y == 0.0 {
-                    error!("Division by zero");
-                    return std::ptr::null_mut();
-                }
-                Value::Num(x / y)
-            }
-            (Value::Int(x), Value::Int(y)) => {
-                if y.is_zero() {
-                    error!("Division by zero");
-                    return std::ptr::null_mut();
-                }
-                Value::Num(x.to_f64() / y.to_f64())
-            }
-            (Value::Num(x), Value::Int(y)) => {
-                if y.is_zero() {
-                    error!("Division by zero");
-                    return std::ptr::null_mut();
-                }
-                Value::Num(x / y.to_f64())
-            }
-            (Value::Int(x), Value::Num(y)) => {
-                if *y == 0.0 {
-                    error!("Division by zero");
-                    return std::ptr::null_mut();
-                }
-                Value::Num(x.to_f64() / y)
-            }
-            _ => {
-                error!("Unsupported division: {a:?} / {b:?}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Power of two Value objects
-#[no_mangle]
-pub extern "C" fn runmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
-            Ok(value) => value,
-            Err(e) => {
-                error!("Power operation failed: {e}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Negate a Value object
-#[no_mangle]
-pub extern "C" fn runmat_value_neg(a_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-
-        let result = match runmat_runtime::call_builtin("times", &[a.clone(), Value::Num(-1.0)]) {
-            Ok(value) => value,
-            Err(e) => {
-                error!("Negation failed: {e}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Element-wise multiplication
-#[no_mangle]
-pub extern "C" fn runmat_value_elementwise_mul(
-    a_ptr: *const Value,
-    b_ptr: *const Value,
-) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        match runmat_runtime::call_builtin("times", &[a.clone(), b.clone()]) {
-            Ok(result) => match gc_allocate(result) {
-                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(e) => {
-                error!("Element-wise multiplication error: {e}");
-                std::ptr::null_mut()
+fn run_immediate<F: Future>(mut future: F) -> Result<F::Output> {
+    let waker = noop_waker();
+    let mut context = Context::from_waker(&waker);
+    let mut future = unsafe { Pin::new_unchecked(&mut future) };
+    loop {
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => return Ok(output),
+            std::task::Poll::Pending => {
+                return Err(execution_error(
+                    "async interpreter yielded unexpectedly in sync JIT path",
+                ))
             }
         }
     }
 }
 
-/// Element-wise division
-#[no_mangle]
-pub extern "C" fn runmat_value_elementwise_div(
-    a_ptr: *const Value,
-    b_ptr: *const Value,
-) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
-            Ok(result) => match gc_allocate(result) {
-                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(e) => {
-                error!("Element-wise division error: {e}");
-                std::ptr::null_mut()
-            }
-        }
-    }
-}
-
-/// Element-wise power
-#[no_mangle]
-pub extern "C" fn runmat_value_elementwise_pow(
-    a_ptr: *const Value,
-    b_ptr: *const Value,
-) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
-            Ok(result) => match gc_allocate(result) {
-                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(e) => {
-                error!("Element-wise power error: {e}");
-                std::ptr::null_mut()
-            }
-        }
-    }
-}
-
-/// Element-wise left division
-#[no_mangle]
-pub extern "C" fn runmat_value_elementwise_leftdiv(
-    a_ptr: *const Value,
-    b_ptr: *const Value,
-) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        // Left division is b \ a which is equivalent to a ./ b
-        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
-            Ok(result) => match gc_allocate(result) {
-                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(e) => {
-                error!("Element-wise left division error: {e}");
-                std::ptr::null_mut()
-            }
-        }
-    }
-}
-
-/// Compare two Value objects: less than
-#[no_mangle]
-pub extern "C" fn runmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let a = &*a_ptr;
-        let b = &*b_ptr;
-
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Int(y)) => {
-                Value::Num(if x.to_i64() < y.to_i64() { 1.0 } else { 0.0 })
-            }
-            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < y.to_f64() { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Num(y)) => Value::Num(if x.to_f64() < *y { 1.0 } else { 0.0 }),
-            _ => {
-                error!("Unsupported comparison: {a:?} < {b:?}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        match gc_allocate(result) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Call a builtin function by name
-#[no_mangle]
-pub extern "C" fn runmat_call_builtin(
-    name_ptr: *const u8,
-    name_len: usize,
-    args_ptr: *const *const Value,
-    args_len: usize,
-) -> *mut Value {
-    if name_ptr.is_null() || args_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        // Convert name from C string
-        let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
-        let name = match std::str::from_utf8(name_slice) {
-            Ok(s) => s,
-            Err(_) => {
-                error!("Invalid UTF-8 in builtin name");
-                return std::ptr::null_mut();
-            }
-        };
-
-        // Convert arguments
-        let args_slice = std::slice::from_raw_parts(args_ptr, args_len);
-        let mut args = Vec::new();
-        for &arg_ptr in args_slice {
-            if arg_ptr.is_null() {
-                error!("Null argument in builtin call");
-                return std::ptr::null_mut();
-            }
-            args.push((*arg_ptr).clone());
-        }
-
-        // Prepare arguments with native acceleration when available
-        let prepared_args = match accel_prepare_args(name, &args) {
-            Ok(v) => v,
-            Err(err) => {
-                error!("Auto-offload prepare failed: {err}");
-                return std::ptr::null_mut();
-            }
-        };
-
-        // Call the builtin
-        match runmat_runtime::call_builtin(name, &prepared_args) {
-            Ok(result) => match gc_allocate(result) {
-                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(e) => {
-                error!("Builtin call failed: {e}");
-                std::ptr::null_mut()
-            }
-        }
-    }
-}
-
-/// Load a variable from the variables array
-#[no_mangle]
-pub extern "C" fn runmat_load_var(
-    vars_ptr: *mut Value,
-    vars_len: usize,
-    index: usize,
-) -> *mut Value {
-    if vars_ptr.is_null() || index >= vars_len {
-        error!("Invalid variable access: index {index} >= length {vars_len}");
-        return std::ptr::null_mut();
-    }
-
-    unsafe {
-        let vars_slice = std::slice::from_raw_parts(vars_ptr, vars_len);
-        let value = vars_slice[index].clone();
-        match gc_allocate(value) {
-            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Store a variable to the variables array
-#[no_mangle]
-pub extern "C" fn runmat_store_var(
-    vars_ptr: *mut Value,
-    vars_len: usize,
-    index: usize,
-    value_ptr: *const Value,
-) -> i32 {
-    if vars_ptr.is_null() || value_ptr.is_null() || index >= vars_len {
-        error!("Invalid variable store: index {index} >= length {vars_len}");
-        return -1; // Error
-    }
-
-    unsafe {
-        let vars_slice = std::slice::from_raw_parts_mut(vars_ptr, vars_len);
-        let value = (*value_ptr).clone();
-        vars_slice[index] = value;
-        0 // Success
-    }
-}
-
-/// Declare the host runtime function on the module (done once during engine init)
-fn declare_host_call_in_module<M: Module>(module: &mut M) -> FuncId {
-    // Create signature that EXACTLY matches our extern "C" function
-    let mut sig = module.make_signature();
-
-    // Use pointer-sized types (works on both aarch64 and x86_64)
-    let iptr = module.target_config().pointer_type();
-
-    sig.params.push(AbiParam::new(iptr)); // func_name_ptr
-    sig.params.push(AbiParam::new(iptr)); // args_ptr
-    sig.params.push(AbiParam::new(types::I32)); // arg_count
-    sig.params.push(AbiParam::new(iptr)); // result_ptr
-    sig.returns.push(AbiParam::new(types::I32)); // return code
-
-    // Note: module.make_signature() already sets the default call conv for the target
-
-    // Declare it as an import on the Module
-    module
-        .declare_function("runmat_call_user_function", Linkage::Import, &sig)
-        .expect("declare host func")
-}
-
-/// Global context for JIT function calls
-/// This provides access to function definitions during runtime calls
-static mut RUNTIME_CONTEXT: Option<&'static RuntimeContext> = None;
-
-pub struct RuntimeContext {
-    pub function_definitions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
+struct RuntimeContext {
+    functions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
 }
 
 impl RuntimeContext {
-    pub fn new(
-        functions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
-    ) -> Self {
-        Self {
-            function_definitions: functions,
-        }
+    fn new(functions: std::collections::HashMap<String, runmat_ignition::UserFunction>) -> Self {
+        Self { functions }
     }
 }
 
-/// Set the runtime context for JIT function calls
-/// This should be called before executing JIT-compiled code that calls user functions
-///
-/// # Safety
-/// The context must remain valid for the entire duration of JIT execution.
-/// The caller must ensure the context pointer remains valid.
-pub unsafe fn set_runtime_context(context: &'static RuntimeContext) {
-    RUNTIME_CONTEXT = Some(context);
+thread_local! {
+    static RUNTIME_CONTEXT: Cell<*const RuntimeContext> = Cell::new(std::ptr::null());
 }
 
-/// Clear the runtime context
-///
-/// # Safety  
-/// This must only be called when no JIT-compiled code is running.
-pub unsafe fn clear_runtime_context() {
-    RUNTIME_CONTEXT = None;
+fn set_runtime_context(context: &'static RuntimeContext) {
+    RUNTIME_CONTEXT.with(|cell| cell.set(context as *const RuntimeContext));
 }
 
-/// Runtime function for executing user-defined functions from JIT code
-/// This enables recursive compilation: JIT code can call other user functions
-#[no_mangle]
-pub extern "C" fn runmat_call_user_function(
-    func_name_ptr: *const u8,
-    args_ptr: *const u8,
-    arg_count: i32,
-    result_ptr: *mut u8,
-) -> i32 {
-    if func_name_ptr.is_null() || result_ptr.is_null() {
-        error!("Invalid function name or result pointer");
-        return -1; // Error: Invalid pointers
-    }
+fn clear_runtime_context() {
+    RUNTIME_CONTEXT.with(|cell| cell.set(std::ptr::null()));
+}
 
-    unsafe {
-        // Get runtime context
-        let context = match RUNTIME_CONTEXT {
-            Some(ctx) => ctx,
-            None => {
-                error!("Runtime context not set for user function calls");
-                return -2; // Error: No context
-            }
-        };
-
-        // Convert C string to Rust string (null-terminated UTF-8)
-        // Cast to platform-correct c_char for portability (i8 on macOS/x86_64, u8 on aarch64 Linux)
-        let func_name_cstr = std::ffi::CStr::from_ptr(func_name_ptr as *const std::os::raw::c_char);
-        let func_name = match func_name_cstr.to_str() {
-            Ok(name) => name,
-            Err(_) => {
-                error!("Invalid function name encoding");
-                return -3; // Error: Invalid encoding
-            }
-        };
-
-        // Look up function definition
-        let function_def = match context.function_definitions.get(func_name) {
-            Some(def) => def,
-            None => {
-                error!("Unknown user function: {func_name}");
-                return -4; // Error: Function not found
-            }
-        };
-
-        // Convert arguments from f64 array
-        let args = if arg_count > 0 && !args_ptr.is_null() {
-            let args_slice = std::slice::from_raw_parts(args_ptr as *const f64, arg_count as usize);
-            args_slice
-                .iter()
-                .map(|&f| Value::Num(f))
-                .collect::<Vec<_>>()
+fn get_runtime_context() -> Option<&'static RuntimeContext> {
+    RUNTIME_CONTEXT.with(|cell| {
+        let ptr = cell.get();
+        if ptr.is_null() {
+            None
         } else {
-            Vec::new()
-        };
-
-        // Validate argument count - MATLAB requires exact match unless function uses nargin
-        if args.len() != function_def.params.len() {
-            error!(
-                "JIT RUNTIME: Function {} expects {} arguments, got {} - MATLAB requires exact match",
-                func_name,
-                function_def.params.len(),
-                args.len()
-            );
-            return -5; // Error: Wrong argument count
+            Some(unsafe { &*ptr })
         }
+    })
+}
 
-        debug!(
-            "JIT RUNTIME: Executing function {} with {} arguments",
-            func_name,
-            args.len()
-        );
+fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(pointer_type)); // name_ptr
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // result_ptr
+    sig.returns.push(AbiParam::new(types::I32)); // status
 
-        // Execute function using Ignition interpreter with proper variable isolation
-        match execute_user_function_isolated(function_def, &args, &context.function_definitions) {
-            Ok(result) => {
-                // Write result to result_ptr
-                *(result_ptr as *mut f64) = match result {
-                    Value::Num(n) => n,
-                    _ => {
-                        error!("Function {func_name} returned non-numeric value");
-                        return -6; // Error: Invalid return type
-                    }
-                };
-                0 // Success
-            }
-            Err(e) => {
-                error!("Error executing function {func_name}: {e}");
-                -7 // Error: Execution failed
-            }
-        }
-    }
+    module
+        .declare_function("runmat_call_user_function", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_call_user_function")
 }
 
 /// Execute a user-defined function with access to global variables using Ignition interpreter
@@ -679,19 +136,16 @@ fn execute_user_function_isolated(
         var_types: func_var_types,
     };
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
-        .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
+        .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = match block_on(runmat_ignition::interpret_with_vars(
+    let func_result_vars = match run_immediate(runmat_ignition::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
-    )) {
+    ))? {
         Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
 
-        Err(e) => Err(TurbineError::ExecutionError(format!(
-            "Failed to execute function: {}",
-            e.to_string()
-        ))),
+        Err(e) => Err(TurbineError::ExecutionError(e)),
     }?;
 
     // Copy back the modified variables
@@ -705,7 +159,7 @@ fn execute_user_function_isolated(
         if local_output_index < func_vars.len() {
             Ok(func_vars[local_output_index].clone())
         } else {
-            Err(TurbineError::ExecutionError(format!(
+            Err(execution_error(format!(
                 "Output variable index {local_output_index} out of bounds"
             )))
         }
@@ -756,13 +210,17 @@ pub enum TurbineError {
     JitUnavailable(String),
 
     #[error("Execution error: {0}")]
-    ExecutionError(String),
+    ExecutionError(RuntimeError),
 
     #[error("Invalid function pointer")]
     InvalidFunctionPointer,
 }
 
 pub type Result<T> = std::result::Result<T, TurbineError>;
+
+pub(crate) fn execution_error(message: impl Into<String>) -> TurbineError {
+    TurbineError::ExecutionError(build_runtime_error(message).build())
+}
 
 impl TurbineEngine {
     /// Create a new Turbine JIT engine with proper cross-platform support
@@ -980,9 +438,7 @@ impl TurbineEngine {
                 Value::Bool(b) => f64_vars.push(if *b { 1.0 } else { 0.0 }),
                 _ => {
                     error!("Unsupported value type for JIT execution: {value:?}");
-                    return Err(TurbineError::ExecutionError(
-                        "Unsupported value type".to_string(),
-                    ));
+                    return Err(execution_error("Unsupported value type"));
                 }
             }
         }
@@ -1069,10 +525,10 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match block_on(runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>"))) {
+        match run_immediate(runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")))? {
             Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
 
-            Err(e) => Err(TurbineError::ExecutionError(e.to_string())),
+            Err(e) => Err(TurbineError::ExecutionError(e)),
         }
     }
 
@@ -1290,6 +746,80 @@ unsafe impl Sync for CompiledFunction {}
 
 /// Runtime function implementations for JIT-compiled code
 /// These functions provide the bridge between JIT-compiled code and the RunMat runtime
+#[no_mangle]
+pub extern "C" fn runmat_call_user_function(
+    name_ptr: *const u8,
+    args_ptr: *const f64,
+    args_len: i32,
+    result_ptr: *mut f64,
+) -> i32 {
+    if name_ptr.is_null() || result_ptr.is_null() {
+        error!("Null pointer passed to runmat_call_user_function");
+        return 1;
+    }
+
+    let name = unsafe { CStr::from_ptr(name_ptr as *const i8) }
+        .to_string_lossy()
+        .to_string();
+
+    let args_slice = if args_len > 0 {
+        if args_ptr.is_null() {
+            error!("Null args pointer passed to runmat_call_user_function");
+            return 1;
+        }
+        unsafe { std::slice::from_raw_parts(args_ptr, args_len as usize) }
+    } else {
+        &[]
+    };
+
+    let context = match get_runtime_context() {
+        Some(ctx) => ctx,
+        None => {
+            error!("No runtime context available for user function call");
+            return 1;
+        }
+    };
+
+    let function_def = match context.functions.get(&name) {
+        Some(def) => def,
+        None => {
+            error!("Unknown user function requested: {name}");
+            return 1;
+        }
+    };
+
+    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
+    let output = match execute_user_function_isolated(function_def, &args, &context.functions) {
+        Ok(result) => result,
+        Err(err) => {
+            error!("User function execution failed: {err}");
+            return 1;
+        }
+    };
+
+    let output_value = match output {
+        Value::Num(val) => val,
+        Value::Int(val) => val.to_f64(),
+        Value::Bool(val) => {
+            if val {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        _ => {
+            error!("User function returned unsupported value: {output:?}");
+            return 1;
+        }
+    };
+
+    unsafe {
+        *result_ptr = output_value;
+    }
+
+    0
+}
+
 /// Runtime builtin dispatcher for f64-returning functions
 ///
 /// # Arguments

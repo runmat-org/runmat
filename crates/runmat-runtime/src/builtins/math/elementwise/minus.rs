@@ -768,7 +768,6 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::RuntimeError;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor};

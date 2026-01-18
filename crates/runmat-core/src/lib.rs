@@ -10,13 +10,13 @@ pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
-use runmat_turbine::TurbineEngine;
+use runmat_turbine::{TurbineEngine, TurbineError};
 use std::collections::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
@@ -373,7 +373,7 @@ pub struct ExecutionResult {
     pub value: Option<Value>,
     pub execution_time_ms: u64,
     pub used_jit: bool,
-    pub error: Option<String>,
+    pub error: Option<RuntimeError>,
     /// Type information displayed when output is suppressed by semicolon
     pub type_info: Option<String>,
     /// Ordered console output (stdout/stderr) captured during execution.
@@ -1220,7 +1220,11 @@ impl RunMatSession {
 
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
-                    error = Some(format!("Execution failed: {e}"));
+                    let runtime_error = match e {
+                        TurbineError::ExecutionError(err) => err,
+                        other => build_runtime_error(format!("Execution failed: {other}")).build(),
+                    };
+                    error = Some(runtime_error);
                 }
             }
         }
@@ -1847,12 +1851,13 @@ fn gather_profiling(execution_time_ms: u64) -> Option<ExecutionProfiling> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn captures_basic_workspace_assignments() {
         let mut session =
             RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-        let result = session.execute("x = 42;").expect("exec succeeds");
+        let result = block_on(session.execute("x = 42;")).expect("exec succeeds");
         assert!(
             result
                 .workspace

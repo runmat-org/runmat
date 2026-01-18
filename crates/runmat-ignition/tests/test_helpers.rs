@@ -1,11 +1,13 @@
 use futures::executor::block_on;
 use runmat_builtins::Value;
 use runmat_hir::HirProgram;
+use runmat_runtime::RuntimeError;
 
-pub fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
+pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     block_on(runmat_ignition::execute(program))
 }
 
-pub fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, String> {
+#[allow(dead_code)]
+pub fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(runmat_ignition::interpret(bytecode))
 }

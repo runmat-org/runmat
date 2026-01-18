@@ -603,7 +603,7 @@ pub(crate) mod tests {
     fn randperm_errors_when_k_exceeds_n() {
         let args = vec![Value::from(3), Value::from(4)];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("K must satisfy 0 <= K <= N"));
+        assert!(err.message().contains("K must satisfy 0 <= K <= N"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -611,7 +611,7 @@ pub(crate) mod tests {
     fn randperm_errors_for_negative_input() {
         let args = vec![Value::Num(-1.0)];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("N must be a non-negative integer"));
+        assert!(err.message().contains("N must be a non-negative integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -619,7 +619,7 @@ pub(crate) mod tests {
     fn randperm_rejects_single_precision_request() {
         let args = vec![Value::from(5), Value::from("single")];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("single precision"));
+        assert!(err.message().contains("single precision"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -688,7 +688,7 @@ pub(crate) mod tests {
     fn randperm_like_requires_prototype() {
         let args = vec![Value::from(4), Value::from("like")];
         let err = randperm_builtin(args).unwrap_err();
-        assert!(err.contains("prototype after 'like'"));
+        assert!(err.message().contains("prototype after 'like'"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

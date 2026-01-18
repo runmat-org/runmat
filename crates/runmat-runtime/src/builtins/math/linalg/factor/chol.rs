@@ -616,6 +616,8 @@ impl RowMajorMatrix {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::{LogicalArray, Tensor as Matrix};
+
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
     }

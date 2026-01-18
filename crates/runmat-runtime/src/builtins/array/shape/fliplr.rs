@@ -1,6 +1,6 @@
 //! MATLAB-compatible `fliplr` builtin with GPU-aware semantics for RunMat.
 
-use super::flip::{
+use crate::builtins::array::shape::flip::{
     complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
     flip_logical_array_with, flip_string_array_with, flip_tensor_with,
 };
@@ -300,6 +300,7 @@ fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};

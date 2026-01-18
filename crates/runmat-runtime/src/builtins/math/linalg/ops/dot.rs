@@ -543,6 +543,7 @@ fn promote_result_to_gpu(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

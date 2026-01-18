@@ -404,6 +404,7 @@ pub fn rank_host_real_for_provider(matrix: &Tensor, tol: Option<f64>) -> Builtin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

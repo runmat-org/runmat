@@ -1022,7 +1022,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(a), Value::Tensor(b)],
         )
         .unwrap_err();
-        assert!(err.contains("dimension 1"));
+        assert!(err.message().contains("dimension 1"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1135,7 +1135,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert!(err.contains("logical"));
+        assert!(err.message().contains("logical"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

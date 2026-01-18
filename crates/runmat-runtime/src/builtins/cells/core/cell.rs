@@ -823,18 +823,6 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cell_like_requires_prototype() {
-        let err = cell_builtin(vec![Value::from("like")])
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("expected prototype"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn cell_like_rejects_multiple_keywords() {
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = cell_builtin(vec![

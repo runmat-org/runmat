@@ -1063,6 +1063,7 @@ fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
 pub(crate) mod tests {
     use super::*;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{CharArray, StructValue};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

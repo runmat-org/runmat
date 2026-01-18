@@ -83,8 +83,6 @@ fn broadcast_row_assign() {
     }
 }
 
-use runmat_builtins::Value;
-
 #[test]
 fn assign_scalar_element() {
     let ast = parse("A=[1,2;3,4]; A(2,1)=42; B=A").unwrap();

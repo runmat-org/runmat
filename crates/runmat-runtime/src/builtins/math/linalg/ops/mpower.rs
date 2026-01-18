@@ -456,6 +456,7 @@ impl HandleState {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, Tensor};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

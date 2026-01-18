@@ -692,7 +692,7 @@ pub(crate) mod tests {
     fn colon_zero_increment_errors() {
         let err = colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)])
             .expect_err("colon should error");
-        assert!(err.contains("increment must be nonzero"));
+        assert!(err.message().contains("increment must be nonzero"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -857,7 +857,7 @@ pub(crate) mod tests {
         let err = colon_builtin(Value::Complex(1.0, 1e-2), Value::Num(2.0), Vec::new())
             .expect_err("colon should reject complex inputs");
         assert!(
-            err.contains("zero imaginary part"),
+            err.message().contains("zero imaginary part"),
             "unexpected error message: {err}"
         );
     }
@@ -868,7 +868,7 @@ pub(crate) mod tests {
         let err = colon_builtin(Value::from("hello"), Value::Num(2.0), Vec::new())
             .expect_err("colon should reject string inputs");
         assert!(
-            err.contains("string-like"),
+            err.message().contains("string-like"),
             "unexpected error message: {err}"
         );
     }
@@ -898,7 +898,7 @@ pub(crate) mod tests {
         let err = colon_builtin(start, Value::Num(1.5), vec![stop])
             .expect_err("colon should reject fractional char steps");
         assert!(
-            err.contains("character sequence requires integer"),
+            err.message().contains("character sequence requires integer"),
             "unexpected error message: {err}"
         );
     }

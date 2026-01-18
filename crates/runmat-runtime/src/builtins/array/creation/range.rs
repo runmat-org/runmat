@@ -933,7 +933,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = range_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)])
             .expect_err("expected dimension error");
-        assert!(err.contains("integer"));
+        assert!(err.message().contains("integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

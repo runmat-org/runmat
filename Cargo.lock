@@ -6165,6 +6165,7 @@ name = "runmat-gc"
 version = "0.2.8"
 dependencies = [
  "criterion",
+ "futures",
  "log",
  "num-traits",
  "num_cpus",
@@ -6307,6 +6308,7 @@ dependencies = [
  "inventory",
  "proc-macro2",
  "quote",
+ "runmat-async",
  "runmat-builtins",
  "syn 1.0.109",
  "trybuild",

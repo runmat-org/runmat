@@ -1,6 +1,5 @@
 mod test_helpers;
 
-use runmat_builtins::Value;
 use runmat_hir::lower;
 use runmat_parser::parse;
 use test_helpers::{execute, interpret};
@@ -49,7 +48,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir = lower(&parse(program).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
 
     // too many inputs
     let program2 = r#"
@@ -60,7 +59,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir2 = lower(&parse(program2).unwrap()).unwrap();
     let err2 = execute(&hir2).err().unwrap();
-    assert!(err2.contains("MATLAB:TooManyInputs"));
+    assert_eq!(err2.identifier(), Some("MATLAB:TooManyInputs"));
 }
 
 #[test]
@@ -74,7 +73,7 @@ fn inputs_with_varargin_minimum_only() {
     "#;
     let hir_e = lower(&parse(program_err).unwrap()).unwrap();
     let err = execute(&hir_e).err().unwrap();
-    assert!(err.contains("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
 
     let program_ok = r#"
         function y = f(a,b,varargin)
@@ -102,7 +101,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_tmo = lower(&parse(program_tmo).unwrap()).unwrap();
     let err_tmo = execute(&hir_tmo).err().unwrap();
-    assert!(err_tmo.contains("MATLAB:TooManyOutputs"));
+    assert_eq!(err_tmo.identifier(), Some("MATLAB:TooManyOutputs"));
 
     // Varargout requested more than provided
     let program_mis = r#"
@@ -113,7 +112,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_mis = lower(&parse(program_mis).unwrap()).unwrap();
     let err_mis = execute(&hir_mis).err().unwrap();
-    assert!(err_mis.contains("MATLAB:VarargoutMismatch"));
+    assert_eq!(err_mis.identifier(), Some("MATLAB:VarargoutMismatch"));
 }
 #[allow(dead_code)]
 fn function_definition_and_calls() {

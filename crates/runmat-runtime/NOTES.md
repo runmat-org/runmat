@@ -1,11 +1,11 @@
 Interpreter error semantics and MException
 ----------------------------------------
 
-- Builtins return `Result<Value, String>`. The interpreter (VM) converts error strings into `MException` when inside try/catch.
-- Format for identifiers: prefer `Category:Identifier: message`, but VM uses the last `:` to split into `identifier` and `message`.
+- Builtins return `Result<Value, RuntimeError>`. The interpreter (VM) converts `RuntimeError` into `MException` when inside try/catch.
+- Identifiers live on `RuntimeError.identifier`; `parse_exception` only splits strings when identifiers are missing.
 - Catch binding: `catch e` stores `Value::MException { identifier, message, stack }` in the bound variable.
-- `rethrow(e)` accepts either `MException` (preferred) or strings (legacy) and converts back to string error for upstream propagation.
-- Next work: change builtins to surface richer identifiers; optionally change builtin signatures to produce `MException` directly when we tackle full runtime overhaul.
+- `rethrow(e)` preserves identifier/message for `MException` values and wraps legacy strings into `RuntimeError`.
+- Next work: enrich `RuntimeError.context` with call stacks/spans for deeper diagnostics.
 
 Closures and feval
 ------------------

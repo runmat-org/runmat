@@ -630,6 +630,7 @@ impl From<ProviderCondNorm> for CondNorm {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::IntValue;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

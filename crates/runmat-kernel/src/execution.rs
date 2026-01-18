@@ -136,28 +136,24 @@ impl ExecutionEngine {
             Ok(repl_result) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
-                if let Some(error_msg) = repl_result.error {
-                    // Determine error type based on error message content
-                    let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
-                        "ParseError"
-                    } else if error_msg.contains("undefined") || error_msg.contains("variable") {
-                        "RuntimeError"
-                    } else if error_msg.contains("lower") || error_msg.contains("HIR") {
-                        "CompileError"
+                if let Some(error) = repl_result.error {
+                    let error_message = error.format_diagnostic();
+                    let traceback = if error.context.call_stack.is_empty() {
+                        vec!["Error during code execution".to_string()]
                     } else {
-                        "ExecutionError"
+                        error.context.call_stack.clone()
                     };
 
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Error,
                         stdout: self.capture_stdout(),
-                        stderr: self.capture_stderr(&error_msg),
+                        stderr: self.capture_stderr(&error_message),
                         result: None,
                         execution_time_ms,
                         error: Some(ExecutionError {
-                            error_type: error_type.to_string(),
-                            message: error_msg,
-                            traceback: vec!["Error during code execution".to_string()],
+                            error_type: "RuntimeError".to_string(),
+                            message: error_message,
+                            traceback,
                         }),
                     })
                 } else {

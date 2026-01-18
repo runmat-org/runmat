@@ -25,7 +25,7 @@ fn test_assignment_with_semicolon() {
     // Assignment without semicolon should return the assigned value
     let result = block_on(engine.execute("x = 42")).unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.as_ref()).unwrap().to_string(), "42");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "42");
     let stdout = collect_stdout_texts(&result);
     assert_eq!(stdout, vec!["x = 42"]);
 
@@ -171,7 +171,7 @@ fn test_type_info_display() {
     // Test that assignments without semicolon still show values, not type info
     let result = block_on(engine.execute("a = 100")).unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.as_ref()).unwrap().to_string(), "100");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "100");
     assert_eq!(result.type_info, None);
     let stdout = collect_stdout_texts(&result);
     assert_eq!(stdout, vec!["a = 100"]);

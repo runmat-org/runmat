@@ -571,7 +571,7 @@ pub(crate) mod tests {
     fn linspace_non_integer_count_errors() {
         let err = linspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(3.5)])
             .expect_err("expected error");
-        assert!(err.contains("integer"));
+        assert!(err.message().contains("integer"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -583,7 +583,7 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(-2))],
         )
         .expect_err("expected error");
-        assert!(err.contains(">= 0"));
+        assert!(err.message().contains(">= 0"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -595,7 +595,7 @@ pub(crate) mod tests {
             vec![Value::Num(f64::INFINITY)],
         )
         .expect_err("expected error");
-        assert!(err.contains("finite"));
+        assert!(err.message().contains("finite"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -603,7 +603,7 @@ pub(crate) mod tests {
     fn linspace_nan_count_errors() {
         let err = linspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(f64::NAN)])
             .expect_err("expected error");
-        assert!(err.contains("finite"));
+        assert!(err.message().contains("finite"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -612,7 +612,7 @@ pub(crate) mod tests {
         let sz = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let err = linspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Tensor(sz)])
             .expect_err("expected error");
-        assert!(err.contains("scalar"));
+        assert!(err.message().contains("scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

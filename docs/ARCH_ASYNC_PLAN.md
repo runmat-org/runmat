@@ -7,123 +7,65 @@ This is the **working plan** for implementing the async/futures architecture des
 
 ### Guiding principles
 
-- Prefer **typed control-flow** over sentinel strings.
-- Prefer **waker-driven** waiting over polling loops.
+- Prefer **typed errors** over sentinel strings.
+- Use **async/await** instead of control‑flow enums.
 - Keep crates layered: no Tokio/JS deps leaking into VM/runtime crates.
-- Keep MATLAB-compat “sync code” fast.
-- Builtins remain **language-synchronous**; concurrency is explicit via tasks + `await`.
+- Keep MATLAB‑compat “sync code” fast.
+- Builtins remain **language‑synchronous**; concurrency is explicit via tasks + `await`.
 
 ---
 
 ## Current status snapshot
 
-### Transitional mechanism (temporary)
+### Finalized baseline
 
-**As of `feat-async` (compile-green):**
-
-- Evaluation is now **poll-driven** via `ExecuteFuture` (Phase 2 directionally complete).
-- The legacy **string sentinel** suspension mechanism is removed; suspension is represented as
-  **typed control-flow** (`runmat_async::RuntimeControlFlow::Suspend(PendingInteraction)`).
-- WASM no longer requires any host “resume loops” for stdin; input is **Promise-driven** via
-  `setInputHandler` + typed UI responses.
-- WebGPU readback waiting is **waker-driven** (no polling loop), via a GPU map/readback waker hook.
-
-Remaining transitional glue is limited to a small set of legacy `Result<_, String>` call stacks
-where typed control-flow may still need to bubble through string-returning helpers; this surface is
-being retired incrementally as helpers/builtins are migrated to `BuiltinResult<T>`.
-
-### Target end state
-
-- `RunMatSession::execute_async` returns a `Future`/`Promise` backed by `ExecuteFuture`.
-- VM yields via `Poll::Pending` at await points, not via error strings.
-- Host runtime drives execution through an executor adapter.
+- Execution is **async end‑to‑end** (`RunMatSession::execute` and ignition VM are async).
+- Builtins return `Result<T, RuntimeError>` with structured diagnostics.
+- `RuntimeControlFlow`, pending frames, and resume loops are removed.
+- WASM input handlers are Promise‑backed and return typed responses.
+- GPU map/readback currently returns a **runtime error** when pending; future awaitables are
+  planned to remove this limitation.
 
 ---
 
 ## Work breakdown (phases)
 
-### Phase 0: doc + alignment (done when design is accepted)
+### Phase 1: async execution + typed errors (done)
 
-- Ensure `ARCH_ASYNC.md` is correct and agreed upon.
-- Decide if we will introduce `runmat-async` as a new crate and merge `runmat-control-flow` into it.
+**Goal**: remove sentinel control flow and move to async + `RuntimeError`.
 
 **Exit criteria**
-- Design sign-off.
+- Interpreter is async.
+- Builtins return `RuntimeError` directly.
+- No control‑flow enum or resume loops remain.
 
 ---
 
-### Phase 1: introduce `runmat-async` crate and typed control-flow (no language syntax yet)
+### Phase 2: internal awaitables (GPU readback)
 
-**Goal**: establish the shared async substrate and eliminate stringly-typed suspension.
+**Goal**: replace the current “pending readback” error with awaitable GPU futures.
 
-- Create crate `runmat-async`
-  - `TaskId`, `TaskHandle`
-  - minimal executor trait (host-neutral)
-  - awaitable wrapper types
-  - deterministic local executor for tests (optional now; required before heavy testing)
-- Move/merge existing `runmat-control-flow` types into `runmat-async` (and delete old crate).
-- Replace any “pending interaction sentinel string” control-flow with typed control-flow:
-  - no `__RUNMAT_PENDING_INTERACTION__` in the final architecture
-  - define a typed `YieldReason` / `PendingRequest` model in `runmat-async`
+- Add `WgpuReadbackFuture` in the accelerate provider.
+- Await map/readback completion inside GPU paths.
 
 **Exit criteria**
-- Core crates compile with `runmat-async`.
-- No “pending as string” used as a control-flow boundary in core runtime execution.
+- WebGPU map/readback no longer returns a “pending” error.
 
 ---
 
-### Phase 2: `ExecuteFuture` (interpreter becomes a Future)
+### Phase 3: external awaitables (stdin/UI)
 
-**Goal**: make evaluation pollable and waker-driven; still no user-facing `async/await` syntax.
+**Goal**: input uses awaitables rather than immediate handler responses when desired.
 
-- Add `RunMatSession::execute_async(...) -> ExecuteFuture`
-  - `ExecuteFuture: Future<Output = Result<ExecutionResult, RunMatError>>`
-  - owns VM state and roots across yields
-- Modify ignition to be driven by poll:
-  - `poll_execute` runs until completion/error/await-pending
-- Build a minimal `LocalExecutor` and `WasmExecutorAdapter`
-  - native: simple single-thread executor for tests and CLI
-  - wasm: adapter that integrates with JS event loop and wakers
+- Add an `InputAwaitable` and host fulfillment path.
+- Preserve synchronous handlers as a fast path.
 
 **Exit criteria**
-- `execute_async` works in native tests and in wasm (via Promise), even if no async ops exist yet.
+- Input can be awaited without blocking the event loop.
 
 ---
 
-### Phase 3: internal awaitables (GPU map/readback first)
-
-**Goal**: convert WebGPU map/readback to internal awaitables (no host polling loops).
-
-- Add `GpuReadbackAwaitable` (or `WgpuMapFuture`) inside accelerate/wgpu provider:
-  - registers waker
-  - wakes on map callback
-  - provides mapped bytes to decode path
-- Update provider download path to return/await this awaitable internally.
-
-**Exit criteria**
-- WebGPU readback no longer uses any host “resume” loop or sentinel strings.
-- The original map_async hang is solved by construction (no event-loop starvation).
-
----
-
-### Phase 4: external awaitables (stdin/UI)
-
-**Goal**: stdin uses awaitables rather than “pending requests” plumbing.
-
-- Implement an `InputAwaitable` (oneshot-like):
-  - created by runtime when input is required
-  - host fulfills it
-  - wake resumes execution
-- Update JS/desktop bindings:
-  - surface external pending awaits to UI
-  - fulfill via a typed response
-
-**Exit criteria**
-- Input no longer uses special “resume” APIs; it’s just completing an awaitable.
-
----
-
-### Phase 5: language-level async/await (FUTURES.md)
+### Phase 4: language‑level async/await
 
 **Goal**: add RunMat language constructs.
 
@@ -134,48 +76,35 @@ being retired incrementally as helpers/builtins are migrated to `BuiltinResult<T
   - `ASYNC_CREATE`, `AWAIT`
 - Value representation:
   - `Value::Task(TaskHandle)` and/or `Value::Awaitable(...)`
-- Standard library async builtins:
-  - `sleep_ms`, async FS primitives, etc. (these return tasks/awaitables explicitly)
 
 **Exit criteria**
 - Minimal async programs run deterministically.
-- Concurrency is created by tasks (`async`/`spawn`) around existing language-synchronous builtins
-  (e.g., `webread`), not by maintaining parallel `*_async` builtin name variants.
 
 ---
 
-### Phase 6: cleanup + removal of transitional code
+### Phase 5: cleanup + removal of transitional code
 
-**Goal**: remove interim hacks introduced during the WebGPU investigation.
-
-- Delete any sentinel string control-flow.
-- Delete JS “internal drain loops” if they exist (executor/wakers should handle it).
-- Remove compatibility shim code that only existed for the transitional design.
+**Goal**: remove any remaining scaffolding and keep only async + `RuntimeError`.
 
 **Exit criteria**
-- No “pending request” transitional protocol remains; all waiting is waker-driven.
+- No legacy control‑flow scaffolding remains.
 
 ---
 
 ## Tracking checklist (update as we go)
 
-- [x] `runmat-async` crate created
-- [x] `runmat-control-flow` merged/deleted
-- [x] typed control-flow replaces sentinel strings
-- [x] `ExecuteFuture` implemented
-- [x] wasm executor adapter implemented (Promise-backed `execute`)
-- [x] internal GPU awaitable implemented (waker-driven WebGPU map/readback)
-- [x] external input awaitable implemented (Promise-driven stdin via `setInputHandler`)
-- [ ] language async/await syntax shipped
-- [ ] transitional code removed
+- [x] async `execute` end‑to‑end
+- [x] builtins return `RuntimeError`
+- [x] control‑flow enum removed
+- [ ] awaitable GPU readback
+- [ ] awaitable stdin
+- [ ] language async/await
 
 ---
 
 ## Open questions (keep updated)
 
 - **Lazy vs eager tasks**: default to lazy? (`async` creates suspended task; `spawn` starts)
-- **Top-level await**: allowed in REPL? in scripts?
-- **GC rooting API**: best representation for cross-await handles
-- **Cancellation semantics**: how to expose and how to integrate with host cancel
-
-
+- **Top‑level await**: allowed in REPL? in scripts?
+- **GC rooting API**: best representation for cross‑await handles
+- **Cancellation semantics**: how to expose and integrate with host cancel

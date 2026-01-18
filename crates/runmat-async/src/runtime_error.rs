@@ -65,6 +65,38 @@ impl RuntimeError {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    pub fn contains(&self, needle: &str) -> bool {
+        self.message.contains(needle)
+    }
+
+    pub fn starts_with(&self, prefix: &str) -> bool {
+        self.message.starts_with(prefix)
+    }
+
+    pub fn format_diagnostic(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!("error: {}", self.message));
+        if let Some(identifier) = self.identifier.as_deref() {
+            lines.push(format!("  = identifier: {identifier}"));
+        }
+        if let Some(builtin) = self.context.builtin.as_deref() {
+            lines.push(format!("  = builtin: {builtin}"));
+        }
+        if let Some(task_id) = self.context.task_id.as_deref() {
+            lines.push(format!("  = task_id: {task_id}"));
+        }
+        if let Some(phase) = self.context.phase.as_deref() {
+            lines.push(format!("  = phase: {phase}"));
+        }
+        if !self.context.call_stack.is_empty() {
+            lines.push(format!(
+                "  = call stack: {}",
+                self.context.call_stack.join(" -> ")
+            ));
+        }
+        lines.join("\n")
+    }
 }
 
 impl From<String> for RuntimeError {

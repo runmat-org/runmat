@@ -1182,6 +1182,7 @@ impl RowCharKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RowStringKey(Vec<String>);
 
+#[derive(Debug)]
 pub struct SetdiffEvaluation {
     values: Value,
     ia: Tensor,

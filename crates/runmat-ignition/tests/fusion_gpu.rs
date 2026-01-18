@@ -19,18 +19,18 @@ use runmat_ignition::{compile, interpret as interpret_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
+use runmat_runtime::{gather_if_needed, RuntimeError};
 
-fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, String> {
+fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_async(bytecode))
 }
 
 fn interpret_function(
     bytecode: &runmat_ignition::Bytecode,
     vars: Vec<Value>,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_function_async(bytecode, vars))
 }
-use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

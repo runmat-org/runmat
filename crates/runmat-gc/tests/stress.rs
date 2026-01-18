@@ -106,6 +106,7 @@ fn test_nested_cell_stress() {
 #[test]
 fn test_gc_with_interpreter_integration() {
     // Test GC under interpreter load
+    use futures::executor::block_on;
     use runmat_hir::lower;
     use runmat_ignition::execute;
     use runmat_parser::parse;
@@ -125,7 +126,7 @@ fn test_gc_with_interpreter_integration() {
     for run in 0..50 {
         let ast = parse(program).expect("parsing should succeed");
         let hir = lower(&ast).expect("lowering should succeed");
-        let vars = execute(&hir).expect("execution should succeed");
+        let vars = block_on(execute(&hir)).expect("execution should succeed");
 
         // Verify the result is consistent
         let result: f64 = (&vars[0]).try_into().expect("result should be a number");

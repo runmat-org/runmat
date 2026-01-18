@@ -1103,7 +1103,7 @@ async fn process_repl_line(
         Ok(result) => {
             emit_execution_streams(&result.streams);
             if let Some(error) = result.error {
-                eprintln!("Error: {error}");
+                eprintln!("{}", error.format_diagnostic());
             } else if result.value.is_some()
                 && config.runtime.verbose
                 && result.execution_time_ms > 10
@@ -1306,7 +1306,7 @@ async fn execute_script_with_args(
     let execution_time = start_time.elapsed();
 
     let provider_snapshot = capture_provider_snapshot();
-    let error_payload = result.error.clone();
+    let error_payload = result.error.as_ref().map(|err| err.format_diagnostic());
     let success = error_payload.is_none();
     emit_runtime_value(RuntimeTelemetryRecord {
         kind: TelemetryRunKind::Script,
@@ -1591,7 +1591,7 @@ async fn execute_benchmark(
         let result = engine.execute(&content).await?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result.error.clone() {
+        if let Some(error) = result.error.as_ref().map(|err| err.format_diagnostic()) {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,

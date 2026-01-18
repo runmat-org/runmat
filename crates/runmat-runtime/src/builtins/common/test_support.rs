@@ -1,5 +1,7 @@
 use runmat_builtins::{LogicalArray, Tensor, Value};
 
+use crate::build_runtime_error;
+
 /// Extract MATLAB code blocks from builtin documentation.
 pub fn doc_examples(doc: &str) -> Vec<String> {
     let mut blocks = Vec::new();
@@ -44,7 +46,7 @@ where
 }
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
-pub fn gather(value: Value) -> Result<Tensor, String> {
+pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     // Ensure the correct provider is active for GPU handles created by the WGPU backend.
     #[cfg(feature = "wgpu")]
     {
@@ -58,14 +60,16 @@ pub fn gather(value: Value) -> Result<Tensor, String> {
     }
     match crate::dispatcher::gather_if_needed(&value)? {
         Value::Tensor(t) => Ok(t),
-        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build()),
         Value::LogicalArray(LogicalArray { data, shape }) => {
             let dense: Vec<f64> = data
                 .iter()
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
-            Tensor::new(dense, shape.clone()).map_err(|e| format!("gather: {e}"))
+            Tensor::new(dense, shape.clone())
+                .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
-        other => Err(format!("gather: unsupported value {other:?}")),
+        other => Err(build_runtime_error(format!("gather: unsupported value {other:?}")).build()),
     }
 }
