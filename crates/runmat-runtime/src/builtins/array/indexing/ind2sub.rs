@@ -425,7 +425,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn recovers_matrix_indices() {
+    fn recovers_tensor_indices() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
         let result = ind2sub_builtin(Value::Tensor(dims), Value::Num(8.0)).unwrap();
         match result {
@@ -503,7 +503,8 @@ pub(crate) mod tests {
         let err =
             ind2sub_builtin(Value::Tensor(dims), Value::Num(13.0)).expect_err("expected failure");
         assert!(
-            err.to_string().contains("Linear indices must be positive integers"),
+            err.message()
+                .contains("Index exceeds number of array elements"),
             "unexpected error: {err}"
         );
 

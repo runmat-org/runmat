@@ -3088,7 +3088,7 @@ async fn run_interpreter(
                                     &[
                                         Value::Object(obj),
                                         Value::String("subsref".to_string()),
-                                        Value::String("{}".to_string()),
+                                        Value::String("()".to_string()),
                                         Value::Cell(cell),
                                     ],
                                 ) {
@@ -5562,7 +5562,7 @@ async fn run_interpreter(
                     other => {
                         let result = match runmat_runtime::perform_indexing(&other, &indices) {
                             Ok(v) => v,
-                            Err(e) => vm_bail!(e.to_string()),
+                            Err(e) => vm_bail!(e),
                         };
                         stack.push(result);
                     }
@@ -9212,13 +9212,14 @@ async fn run_interpreter(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
+                                Value::String("()".to_string()),
                                 cell,
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
+                            Err(e) => vm_bail!(e),
                         }
+
                     }
                     Value::Cell(ca) => match indices.len() {
                         1 => {

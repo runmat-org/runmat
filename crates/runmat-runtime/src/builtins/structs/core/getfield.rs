@@ -462,7 +462,7 @@ fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value>
                 .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
             let scratch = Value::Tensor(tensor);
             let indexed = perform_indexing(&scratch, &resolved_f64)
-                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+                .map_err(|err| remap_getfield_flow(err, Some("getfield: ")))?;
             match indexed {
                 Value::Num(n) => Ok(Value::Bool(n != 0.0)),
                 Value::Tensor(t) => {
@@ -485,7 +485,7 @@ fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value>
         | Value::Cell(_)
         | Value::Num(_)
         | Value::Int(_) => perform_indexing(&value, &resolved_f64)
-            .map_err(|e| getfield_flow(format!("getfield: {e}"))),
+            .map_err(|err| remap_getfield_flow(err, Some("getfield: "))),
         Value::Bool(_) => {
             if resolved.len() == 1 && resolved[0] == 1 {
                 Ok(value)
