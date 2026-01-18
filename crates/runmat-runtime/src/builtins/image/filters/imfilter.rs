@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg_attr(
     feature = "doc_export",
@@ -201,11 +201,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const IMFILTER_BUILTIN: &str = "imfilter";
 
-fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(builtin)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -760,7 +759,6 @@ fn reflect_index(coord: isize, len: isize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::{Tensor, Value};
 
 
@@ -768,11 +766,8 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
     }
 
-    fn error_message(err: RuntimeControlFlow) -> String {
-        match err {
-            RuntimeControlFlow::Error(error) => error.message().to_string(),
-            other => panic!("unexpected runtime control flow: {other:?}"),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -35,7 +35,7 @@ use super::point::{
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -157,7 +157,7 @@ pub fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
                         figure.add_scatter_plot_on_axes(plot, axes);
                         return Ok(());
                     }
-                    Err(RuntimeControlFlow::Error(err)) => {
+                    Err(err) => {
                         warn!("scatter GPU path unavailable: {err}");
                     }
                 }
@@ -211,7 +211,7 @@ fn build_scatter_plot(
 
 const DEFAULT_MARKER_SIZE: f32 = 10.0;
 
-fn scatter_err(message: impl Into<String>) -> RuntimeControlFlow {
+fn scatter_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
 }
 
@@ -641,6 +641,7 @@ pub(crate) mod tests {
     };
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
@@ -679,16 +680,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                let lower = err.to_string().to_lowercase();
-                assert!(
-                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-                    "unexpected error: {err}"
-                );
-            }
-        }
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -775,11 +772,7 @@ pub(crate) mod tests {
         ];
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
         let err = resolve_scatter_style(2, &args, "scatter").unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.to_string().contains("requires per-point color data"));
-            }
-        }
+        assert!(err.to_string().contains("requires per-point color data"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

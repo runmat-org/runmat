@@ -7,7 +7,7 @@ use std::path::Path;
 use runmat_builtins::{CharArray, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -208,12 +208,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "tempdir";
 
-fn tempdir_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn tempdir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -259,15 +257,9 @@ fn ends_with_separator(text: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -340,7 +332,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempdir_errors_when_arguments_provided() {
-        let err = unwrap_error(tempdir_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        let err = tempdir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
     }
 

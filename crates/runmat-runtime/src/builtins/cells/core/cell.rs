@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -255,19 +255,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const IDENT_INVALID_INPUT: &str = "MATLAB:cell:InvalidInput";
 const IDENT_INVALID_SIZE: &str = "MATLAB:cell:InvalidSize";
 
-fn cell_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn cell_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cell")
         .build()
-        .into()
 }
 
-fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cell")
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(

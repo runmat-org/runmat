@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
@@ -194,11 +194,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Companion matrix eigenvalue solve executes on the host; providers currently fall back to the CPU implementation.",
 };
 
-fn roots_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn roots_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::roots")]
@@ -425,21 +424,15 @@ fn empty_column() -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
 
-    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => assert!(
-                err.message().contains(needle),
-                "expected error containing '{needle}', got '{}'",
-                err.message()
-            ),
-            other => {
-                panic!("unexpected runtime control flow in roots tests: {other:?}");
-            }
-        }
+    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "expected error containing '{needle}', got '{}'",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

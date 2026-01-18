@@ -31,7 +31,6 @@ fn interpret_function(
     block_on(interpret_function_async(bytecode, vars))
 }
 use runmat_runtime::gather_if_needed;
-use runmat_runtime::RuntimeControlFlow;
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -173,15 +172,9 @@ impl AccelProvider for TestProvider {
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        let spec =
-            test_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
-                RuntimeControlFlow::Error(error) => anyhow!(error),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            })?;
-        let tensor = spec.generate_tensor().map_err(|err| match err {
-            RuntimeControlFlow::Error(error) => anyhow!(error),
-            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-        })?;
+        let spec = test_fspecial_spec_from_request(&request.filter)
+            .map_err(|error| anyhow!(error))?;
+        let tensor = spec.generate_tensor().map_err(|error| anyhow!(error))?;
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
 
@@ -504,28 +497,12 @@ impl AccelProvider for TestProvider {
         let (data, shape) = self.pull(handle)?;
         let tensor =
             Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
-        let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+        let eval = runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
             tensor, options,
-        ) {
-            Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => {
-                        anyhow!("unique (test provider): {err}")
-                    }
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
-            }
-        };
-        match eval.into_numeric_unique_result() {
-            Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => {
-                    anyhow!("unique (test provider): {err}")
-                }
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
-        }
+        )
+        .map_err(|err| anyhow!("unique (test provider): {err}"))?;
+        eval.into_numeric_unique_result()
+            .map_err(|err| anyhow!("unique (test provider): {err}"))
     }
 
     fn corrcoef(

@@ -5,7 +5,7 @@ use std::cmp::min;
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, make_cell_with_shape, BuiltinResult, RuntimeError};
 use runmat_builtins::{CharArray, IntValue, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -243,15 +243,14 @@ const CELL_ELEMENT_ERROR: &str =
 const SIZE_MISMATCH_ERROR: &str =
     "eraseBetween: boundary sizes must be compatible with the text input";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(FN_NAME)
         .build()
-        .into()
 }
 
-fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, FN_NAME)
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, FN_NAME)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -4,7 +4,7 @@ use runmat_accelerate_api::{CovNormalization, CovRows, CovarianceOptions};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -14,8 +14,8 @@ use crate::builtins::common::tensor;
 
 const NAME: &str = "cov";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[cfg_attr(

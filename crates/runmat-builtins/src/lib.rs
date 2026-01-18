@@ -977,7 +977,7 @@ pub enum AccelTag {
 }
 
 /// Control-flow type for builtins that may suspend or error.
-pub type BuiltinControlFlow = runmat_async::RuntimeControlFlow<runmat_async::RuntimeError>;
+pub type BuiltinControlFlow = runmat_async::RuntimeError;
 
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]

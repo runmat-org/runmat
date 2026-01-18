@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:assertion:failed";
 const DEFAULT_MESSAGE: &str = "Assertion failed.";
@@ -173,32 +173,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin with no fusion support.",
 };
 
-fn assert_flow(identifier: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn assert_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("assert")
         .with_identifier(normalize_identifier(identifier))
         .build()
-        .into()
 }
 
-fn remap_assert_flow<F>(flow: RuntimeControlFlow, identifier: &str, message: F) -> RuntimeControlFlow
+fn remap_assert_flow<F>(err: RuntimeError, identifier: &str, message: F) -> RuntimeError
 where
     F: FnOnce(&crate::RuntimeError) -> String,
 {
-    match flow {
-        RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
-            .with_builtin("assert")
-            .with_identifier(normalize_identifier(identifier))
-            .with_source(err)
-            .build()
-            .into(),
-        _ => RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending")
-                .with_builtin("assert")
-                .with_identifier(normalize_identifier(identifier))
-                .build(),
-        ),
-    }
+    build_runtime_error(message(&err))
+        .with_builtin("assert")
+        .with_identifier(normalize_identifier(identifier))
+        .with_source(err)
+        .build()
 }
 
 #[runtime_builtin(
@@ -464,11 +454,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
 
-    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err,
-            other => panic!("expected error, got {other:?}"),
-        }
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

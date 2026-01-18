@@ -15,7 +15,7 @@ use runmat_thread_local::runmat_thread_local;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Process-wide WGPU context exported by the acceleration provider (if any).
 #[cfg(not(target_arch = "wasm32"))]
@@ -72,8 +72,8 @@ pub fn ensure_context_from_provider() -> BuiltinResult<WgpuContextHandle> {
     }
 }
 
-fn context_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).build().into()
+fn context_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
 }
 
 fn propagate_to_plot_crate(context: &WgpuContextHandle) {

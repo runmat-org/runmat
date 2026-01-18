@@ -234,11 +234,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`ismember` materialises logical outputs and terminates fusion chains; upstream tensors are gathered when necessary.",
 };
 
-fn ismember_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("ismember")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -889,10 +888,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

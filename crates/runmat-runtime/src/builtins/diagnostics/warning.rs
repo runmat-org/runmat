@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::console::{record_console_output, ConsoleStream};
 use crate::warning_store;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use tracing;
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
@@ -195,36 +195,26 @@ where
     func(&mut guard)
 }
 
-fn warning_flow(identifier: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn warning_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("warning")
         .with_identifier(normalize_identifier(identifier))
         .build()
-        .into()
 }
 
-fn warning_default_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn warning_default_error(message: impl Into<String>) -> RuntimeError {
     warning_flow(DEFAULT_IDENTIFIER, message)
 }
 
-fn remap_warning_flow<F>(flow: RuntimeControlFlow, identifier: &str, message: F) -> RuntimeControlFlow
+fn remap_warning_flow<F>(err: RuntimeError, identifier: &str, message: F) -> RuntimeError
 where
     F: FnOnce(&crate::RuntimeError) -> String,
 {
-    match flow {
-        RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
-            .with_builtin("warning")
-            .with_identifier(normalize_identifier(identifier))
-            .with_source(err)
-            .build()
-            .into(),
-        _ => RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending")
-                .with_builtin("warning")
-                .with_identifier(normalize_identifier(identifier))
-                .build(),
-        ),
-    }
+    build_runtime_error(message(&err))
+        .with_builtin("warning")
+        .with_identifier(normalize_identifier(identifier))
+        .with_source(err)
+        .build()
 }
 
 #[runtime_builtin(
@@ -1011,11 +1001,8 @@ pub(crate) mod tests {
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err,
-            other => panic!("expected error, got {other:?}"),
-        }
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
     }
 
     fn reset_manager() {

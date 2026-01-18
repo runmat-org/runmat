@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -215,27 +215,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "dir";
 
-fn dir_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn dir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -600,7 +594,6 @@ fn sort_records(records: &mut [DirRecord]) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
     use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
@@ -647,11 +640,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     fn structs_from_value(value: Value) -> Vec<TestStruct> {
         match value {
@@ -869,7 +857,7 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let err = unwrap_error(dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        let err = dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
     }
 
@@ -880,9 +868,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
-        let err = unwrap_error(
-            dir_builtin(vec![Value::StringArray(array)]).expect_err("expected multi-string error"),
-        );
+        let err = dir_builtin(vec![Value::StringArray(array)])
+            .expect_err("expected multi-string error");
         assert_eq!(err.message(), "dir: name must be a character vector or string scalar");
     }
 
@@ -910,10 +897,8 @@ pub(crate) mod tests {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let err = unwrap_error(
-            dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
-                .expect_err("expected wildcard folder error"),
-        );
+        let err = dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
+            .expect_err("expected wildcard folder error");
         assert_eq!(
             err.message(),
             "dir: folder input must not contain wildcard characters"

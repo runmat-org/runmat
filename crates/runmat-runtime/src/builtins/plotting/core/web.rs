@@ -2,18 +2,18 @@
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use runmat_plot::plots::Figure;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-fn web_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).build().into()
+fn web_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
 }
 
 #[allow(dead_code)]
 fn web_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeControlFlow {
-    build_runtime_error(message).with_source(source).build().into()
+) -> RuntimeError {
+    build_runtime_error(message).with_source(source).build()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

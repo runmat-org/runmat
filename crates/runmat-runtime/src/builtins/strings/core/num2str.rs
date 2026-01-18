@@ -11,20 +11,19 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
-fn num2str_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn num2str_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("num2str")
         .build()
-        .into()
 }
 
-fn remap_num2str_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "num2str")
+fn remap_num2str_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "num2str")
 }
 
 #[cfg_attr(
@@ -985,13 +984,10 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, LogicalArray, Tensor};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

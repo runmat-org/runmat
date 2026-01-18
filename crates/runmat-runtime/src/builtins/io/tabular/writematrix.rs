@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writematrix";
 
@@ -210,14 +210,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before serialisation.",
 };
 
-fn writematrix_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn writematrix_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn writematrix_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+fn writematrix_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -225,23 +224,18 @@ where
         .with_builtin(BUILTIN_NAME)
         .with_source(source)
         .build()
-        .into()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|value| value.to_string());
-            let message = err.message().to_string();
-            let mut builder = build_runtime_error(message)
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]

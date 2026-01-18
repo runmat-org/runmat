@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tan";
 
@@ -230,12 +230,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute tan in place via unary_tan; runtimes gather to host when the hook is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::from(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
@@ -435,10 +433,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
 
-    fn error_message(err: RuntimeControlFlow) -> String {
-        match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

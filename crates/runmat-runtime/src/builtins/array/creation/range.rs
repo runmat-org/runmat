@@ -224,8 +224,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Requires provider min/max reductions plus elem_sub; omitnan and multi-axis reductions gather to host when hooks are absent.",
 };
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("range").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("range").build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]

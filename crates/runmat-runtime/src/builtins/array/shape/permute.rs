@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -204,8 +204,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
 };
 
-fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(builtin).build().into()
+fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(builtin)
+        .build()
 }
 
 #[runtime_builtin(

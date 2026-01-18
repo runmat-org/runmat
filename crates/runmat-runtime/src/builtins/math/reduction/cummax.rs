@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummax";
 
@@ -175,8 +175,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose prefix-max kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
 
-fn cummax_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn cummax_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cummax")]
@@ -983,7 +983,7 @@ pub(crate) mod tests {
             &[Value::from("reverse"), Value::from("forward")],
         );
         match err {
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(err.message().contains("direction specified more than once"));
             }
             Ok(_) => panic!("expected error"),
@@ -998,7 +998,7 @@ pub(crate) mod tests {
             &[Value::from("omitnan"), Value::from("includenan")],
         );
         match err {
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(err
                     .message()
                     .contains("missing-value handling specified more than once"));
@@ -1073,7 +1073,7 @@ pub(crate) mod tests {
         let args = [Value::Int(IntValue::I32(0))];
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected dimension error"),
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(err.message().contains("dimension must be >= 1"));
             }
         }

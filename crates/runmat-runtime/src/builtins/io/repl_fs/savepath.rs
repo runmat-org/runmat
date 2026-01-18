@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::env;
@@ -233,27 +233,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "savepath";
 
-fn savepath_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn savepath_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -523,7 +517,6 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::{current_path_string, set_path_string};
-    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -553,11 +546,6 @@ pub(crate) mod tests {
         previous: Option<String>,
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     impl PathdefEnvGuard {
         fn set(path: &Path) -> Self {
@@ -742,14 +730,14 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let _guard = PathGuard::new();
 
-        let err = unwrap_error(evaluate(&[Value::from(String::new())]).expect_err("expected error"));
+        let err = evaluate(&[Value::from(String::new())]).expect_err("expected error");
         assert_eq!(err.message(), ERROR_EMPTY_FILENAME);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn savepath_rejects_non_string_input() {
-        let err = unwrap_error(savepath_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        let err = savepath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert!(err.message().contains("savepath"));
     }
 
@@ -777,9 +765,7 @@ pub(crate) mod tests {
     fn savepath_rejects_multi_element_string_array() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
             .expect("string array");
-        let err = unwrap_error(
-            extract_filename(&Value::StringArray(array)).expect_err("expected error"),
-        );
+        let err = extract_filename(&Value::StringArray(array)).expect_err("expected error");
         assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
@@ -787,9 +773,7 @@ pub(crate) mod tests {
     #[test]
     fn savepath_rejects_multi_row_char_array() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).expect("char array");
-        let err = unwrap_error(
-            extract_filename(&Value::CharArray(chars)).expect_err("expected error"),
-        );
+        let err = extract_filename(&Value::CharArray(chars)).expect_err("expected error");
         assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
@@ -797,9 +781,7 @@ pub(crate) mod tests {
     #[test]
     fn savepath_rejects_tensor_with_fractional_codes() {
         let tensor = Tensor::new(vec![65.5], vec![1, 1]).expect("tensor");
-        let err = unwrap_error(
-            extract_filename(&Value::Tensor(tensor)).expect_err("expected error"),
-        );
+        let err = extract_filename(&Value::Tensor(tensor)).expect_err("expected error");
         assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 

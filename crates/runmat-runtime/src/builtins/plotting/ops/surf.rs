@@ -22,7 +22,7 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::BuiltinResult;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -158,7 +158,7 @@ pub fn surf_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate::Bu
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("surf GPU path unavailable: {err}");
                 }
             }

@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -355,11 +355,10 @@ fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn strfind_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn strfind_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {

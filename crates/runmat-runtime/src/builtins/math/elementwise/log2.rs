@@ -9,7 +9,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use super::log::{detect_gpu_requires_complex, log_complex_parts};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -229,8 +229,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log2";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -270,11 +272,11 @@ fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log2_tensor(tensor);
             }
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
-            }
-            Err(RuntimeControlFlow::Error(_)) => {
-                // Fall through and gather below if detection fails.
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(err);
+                }
+                // Fall through to host fallback below.
             }
         }
     }
@@ -445,15 +447,10 @@ pub(crate) mod tests {
     #[test]
     fn log2_string_input_errors() {
         let err = log2_builtin(Value::from("hello")).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("log2: expected numeric input"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(
+            err.message().contains("log2: expected numeric input"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -461,15 +458,10 @@ pub(crate) mod tests {
     fn log2_string_array_errors() {
         let array = StringArray::new(vec!["hello".to_string()], vec![1, 1]).unwrap();
         let err = log2_builtin(Value::StringArray(array)).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("log2: expected numeric input"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(
+            err.message().contains("log2: expected numeric input"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

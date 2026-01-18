@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string}, registry};
-use crate::{build_runtime_error, flow_to_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -212,16 +212,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
-fn fclose_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fclose_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    let err = flow_to_error(flow);
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
     let message = err.message().to_string();
     let identifier = err.identifier().map(|value| value.to_string());
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
@@ -230,7 +227,7 @@ fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
     }
-    RuntimeControlFlow::Error(builder.build())
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
@@ -437,7 +434,6 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fopen, registry};
-    use crate::RuntimeControlFlow;
     use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_filesystem as fs;
@@ -449,10 +445,8 @@ pub(crate) mod tests {
 
     static REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn registry_guard() -> MutexGuard<'static, ()> {

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{CellArray, CharArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -191,11 +191,10 @@ enum FieldValue {
     Cell(CellArray),
 }
 
-fn struct_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn struct_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("struct")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -411,14 +410,11 @@ pub(crate) mod tests {
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

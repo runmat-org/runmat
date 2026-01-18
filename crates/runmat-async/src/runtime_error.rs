@@ -3,7 +3,6 @@ use std::error::Error as StdError;
 use miette::SourceSpan;
 use thiserror::Error;
 
-use crate::RuntimeControlFlow;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {
@@ -77,24 +76,6 @@ impl From<String> for RuntimeError {
 impl From<&str> for RuntimeError {
     fn from(value: &str) -> Self {
         RuntimeError::new(value)
-    }
-}
-
-impl From<RuntimeError> for RuntimeControlFlow<RuntimeError> {
-    fn from(value: RuntimeError) -> Self {
-        RuntimeControlFlow::Error(value)
-    }
-}
-
-impl From<String> for RuntimeControlFlow<RuntimeError> {
-    fn from(value: String) -> Self {
-        RuntimeControlFlow::Error(RuntimeError::from(value))
-    }
-}
-
-impl From<&str> for RuntimeControlFlow<RuntimeError> {
-    fn from(value: &str) -> Self {
-        RuntimeControlFlow::Error(RuntimeError::from(value))
     }
 }
 

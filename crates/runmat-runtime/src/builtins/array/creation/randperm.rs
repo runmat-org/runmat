@@ -224,8 +224,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses provider random_permutation(_like) hooks (WGPU implements a native kernel); falls back to host generation + upload when unavailable.",
 };
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("randperm").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("randperm").build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]

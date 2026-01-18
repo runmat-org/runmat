@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     random_args::keyword_of,
@@ -239,11 +239,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "double";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
+}
+
+fn conversion_error(type_name: &str) -> RuntimeError {
+    builtin_error(format!(
+        "double: conversion to double from {type_name} is not possible"
+    ))
 }
 
 #[runtime_builtin(
@@ -334,13 +339,6 @@ fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
     Ok(tensor::tensor_into_value(tensor))
-}
-
-fn conversion_error(type_name: &str) -> RuntimeControlFlow {
-    builtin_error(format!(
-        "double: conversion to double from {} is not possible",
-        type_name
-    ))
 }
 
 #[derive(Clone)]
@@ -534,14 +532,9 @@ pub(crate) mod tests {
     #[test]
     fn double_rejects_strings() {
         let err = double_builtin(Value::String("hello".into()), Vec::new()).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err
-                    .message()
-                    .contains("double: conversion to double from string is not possible"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err
+            .message()
+            .contains("double: conversion to double from string is not possible"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -618,12 +611,7 @@ pub(crate) mod tests {
     fn double_like_missing_prototype_errors() {
         let err =
             double_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected prototype"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("expected prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -634,12 +622,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
         .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("too many input arguments"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

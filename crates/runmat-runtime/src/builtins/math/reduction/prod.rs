@@ -8,7 +8,7 @@ const NAME: &str = "prod";
 
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -206,8 +206,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 
-fn prod_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn prod_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::prod")]
@@ -1108,24 +1108,14 @@ pub(crate) mod tests {
     fn prod_like_without_prototype_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = prod_builtin(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected prototype"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("expected prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_rejects_complex_input() {
         let err = prod_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("complex inputs"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("complex inputs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

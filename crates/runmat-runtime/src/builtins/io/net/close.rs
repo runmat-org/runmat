@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::accept::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
@@ -204,24 +204,16 @@ fn close_error(message_id: &'static str, message: impl Into<String>) -> RuntimeE
         .build()
 }
 
-fn close_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    close_error(message_id, message).into()
+fn close_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    close_error(message_id, message)
 }
 
-fn map_close_flow(
-    flow: RuntimeControlFlow,
-    message_id: &'static str,
-    context: &str,
-) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => build_runtime_error(format!("{context}: {}", err.message()))
-            .with_identifier(message_id)
-            .with_builtin("close")
-            .with_source(err)
-            .build()
-            .into(),
-    }
+fn map_close_flow(err: RuntimeError, message_id: &'static str, context: &str) -> RuntimeError {
+    build_runtime_error(format!("{context}: {}", err.message()))
+        .with_identifier(message_id)
+        .with_builtin("close")
+        .with_source(err)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::close")]
@@ -399,13 +391,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                assert_eq!(err.identifier(), Some(expected));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+    fn assert_error_identifier(err: RuntimeError, expected: &str) {
+        assert_eq!(err.identifier(), Some(expected));
     }
 
     fn server_id(value: &Value) -> u64 {

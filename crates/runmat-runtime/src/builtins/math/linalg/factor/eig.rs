@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
@@ -242,23 +242,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
 };
 
-fn eig_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn eig_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn with_eig_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut error) => {
-            if error.context.builtin.is_none() {
-                error.context = error.context.with_builtin(BUILTIN_NAME);
-            }
-            RuntimeControlFlow::Error(error)
-        }
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+fn with_eig_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
     }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::eig")]
@@ -747,14 +746,8 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
-    use runmat_builtins::{IntValue, Tensor};
-
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn matrix_from_value(value: Value) -> DMatrix<Complex64> {

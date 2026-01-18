@@ -7,7 +7,7 @@ use thiserror::Error;
 
 #[cfg(feature = "plot-core")]
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
@@ -24,15 +24,15 @@ enum PlottingBackendError {
     ImageExport(String),
 }
 
-fn engine_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).build().into()
+fn engine_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
 }
 
 fn engine_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeControlFlow {
-    build_runtime_error(message).with_source(source).build().into()
+) -> RuntimeError {
+    build_runtime_error(message).with_source(source).build()
 }
 
 pub fn render_figure(handle: FigureHandle, figure: Figure) -> BuiltinResult<String> {

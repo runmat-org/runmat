@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -232,12 +232,11 @@ const BUILTIN_NAME: &str = "eq";
 const IDENT_INVALID_INPUT: &str = "MATLAB:eq:InvalidInput";
 const IDENT_SIZE_MISMATCH: &str = "MATLAB:eq:SizeMismatch";
 
-fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeControlFlow {
+fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -606,7 +605,6 @@ fn promote_numeric_to_complex(buffer: &NumericBuffer) -> ComplexBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
@@ -719,13 +717,8 @@ pub(crate) mod tests {
     #[test]
     fn eq_numeric_and_string_error() {
         let err = eq_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("mixing numeric and string inputs"));
-                assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("mixing numeric and string inputs"));
+        assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

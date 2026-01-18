@@ -9,16 +9,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const LABEL: &str = "string.empty";
 
-fn string_empty_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(LABEL).build().into()
+fn string_empty_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(LABEL).build()
 }
 
-fn remap_string_empty_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, LABEL)
+fn remap_string_empty_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, LABEL)
 }
 
 #[cfg_attr(
@@ -366,14 +366,11 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{StringArray, Tensor, Value};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

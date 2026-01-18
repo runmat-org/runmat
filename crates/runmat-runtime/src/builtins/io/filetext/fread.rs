@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -244,29 +244,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that reads from the shared file registry; GPU arguments are gathered to the CPU before I/O.",
 };
 
-fn fread_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fread_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
+
 
 fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
     result.map_err(fread_error)
@@ -1303,17 +1297,15 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_filesystem::{self as fs, File};
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

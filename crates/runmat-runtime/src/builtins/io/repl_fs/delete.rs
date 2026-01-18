@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
 const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
@@ -197,28 +197,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "delete";
 
-fn delete_error(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .with_identifier(message_id)
-            .build(),
-    )
+fn delete_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(message_id)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -552,16 +546,10 @@ fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, Value};
     use std::fs::File;
     use tempfile::tempdir;
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -701,7 +689,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn delete_errors_on_empty_string_argument() {
-        let err = unwrap_error(delete_builtin(vec![Value::from(String::new())]).expect_err("empty string"));
+        let err = delete_builtin(vec![Value::from(String::new())]).expect_err("empty string");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
@@ -710,9 +698,7 @@ pub(crate) mod tests {
     fn delete_errors_on_string_array_empty_element() {
         let array =
             StringArray::new(vec![String::new()], vec![1]).expect("single empty string element");
-        let err = unwrap_error(
-            delete_builtin(vec![Value::StringArray(array)]).expect_err("empty element"),
-        );
+        let err = delete_builtin(vec![Value::StringArray(array)]).expect_err("empty element");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
@@ -721,9 +707,7 @@ pub(crate) mod tests {
     fn delete_errors_on_char_array_blank_row() {
         let data = vec![' '; 4];
         let char_array = CharArray::new(data, 1, 4).expect("char matrix");
-        let err = unwrap_error(
-            delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row"),
-        );
+        let err = delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
     }
 
@@ -731,7 +715,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
-        let err = unwrap_error(delete_target(pattern).expect_err("invalid pattern should error"));
+        let err = delete_target(pattern).expect_err("invalid pattern should error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_PATTERN));
     }
 
@@ -745,7 +729,7 @@ pub(crate) mod tests {
         let temp = tempdir().expect("temp dir");
         let missing = temp.path().join("missing.txt");
         let missing_str = missing.to_string_lossy().to_string();
-        let err = unwrap_error(delete_target(&missing_str).expect_err("error"));
+        let err = delete_target(&missing_str).expect_err("error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_FILE_NOT_FOUND));
     }
 
@@ -760,7 +744,7 @@ pub(crate) mod tests {
         let dir = temp.path().join("dir");
         std::fs::create_dir(&dir).expect("create dir");
         let dir_display = dir.to_string_lossy().to_string();
-        let err = unwrap_error(delete_single_path(&dir, &dir_display).expect_err("error"));
+        let err = delete_single_path(&dir, &dir_display).expect_err("error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_IS_DIRECTORY));
     }
 
@@ -789,13 +773,11 @@ pub(crate) mod tests {
     fn delete_rejects_mixed_handle_and_filename() {
         let handle =
             crate::new_handle_object_builtin("ReplFsDeleteTestHandle".to_string()).expect("handle");
-        let err = unwrap_error(
-            delete_builtin(vec![
-                handle,
-                Value::from("mixed-handle-path.txt".to_string()),
-            ])
-            .expect_err("expected mixed error"),
-        );
+        let err = delete_builtin(vec![
+            handle,
+            Value::from("mixed-handle-path.txt".to_string()),
+        ])
+        .expect_err("expected mixed error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_HANDLE));
     }
 

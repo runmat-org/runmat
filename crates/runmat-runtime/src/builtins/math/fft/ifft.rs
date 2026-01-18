@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -207,8 +207,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ifft";
 
-fn ifft_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn ifft_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
 }
 
 #[runtime_builtin(
@@ -521,13 +521,8 @@ pub(crate) mod tests {
         (a_re - b_re).abs() <= tol && (a_im - b_im).abs() <= tol
     }
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => {
-                panic!("unexpected suspension in ifft tests")
-            }
-        }
+    fn error_message(error: crate::RuntimeError) -> String {
+        error.message().to_string()
     }
 
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {

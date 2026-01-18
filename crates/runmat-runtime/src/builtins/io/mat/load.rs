@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -224,22 +224,20 @@ struct LoadRequest {
 
 const BUILTIN_NAME: &str = "load";
 
-fn load_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn load_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 fn load_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeControlFlow {
+) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(source)
         .build()
-        .into()
 }
 
 pub fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
@@ -425,13 +423,13 @@ pub(crate) fn read_mat_file_for_builtin(
 ) -> crate::BuiltinResult<Vec<(String, Value)>> {
     match read_mat_file(path) {
         Ok(entries) => Ok(entries),
-        Err(RuntimeControlFlow::Error(err)) => {
+        Err(err) => {
             let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
             let mut builder = build_runtime_error(message).with_builtin(builtin);
             if let Some(identifier) = err.identifier() {
                 builder = builder.with_identifier(identifier);
             }
-            Err(builder.with_source(err).build().into())
+            Err(builder.with_source(err).build())
         }
     }
 }
@@ -1003,7 +1001,7 @@ pub(crate) mod tests {
 
     fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
         match result {
-            Err(crate::RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(
                     err.message().contains(snippet),
                     "expected error to contain '{snippet}', got '{}'",

@@ -3,7 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -252,13 +252,14 @@ fn isinf_host(value: Value) -> BuiltinResult<Value> {
             let StringArray { shape, .. } = array;
             logical_zeros(BUILTIN_NAME, shape)
         }
-        _ => Err(build_runtime_error(format!(
-            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
-        ))
-        .with_identifier(IDENTIFIER_INVALID_INPUT)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-        .into()),
+        _ => Err(
+            build_runtime_error(format!(
+                "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
+            ))
+            .with_identifier(IDENTIFIER_INVALID_INPUT)
+            .with_builtin(BUILTIN_NAME)
+            .build(),
+        ),
     }
 }
 
@@ -318,23 +319,21 @@ fn logical_result(name: &str, bits: Vec<u8>, shape: Vec<usize>) -> BuiltinResult
     }
 }
 
-fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeControlFlow {
+fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError {
     internal_error(name, format!("{name}: {err}"))
 }
 
-fn internal_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier(IDENTIFIER_INTERNAL)
         .with_builtin(name)
         .build()
-        .into()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::IntValue;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -489,10 +488,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isinf_rejects_unsupported_types() {
-        let err = unwrap_error(
-            isinf_builtin(Value::FunctionHandle("foo".to_string()))
-                .expect_err("isinf should reject function handles"),
-        );
+        let err = isinf_builtin(Value::FunctionHandle("foo".to_string()))
+            .expect_err("isinf should reject function handles");
         assert!(
             err.message()
                 .contains("expected numeric, logical, char, or string input"),
@@ -575,10 +572,4 @@ pub(crate) mod tests {
         }
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend in isinf tests"),
-        }
-    }
 }

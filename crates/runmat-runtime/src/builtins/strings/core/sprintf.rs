@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -237,12 +237,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting is a residency sink and is not fused; callers should treat sprintf as a CPU-only builtin.",
 };
 
-fn sprintf_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("sprintf").build().into()
+fn sprintf_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("sprintf").build()
 }
 
-fn remap_sprintf_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "sprintf")
+fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "sprintf")
 }
 
 #[runtime_builtin(
@@ -295,13 +295,11 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{builtins::common::test_support, make_cell, RuntimeControlFlow};
+    use crate::{builtins::common::test_support, make_cell};
     use runmat_builtins::{CharArray, IntValue, StringArray, Tensor};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn char_value_to_string(value: Value) -> String {

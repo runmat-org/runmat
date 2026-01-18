@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -181,45 +181,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "filewrite";
 
-fn filewrite_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn filewrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
-fn map_control_flow_with_context(flow: RuntimeControlFlow, context: &str) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{context}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {context}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileEncoding {
@@ -664,42 +653,36 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
     }
 
     let mut file = options.open(path).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!(
-                "filewrite: unable to open '{}': {}",
-                path.display(),
-                err
-            ))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build(),
-        )
+        build_runtime_error(format!(
+            "filewrite: unable to open '{}': {}",
+            path.display(),
+            err
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
     })?;
 
     file.write_all(payload).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!(
-                "filewrite: unable to write to '{}': {}",
-                path.display(),
-                err
-            ))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build(),
-        )
+        build_runtime_error(format!(
+            "filewrite: unable to write to '{}': {}",
+            path.display(),
+            err
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
     })?;
 
     file.flush().map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!(
-                "filewrite: unable to flush '{}': {}",
-                path.display(),
-                err
-            ))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err)
-            .build(),
-        )
+        build_runtime_error(format!(
+            "filewrite: unable to flush '{}': {}",
+            path.display(),
+            err
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err)
+        .build()
     })?;
 
     Ok(payload.len())
@@ -708,16 +691,15 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::RuntimeError;
     use runmat_filesystem as fs;
     use runmat_time::unix_timestamp_ms;
     use std::io::Read;
 
     use crate::builtins::common::test_support;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

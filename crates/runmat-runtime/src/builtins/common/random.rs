@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
 pub(crate) const DEFAULT_USER_SEED: u64 = 0;
@@ -11,8 +11,8 @@ const RNG_SHIFT: u32 = 11;
 const RNG_SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
 const MIN_UNIFORM: f64 = f64::MIN_POSITIVE;
 
-fn random_error(label: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(label).build().into()
+fn random_error(label: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(label).build()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

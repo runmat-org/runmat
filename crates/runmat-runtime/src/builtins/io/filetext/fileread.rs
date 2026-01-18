@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
 #[cfg_attr(
@@ -179,28 +179,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fileread";
 
-fn fileread_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fileread_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -359,12 +353,10 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 
 fn read_all(path: &Path) -> BuiltinResult<Vec<u8>> {
     fs::read(path).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("fileread: unable to read '{}': {}", path.display(), err))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("fileread: unable to read '{}': {}", path.display(), err))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build()
     })
 }
 
@@ -426,10 +418,8 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

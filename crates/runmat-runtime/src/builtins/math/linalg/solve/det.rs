@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "det";
 
@@ -216,8 +216,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real inputs re-upload their determinant to preserve residency; complex inputs currently return host scalars when LU hooks are available.",
 };
 
-fn builtin_error(message: String) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn builtin_error(message: String) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn interaction_pending_error() -> RuntimeError {
+    build_runtime_error("interaction pending...")
+        .with_builtin(NAME)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
@@ -256,10 +262,12 @@ fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match det_gpu_via_provider(provider, &handle) {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {}
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending))
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(interaction_pending_error());
+                }
+                return Err(err);
             }
-            Err(RuntimeControlFlow::Error(err)) => return Err(RuntimeControlFlow::Error(err)),
         }
     }
 
@@ -274,10 +282,11 @@ fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             if let Some(provider) = runmat_accelerate_api::provider() {
                 match upload_scalar(provider, det) {
                     Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending))
+                    Err(err) => {
+                        if err.message() == "interaction pending..." {
+                            return Err(interaction_pending_error());
+                        }
                     }
-                    Err(RuntimeControlFlow::Error(_)) => {}
                 }
             }
             Ok(Value::Num(det))
@@ -416,10 +425,10 @@ fn det_gpu_via_provider(
 
         let upper_factor = match gpu_helpers::gather_tensor(&lu_result.upper) {
             Ok(tensor) => UpperFactor::Real(tensor),
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending))
-            }
-            Err(RuntimeControlFlow::Error(_)) => {
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(interaction_pending_error());
+                }
                 let value = Value::GpuTensor(lu_result.upper.clone());
                 match gpu_helpers::gather_value(&value) {
                     Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
@@ -429,45 +438,55 @@ fn det_gpu_via_provider(
                         UpperFactor::Real(tensor)
                     }
                     Ok(_) => return Ok(None),
-                    Err(RuntimeControlFlow::Suspend(pending)) => {
-                        return Err(RuntimeControlFlow::Suspend(pending))
+                    Err(err) => {
+                        if err.message() == "interaction pending..." {
+                            return Err(interaction_pending_error());
+                        }
+                        return Ok(None);
                     }
-                    Err(RuntimeControlFlow::Error(_)) => return Ok(None),
                 }
             }
         };
 
         let pivot_tensor = match gpu_helpers::gather_tensor(&lu_result.perm_vector) {
             Ok(tensor) => tensor,
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending))
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(interaction_pending_error());
+                }
+                return Ok(None);
             }
-            Err(RuntimeControlFlow::Error(_)) => return Ok(None),
         };
 
         let determinant = match upper_factor {
             UpperFactor::Real(tensor) => match diagonal_product_real(&tensor, rows) {
                 Ok(value) => Determinant::Real(value),
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending))
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        return Err(interaction_pending_error());
+                    }
+                    return Ok(None);
                 }
-                Err(RuntimeControlFlow::Error(_)) => return Ok(None),
             },
             UpperFactor::Complex(tensor) => match diagonal_product_complex(&tensor, rows) {
                 Ok((re, im)) => Determinant::Complex(re, im),
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    return Err(RuntimeControlFlow::Suspend(pending))
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        return Err(interaction_pending_error());
+                    }
+                    return Ok(None);
                 }
-                Err(RuntimeControlFlow::Error(_)) => return Ok(None),
             },
         };
 
         let permutation_sign = match permutation_sign_from_tensor(&pivot_tensor, rows) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending))
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(interaction_pending_error());
+                }
+                return Ok(None);
             }
-            Err(RuntimeControlFlow::Error(_)) => return Ok(None),
         };
 
         let determinant = determinant.apply_sign(permutation_sign);
@@ -475,10 +494,13 @@ fn det_gpu_via_provider(
         match determinant {
             Determinant::Real(value) => match upload_scalar(provider, value) {
                 Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-                Err(RuntimeControlFlow::Suspend(pending)) => {
-                    Err(RuntimeControlFlow::Suspend(pending))
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        Err(interaction_pending_error())
+                    } else {
+                        Ok(None)
+                    }
                 }
-                Err(RuntimeControlFlow::Error(_)) => Ok(None),
             },
             Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
         }
@@ -607,14 +629,8 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
-    use runmat_builtins::LogicalArray;
-
-    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

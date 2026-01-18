@@ -226,8 +226,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; the runtime falls back to host sampling and upload when unavailable.",
 };
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("randi").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("randi").build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]

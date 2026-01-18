@@ -1707,14 +1707,7 @@ where
     F: FnMut() -> runmat_runtime::BuiltinResult<T>,
 {
     let start = Instant::now();
-    let _ = f().map_err(|flow| match flow {
-        runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!(err),
-        _ => anyhow!(
-            runmat_runtime::build_runtime_error("interaction pending")
-                .with_phase("auto_offload")
-                .build()
-        ),
-    })?;
+    let _ = f().map_err(|err| anyhow!(err))?;
     Ok(start.elapsed())
 }
 

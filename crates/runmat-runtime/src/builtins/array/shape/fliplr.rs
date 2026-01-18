@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -233,8 +233,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through fliplr.",
 };
 
-fn fliplr_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("fliplr").build().into()
+fn fliplr_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("fliplr")
+        .build()
 }
 
 #[runtime_builtin(

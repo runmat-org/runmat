@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -187,29 +187,25 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses repeated provider matmul calls via binary exponentiation; falls back to the host implementation when matmul or identity creation is unavailable.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
-            if let Some(identifier) = err.identifier() {
-                builder = builder.with_identifier(identifier.to_string());
-            }
-            if let Some(task_id) = err.context.task_id.clone() {
-                builder = builder.with_task_id(task_id);
-            }
-            if !err.context.call_stack.is_empty() {
-                builder = builder.with_call_stack(err.context.call_stack.clone());
-            }
-            if let Some(phase) = err.context.phase.clone() {
-                builder = builder.with_phase(phase);
-            }
-            builder.with_source(err).build().into()
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
     }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::mpower")]
@@ -460,13 +456,8 @@ impl HandleState {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
-    use runmat_builtins::{IntValue, Tensor};
-
-    fn unwrap_error(flow: RuntimeControlFlow) -> crate::RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

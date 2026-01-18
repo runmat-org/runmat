@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -235,28 +235,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
-fn fprintf_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fprintf_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
@@ -674,20 +668,16 @@ fn format_with_repetition(format: &str, args: &[Value]) -> BuiltinResult<String>
     Ok(out)
 }
 
-fn remap_format_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().replace("sprintf", "fprintf");
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(message)
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn remap_format_error(err: RuntimeError) -> RuntimeError {
+    let message = err.message().replace("sprintf", "fprintf");
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 fn encode_output(text: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
@@ -749,7 +739,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, registry};
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
     use runmat_filesystem::{self as fs, File};
@@ -758,10 +748,8 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

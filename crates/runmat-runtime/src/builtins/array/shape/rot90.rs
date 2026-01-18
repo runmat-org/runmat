@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -234,8 +234,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Rotations only reorder data; fusion planner treats rot90 as a residency-preserving boundary.",
 };
 
-fn rot90_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("rot90").build().into()
+fn rot90_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("rot90")
+        .build()
 }
 
 #[runtime_builtin(

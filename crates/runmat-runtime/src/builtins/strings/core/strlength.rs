@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::is_missing_string;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -189,15 +189,14 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "strlength: cell array elements must be character vectors or string scalars";
 
-fn strlength_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn strlength_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("strlength")
         .build()
-        .into()
 }
 
-fn remap_strlength_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "strlength")
+fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "strlength")
 }
 
 #[runtime_builtin(
@@ -295,12 +294,9 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

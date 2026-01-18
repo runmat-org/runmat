@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
@@ -265,8 +265,8 @@ fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
 }
 
-fn cat_err(message: impl Into<String>) -> RuntimeControlFlow {
-    cat_error(message).into()
+fn cat_err(message: impl Into<String>) -> RuntimeError {
+    cat_error(message)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

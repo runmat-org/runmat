@@ -4,7 +4,7 @@ use super::state::FigureHandle;
 use super::style::value_as_string;
 use super::plotting_error;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult};
 
 pub(super) fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureHandle>> {
     match value {
@@ -43,14 +43,16 @@ pub(super) fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureH
             format!("{ctx}: handle text cannot be empty"),
         ));
     }
-    let id = trimmed.parse::<u32>().map_err(|err| {
-        RuntimeControlFlow::from(
-            build_runtime_error(format!("{ctx}: expected numeric figure handle text, got `{text}`"))
-                .with_builtin(ctx)
-                .with_source(err)
-                .build(),
-        )
-    })?;
+    let id = trimmed
+        .parse::<u32>()
+        .map_err(|err| {
+            build_runtime_error(format!(
+                "{ctx}: expected numeric figure handle text, got `{text}`"
+            ))
+            .with_builtin(ctx)
+            .with_source(err)
+            .build()
+        })?;
     if id == 0 {
         return Err(plotting_error(
             ctx,

@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -224,8 +224,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "hypot";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -487,12 +489,7 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let err = hypot_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("dimension"), "unexpected error: {err}");
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("dimension"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -380,12 +380,12 @@ struct ArgumentData {
     shape: Vec<usize>,
 }
 
-fn string_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("string").build().into()
+fn string_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("string").build()
 }
 
-fn remap_string_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "string")
+fn remap_string_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "string")
 }
 
 pub(crate) fn format_from_spec(
@@ -909,13 +909,10 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::{CellArray, IntValue, StringArray, StructValue};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

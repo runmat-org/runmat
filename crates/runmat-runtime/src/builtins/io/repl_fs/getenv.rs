@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
 const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -237,27 +237,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "getenv";
 
-fn getenv_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn getenv_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -403,14 +397,8 @@ fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, Value};
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -583,7 +571,7 @@ pub(crate) mod tests {
             2,
         )
         .expect("cell creation");
-        let err = unwrap_error(getenv_builtin(vec![invalid_cell]).expect_err("expected error"));
+        let err = getenv_builtin(vec![invalid_cell]).expect_err("expected error");
         assert!(
             err.message().contains("cell array elements"),
             "unexpected error message: {}",
@@ -620,9 +608,8 @@ pub(crate) mod tests {
     #[test]
     fn getenv_invalid_input_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = unwrap_error(
-            getenv_builtin(vec![Value::Num(std::f64::consts::PI)]).expect_err("expected error"),
-        );
+        let err = getenv_builtin(vec![Value::Num(std::f64::consts::PI)])
+            .expect_err("expected error");
         assert!(
             err.message().contains("NAME must be"),
             "unexpected error message: {}",
@@ -634,13 +621,11 @@ pub(crate) mod tests {
     #[test]
     fn getenv_too_many_arguments_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = unwrap_error(
-            getenv_builtin(vec![
-                Value::String("PATH".to_string()),
-                Value::String("HOME".to_string()),
-            ])
-            .expect_err("expected error"),
-        );
+        let err = getenv_builtin(vec![
+            Value::String("PATH".to_string()),
+            Value::String("HOME".to_string()),
+        ])
+        .expect_err("expected error");
         assert!(
             err.message().contains("too many input arguments"),
             "unexpected error message: {}",

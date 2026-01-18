@@ -197,8 +197,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may generate sequences directly; the runtime uploads host-generated data when hooks are absent.",
 };
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("linspace").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("linspace").build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::linspace")]

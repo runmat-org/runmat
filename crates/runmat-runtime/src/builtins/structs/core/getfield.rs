@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
-use crate::{build_runtime_error, call_builtin, gather_if_needed, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, call_builtin, gather_if_needed, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
     ObjectInstance, StructValue, Tensor, Value,
@@ -219,29 +219,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "getfield";
 
-fn getfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn getfield_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn remap_getfield_flow(flow: RuntimeControlFlow, prefix: Option<&str>) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let mut message = err.message().to_string();
-            if let Some(prefix) = prefix {
-                if !message.starts_with(prefix) {
-                    message = format!("{prefix}{message}");
-                }
-            }
-            let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
-            if let Some(identifier) = err.identifier() {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.with_source(err).build().into()
+fn remap_getfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {
+    let mut message = err.message().to_string();
+    if let Some(prefix) = prefix {
+        if !message.starts_with(prefix) {
+            message = format!("{prefix}{message}");
         }
     }
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(err).build()
 }
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
@@ -363,11 +358,11 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
         _ => {
-            let idx = parse_positive_scalar(value).map_err(|flow| match flow {
-                RuntimeControlFlow::Error(err) => getfield_flow(format!(
+            let idx = parse_positive_scalar(value).map_err(|err| {
+                getfield_flow(format!(
                     "getfield: invalid index element ({})",
                     err.message()
-                )),
+                ))
             })?;
             Ok(IndexComponent::Scalar(idx))
         }
@@ -818,9 +813,9 @@ fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
             let getter = format!("get.{name}");
             match call_builtin(&getter, &[Value::Object(obj.clone())]) {
                 Ok(value) => return Ok(value),
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     if !is_undefined_function(&err) {
-                        return Err(remap_getfield_flow(RuntimeControlFlow::Error(err), None));
+                        return Err(remap_getfield_flow(err, None));
                     }
                 }
             }
@@ -946,12 +941,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

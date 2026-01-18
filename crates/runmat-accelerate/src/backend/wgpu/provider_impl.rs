@@ -24,7 +24,7 @@ use runmat_accelerate_api::{
     UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
-use runmat_runtime::{build_runtime_error, RuntimeControlFlow};
+use runmat_runtime::RuntimeError;
 use runmat_runtime::builtins::image::filters::fspecial::{
     spec_from_request as runtime_fspecial_spec_from_request, FspecialFilterSpec,
 };
@@ -92,15 +92,8 @@ use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 
-fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
-    match flow {
-        RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
-        _ => anyhow::Error::new(
-            build_runtime_error("interaction pending")
-                .with_builtin(context)
-                .build(),
-        ),
-    }
+fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
+    anyhow::Error::new(err)
 }
 
 #[derive(Clone, Debug)]
@@ -9454,12 +9447,7 @@ impl WgpuProvider {
 
         let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options, "imfilter") {
             Ok(plan) => plan,
-            Err(RuntimeControlFlow::Error(err)) => return Err(anyhow!(err)),
-            Err(_) => {
-                return Err(anyhow!(
-                    runmat_runtime::build_runtime_error("interaction pending").build()
-                ))
-            }
+            Err(err) => return Err(anyhow!(err)),
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
@@ -9836,10 +9824,7 @@ impl WgpuProvider {
             options,
             "imfilter",
         )
-        .map_err(|err| match err {
-            RuntimeControlFlow::Error(error) => anyhow!(error),
-            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-        })?;
+        .map_err(|err| anyhow!(err))?;
         let data_owned = result.data;
         let shape_owned = result.shape;
         let view = HostTensorView {
@@ -10174,10 +10159,7 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
     }
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
-        let spec = runtime_fspecial_spec_from_request(&request.filter).map_err(|err| match err {
-            RuntimeControlFlow::Error(error) => anyhow!(error),
-            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-        })?;
+        let spec = runtime_fspecial_spec_from_request(&request.filter).map_err(|err| anyhow!(err))?;
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
             FspecialFilterSpec::Average { rows, cols } => (
@@ -13651,10 +13633,7 @@ impl AccelProvider for WgpuProvider {
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
         let host_result =
             polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
-                .map_err(|flow| match flow {
-                    RuntimeControlFlow::Error(err) => anyhow!(err),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                })?;
+                .map_err(|err| anyhow!(err))?;
         Ok(ProviderPolyfitResult {
             coefficients: host_result.coefficients,
             r_matrix: host_result.r_matrix,
@@ -14136,19 +14115,13 @@ impl AccelProvider for WgpuProvider {
             tensor, options,
         ) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("unique: {err}"));
             }
         };
         match eval.into_numeric_unique_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("unique: {err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("unique: {err}")),
         }
     }
     fn ismember(
@@ -14169,19 +14142,13 @@ impl AccelProvider for WgpuProvider {
             options.rows,
         ) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("ismember: {err}"));
             }
         };
         match eval.into_numeric_ismember_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("ismember: {err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("ismember: {err}")),
         }
     }
 
@@ -14199,19 +14166,13 @@ impl AccelProvider for WgpuProvider {
             tensor_a, tensor_b, options,
         ) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("union: {err}"));
             }
         };
         match eval.into_numeric_union_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("union: {err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("union: {err}")),
         }
     }
     fn setdiff(
@@ -14230,19 +14191,13 @@ impl AccelProvider for WgpuProvider {
             tensor_a, tensor_b, options,
         ) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("setdiff: {err}"));
             }
         };
         match eval.into_numeric_setdiff_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("setdiff: {err}")),
         }
     }
 

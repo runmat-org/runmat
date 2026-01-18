@@ -23,7 +23,7 @@ use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "contour";
 const DEFAULT_LEVELS: usize = 10;
@@ -410,7 +410,7 @@ impl ContourCall {
                     figure.add_contour_plot_on_axes(contour, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("{name} GPU path unavailable: {err}");
                 }
             }

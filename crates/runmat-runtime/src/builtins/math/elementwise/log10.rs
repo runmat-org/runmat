@@ -9,7 +9,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use super::log::{detect_gpu_requires_complex, log_complex_parts};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -224,8 +224,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log10";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
 }
 
 #[runtime_builtin(
@@ -265,10 +265,10 @@ fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log10_tensor(tensor);
             }
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
-            }
-            Err(RuntimeControlFlow::Error(_)) => {
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(err);
+                }
                 // Fall through and gather below if detection fails.
             }
         }
@@ -505,28 +505,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_input_errors() {
-        let err = log10_builtin(Value::from("hello"));
-        match err {
-            Err(RuntimeControlFlow::Error(err)) => {
-                assert!(err.message().contains("expected numeric input"));
-            }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspend"),
-            Ok(_) => panic!("expected error"),
-        }
+        let err = log10_builtin(Value::from("hello")).expect_err("expected error");
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log10_string_array_errors() {
         let array = StringArray::new(vec!["hello".to_string()], vec![1, 1]).unwrap();
-        let err = log10_builtin(Value::StringArray(array));
-        match err {
-            Err(RuntimeControlFlow::Error(err)) => {
-                assert!(err.message().contains("expected numeric input"));
-            }
-            Err(RuntimeControlFlow::Suspend(_)) => panic!("unexpected suspend"),
-            Ok(_) => panic!("expected error"),
-        }
+        let err = log10_builtin(Value::StringArray(array)).expect_err("expected error");
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

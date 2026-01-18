@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{dispatcher::gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{dispatcher::gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
@@ -180,24 +180,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-fn which_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("which").build().into()
+fn which_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("which").build()
 }
 
-fn which_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|id| id.to_string());
-            let mut builder = build_runtime_error(err.message().to_string())
-                .with_builtin("which")
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
-        }
+fn which_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|id| id.to_string());
+    let mut builder = build_runtime_error(err.message().to_string())
+        .with_builtin("which")
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 fn which_path<T>(result: Result<T, String>) -> BuiltinResult<T> {
@@ -580,13 +575,8 @@ pub(crate) mod tests {
         });
     }
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => {
-                panic!("expected error flow, got suspend")
-            }
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -15,7 +15,6 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::{build_surface, build_surface_gpu_plot};
 use std::sync::Arc;
 
-use crate::RuntimeControlFlow;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -123,12 +122,12 @@ pub fn surfc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate:
                             figure.add_contour_plot_on_axes(contour, axes);
                             return Ok(());
                         }
-                        Err(RuntimeControlFlow::Error(err)) => {
+                        Err(err) => {
                             warn!("surfc contour GPU path unavailable: {err}");
                         }
                     }
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("surfc surface GPU path unavailable: {err}");
                 }
             }

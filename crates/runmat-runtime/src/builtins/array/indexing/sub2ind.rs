@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -464,7 +464,7 @@ fn coerce_subscript(
     Ok(rounded as usize)
 }
 
-fn dimension_bounds_error(dim_number: usize) -> RuntimeControlFlow {
+fn dimension_bounds_error(dim_number: usize) -> RuntimeError {
     let message = match dim_number {
         1 => format!("Index exceeds the number of rows in dimension {dim_number}."),
         2 => format!("Index exceeds the number of columns in dimension {dim_number}."),
@@ -485,11 +485,10 @@ fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> crate::Builtin
     }
 }
 
-fn sub2ind_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn sub2ind_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("sub2ind")
         .build()
-        .into()
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use super::engine::render_figure;
 use super::{plotting_error, plotting_error_with_source};
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
@@ -251,7 +251,7 @@ pub enum FigureError {
     },
 }
 
-fn map_figure_error(builtin: &'static str, err: FigureError) -> RuntimeControlFlow {
+fn map_figure_error(builtin: &'static str, err: FigureError) -> RuntimeError {
     let message = format!("{builtin}: {err}");
     plotting_error_with_source(builtin, message, err)
 }

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -242,9 +242,8 @@ fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         cells.push(Value::String(name));
     }
     let rows = cells.len();
-    make_cell(cells, rows, 1).map_err(|err| {
-        RuntimeControlFlow::Error(build_runtime_error(err).with_builtin("who").build())
-    })
+    make_cell(cells, rows, 1)
+        .map_err(|err| build_runtime_error(err).with_builtin("who").build())
 }
 
 #[derive(Debug)]
@@ -267,17 +266,13 @@ enum NameSelector {
     Wildcard(Pattern),
 }
 
-fn who_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("who").build())
+fn who_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("who").build()
 }
 
-fn who_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut err) => {
-            err.context = err.context.with_builtin("who");
-            RuntimeControlFlow::Error(err)
-        }
-    }
+fn who_flow(mut err: RuntimeError) -> RuntimeError {
+    err.context = err.context.with_builtin("who");
+    err
 }
 
 fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
@@ -319,14 +314,12 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
                         }
                         for pattern in candidates {
                             let regex = Regex::new(&pattern).map_err(|err| {
-                                RuntimeControlFlow::Error(
-                                    build_runtime_error(format!(
-                                        "who: invalid regular expression '{pattern}': {err}"
-                                    ))
-                                    .with_builtin("who")
-                                    .with_source(err)
-                                    .build(),
-                                )
+                                build_runtime_error(format!(
+                                    "who: invalid regular expression '{pattern}': {err}"
+                                ))
+                                .with_builtin("who")
+                                .with_source(err)
+                                .build()
                             })?;
                             regex_patterns.push(regex);
                         }
@@ -393,12 +386,10 @@ fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
     for name in names {
         if contains_wildcards(name) {
             let pattern = Pattern::new(name).map_err(|err| {
-                RuntimeControlFlow::Error(
-                    build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
-                        .with_builtin("who")
-                        .with_source(err)
-                        .build(),
-                )
+                build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
+                    .with_builtin("who")
+                    .with_source(err)
+                    .build()
             })?;
             selectors.push(NameSelector::Wildcard(pattern));
         } else {
@@ -524,10 +515,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MOVEFILE:OSError";
 const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:MOVEFILE:FileDoesNotExist";
@@ -207,27 +207,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "movefile";
 
-fn movefile_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn movefile_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -683,15 +677,9 @@ fn path_to_display(path: &Path) -> String {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use std::fs::{self, File};
     use tempfile::tempdir;
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -864,10 +852,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = unwrap_error(
-            evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
-                .expect_err("expected error"),
-        );
+        let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
+            .expect_err("expected error");
         assert_eq!(err.message(), ERR_FLAG_ARG);
     }
 

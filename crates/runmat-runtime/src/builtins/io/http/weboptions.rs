@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 
@@ -217,29 +217,20 @@ fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::Struct(options))
 }
 
-fn weboptions_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn weboptions_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("weboptions")
         .build()
-        .into()
 }
 
-fn remap_weboptions_flow<F>(flow: RuntimeControlFlow, message: F) -> RuntimeControlFlow
+fn remap_weboptions_flow<F>(err: RuntimeError, message: F) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    match flow {
-        RuntimeControlFlow::Error(err) => build_runtime_error(message(&err))
-            .with_builtin("weboptions")
-            .with_source(err)
-            .build()
-            .into(),
-        _ => RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending")
-                .with_builtin("weboptions")
-                .build(),
-        ),
-    }
+    build_runtime_error(message(&err))
+        .with_builtin("weboptions")
+        .with_source(err)
+        .build()
 }
 
 fn default_options_struct() -> StructValue {
@@ -550,7 +541,6 @@ pub(crate) mod tests {
     use std::thread;
 
     use crate::call_builtin;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::CellArray;
 
     use crate::builtins::common::test_support;
@@ -569,11 +559,8 @@ pub(crate) mod tests {
         format!("http://{}", addr)
     }
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-            other => panic!("unexpected runtime control flow in weboptions tests: {other:?}"),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn read_request(stream: &mut TcpStream) -> (String, Vec<u8>) {

@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -271,8 +271,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "times";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -908,12 +910,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = times_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("times"), "unexpected error: {err}");
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("times"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1069,12 +1066,7 @@ pub(crate) mod tests {
         let lhs = Value::Num(2.0);
         let rhs = Value::Num(4.0);
         let err = times_builtin(lhs, rhs, vec![Value::from("like")]).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("prototype"), "unexpected error: {err}");
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("prototype"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

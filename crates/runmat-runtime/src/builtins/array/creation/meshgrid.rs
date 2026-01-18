@@ -247,8 +247,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may supply a dedicated meshgrid hook; until then the runtime builds grids on the host and uploads them when GPU residency is requested.",
 };
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("meshgrid").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("meshgrid").build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::meshgrid")]

@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
 const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
@@ -215,27 +215,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "setenv";
 
-fn setenv_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn setenv_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -404,18 +398,12 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::{CharArray, StringArray, Value};
 
     fn unique_name(suffix: &str) -> String {
         format!("RUNMAT_TEST_SETENV_{}", suffix)
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -513,10 +501,8 @@ pub(crate) mod tests {
     #[test]
     fn setenv_errors_when_name_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = unwrap_error(
-            setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())])
-                .unwrap_err(),
-        );
+        let err = setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())])
+            .unwrap_err();
         assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
@@ -524,13 +510,11 @@ pub(crate) mod tests {
     #[test]
     fn setenv_errors_when_value_is_not_text() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = unwrap_error(
-            setenv_builtin(vec![
-                Value::String("RUNMAT_INVALID_VALUE".to_string()),
-                Value::Num(1.0),
-            ])
-            .unwrap_err(),
-        );
+        let err = setenv_builtin(vec![
+            Value::String("RUNMAT_INVALID_VALUE".to_string()),
+            Value::Num(1.0),
+        ])
+        .unwrap_err();
         assert_eq!(err.message(), ERR_VALUE_TYPE);
     }
 
@@ -563,13 +547,11 @@ pub(crate) mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let array =
             StringArray::new(vec!["A".to_string(), "B".to_string()], vec![2]).expect("array");
-        let err = unwrap_error(
-            setenv_builtin(vec![
-                Value::StringArray(array),
-                Value::String("value".to_string()),
-            ])
-            .unwrap_err(),
-        );
+        let err = setenv_builtin(vec![
+            Value::StringArray(array),
+            Value::String("value".to_string()),
+        ])
+        .unwrap_err();
         assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 
@@ -578,13 +560,11 @@ pub(crate) mod tests {
     fn setenv_errors_for_char_array_with_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let array = CharArray::new(vec!['R', 'M'], 2, 1).expect("two-row char array");
-        let err = unwrap_error(
-            setenv_builtin(vec![
-                Value::CharArray(array),
-                Value::String("value".to_string()),
-            ])
-            .unwrap_err(),
-        );
+        let err = setenv_builtin(vec![
+            Value::CharArray(array),
+            Value::String("value".to_string()),
+        ])
+        .unwrap_err();
         assert_eq!(err.message(), ERR_NAME_TYPE);
     }
 

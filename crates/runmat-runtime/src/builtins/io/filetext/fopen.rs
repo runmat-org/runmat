@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::{helpers::{char_array_value, extract_scalar_string, normalize_encoding_label}, registry::{self, FileInfo, RegisteredFile}};
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
 #[cfg_attr(
@@ -190,28 +190,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fopen";
 
-fn fopen_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fopen_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(

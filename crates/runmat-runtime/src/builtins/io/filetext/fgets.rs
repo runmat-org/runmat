@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
@@ -279,28 +279,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O; arguments gathered from the GPU when necessary.",
 };
 
-fn fgets_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fgets_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
@@ -534,12 +528,10 @@ fn read_line(file: &mut File, limit: Option<usize>) -> BuiltinResult<LineRead> {
         }
 
         let read = file.read(&mut buffer).map_err(|err| {
-            RuntimeControlFlow::Error(
-                build_runtime_error(format!("fgets: failed to read from file: {err}"))
-                    .with_builtin(BUILTIN_NAME)
-                    .with_source(err)
-                    .build(),
-            )
+            build_runtime_error(format!("fgets: failed to read from file: {err}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err)
+                .build()
         })?;
         if read == 0 {
             if data.is_empty() && first_attempt {
@@ -553,12 +545,10 @@ fn read_line(file: &mut File, limit: Option<usize>) -> BuiltinResult<LineRead> {
         if byte == b'\n' {
             if data.len().saturating_add(1) > max_bytes {
                 file.seek(SeekFrom::Current(-1)).map_err(|err| {
-                    RuntimeControlFlow::Error(
-                        build_runtime_error(format!("fgets: failed to seek in file: {err}"))
-                            .with_builtin(BUILTIN_NAME)
-                            .with_source(err)
-                            .build(),
-                    )
+                    build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(err)
+                        .build()
                 })?;
             } else {
                 data.push(b'\n');
@@ -573,12 +563,10 @@ fn read_line(file: &mut File, limit: Option<usize>) -> BuiltinResult<LineRead> {
 
             let mut next = [0u8; 1];
             let read_next = file.read(&mut next).map_err(|err| {
-                RuntimeControlFlow::Error(
-                    build_runtime_error(format!("fgets: failed to read from file: {err}"))
-                        .with_builtin(BUILTIN_NAME)
-                        .with_source(err)
-                        .build(),
-                )
+                build_runtime_error(format!("fgets: failed to read from file: {err}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(err)
+                    .build()
             })?;
             if read_next > 0 {
                 if next[0] == b'\n' {
@@ -587,24 +575,20 @@ fn read_line(file: &mut File, limit: Option<usize>) -> BuiltinResult<LineRead> {
                     consumed = 2;
                 } else {
                     file.seek(SeekFrom::Current(-1)).map_err(|err| {
-                        RuntimeControlFlow::Error(
-                            build_runtime_error(format!("fgets: failed to seek in file: {err}"))
-                                .with_builtin(BUILTIN_NAME)
-                                .with_source(err)
-                                .build(),
-                        )
+                        build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                            .with_builtin(BUILTIN_NAME)
+                            .with_source(err)
+                            .build()
                     })?;
                 }
             }
 
             if data.len().saturating_add(newline_len) > max_bytes {
                 file.seek(SeekFrom::Current(-consumed)).map_err(|err| {
-                    RuntimeControlFlow::Error(
-                        build_runtime_error(format!("fgets: failed to seek in file: {err}"))
-                            .with_builtin(BUILTIN_NAME)
-                            .with_source(err)
-                            .build(),
-                    )
+                    build_runtime_error(format!("fgets: failed to seek in file: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(err)
+                        .build()
                 })?;
             } else {
                 data.extend_from_slice(&newline[..newline_len]);
@@ -738,7 +722,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
     use runmat_filesystem as fs;
@@ -746,10 +730,8 @@ pub(crate) mod tests {
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

@@ -3,7 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -236,8 +236,8 @@ fn not_host(value: Value) -> BuiltinResult<Value> {
     logical_value("not", mapped, shape)
 }
 
-fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(fn_name).build().into()
+fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(fn_name).build()
 }
 
 fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -355,16 +355,11 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::tensor;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
 
-    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+    fn assert_error_contains(err: RuntimeError, expected: &str) {
+        assert!(err.message().contains(expected), "unexpected error: {}", err.message());
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;

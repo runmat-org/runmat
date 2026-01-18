@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
 
@@ -239,14 +239,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; acceleration providers are not involved.",
 };
 
-fn csvread_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn csvread_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn csvread_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+fn csvread_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -254,23 +253,18 @@ where
         .with_builtin(BUILTIN_NAME)
         .with_source(source)
         .build()
-        .into()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|value| value.to_string());
-            let message = err.message().to_string();
-            let mut builder = build_runtime_error(message)
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
@@ -965,9 +959,7 @@ pub(crate) mod tests {
         let path = write_temp_file(&["1,2,3", "4,error,6"]);
         let err = csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
             .expect_err("should fail");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("nonnumeric token 'error'"),
             "unexpected error: {message}"

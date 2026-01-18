@@ -207,20 +207,18 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #![allow(unused_variables)]
             if #is_last_variadic {
                 if args.len() < #param_len - 1 {
-                    return Err(crate::RuntimeControlFlow::Error(
-                        crate::build_runtime_error(format!(
-                            "expected at least {} args, got {}",
-                            #param_len - 1,
-                            args.len()
-                        ))
-                        .build(),
-                    ));
+                    return Err(std::convert::From::from(format!(
+                        "expected at least {} args, got {}",
+                        #param_len - 1,
+                        args.len()
+                    )));
                 }
             } else if args.len() != #param_len {
-                return Err(crate::RuntimeControlFlow::Error(
-                    crate::build_runtime_error(format!("expected {} args, got {}", #param_len, args.len()))
-                        .build(),
-                ));
+                return Err(std::convert::From::from(format!(
+                    "expected {} args, got {}",
+                    #param_len,
+                    args.len()
+                )));
             }
             #(#conv_stmts)*
             let res = match #ident(#(#param_idents),*) {

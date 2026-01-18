@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "asin";
 const ZERO_EPS: f64 = 1e-12;
@@ -238,12 +238,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::from(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
@@ -296,9 +294,10 @@ fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 let tensor = gpu_helpers::gather_tensor(&handle)?;
                 return asin_tensor_real(tensor);
             }
-            Err(RuntimeControlFlow::Error(_)) => {
-                // Fall through to host fallback.
+            Err(_) => {
+                // Fall back to host path below.
             }
+
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;
@@ -443,10 +442,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, LogicalArray};
 
-    fn error_message(err: RuntimeControlFlow) -> String {
-        match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

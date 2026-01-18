@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
 const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
@@ -210,19 +210,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
 };
 
-fn jsondecode_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("jsondecode").build())
+fn jsondecode_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("jsondecode")
+        .build()
 }
 
-fn jsondecode_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
-            build_runtime_error(err.message().to_string())
-                .with_builtin("jsondecode")
-                .with_source(err)
-                .build(),
-        ),
-    }
+fn jsondecode_flow_with_context(err: RuntimeError) -> RuntimeError {
+    build_runtime_error(err.message().to_string())
+        .with_builtin("jsondecode")
+        .with_source(err)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
@@ -248,24 +246,20 @@ fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
     let gathered = gather_if_needed(&text).map_err(jsondecode_flow_with_context)?;
     let source = extract_text(gathered)?;
     let parsed: JsonValue = serde_json::from_str(&source).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-                .with_builtin("jsondecode")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
+            .with_builtin("jsondecode")
+            .with_source(err)
+            .build()
     })?;
     value_from_json(&parsed)
 }
 
 pub(crate) fn decode_json_text(text: &str) -> BuiltinResult<Value> {
     let parsed: JsonValue = serde_json::from_str(text).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-                .with_builtin("jsondecode")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
+            .with_builtin("jsondecode")
+            .with_source(err)
+            .build()
     })?;
     value_from_json(&parsed)
 }
@@ -632,16 +626,14 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, Tensor};
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
 
     fn char_row(text: &str) -> Value {
         Value::CharArray(CharArray::new_row(text))
     }
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

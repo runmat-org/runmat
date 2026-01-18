@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -212,8 +212,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fftshift";
 
-fn fftshift_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn fftshift_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
 }
 
 #[runtime_builtin(
@@ -370,13 +370,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, Tensor};
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => {
-                panic!("unexpected suspension in fftshift tests")
-            }
-        }
+    fn error_message(error: crate::RuntimeError) -> String {
+        error.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

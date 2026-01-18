@@ -6,7 +6,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "median";
 
@@ -217,8 +217,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute medians entirely on device; runtimes fall back to host when hooks are missing or omitnan is requested.",
 };
 
-fn median_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn median_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::median")]
@@ -830,7 +830,6 @@ pub(crate) mod tests {
     #[test]
     fn median_rejects_unknown_keyword() {
         let err = median_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(
             err.message().contains("unrecognised argument"),
             "unexpected error message: {err}"

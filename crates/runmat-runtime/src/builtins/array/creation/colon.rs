@@ -237,8 +237,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("colon").build().into()
+fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
+    build_runtime_error(message).with_builtin("colon").build()
 }
 
 #[runtime_builtin(

@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -224,10 +224,6 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("vertcat").build()
 }
 
-fn vertcat_err(message: impl Into<String>) -> RuntimeControlFlow {
-    vertcat_error(message).into()
-}
-
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
@@ -249,17 +245,14 @@ fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     forwarded.extend(args);
     match crate::call_builtin("cat", &forwarded) {
         Ok(value) => Ok(value),
-        Err(RuntimeControlFlow::Error(err)) => Err(adapt_cat_error(err).into()),
-        Err(_) => Err(RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending").build(),
-        )),
+        Err(err) => Err(adapt_cat_error(err)),
     }
 }
 
 fn empty_double() -> crate::BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| vertcat_err(format!("vertcat: {e}")))
+        .map_err(|e| vertcat_error(format!("vertcat: {e}")))
 }
 
 fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {

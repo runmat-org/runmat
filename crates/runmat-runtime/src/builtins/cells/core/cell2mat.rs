@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -262,19 +262,17 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:cell2mat:InvalidInput";
 const IDENT_INVALID_CONTENTS: &str = "MATLAB:cell2mat:InvalidContents";
 const IDENT_SIZE_LIMIT: &str = "MATLAB:cell2mat:SizeExceeded";
 
-fn cell2mat_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn cell2mat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cell2mat")
         .build()
-        .into()
 }
 
-fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cell2mat")
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(

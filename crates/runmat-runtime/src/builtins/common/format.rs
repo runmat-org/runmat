@@ -6,7 +6,7 @@ use std::str::Chars;
 
 use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
@@ -38,12 +38,12 @@ impl<'a> ArgCursor<'a> {
     }
 }
 
-fn format_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).build().into()
+fn format_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
 }
 
-fn map_control_flow_with_context(flow: RuntimeControlFlow, context: &str) -> RuntimeControlFlow {
-    crate::builtins::common::map_control_flow_with_builtin(flow, context)
+fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
+    crate::builtins::common::map_control_flow_with_builtin(err, context)
 }
 
 /// Result of formatting a string with the current cursor state.

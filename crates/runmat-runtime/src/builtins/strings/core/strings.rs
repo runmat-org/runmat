@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
@@ -18,12 +18,12 @@ const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_NUMERIC_ERR: &str = "size arguments must be numeric scalars or vectors";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
 
-fn strings_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(FN_NAME).build().into()
+fn strings_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(FN_NAME).build()
 }
 
-fn remap_strings_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, FN_NAME)
+fn remap_strings_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, FN_NAME)
 }
 
 #[cfg_attr(
@@ -352,15 +352,15 @@ fn prototype_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     }
 }
 
-fn err_integer() -> RuntimeControlFlow {
+fn err_integer() -> RuntimeError {
     strings_flow(format!("{FN_NAME}: {SIZE_INTEGER_ERR}"))
 }
 
-fn err_nonnegative() -> RuntimeControlFlow {
+fn err_nonnegative() -> RuntimeError {
     strings_flow(format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}"))
 }
 
-fn err_finite() -> RuntimeControlFlow {
+fn err_finite() -> RuntimeError {
     strings_flow(format!("{FN_NAME}: {SIZE_FINITE_ERR}"))
 }
 
@@ -500,13 +500,10 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,7 +5,7 @@ use runmat_macros::runtime_builtin;
 
 use super::state::{new_figure_handle, select_figure, FigureHandle};
 use super::plotting_error;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::build_runtime_error;
 
 fn parse_handle(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
     match value {
@@ -49,14 +49,14 @@ fn parse_string_handle(text: &str) -> crate::BuiltinResult<Option<FigureHandle>>
     if text.eq_ignore_ascii_case("next") {
         Ok(None)
     } else {
-        let id = text.parse::<u32>().map_err(|err| {
-            RuntimeControlFlow::from(
+        let id = text
+            .parse::<u32>()
+            .map_err(|err| {
                 build_runtime_error("figure: invalid handle string")
                     .with_builtin("figure")
                     .with_source(err)
-                    .build(),
-            )
-        })?;
+                    .build()
+            })?;
         Ok(Some(FigureHandle::from(id)))
     }
 }

@@ -9,7 +9,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -230,8 +230,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -271,10 +273,10 @@ fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
                 return log_tensor_real(tensor);
             }
-            Err(RuntimeControlFlow::Suspend(pending)) => {
-                return Err(RuntimeControlFlow::Suspend(pending));
-            }
-            Err(RuntimeControlFlow::Error(_)) => {
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(err);
+                }
                 // Fall through to host fallback below.
             }
         }
@@ -465,15 +467,10 @@ pub(crate) mod tests {
     #[test]
     fn log_string_input_errors() {
         let err = log_builtin(Value::from("hello")).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains("log: expected numeric input"),
-                    "unexpected error message: {err}"
-                );
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(
+            err.message().contains("log: expected numeric input"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

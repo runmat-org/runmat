@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
 
@@ -155,29 +155,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin; excluded from fusion planning.",
 };
 
-fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("error")
         .with_identifier(normalize_identifier(identifier))
         .build()
-        .into()
 }
 
-fn remap_error_flow(flow: RuntimeControlFlow, identifier: &str) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => build_runtime_error(err.message().to_string())
-            .with_builtin("error")
-            .with_identifier(normalize_identifier(identifier))
-            .with_source(err)
-            .build()
-            .into(),
-        _ => RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending")
-                .with_builtin("error")
-                .with_identifier(normalize_identifier(identifier))
-                .build(),
-        ),
-    }
+fn remap_error_flow(err: RuntimeError, identifier: &str) -> RuntimeError {
+    build_runtime_error(err.message().to_string())
+        .with_builtin("error")
+        .with_identifier(normalize_identifier(identifier))
+        .with_source(err)
+        .build()
 }
 
 #[runtime_builtin(
@@ -323,11 +313,8 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{IntValue, MException};
 
-    fn unwrap_error(flow: crate::RuntimeControlFlow) -> crate::RuntimeError {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err,
-            other => panic!("expected error, got {other:?}"),
-        }
+    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
+        err
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -11,8 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
-    RuntimeError,
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -256,19 +255,17 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:cellfun:InvalidInput";
 const IDENT_UNIFORM_OUTPUT: &str = "MATLAB:cellfun:UniformOutput";
 const IDENT_FUNCTION_ERROR: &str = "MATLAB:cellfun:FunctionError";
 
-fn cellfun_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn cellfun_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cellfun")
         .build()
-        .into()
 }
 
-fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cellfun")
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -407,9 +404,9 @@ fn execute_uniform(
 
         let result = match callable.call(&call_args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 let Some(handler) = error_handler.as_ref() else {
-                    return Err(RuntimeControlFlow::Error(err));
+                    return Err(err);
                 };
                 let err_value = make_error_struct(&err, linear_idx, shape)?;
                 let mut handler_args =
@@ -459,9 +456,9 @@ fn execute_cell(
 
         let result = match callable.call(&call_args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 let Some(handler) = error_handler.as_ref() else {
-                    return Err(RuntimeControlFlow::Error(err));
+                    return Err(err);
                 };
                 let err_value = make_error_struct(&err, linear_idx, shape)?;
                 let mut handler_args =

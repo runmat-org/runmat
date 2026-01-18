@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
@@ -197,26 +197,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP requests always execute on the CPU; gpuArray inputs are gathered eagerly.",
 };
 
-fn webread_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("webread").build())
+fn webread_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("webread")
+        .build()
 }
 
-fn remap_webread_flow<F>(flow: RuntimeControlFlow, message: F) -> RuntimeControlFlow
+fn remap_webread_flow<F>(err: RuntimeError, message: F) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    match flow {
-        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
-            build_runtime_error(message(&err))
-                .with_builtin("webread")
-                .with_source(err)
-                .build(),
-        ),
-    }
+    build_runtime_error(message(&err))
+        .with_builtin("webread")
+        .with_source(err)
+        .build()
 }
 
-fn webread_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    remap_webread_flow(flow, |err| format!("webread: {}", err.message()))
+fn webread_flow_with_context(err: RuntimeError) -> RuntimeError {
+    remap_webread_flow(err, |err| format!("webread: {}", err.message()))
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webread")]
@@ -428,12 +426,10 @@ fn execute_request(
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("webread: invalid URL '{url_text}': {err}"))
-                .with_builtin("webread")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("webread: invalid URL '{url_text}': {err}"))
+            .with_builtin("webread")
+            .with_source(err)
+            .build()
     })?;
     if !query_params.is_empty() {
         {
@@ -472,12 +468,10 @@ fn execute_request(
     };
 
     let response = transport::send_request(&request).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(err.message_with_prefix("webread"))
-                .with_builtin("webread")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(err.message_with_prefix("webread"))
+            .with_builtin("webread")
+            .with_source(err)
+            .build()
     })?;
 
     let header_content_type =
@@ -505,25 +499,19 @@ fn execute_request(
     }
 }
 
-fn map_json_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
-                format!("webread: failed to parse JSON response ({rest})")
-            } else {
-                format!(
-                    "webread: failed to parse JSON response ({})",
-                    err.message()
-                )
-            };
-            RuntimeControlFlow::Error(
-                build_runtime_error(message)
-                    .with_builtin("webread")
-                    .with_source(err)
-                    .build(),
-            )
-        }
-    }
+fn map_json_error(err: RuntimeError) -> RuntimeError {
+    let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
+        format!("webread: failed to parse JSON response ({rest})")
+    } else {
+        format!(
+            "webread: failed to parse JSON response ({})",
+            err.message()
+        )
+    };
+    build_runtime_error(message)
+        .with_builtin("webread")
+        .with_source(err)
+        .build()
 }
 
 fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
@@ -765,10 +753,8 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     fn spawn_server<F>(handler: F) -> String

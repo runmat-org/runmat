@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
@@ -236,11 +236,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider-level Horner kernels for real coefficients/inputs; falls back to host evaluation (with upload) for complex or prediction-interval paths.",
 };
 
-fn polyval_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn polyval_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyval")]
@@ -1040,20 +1039,14 @@ fn values_are_real(values: &[Complex64]) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::StructValue;
 
-    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => assert!(
-                err.message().contains(needle),
-                "expected error containing '{needle}', got '{}'",
-                err.message()
-            ),
-            other => {
-                panic!("unexpected runtime control flow in polyval tests: {other:?}");
-            }
-        }
+    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "expected error containing '{needle}', got '{}'",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -313,11 +313,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`unique` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn unique_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+fn unique_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("unique")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -1457,10 +1456,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

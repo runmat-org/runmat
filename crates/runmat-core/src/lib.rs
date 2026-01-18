@@ -10,7 +10,7 @@ pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_runtime::RuntimeControlFlow;
+use runmat_runtime::RuntimeError;
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -715,11 +715,22 @@ impl RunMatSession {
     > {
         let session_handler = self.input_handler.clone();
         Arc::new(move |prompt| {
+            if matches!(
+                prompt.kind,
+                runmat_runtime::interaction::InteractionKind::GpuMapRead
+            ) {
+                return runmat_runtime::interaction::InteractionDecision::Respond(Err(
+                    "gpu map read pending is not supported by input handlers".to_string(),
+                ));
+            }
             let request_kind = match prompt.kind {
                 runmat_runtime::interaction::InteractionKind::Line { echo } => {
                     InputRequestKind::Line { echo }
                 }
                 runmat_runtime::interaction::InteractionKind::KeyPress => {
+                    InputRequestKind::KeyPress
+                }
+                runmat_runtime::interaction::InteractionKind::GpuMapRead => {
                     InputRequestKind::KeyPress
                 }
             };
@@ -1507,7 +1518,7 @@ impl RunMatSession {
     async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
-    ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeControlFlow> {
+    ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeError> {
         runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>")).await
     }
 

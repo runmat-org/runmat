@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
 };
 
 #[cfg_attr(
@@ -221,19 +221,17 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:mat2cell:InvalidInput";
 const IDENT_INVALID_PARTITION: &str = "MATLAB:mat2cell:InvalidPartition";
 const IDENT_SIZE_LIMIT: &str = "MATLAB:mat2cell:SizeExceeded";
 
-fn mat2cell_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn mat2cell_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("mat2cell")
         .build()
-        .into()
 }
 
-fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("mat2cell")
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(

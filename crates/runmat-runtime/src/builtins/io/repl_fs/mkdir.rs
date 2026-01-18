@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MKDIR:OSError";
 const MESSAGE_ID_DIRECTORY_EXISTS: &str = "MATLAB:MKDIR:DirectoryExists";
@@ -209,27 +209,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "mkdir";
 
-fn mkdir_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn mkdir_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -442,18 +436,12 @@ fn char_array_value(text: &str) -> Value {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
     use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -517,12 +505,10 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = unwrap_error(mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error"));
+        let err = mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error");
         assert_eq!(err.message(), ERR_FOLDER_ARG);
 
-        let err = unwrap_error(
-            evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error"),
-        );
+        let err = evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error");
         assert_eq!(err.message(), ERR_FOLDER_ARG);
     }
 

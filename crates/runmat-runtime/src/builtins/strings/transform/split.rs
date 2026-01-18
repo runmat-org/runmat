@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -235,15 +235,14 @@ const EMPTY_DELIMITER_ERROR: &str = "split: delimiters must contain at least one
 const CELL_ELEMENT_ERROR: &str =
     "split: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(

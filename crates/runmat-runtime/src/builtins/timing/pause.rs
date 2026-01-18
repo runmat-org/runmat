@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg(not(test))]
 use crate::interaction;
 #[cfg_attr(
@@ -164,19 +164,17 @@ const MSG_INVALID_ARG: &str = "pause: invalid input argument";
 const MSG_TOO_MANY_INPUTS: &str = "pause: too many input arguments";
 const MSG_STATE_LOCK: &str = "pause: failed to acquire pause state";
 
-fn pause_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn pause_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn pause_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn pause_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -229,7 +227,7 @@ fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn perform_wait(wait: PauseWait) -> Result<(), RuntimeControlFlow> {
+fn perform_wait(wait: PauseWait) -> Result<(), RuntimeError> {
     if !pause_enabled()? {
         return Ok(());
     }
@@ -248,7 +246,7 @@ fn perform_wait(wait: PauseWait) -> Result<(), RuntimeControlFlow> {
     }
 }
 
-fn wait_for_key_press() -> Result<(), RuntimeControlFlow> {
+fn wait_for_key_press() -> Result<(), RuntimeError> {
     #[cfg(test)]
     {
         Ok(())
@@ -259,7 +257,7 @@ fn wait_for_key_press() -> Result<(), RuntimeControlFlow> {
     }
 }
 
-fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
+fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
     let host_value = gpu_helpers::gather_value(arg)
         .map_err(|e| pause_error(format!("pause: {e}")))?;
     match host_value {
@@ -315,7 +313,7 @@ fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeControlFlow> {
     }
 }
 
-fn parse_command(raw: &str) -> Result<PauseArgument, RuntimeControlFlow> {
+fn parse_command(raw: &str) -> Result<PauseArgument, RuntimeError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
@@ -332,7 +330,7 @@ fn parse_command(raw: &str) -> Result<PauseArgument, RuntimeControlFlow> {
     }
 }
 
-fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeControlFlow> {
+fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeError> {
     if !value.is_finite() {
         if value.is_sign_positive() {
             return Ok(PauseArgument::Wait(PauseWait::Default));
@@ -351,7 +349,7 @@ fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeControlFlow> {
     Ok(PauseArgument::Wait(PauseWait::Seconds(value)))
 }
 
-fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeControlFlow> {
+fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
     if tensor.data.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
@@ -364,7 +362,7 @@ fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeControlFlow> {
     parse_numeric(tensor.data[0])
 }
 
-fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeControlFlow> {
+fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeError> {
     if logical.data.is_empty() {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
@@ -387,14 +385,14 @@ fn state_value(enabled: bool) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn pause_enabled() -> Result<bool, RuntimeControlFlow> {
+fn pause_enabled() -> Result<bool, RuntimeError> {
     PAUSE_STATE
         .read()
         .map(|guard| guard.enabled)
         .map_err(|_| pause_error(MSG_STATE_LOCK))
 }
 
-fn set_pause_enabled(next: bool) -> Result<bool, RuntimeControlFlow> {
+fn set_pause_enabled(next: bool) -> Result<bool, RuntimeError> {
     let mut guard = PAUSE_STATE
         .write()
         .map_err(|_| pause_error(MSG_STATE_LOCK))?;
@@ -425,12 +423,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_pause_error_identifier(err: RuntimeControlFlow, identifier: &str) {
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
-            }
-        }
+    fn assert_pause_error_identifier(err: crate::RuntimeError, identifier: &str) {
+        assert_eq!(err.identifier(), Some(identifier), "message: {}", err.message());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

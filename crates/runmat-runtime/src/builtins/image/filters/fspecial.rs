@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -165,11 +165,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Generates constant kernels; fusion is not applicable.",
 };
 
-fn fspecial_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn fspecial_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("fspecial")
         .build()
-        .into()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -439,16 +438,11 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<V
                     )
                 }
             },
-            Err(RuntimeControlFlow::Error(error)) => {
+            Err(error) => {
                 warn!(
                     "fspecial: provider hook unavailable, falling back to host path: {}",
                     error.message()
                 );
-            }
-            Err(_) => {
-                return Err(RuntimeControlFlow::Error(
-                    build_runtime_error("interaction pending").build(),
-                ));
             }
         }
     }
@@ -1089,7 +1083,6 @@ fn clamp_asin(value: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {
         if (actual - expected).abs() > epsilon {
@@ -1099,11 +1092,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn error_message(err: RuntimeControlFlow) -> String {
-        match err {
-            RuntimeControlFlow::Error(error) => error.message().to_string(),
-            other => panic!("unexpected runtime control flow: {other:?}"),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

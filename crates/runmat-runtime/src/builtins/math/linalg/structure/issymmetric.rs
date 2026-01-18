@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -238,8 +238,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "issymmetric";
 
-fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin(name).build())
+fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(name).build()
 }
 
 #[runtime_builtin(

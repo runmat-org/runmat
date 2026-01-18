@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
 const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
@@ -207,27 +207,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "tempname";
 
-fn tempname_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn tempname_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -346,17 +340,10 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::fs::home_directory;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::StringArray;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
-
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -493,24 +480,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tempname_rejects_too_many_arguments() {
-        let err = unwrap_error(
-            tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("error"),
-        );
+        let err = tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)])
+            .expect_err("expected error");
         assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
-    }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn tempname_rejects_invalid_type() {
-        let err = unwrap_error(tempname_builtin(vec![Value::Num(1.0)]).expect_err("error"));
+        let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");
         assert_eq!(err.message(), ERR_FOLDER_TYPE);
-    }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn tempname_rejects_empty_folder() {
         let empty = Value::CharArray(CharArray::new_row(""));
-        let err = unwrap_error(tempname_builtin(vec![empty]).expect_err("error"));
+        let err = tempname_builtin(vec![empty]).expect_err("error");
         assert_eq!(err.message(), ERR_FOLDER_EMPTY);
     }
 

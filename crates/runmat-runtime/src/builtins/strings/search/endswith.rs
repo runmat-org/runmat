@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -250,9 +250,8 @@ fn evaluate_endswith(
     patterns: &TextCollection,
     ignore_case: bool,
 ) -> BuiltinResult<Value> {
-    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape).map_err(
-        |err| RuntimeControlFlow::from(build_runtime_error(err).with_builtin(BUILTIN_NAME).build()),
-    )?;
+    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
+        .map_err(|err| build_runtime_error(err).with_builtin(BUILTIN_NAME).build())?;
     let total = tensor::element_count(&output_shape);
     if total == 0 {
         return logical_result(BUILTIN_NAME, Vec::new(), output_shape);

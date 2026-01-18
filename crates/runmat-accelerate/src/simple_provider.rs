@@ -15,7 +15,7 @@ use runmat_accelerate_api::{
     SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
-use runmat_runtime::{build_runtime_error, RuntimeControlFlow};
+use runmat_runtime::RuntimeError;
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -58,15 +58,8 @@ const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 
-fn runtime_flow_to_anyhow(context: &str, flow: RuntimeControlFlow) -> anyhow::Error {
-    match flow {
-        RuntimeControlFlow::Error(err) => anyhow::Error::new(err),
-        _ => anyhow::Error::new(
-            build_runtime_error("interaction pending")
-                .with_builtin(context)
-                .build(),
-        ),
-    }
+fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
+    anyhow::Error::new(err)
 }
 
 #[derive(Clone, Copy)]
@@ -1732,14 +1725,8 @@ impl AccelProvider for InProcessProvider {
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
             runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
-                .map_err(|err| match err {
-                    RuntimeControlFlow::Error(error) => anyhow!(error),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                })?;
-        let tensor = spec.generate_tensor().map_err(|err| match err {
-            RuntimeControlFlow::Error(error) => anyhow!(error),
-            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-        })?;
+                .map_err(|err| anyhow!(err))?;
+        let tensor = spec.generate_tensor().map_err(|err| anyhow!(err))?;
         Ok(self.allocate_tensor(tensor.data.clone(), tensor.shape.clone()))
     }
 
@@ -1771,10 +1758,7 @@ impl AccelProvider for InProcessProvider {
             options,
             "imfilter",
         )
-        .map_err(|err| match err {
-            RuntimeControlFlow::Error(error) => anyhow!(error),
-            _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-        })?;
+        .map_err(|err| anyhow!(err))?;
         let Tensor { data, shape, .. } = result;
         Ok(self.allocate_tensor(data, shape))
     }
@@ -3647,19 +3631,13 @@ impl AccelProvider for InProcessProvider {
         let tensor = Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("unique: {e}"))?;
         let eval = match unique::unique_numeric_from_tensor(tensor, options) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("{err}"));
             }
         };
         match eval.into_numeric_unique_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("{err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("{err}")),
         }
     }
 
@@ -3689,19 +3667,13 @@ impl AccelProvider for InProcessProvider {
             tensor_a, tensor_b, options,
         ) {
             Ok(eval) => eval,
-            Err(flow) => {
-                return Err(match flow {
-                    runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                    _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-                });
+            Err(err) => {
+                return Err(anyhow!("setdiff: {err}"));
             }
         };
         match eval.into_numeric_setdiff_result() {
             Ok(result) => Ok(result),
-            Err(flow) => Err(match flow {
-                runmat_runtime::RuntimeControlFlow::Error(err) => anyhow!("setdiff: {err}"),
-                _ => anyhow!(runmat_runtime::build_runtime_error("interaction pending").build()),
-            }),
+            Err(err) => Err(anyhow!("setdiff: {err}")),
         }
     }
 

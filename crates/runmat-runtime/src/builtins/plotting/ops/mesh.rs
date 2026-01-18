@@ -17,7 +17,7 @@ use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::BuiltinResult;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -141,7 +141,7 @@ pub fn mesh_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate::
                     figure.add_surface_plot_on_axes(surface, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("mesh GPU path unavailable: {err}");
                 }
             }

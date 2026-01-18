@@ -10,7 +10,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "nnz";
 
@@ -210,8 +210,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
 
-fn nnz_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn nnz_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
@@ -741,17 +741,12 @@ pub(crate) mod tests {
     #[test]
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message()
-                        .contains("expected numeric, logical, complex, or char array"),
-                    "unexpected error: {err}"
-                );
-                assert!(err.message().contains("string scalar"), "unexpected error: {err}");
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(
+            err.message()
+                .contains("expected numeric, logical, complex, or char array"),
+            "unexpected error: {err}"
+        );
+        assert!(err.message().contains("string scalar"), "unexpected error: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

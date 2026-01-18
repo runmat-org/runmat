@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -223,8 +223,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Triangular masking is not currently fused; fusion planner treats tril nodes as boundaries.",
 };
 
-fn tril_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("tril").build().into()
+fn tril_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("tril")
+        .build()
 }
 
 #[runtime_builtin(

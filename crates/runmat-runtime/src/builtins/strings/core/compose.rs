@@ -10,7 +10,7 @@ use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -214,12 +214,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting builtin; not eligible for fusion and materialises host string arrays.",
 };
 
-fn compose_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("compose").build().into()
+fn compose_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("compose").build()
 }
 
-fn remap_compose_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "compose")
+fn remap_compose_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "compose")
 }
 
 #[runtime_builtin(
@@ -265,13 +265,10 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::{IntValue, Tensor};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

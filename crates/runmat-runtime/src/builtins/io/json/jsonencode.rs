@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
 const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
@@ -228,26 +228,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
 
-fn jsonencode_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn jsonencode_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("jsonencode")
         .build()
-        .into()
 }
 
-fn jsonencode_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => build_runtime_error(err.message().to_string())
-            .with_builtin("jsonencode")
-            .with_source(err)
-            .build()
-            .into(),
-        _ => RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending")
-                .with_builtin("jsonencode")
-                .build(),
-        ),
-    }
+fn jsonencode_flow_with_context(err: RuntimeError) -> RuntimeError {
+    build_runtime_error(err.message().to_string())
+        .with_builtin("jsonencode")
+        .with_source(err)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
@@ -934,7 +925,6 @@ fn format_number(value: f64) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor,
     };
@@ -947,11 +937,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-            _ => "interaction pending".to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

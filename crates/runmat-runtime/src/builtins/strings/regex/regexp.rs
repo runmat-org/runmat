@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -234,19 +234,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "regexp";
 
-fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(builtin).build().into()
+fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
 }
 
-fn with_builtin_context(builtin: &'static str, flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut err) => {
-            if err.context.builtin.is_none() {
-                err.context = err.context.with_builtin(builtin);
-            }
-            RuntimeControlFlow::Error(err)
-        }
+fn with_builtin_context(builtin: &'static str, mut err: RuntimeError) -> RuntimeError {
+    if err.context.builtin.is_none() {
+        err.context = err.context.with_builtin(builtin);
     }
+    err
 }
 
 /// Evaluate a regular expression and return an evaluation handle that can produce MATLAB-compatible outputs.

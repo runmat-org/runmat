@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
@@ -198,29 +198,25 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider transpose hook when available; otherwise gathers, transposes on the host, and uploads the result back to the GPU.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
-            if let Some(identifier) = err.identifier() {
-                builder = builder.with_identifier(identifier.to_string());
-            }
-            if let Some(task_id) = err.context.task_id.clone() {
-                builder = builder.with_task_id(task_id);
-            }
-            if !err.context.call_stack.is_empty() {
-                builder = builder.with_call_stack(err.context.call_stack.clone());
-            }
-            if let Some(phase) = err.context.phase.clone() {
-                builder = builder.with_phase(phase);
-            }
-            builder.with_source(err).build().into()
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
     }
+    if let Some(task_id) = err.context.task_id.clone() {
+        builder = builder.with_task_id(task_id);
+    }
+    if !err.context.call_stack.is_empty() {
+        builder = builder.with_call_stack(err.context.call_stack.clone());
+    }
+    if let Some(phase) = err.context.phase.clone() {
+        builder = builder.with_phase(phase);
+    }
+    builder.with_source(err).build()
 }
 
 #[runmat_macros::register_fusion_spec(

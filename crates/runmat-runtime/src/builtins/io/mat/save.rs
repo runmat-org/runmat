@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use crate::workspace;
 
 #[cfg_attr(
@@ -341,23 +341,21 @@ struct SaveRequest {
 
 const BUILTIN_NAME: &str = "save";
 
-fn save_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn save_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 fn save_error_with_source(
     message: impl Into<String>,
     source: impl std::fmt::Display,
-) -> RuntimeControlFlow {
+) -> RuntimeError {
     let source = std::io::Error::new(std::io::ErrorKind::Other, source.to_string());
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(source)
         .build()
-        .into()
 }
 
 fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
@@ -989,7 +987,7 @@ pub(crate) mod tests {
 
     fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
         match result {
-            Err(crate::RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(
                     err.message().contains(snippet),
                     "expected error to contain '{snippet}', got '{}'",

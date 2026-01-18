@@ -26,7 +26,7 @@ use super::style::{
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -250,7 +250,7 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn plot_err(msg: impl Into<String>) -> RuntimeControlFlow {
+fn plot_err(msg: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, format!("plot: {}", msg.into()))
 }
 
@@ -427,7 +427,7 @@ fn render_series(
                         figure.add_line_plot_on_axes(line_plot, axes_index);
                         continue;
                     }
-                    Err(RuntimeControlFlow::Error(err)) => {
+                    Err(err) => {
                         warn!("plot GPU path unavailable: {err}");
                     }
                 }
@@ -483,6 +483,7 @@ impl PlotSeriesInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -498,16 +499,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                let lower = err.to_string().to_lowercase();
-                assert!(
-                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-                    "unexpected error: {err}"
-                );
-            }
-        }
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -564,11 +561,7 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.to_string().contains("expected numeric Y argument"));
-            }
-        }
+        assert!(err.to_string().contains("expected numeric Y argument"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -577,11 +570,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.to_string().contains("expected numeric X data"));
-            }
-        }
+        assert!(err.to_string().contains("expected numeric X data"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

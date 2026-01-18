@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -235,8 +235,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "symrcm";
 
-fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin(name).build())
+fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(name).build()
 }
 
 #[runtime_builtin(
@@ -349,15 +349,7 @@ fn adjacency_from_complex_data(
 }
 
 fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
-    let (rows, cols) = match super::bandwidth::ensure_matrix_shape(shape) {
-        Ok(dimensions) => dimensions,
-        Err(RuntimeControlFlow::Error(_)) => {
-            return Err(runtime_error(
-                BUILTIN_NAME,
-                "symrcm: input must be a 2-D matrix",
-            ));
-        }
-    };
+    let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)?;
     if rows != cols {
         return Err(runtime_error(
             BUILTIN_NAME,

@@ -8,7 +8,7 @@ use runmat_builtins::{CellArray, StringArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -200,11 +200,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata mutation forces fusion planners to flush pending groups on the host.",
 };
 
-fn rmfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn rmfield_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("rmfield")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -386,7 +385,7 @@ fn remove_fields_from_struct_array(
         .map_err(|e| rmfield_flow(format!("rmfield: failed to rebuild struct array: {e}")))
 }
 
-fn missing_field_error(name: &str) -> RuntimeControlFlow {
+fn missing_field_error(name: &str) -> RuntimeError {
     rmfield_flow(format!("Reference to non-existent field '{name}'."))
 }
 
@@ -402,19 +401,13 @@ pub(crate) mod tests {
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Value};
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;

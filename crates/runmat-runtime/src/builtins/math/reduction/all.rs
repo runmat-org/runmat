@@ -10,7 +10,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "all";
 
@@ -203,8 +203,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute device-side AND reductions; runtimes gather to host when hooks are unavailable.",
 };
 
-fn all_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn all_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::all")]
@@ -1010,7 +1010,6 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("all"), Value::Int(IntValue::I32(1))];
         let err = all_builtin(Value::Tensor(tensor), args).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(
             err.message().contains("dimension"),
             "unexpected error message: {err}"

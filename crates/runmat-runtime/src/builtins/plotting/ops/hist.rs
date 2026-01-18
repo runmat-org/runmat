@@ -26,7 +26,7 @@ use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -117,7 +117,7 @@ const HIST_BAR_WIDTH: f32 = 0.95;
 const HIST_DEFAULT_COLOR: Vec4 = Vec4::new(0.15, 0.5, 0.8, 0.95);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
 
-fn hist_err(message: impl Into<String>) -> RuntimeControlFlow {
+fn hist_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
 }
 
@@ -1345,6 +1345,7 @@ impl HistInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1360,16 +1361,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                let lower = err.to_string().to_lowercase();
-                assert!(
-                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-                    "unexpected error: {err}"
-                );
-            }
-        }
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

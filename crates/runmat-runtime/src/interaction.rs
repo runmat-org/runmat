@@ -2,7 +2,7 @@ use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 
-use crate::build_runtime_error;
+use crate::{build_runtime_error, RuntimeError};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::IsTerminal;
 #[cfg(not(target_arch = "wasm32"))]
@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 pub use runmat_async::InteractionKind;
-pub use crate::RuntimeControlFlow;
 
 pub struct InteractionPrompt<'a> {
     pub prompt: &'a str,
@@ -90,15 +89,14 @@ pub fn replace_handler(handler: Option<Arc<InteractionHandler>>) -> HandlerGuard
     HandlerGuard::install(handler)
 }
 
-pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeControlFlow> {
+pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))? {
+        return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(value) => Ok(value),
             InteractionResponse::KeyPress => Err(build_runtime_error(
                 "queued keypress response used for line request",
             )
-            .build()
-            .into()),
+            .build()),
         };
     }
     if let Some(handler) = handler_slot().read().ok().and_then(|slot| slot.clone()) {
@@ -106,28 +104,26 @@ pub fn request_line(prompt: &str, echo: bool) -> Result<String, RuntimeControlFl
             prompt,
             kind: InteractionKind::Line { echo },
         }) {
-            InteractionDecision::Respond(result) => match result.map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))? {
+            InteractionDecision::Respond(result) => match result.map_err(|err| build_runtime_error(err).build())? {
                 InteractionResponse::Line(value) => Ok(value),
                 InteractionResponse::KeyPress => Err(build_runtime_error(
                     "interaction handler returned keypress for line request",
                 )
-                .build()
-                .into()),
+                .build()),
             },
         }
     } else {
-        default_read_line(prompt, echo).map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))
+        default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
     }
 }
 
-pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeControlFlow> {
+pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))? {
+        return match response.map_err(|err| build_runtime_error(err).build())? {
             InteractionResponse::Line(_) => Err(build_runtime_error(
                 "queued line response used for keypress request",
             )
-            .build()
-            .into()),
+            .build()),
             InteractionResponse::KeyPress => Ok(()),
         };
     }
@@ -136,17 +132,16 @@ pub fn wait_for_key(prompt: &str) -> Result<(), RuntimeControlFlow> {
             prompt,
             kind: InteractionKind::KeyPress,
         }) {
-            InteractionDecision::Respond(result) => match result.map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))? {
+            InteractionDecision::Respond(result) => match result.map_err(|err| build_runtime_error(err).build())? {
                 InteractionResponse::Line(_) => Err(build_runtime_error(
                     "interaction handler returned line value for keypress request",
                 )
-                .build()
-                .into()),
+                .build()),
                 InteractionResponse::KeyPress => Ok(()),
             },
         }
     } else {
-        default_wait_for_key(prompt).map_err(|err| RuntimeControlFlow::Error(build_runtime_error(err).build()))
+        default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())
     }
 }
 

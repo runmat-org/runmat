@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -255,8 +255,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "minus";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -766,7 +768,7 @@ fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor};
@@ -881,12 +883,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = minus_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("minus"), "unexpected error message: {err}");
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("minus"), "unexpected error message: {err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1040,12 +1037,7 @@ pub(crate) mod tests {
             vec![Value::from("like")],
         )
         .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("prototype"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

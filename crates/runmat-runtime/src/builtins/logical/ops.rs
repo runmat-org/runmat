@@ -5,7 +5,7 @@ use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     spec::{
@@ -222,11 +222,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "logical";
 
-fn logical_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn logical_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -377,7 +376,7 @@ fn complex_is_zero(re: f64, im: f64) -> bool {
     re == 0.0 && im == 0.0
 }
 
-fn conversion_error(type_name: &str) -> RuntimeControlFlow {
+fn conversion_error(type_name: &str) -> RuntimeError {
     logical_error(format!(
         "logical: conversion to logical from {} is not possible",
         type_name
@@ -444,24 +443,15 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CellArray, IntValue, MException, ObjectInstance, StructValue};
 
-    fn assert_error_message(err: RuntimeControlFlow, expected: &str) {
-        match err {
-            RuntimeControlFlow::Error(err) => assert_eq!(err.message(), expected),
-            other => panic!("unexpected runtime control flow: {other:?}"),
-        }
+    fn assert_error_message(err: crate::RuntimeError, expected: &str) {
+        assert_eq!(err.message(), expected);
     }
 
-    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
-            }
-            other => panic!("unexpected runtime control flow: {other:?}"),
-        }
+    fn assert_error_contains(err: crate::RuntimeError, expected: &str) {
+        assert!(err.message().contains(expected), "unexpected error: {}", err.message());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

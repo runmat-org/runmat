@@ -9,7 +9,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -242,8 +242,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "gamma";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -693,12 +695,7 @@ pub(crate) mod tests {
     #[test]
     fn gamma_string_input_errors() {
         let err = gamma_builtin(Value::from("hello"), Vec::new()).expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("expected numeric input"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -786,12 +783,7 @@ pub(crate) mod tests {
                 vec![Value::from("like"), Value::GpuTensor(proto)],
             )
             .expect_err("expected error");
-            match err {
-                RuntimeControlFlow::Error(err) => {
-                    assert!(err.message().contains("only support real numeric outputs"));
-                }
-                RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-            }
+            assert!(err.message().contains("only support real numeric outputs"));
         });
     }
 
@@ -820,12 +812,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
         .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("too many input arguments"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("too many input arguments"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

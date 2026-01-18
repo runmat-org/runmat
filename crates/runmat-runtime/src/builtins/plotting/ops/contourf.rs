@@ -12,7 +12,6 @@ use super::contour::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
-use crate::RuntimeControlFlow;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -116,14 +115,14 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                             Ok(contours) => {
                                 figure.add_contour_plot_on_axes(contours, axes);
                             }
-                            Err(RuntimeControlFlow::Error(err)) => {
+                            Err(err) => {
                                 warn!("contourf contour overlay unavailable: {err}");
                             }
                         }
                     }
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("contourf GPU path unavailable: {err}");
                 }
             }
@@ -159,7 +158,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 Ok(contours) => {
                     figure.add_contour_plot_on_axes(contours, axes);
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("contourf overlay contour unavailable: {err}");
                 }
             }

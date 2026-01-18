@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::{
     gpu_helpers,
     random_args::keyword_of,
@@ -250,11 +250,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "single";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
+}
+
+fn conversion_error(type_name: &str) -> RuntimeError {
+    builtin_error(format!(
+        "single: conversion to single from {type_name} is not possible"
+    ))
 }
 
 #[runtime_builtin(
@@ -377,13 +382,6 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let ascii: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
     Tensor::new(ascii, vec![chars.rows, chars.cols])
         .map_err(|e| builtin_error(format!("single: {e}")))
-}
-
-fn conversion_error(type_name: &str) -> RuntimeControlFlow {
-    builtin_error(format!(
-        "single: conversion to single from {} is not possible",
-        type_name
-    ))
 }
 
 #[derive(Clone)]
@@ -558,13 +556,8 @@ pub(crate) mod tests {
     fn single_errors_on_string_input() {
         let err = single_builtin(Value::String("hello".to_string()), Vec::new())
             .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("single"));
-                assert!(err.message().contains("string"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("single"));
+        assert!(err.message().contains("string"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

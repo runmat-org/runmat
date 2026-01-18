@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
@@ -165,27 +165,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "path";
 
-fn path_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn path_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -312,7 +306,6 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_search::search_directories;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::path_state::set_path_string;
     use std::convert::TryFrom;
     use tempfile::tempdir;
@@ -335,11 +328,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -453,7 +441,7 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
-        let err = unwrap_error(path_builtin(vec![Value::CharArray(chars)]).expect_err("expected error"));
+        let err = path_builtin(vec![Value::CharArray(chars)]).expect_err("expected error");
         assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
@@ -466,7 +454,7 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("array");
-        let err = unwrap_error(path_builtin(vec![Value::StringArray(array)]).expect_err("expected error"));
+        let err = path_builtin(vec![Value::StringArray(array)]).expect_err("expected error");
         assert_eq!(err.message(), ERROR_ARG_TYPE);
     }
 
@@ -478,7 +466,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let _guard = PathGuard::new();
 
-        let err = unwrap_error(path_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        let err = path_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert!(err.message().contains("path: arguments"));
     }
 

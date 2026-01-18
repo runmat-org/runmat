@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{make_cell, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{make_cell, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_INPUT_NOT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
@@ -236,19 +236,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const IDENT_INVALID_INPUT: &str = "MATLAB:cellstr:InvalidInput";
 const IDENT_INVALID_CONTENTS: &str = "MATLAB:cellstr:InvalidContents";
 
-fn cellstr_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn cellstr_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cellstr")
         .build()
-        .into()
 }
 
-fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeControlFlow {
+fn cellstr_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("cellstr")
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(

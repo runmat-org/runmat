@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
 
@@ -182,12 +182,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sinh directly on the device; runtimes gather to the host when unary_sinh is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::from(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]

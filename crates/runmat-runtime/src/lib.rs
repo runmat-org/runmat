@@ -21,9 +21,7 @@ pub mod warning_store;
 pub mod workspace;
 
 /// Standard result type for runtime builtins.
-pub type BuiltinResult<T> = Result<T, RuntimeControlFlow>;
-
-pub type RuntimeControlFlow = runmat_async::RuntimeControlFlow<RuntimeError>;
+pub type BuiltinResult<T> = Result<T, RuntimeError>;
 
 pub use runtime_error::{build_runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
 
@@ -43,16 +41,6 @@ extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, call_builtin_async, gather_if_needed, is_gpu_value, value_contains_gpu};
 
-pub fn flow_to_error(flow: RuntimeControlFlow) -> RuntimeError {
-    match flow {
-        RuntimeControlFlow::Error(err) => err,
-        RuntimeControlFlow::Suspend(pending) => build_runtime_error(format!(
-            "interaction pending: {}",
-            pending.prompt
-        ))
-        .build(),
-    }
-}
 pub use runmat_macros::{register_doc_text, register_fusion_spec, register_gpu_spec};
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only

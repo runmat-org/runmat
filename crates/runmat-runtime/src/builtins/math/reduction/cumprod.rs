@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirect
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumprod";
 
@@ -166,8 +166,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose device prefix-product kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
 
-fn cumprod_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn cumprod_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
@@ -810,7 +810,7 @@ pub(crate) mod tests {
         let tensor = BuiltinsTensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let result = cumprod_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]);
         match result {
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 assert!(
                     err.message().contains("dimension must be >= 1"),
                     "unexpected result: {err}"

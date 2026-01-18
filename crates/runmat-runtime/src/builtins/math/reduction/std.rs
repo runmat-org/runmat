@@ -8,7 +8,7 @@ const NAME: &str = "std";
 
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -213,8 +213,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 
-fn std_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn std_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::std")]
@@ -1316,7 +1316,6 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![0.2, 0.8], vec![1, 2]).unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(
             err.message().contains("std: dimension entries must be integers")
                 || err.message().contains("std: dimension vector must not be empty"),

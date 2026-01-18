@@ -1,4 +1,3 @@
-use std::fmt;
 use thiserror::Error;
 
 pub mod runtime_error;
@@ -18,35 +17,6 @@ pub enum InteractionKind {
 pub struct PendingInteraction {
     pub prompt: String,
     pub kind: InteractionKind,
-}
-
-/// Typed channel for runtime control flow. This replaces string sentinels like
-/// `__RUNMAT_PENDING_INTERACTION__`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeControlFlow<E = String> {
-    Suspend(PendingInteraction),
-    Error(E),
-}
-
-impl From<String> for RuntimeControlFlow<String> {
-    fn from(value: String) -> Self {
-        RuntimeControlFlow::Error(value)
-    }
-}
-
-impl From<&str> for RuntimeControlFlow<String> {
-    fn from(value: &str) -> Self {
-        RuntimeControlFlow::Error(value.to_string())
-    }
-}
-
-impl<E: fmt::Display> fmt::Display for RuntimeControlFlow<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RuntimeControlFlow::Suspend(pending) => write!(f, "suspend: {}", pending.prompt),
-            RuntimeControlFlow::Error(message) => write!(f, "{message}"),
-        }
-    }
 }
 
 /// Marker error type used to bubble an internal suspension through `anyhow::Error` without

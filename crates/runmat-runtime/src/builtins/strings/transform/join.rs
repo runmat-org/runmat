@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -230,15 +230,14 @@ const DELIMITER_SIZE_ERROR: &str =
     "join: size of delimiter array must match the size of str, with the join dimension reduced by one";
 const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer scalar";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn map_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, BUILTIN_NAME)
+fn map_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(

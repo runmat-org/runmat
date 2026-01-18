@@ -8,7 +8,7 @@ use runmat_builtins::{CellArray, LogicalArray, StructValue, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -191,11 +191,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because it inspects struct metadata on the host.",
 };
 
-fn isfield_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn isfield_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("isfield")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -449,7 +448,7 @@ fn value_to_field_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn field_name_type_error() -> RuntimeControlFlow {
+fn field_name_type_error() -> RuntimeError {
     isfield_flow(
         "isfield: field names must be strings, string arrays, or cell arrays of character vectors",
     )
@@ -461,12 +460,9 @@ pub(crate) mod tests {
     use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
 
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

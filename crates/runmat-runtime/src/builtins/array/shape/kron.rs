@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -210,8 +210,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
 };
 
-fn kron_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("kron").build().into()
+fn kron_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("kron")
+        .build()
 }
 
 #[derive(Clone)]

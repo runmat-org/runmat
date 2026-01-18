@@ -18,9 +18,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::call_builtin;
-use crate::{
-    gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError,
-};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
@@ -203,26 +201,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "HTTP uploads run on the CPU and gather gpuArray inputs before serialisation.",
 };
 
-fn webwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("webwrite").build())
+fn webwrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("webwrite")
+        .build()
 }
 
-fn remap_webwrite_flow<F>(flow: RuntimeControlFlow, message: F) -> RuntimeControlFlow
+fn remap_webwrite_flow<F>(err: RuntimeError, message: F) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    match flow {
-        RuntimeControlFlow::Error(err) => RuntimeControlFlow::Error(
-            build_runtime_error(message(&err))
-                .with_builtin("webwrite")
-                .with_source(err)
-                .build(),
-        ),
-    }
+    build_runtime_error(message(&err))
+        .with_builtin("webwrite")
+        .with_source(err)
+        .build()
 }
 
-fn webwrite_flow_with_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message()))
+fn webwrite_flow_with_context(err: RuntimeError) -> RuntimeError {
+    remap_webwrite_flow(err, |err| format!("webwrite: {}", err.message()))
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webwrite")]
@@ -406,12 +402,10 @@ fn execute_request(
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
-                .with_builtin("webwrite")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
+            .with_builtin("webwrite")
+            .with_source(err)
+            .build()
     })?;
     if !query_params.is_empty() {
         {
@@ -459,12 +453,10 @@ fn execute_request(
     };
 
     let response = transport::send_request(&request).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(err.message_with_prefix("webwrite"))
-                .with_builtin("webwrite")
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(err.message_with_prefix("webwrite"))
+            .with_builtin("webwrite")
+            .with_source(err)
+            .build()
     })?;
 
     let header_content_type =
@@ -813,25 +805,19 @@ fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
     }
 }
 
-fn map_json_error(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
-                format!("webwrite: failed to parse JSON response ({rest})")
-            } else {
-                format!(
-                    "webwrite: failed to parse JSON response ({})",
-                    err.message()
-                )
-            };
-            RuntimeControlFlow::Error(
-                build_runtime_error(message)
-                    .with_builtin("webwrite")
-                    .with_source(err)
-                    .build(),
-            )
-        }
-    }
+fn map_json_error(err: RuntimeError) -> RuntimeError {
+    let message = if let Some(rest) = err.message().strip_prefix("jsondecode: ") {
+        format!("webwrite: failed to parse JSON response ({rest})")
+    } else {
+        format!(
+            "webwrite: failed to parse JSON response ({})",
+            err.message()
+        )
+    };
+    build_runtime_error(message)
+        .with_builtin("webwrite")
+        .with_source(err)
+        .build()
 }
 
 fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {

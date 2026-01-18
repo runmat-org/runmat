@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -204,8 +204,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Squeeze only mutates metadata; fusion planner treats it as a no-op for kernel generation.",
 };
 
-fn squeeze_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("squeeze").build().into()
+fn squeeze_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("squeeze")
+        .build()
 }
 
 #[runtime_builtin(

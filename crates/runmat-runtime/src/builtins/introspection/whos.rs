@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, make_cell, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -226,9 +226,8 @@ fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         values.push(record.into_value()?);
     }
     let rows = values.len();
-    make_cell(values, rows, 1).map_err(|err| {
-        RuntimeControlFlow::Error(build_runtime_error(err).with_builtin("whos").build())
-    })
+    make_cell(values, rows, 1)
+        .map_err(|err| build_runtime_error(err).with_builtin("whos").build())
 }
 
 #[derive(Debug)]
@@ -328,14 +327,12 @@ fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
                         }
                         for pattern in candidates {
                             let regex = Regex::new(&pattern).map_err(|err| {
-                                RuntimeControlFlow::Error(
-                                    build_runtime_error(format!(
-                                        "whos: invalid regular expression '{pattern}': {err}"
-                                    ))
-                                    .with_builtin("whos")
-                                    .with_source(err)
-                                    .build(),
-                                )
+                                build_runtime_error(format!(
+                                    "whos: invalid regular expression '{pattern}': {err}"
+                                ))
+                                .with_builtin("whos")
+                                .with_source(err)
+                                .build()
                             })?;
                             regex_patterns.push(regex);
                         }
@@ -404,17 +401,13 @@ enum NameSelector {
     Wildcard(Pattern),
 }
 
-fn whos_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(build_runtime_error(message).with_builtin("whos").build())
+fn whos_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("whos").build()
 }
 
-fn whos_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut err) => {
-            err.context = err.context.with_builtin("whos");
-            RuntimeControlFlow::Error(err)
-        }
-    }
+fn whos_flow(mut err: RuntimeError) -> RuntimeError {
+    err.context = err.context.with_builtin("whos");
+    err
 }
 
 fn matches_filters(name: &str, selectors: &[NameSelector], regex_patterns: &[Regex]) -> bool {
@@ -435,12 +428,10 @@ fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
     for name in names {
         if contains_wildcards(name) {
             let pattern = Pattern::new(name).map_err(|err| {
-                RuntimeControlFlow::Error(
-                    build_runtime_error(format!("whos: invalid pattern '{name}': {err}"))
-                        .with_builtin("whos")
-                        .with_source(err)
-                        .build(),
-                )
+                build_runtime_error(format!("whos: invalid pattern '{name}': {err}"))
+                    .with_builtin("whos")
+                    .with_source(err)
+                    .build()
             })?;
             selectors.push(NameSelector::Wildcard(pattern));
         } else {
@@ -561,11 +552,9 @@ fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_builtins::Tensor> {
     }
     let data: Vec<f64> = normalized.iter().map(|dim| *dim as f64).collect();
     runmat_builtins::Tensor::new(data, vec![1, normalized.len()]).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
-                .with_builtin("whos")
-                .build(),
-        )
+        build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
+            .with_builtin("whos")
+            .build()
     })
 }
 
@@ -786,10 +775,8 @@ pub(crate) mod tests {
             })
     }
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     pub(crate) fn char_array_from_rows(rows: &[&str]) -> CharArray {

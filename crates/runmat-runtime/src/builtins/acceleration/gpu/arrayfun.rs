@@ -11,8 +11,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{
-    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeControlFlow,
-    RuntimeError,
+    gather_if_needed, make_cell_with_shape, build_runtime_error, BuiltinResult, RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, Tensor, Value};
@@ -255,12 +254,12 @@ fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) 
         .build()
 }
 
-fn arrayfun_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(arrayfun_error(message))
+fn arrayfun_flow(message: impl Into<String>) -> RuntimeError {
+    arrayfun_error(message)
 }
 
-fn arrayfun_flow_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(arrayfun_error_with_source(message, source))
+fn arrayfun_flow_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
+    arrayfun_error_with_source(message, source)
 }
 
 fn format_handler_error(err: &RuntimeError) -> String {
@@ -440,7 +439,7 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<V
 
         let result = match callable.call(&args) {
             Ok(value) => value,
-            Err(RuntimeControlFlow::Error(err)) => {
+            Err(err) => {
                 let handler = match error_handler.as_ref() {
                     Some(handler) => handler,
                     None => {

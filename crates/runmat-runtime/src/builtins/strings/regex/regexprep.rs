@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -200,22 +200,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "regexprep";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn with_builtin_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut err) => {
-            if err.context.builtin.is_none() {
-                err.context = err.context.with_builtin(BUILTIN_NAME);
-            }
-            RuntimeControlFlow::Error(err)
-        }
+fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
+    if err.context.builtin.is_none() {
+        err.context = err.context.with_builtin(BUILTIN_NAME);
     }
+    err
 }
 
 #[runtime_builtin(
@@ -1264,9 +1259,7 @@ pub(crate) mod tests {
             vec![Value::String("unknownOption".into())],
         )
         .expect_err("expected error");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("unrecognised option"),
             "unexpected error message: {message}"
@@ -1349,9 +1342,7 @@ pub(crate) mod tests {
         );
         let err = regexprep_builtin(subject, patterns, replacements, Vec::new())
             .expect_err("expected error");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("replacement sequence is incompatible with element-wise patterns"),
             "unexpected error message: {message}"

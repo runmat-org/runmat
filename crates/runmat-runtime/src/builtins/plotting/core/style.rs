@@ -111,7 +111,7 @@ pub const DEFAULT_LINE_WIDTH: f32 = 2.0;
 pub const DEFAULT_LINE_COLOR: Vec4 = Vec4::new(0.0, 0.4, 0.8, 1.0);
 pub const DEFAULT_LINE_MARKER_SIZE: f32 = 6.0;
 
-fn ctx_err(opts: &LineStyleParseOptions, msg: impl Into<String>) -> crate::RuntimeControlFlow {
+fn ctx_err(opts: &LineStyleParseOptions, msg: impl Into<String>) -> crate::RuntimeError {
     let message = format!("{}: {}", opts.builtin_name, msg.into());
     plotting_error(opts.builtin_name, message)
 }
@@ -1233,7 +1233,7 @@ fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> Builtin
     ))
 }
 
-fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeControlFlow {
+fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
     let message = format!("{builtin}: {}", msg.into());
     plotting_error(builtin, message)
 }

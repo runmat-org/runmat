@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use runmat_time::Instant;
@@ -372,14 +372,16 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinR
     let options = parse_accept_options(rest)?;
 
     let shared_server = server_handle(server_id)
-        .ok_or_else(|| RuntimeControlFlow::Error(accept_error(
-            MESSAGE_ID_INVALID_SERVER,
-            "accept: tcpserver handle is no longer valid",
-        )))?;
+        .ok_or_else(|| {
+            accept_error(
+                MESSAGE_ID_INVALID_SERVER,
+                "accept: tcpserver handle is no longer valid",
+            )
+        })?;
 
     let server_guard = shared_server
         .lock()
-        .map_err(|_| RuntimeControlFlow::Error(accept_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned")))?;
+        .map_err(|_| accept_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned"))?;
 
     let timeout = options.timeout.unwrap_or(server_guard.timeout);
     validate_timeout(timeout)?;
@@ -388,10 +390,10 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinR
         Ok((stream, peer_addr)) => {
             if let Err(err) = configure_stream(&stream, timeout) {
                 drop(server_guard);
-                return Err(RuntimeControlFlow::Error(accept_error(
+                return Err(accept_error(
                     MESSAGE_ID_INTERNAL,
                     format!("accept: failed to configure stream timeouts ({err})"),
-                )));
+                ));
             }
             let byte_order = server_guard.byte_order.clone();
             let client_id = insert_client(
@@ -421,7 +423,7 @@ pub(crate) fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinR
                     format!("accept: failed to accept client ({err})"),
                 ),
             };
-            Err(RuntimeControlFlow::Error(message))
+            Err(message)
         }
     }
 }
@@ -430,27 +432,27 @@ fn extract_server_id(value: &Value) -> BuiltinResult<u64> {
     match value {
         Value::Struct(struct_value) => {
             let id_value = struct_value.fields.get(HANDLE_ID_FIELD).ok_or_else(|| {
-                RuntimeControlFlow::Error(accept_error(
+                accept_error(
                     MESSAGE_ID_INVALID_SERVER,
                     "accept: tcpserver struct missing internal identifier",
-                ))
+                )
             })?;
             let id = match id_value {
                 Value::Int(IntValue::U64(id)) => *id,
                 Value::Int(iv) => iv.to_i64() as u64,
                 other => {
-                    return Err(RuntimeControlFlow::Error(accept_error(
+                    return Err(accept_error(
                         MESSAGE_ID_INVALID_SERVER,
                         format!("accept: expected numeric tcpserver identifier, got {other:?}"),
-                    )))
+                    ));
                 }
             };
             Ok(id)
         }
-        _ => Err(RuntimeControlFlow::Error(accept_error(
+        _ => Err(accept_error(
             MESSAGE_ID_INVALID_SERVER,
             "accept: first argument must be the struct returned by tcpserver",
-        ))),
+        )),
     }
 }
 
@@ -464,10 +466,10 @@ fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
         return Ok(AcceptOptions::default());
     }
     if !rest.len().is_multiple_of(2) {
-        return Err(RuntimeControlFlow::Error(accept_error(
+        return Err(accept_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "accept: name-value arguments must appear in pairs",
-        )));
+        ));
     }
 
     let mut options = AcceptOptions::default();
@@ -482,10 +484,10 @@ fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
             Value::CharArray(ref ca) if ca.rows == 1 => ca.data.iter().collect(),
             Value::StringArray(ref sa) if sa.data.len() == 1 => sa.data[0].clone(),
             other => {
-                return Err(RuntimeControlFlow::Error(accept_error(
+                return Err(accept_error(
                     MESSAGE_ID_INVALID_NAME_VALUE,
                     format!("accept: invalid option name ({other:?})"),
-                )))
+                ));
             }
         };
         let lower = name.to_ascii_lowercase();
@@ -501,10 +503,10 @@ fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
                 options.timeout = Some(timeout);
             }
             _ => {
-                return Err(RuntimeControlFlow::Error(accept_error(
+                return Err(accept_error(
                     MESSAGE_ID_INVALID_NAME_VALUE,
                     format!("accept: unsupported option '{name}'"),
-                )))
+                ));
             }
         }
     }
@@ -544,16 +546,16 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
 
 fn validate_timeout(timeout: f64) -> BuiltinResult<()> {
     if timeout.is_nan() {
-        return Err(RuntimeControlFlow::Error(accept_error(
+        return Err(accept_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "accept: Timeout must not be NaN",
-        )));
+        ));
     }
     if timeout.is_sign_negative() {
-        return Err(RuntimeControlFlow::Error(accept_error(
+        return Err(accept_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "accept: Timeout must be non-negative",
-        )));
+        ));
     }
     Ok(())
 }
@@ -703,12 +705,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                assert_eq!(err.identifier(), Some(expected));
-            }
-        }
+    fn assert_error_identifier(err: RuntimeError, expected: &str) {
+        assert_eq!(err.identifier(), Some(expected));
     }
 
     fn server_id(value: &Value) -> u64 {

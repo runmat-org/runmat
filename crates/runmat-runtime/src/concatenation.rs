@@ -5,10 +5,10 @@
 
 use runmat_builtins::{Tensor, Value};
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-fn concat_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::from(build_runtime_error(message).build())
+fn concat_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).build()
 }
 
 /// Horizontally concatenate two matrices [A, B]

@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::dispatcher::gather_if_needed;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
 const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
@@ -203,27 +203,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "exist";
 
-fn exist_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn exist_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -565,7 +559,6 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
     use runmat_filesystem as vfs;
@@ -625,11 +618,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -741,10 +729,8 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = unwrap_error(
-            exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
-                .expect_err("expected error"),
-        );
+        let err = exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
+            .expect_err("expected error");
         assert_eq!(err.message(), ERROR_INVALID_TYPE);
     }
 
@@ -755,7 +741,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = unwrap_error(exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error"));
+        let err = exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error");
         assert_eq!(err.message(), ERROR_NAME_ARG);
     }
 

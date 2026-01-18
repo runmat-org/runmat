@@ -9,7 +9,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -251,8 +251,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "factorial";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
 #[runtime_builtin(
@@ -559,12 +561,7 @@ pub(crate) mod tests {
     fn factorial_like_missing_prototype_errors() {
         let err = factorial_builtin(Value::Num(3.0), vec![Value::from("like")])
             .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("prototype"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -668,12 +665,7 @@ pub(crate) mod tests {
     fn factorial_complex_input_errors() {
         let err = factorial_builtin(Value::Complex(1.0, 0.5), Vec::new())
             .expect_err("expected complex rejection");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("complex"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -681,12 +673,7 @@ pub(crate) mod tests {
     fn factorial_string_input_errors() {
         let err = factorial_builtin(Value::from("hello"), Vec::new())
             .expect_err("expected string rejection");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("numeric"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -697,12 +684,7 @@ pub(crate) mod tests {
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
         )
         .expect_err("expected complex prototype rejection");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("complex"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+        assert!(err.message().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -196,8 +196,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query; fusion planner treats this builtin as a host scalar.",
 };
 
-fn numel_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("numel").build().into()
+fn numel_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("numel")
+        .build()
 }
 
 #[runtime_builtin(

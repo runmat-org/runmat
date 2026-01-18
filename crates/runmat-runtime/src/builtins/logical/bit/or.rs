@@ -3,7 +3,7 @@
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -269,8 +269,8 @@ fn or_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     logical_value("or", data, shape)
 }
 
-fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(fn_name).build().into()
+fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(fn_name).build()
 }
 
 fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -383,16 +383,11 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
 
-    fn assert_error_contains(err: RuntimeControlFlow, expected: &str) {
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains(expected), "unexpected error: {}", err.message())
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+    fn assert_error_contains(err: RuntimeError, expected: &str) {
+        assert!(err.message().contains(expected), "unexpected error: {}", err.message());
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;

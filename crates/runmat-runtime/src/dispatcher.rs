@@ -1,5 +1,5 @@
 use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
-use crate::{build_runtime_error, flow_to_error, make_cell_with_shape, new_object_builtin, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -19,7 +19,7 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
-pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
+pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
     match value {
         Value::GpuTensor(handle) => {
             // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
@@ -32,24 +32,21 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                 }
             }
             let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                RuntimeControlFlow::Error(build_runtime_error("gather: no acceleration provider registered").build())
+                build_runtime_error("gather: no acceleration provider registered").build()
             })?;
             let is_logical = runmat_accelerate_api::handle_is_logical(handle);
             let host = match provider.download(handle) {
                 Ok(host) => host,
                 Err(err) => {
-                    return Err(RuntimeControlFlow::Error(
-                        build_runtime_error(format!("gather: {err}")).build(),
-                    ));
+                    return Err(build_runtime_error(format!("gather: {err}")).build());
                 }
             };
             runmat_accelerate_api::clear_residency(handle);
             let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
             if is_logical {
                 let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                let logical = LogicalArray::new(bits, shape).map_err(|e| {
-                    RuntimeControlFlow::Error(build_runtime_error(format!("gather: {e}")).build())
-                })?;
+                let logical = LogicalArray::new(bits, shape)
+                    .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
                 Ok(Value::LogicalArray(logical))
             } else {
                 let mut data = data;
@@ -64,9 +61,8 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
                     runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
                     runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
                 };
-                let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
-                    RuntimeControlFlow::Error(build_runtime_error(format!("gather: {e}")).build())
-                })?;
+                let tensor = Tensor::new_with_dtype(data, shape, dtype)
+                    .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
                 Ok(Value::Tensor(tensor))
             }
         }
@@ -75,9 +71,8 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
             for ptr in &ca.data {
                 gathered.push(gather_if_needed(ptr)?);
             }
-            make_cell_with_shape(gathered, ca.shape.clone()).map_err(|err| {
-                RuntimeControlFlow::Error(build_runtime_error(format!("gather: {err}")).build())
-            })
+            make_cell_with_shape(gathered, ca.shape.clone())
+                .map_err(|err| build_runtime_error(format!("gather: {err}")).build())
         }
         Value::Struct(sv) => {
             let mut gathered = sv.clone();
@@ -101,15 +96,15 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeControlFlow> {
 /// Call a registered language builtin by name.
 /// Supports function overloading by trying different argument patterns.
 /// Returns an error if no builtin with that name and compatible arguments is found.
-pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
+pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     call_builtin_sync(name, args)
 }
 
-pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
+pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     call_builtin_sync(name, args)
 }
 
-fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControlFlow> {
+fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -130,10 +125,11 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControl
             // Otherwise default-construct object
             return new_object_builtin(name.to_string());
         }
-        return Err(RuntimeControlFlow::Error(build_runtime_error(format!(
+        return Err(build_runtime_error(format!(
             "{}: Undefined function: {name}",
             "MATLAB:UndefinedFunction"
-        )).build()));
+        ))
+        .build());
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -168,33 +164,18 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControl
                 }
                 return Ok(result);
             }
-            Err(flow) => match flow {
-                RuntimeControlFlow::Error(err) => {
-                    if should_retry_with_gpu_gather(&err, args) {
-                        match gather_args_for_retry(args) {
-                            Ok(Some(gathered_args)) => match (f)(&gathered_args) {
-                                Ok(result) => return Ok(result),
-                                Err(flow) => match flow {
-                                    RuntimeControlFlow::Error(retry_err) => last_error = retry_err,
-                                    other => {
-                                        return Err(RuntimeControlFlow::Error(flow_to_error(other)))
-                                    }
-                                },
-                            },
-                            Ok(None) => last_error = err,
-                            Err(flow) => match flow {
-                                RuntimeControlFlow::Error(gather_err) => last_error = gather_err,
-                                other => {
-                                    return Err(RuntimeControlFlow::Error(flow_to_error(other)))
-                                }
-                            },
-                        }
-                    } else {
-                        last_error = err;
+            Err(err) => {
+                if should_retry_with_gpu_gather(&err, args) {
+                    match gather_args_for_retry(args) {
+                        Ok(Some(gathered_args)) => match (f)(&gathered_args) {
+                            Ok(result) => return Ok(result),
+                            Err(retry_err) => last_error = retry_err,
+                        },
+                        Ok(None) => last_error = err,
+                        Err(gather_err) => last_error = gather_err,
                     }
-                }
-                other => {
-                    return Err(RuntimeControlFlow::Error(flow_to_error(other)));
+                } else {
+                    last_error = err;
                 }
             },
         }
@@ -207,8 +188,7 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeControl
         args.len(),
         last_error.message()
     ))
-    .build()
-    .into())
+    .build())
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
@@ -219,7 +199,7 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     lowered.contains("gpu")
 }
 
-fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeControlFlow> {
+fn gather_args_for_retry(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
     let mut gathered_any = false;
     let mut gathered_args = Vec::with_capacity(args.len());
     for arg in args {

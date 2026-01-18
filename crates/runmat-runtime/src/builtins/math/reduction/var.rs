@@ -5,7 +5,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -206,8 +206,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 
-fn var_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn var_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::var")]
@@ -866,12 +866,7 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
         let err = var_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)])
             .expect_err("var should reject weighted inputs");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("weighted variance"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("weighted variance"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

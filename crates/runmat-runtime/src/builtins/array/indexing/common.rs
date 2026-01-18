@@ -1,7 +1,7 @@
 use runmat_builtins::{Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Materialise a value so indexing helpers can operate on host tensors.
 pub(crate) fn materialize_value(value: Value, _builtin: &str) -> BuiltinResult<(Value, bool)> {
@@ -128,6 +128,6 @@ pub(crate) fn total_elements(dims: &[usize], builtin: &str) -> BuiltinResult<usi
     })
 }
 
-fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(builtin).build().into()
+fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
 }

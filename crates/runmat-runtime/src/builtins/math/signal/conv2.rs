@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1e-12;
 
@@ -233,8 +233,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "conv2";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
 }
 
 #[runtime_builtin(
@@ -616,11 +616,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::LogicalArray;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+    fn error_message(error: RuntimeError) -> String {
+        error.message().to_string()
     }
 
     fn tensor_from_rows(rows: usize, cols: usize, data: &[f64]) -> Tensor {

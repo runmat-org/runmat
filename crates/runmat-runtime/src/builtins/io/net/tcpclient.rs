@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -182,8 +182,8 @@ fn tcpclient_error(message_id: &'static str, message: impl Into<String>) -> Runt
         .build()
 }
 
-fn tcpclient_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    tcpclient_error(message_id, message).into()
+fn tcpclient_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    tcpclient_error(message_id, message)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpclient")]
@@ -566,13 +566,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                assert_eq!(err.identifier(), Some(expected));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+    fn assert_error_identifier(err: RuntimeError, expected: &str) {
+        assert_eq!(err.identifier(), Some(expected));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

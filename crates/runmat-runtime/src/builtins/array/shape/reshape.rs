@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
@@ -195,8 +195,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Reshape influences fusion layout but emits no kernels; fusion planner treats it as a metadata op.",
 };
 
-fn reshape_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("reshape").build().into()
+fn reshape_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("reshape")
+        .build()
 }
 
 #[runtime_builtin(

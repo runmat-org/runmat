@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -696,8 +696,8 @@ fn tensor_to_value(tensor: Tensor, prefer_gpu: bool) -> Value {
     tensor::tensor_into_value(tensor)
 }
 
-fn find_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("find").build().into()
+fn find_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("find").build()
 }
 
 #[cfg(test)]

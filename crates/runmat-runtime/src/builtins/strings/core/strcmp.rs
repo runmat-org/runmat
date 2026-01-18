@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -191,12 +191,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 #[allow(dead_code)]
-fn strcmp_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("strcmp").build().into()
+fn strcmp_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin("strcmp").build()
 }
 
-fn remap_strcmp_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "strcmp")
+fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "strcmp")
 }
 
 #[runtime_builtin(
@@ -241,13 +241,11 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResu
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

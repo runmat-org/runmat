@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow, RuntimeError};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
@@ -215,8 +215,8 @@ fn readline_error(message_id: &'static str, message: impl Into<String>) -> Runti
         .build()
 }
 
-fn readline_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeControlFlow {
-    readline_error(message_id, message).into()
+fn readline_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
+    readline_error(message_id, message)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
@@ -452,13 +452,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_error_identifier(flow: RuntimeControlFlow, expected: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                assert_eq!(err.identifier(), Some(expected));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspend"),
-        }
+    fn assert_error_identifier(err: RuntimeError, expected: &str) {
+        assert_eq!(err.identifier(), Some(expected));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

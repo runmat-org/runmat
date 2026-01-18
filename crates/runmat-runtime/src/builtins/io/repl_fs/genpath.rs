@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -197,27 +197,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "genpath";
 
-fn genpath_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn genpath_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -589,7 +583,6 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
@@ -622,11 +615,6 @@ pub(crate) mod tests {
         canonical_str
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -786,7 +774,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let err = unwrap_error(genpath_builtin(vec![Value::Num(1.0)]).expect_err("expected error"));
+        let err = genpath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
         assert_eq!(err.message(), ERROR_FOLDER_TYPE);
     }
 
@@ -946,7 +934,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let missing = Value::String("this/does/not/exist".into());
-        let err = unwrap_error(genpath_builtin(vec![missing]).expect_err("expected error"));
+        let err = genpath_builtin(vec![missing]).expect_err("expected error");
         assert!(err.message().contains("not found"));
     }
 

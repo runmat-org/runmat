@@ -14,16 +14,14 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
 
-fn gpu_array_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin("gpuArray")
-            .build(),
-    )
+fn gpu_array_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("gpuArray")
+        .build()
 }
 
 #[cfg_attr(

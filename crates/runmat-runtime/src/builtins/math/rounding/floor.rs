@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -238,11 +238,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "floor";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -551,23 +550,16 @@ fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
 
-    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                assert!(
-                    err.message().contains(needle),
-                    "unexpected error: {}",
-                    err.message()
-                );
-            }
-            RuntimeControlFlow::Suspend(pending) => {
-                panic!("unexpected suspend: {pending:?}");
-            }
-        }
+    fn assert_error_contains(error: RuntimeError, needle: &str) {
+        assert!(
+            error.message().contains(needle),
+            "unexpected error: {}",
+            error.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -158,23 +158,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
-fn qr_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn qr_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn with_qr_context(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(mut error) => {
-            if error.context.builtin.is_none() {
-                error.context = error.context.with_builtin(BUILTIN_NAME);
-            }
-            RuntimeControlFlow::Error(error)
-        }
-        RuntimeControlFlow::Suspend(pending) => RuntimeControlFlow::Suspend(pending),
+fn with_qr_context(mut error: RuntimeError) -> RuntimeError {
+    if error.message() == "interaction pending..." {
+        return build_runtime_error("interaction pending...")
+            .with_builtin(BUILTIN_NAME)
+            .build();
     }
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(BUILTIN_NAME);
+    }
+    error
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]

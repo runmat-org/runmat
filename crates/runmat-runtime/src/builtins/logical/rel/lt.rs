@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 #[cfg_attr(
     feature = "doc_export",
     runmat_macros::register_doc_text(
@@ -239,12 +239,11 @@ const IDENT_INVALID_INPUT: &str = "MATLAB:lt:InvalidInput";
 const IDENT_SIZE_MISMATCH: &str = "MATLAB:lt:SizeMismatch";
 const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:lt:ComplexNotSupported";
 
-fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeControlFlow {
+fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_identifier(identifier)
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -514,7 +513,6 @@ impl StringBuffer {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_accelerate_api::HostTensorView;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -580,26 +578,16 @@ pub(crate) mod tests {
     fn lt_string_numeric_error() {
         let err =
             lt_builtin(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("mixing numeric and string"));
-                assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("mixing numeric and string"));
+        assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lt_complex_error() {
         let err = lt_builtin(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("lt");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("complex"));
-                assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("complex"));
+        assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

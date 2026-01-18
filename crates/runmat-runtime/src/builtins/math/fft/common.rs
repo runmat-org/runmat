@@ -1,11 +1,11 @@
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorOwned;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use std::collections::HashSet;
 
-fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(builtin).build().into()
+fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
 }
 
 /// Parse the optional FFT length argument, returning `None` for `[]`.

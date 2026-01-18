@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeControlFlow};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -213,8 +213,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a layout barrier in fusion graphs, mirroring the behaviour of `permute`.",
 };
 
-fn ipermute_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin("ipermute").build().into()
+fn ipermute_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("ipermute")
+        .build()
 }
 
 #[runtime_builtin(

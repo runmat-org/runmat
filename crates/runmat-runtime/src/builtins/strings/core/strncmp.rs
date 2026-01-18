@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strncmp";
 
@@ -185,12 +185,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results and is not eligible for GPU fusion.",
 };
 
-fn strncmp_flow(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(FN_NAME).build().into()
+fn strncmp_flow(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(FN_NAME).build()
 }
 
-fn remap_strncmp_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, FN_NAME)
+fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, FN_NAME)
 }
 
 #[runtime_builtin(
@@ -338,15 +338,12 @@ fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

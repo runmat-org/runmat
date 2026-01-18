@@ -6,7 +6,7 @@ use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string, is_missing_string};
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Clone)]
 pub(crate) struct TextCollection {
@@ -266,11 +266,10 @@ pub(crate) fn value_to_owned_string(value: &Value) -> Option<String> {
     String::try_from(value).ok()
 }
 
-fn text_error(fn_name: &str, message: impl Into<String>) -> RuntimeControlFlow {
+fn text_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(fn_name)
         .build()
-        .into()
 }
 
 pub(crate) fn logical_result(

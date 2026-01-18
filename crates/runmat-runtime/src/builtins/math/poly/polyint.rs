@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::dispatcher;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyint";
@@ -212,11 +212,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers implement the polyint hook for real coefficient vectors; complex inputs fall back to the host.",
 };
 
-fn polyint_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn polyint_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyint")]
@@ -493,20 +492,14 @@ impl Orientation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
     use runmat_builtins::LogicalArray;
 
-    fn assert_error_contains(flow: RuntimeControlFlow, needle: &str) {
-        match flow {
-            RuntimeControlFlow::Error(err) => assert!(
-                err.message().contains(needle),
-                "expected error containing '{needle}', got '{}'",
-                err.message()
-            ),
-            other => {
-                panic!("unexpected runtime control flow in polyint tests: {other:?}");
-            }
-        }
+    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+        assert!(
+            err.message().contains(needle),
+            "expected error containing '{needle}', got '{}'",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -10,7 +10,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{make_cell, build_runtime_error, RuntimeControlFlow};
+use crate::{make_cell, build_runtime_error, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -406,11 +406,10 @@ fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usi
     Ok(coerced)
 }
 
-fn ind2sub_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("ind2sub")
         .build()
-        .into()
 }
 
 #[cfg(test)]

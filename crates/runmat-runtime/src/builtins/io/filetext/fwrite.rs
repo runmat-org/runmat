@@ -9,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 #[cfg_attr(
@@ -238,28 +238,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fwrite";
 
-fn fwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn fwrite_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
@@ -864,7 +858,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider;
     #[cfg(feature = "wgpu")]
@@ -877,10 +871,8 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

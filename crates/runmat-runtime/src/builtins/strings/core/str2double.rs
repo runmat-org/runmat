@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, gather_if_needed, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -220,15 +220,14 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "str2double: cell array elements must be character vectors or string scalars";
 
-fn str2double_flow(message: impl Into<String>) -> RuntimeControlFlow {
+fn str2double_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("str2double")
         .build()
-        .into()
 }
 
-fn remap_str2double_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    map_control_flow_with_builtin(flow, "str2double")
+fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, "str2double")
 }
 
 #[runtime_builtin(
@@ -335,12 +334,9 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

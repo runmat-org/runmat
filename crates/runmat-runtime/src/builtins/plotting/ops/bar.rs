@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::gather_if_needed;
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 
 use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
@@ -145,7 +145,7 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<Stri
                         return Ok(());
                     }
                     Ok(_) => {}
-                    Err(RuntimeControlFlow::Error(err)) => {
+                    Err(err) => {
                         warn!("bar GPU path unavailable: {err}");
                     }
                 }
@@ -166,7 +166,7 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<Stri
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;
 
-fn bar_err(message: impl Into<String>) -> RuntimeControlFlow {
+fn bar_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
 }
 
@@ -627,17 +627,13 @@ pub(crate) mod tests {
     fn bar_builtin_matches_backend_contract() {
         setup_plot_tests();
         let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
-        if let Err(flow) = out {
-            match flow {
-                RuntimeControlFlow::Error(err) => {
-                    let msg_lower = err.to_string().to_lowercase();
-                    assert!(
-                        msg_lower.contains("plotting is unavailable")
-                            || msg_lower.contains("non-main thread"),
-                        "unexpected error: {err}"
-                    );
-                }
-            }
+        if let Err(err) = out {
+            let msg_lower = err.to_string().to_lowercase();
+            assert!(
+                msg_lower.contains("plotting is unavailable")
+                    || msg_lower.contains("non-main thread"),
+                "unexpected error: {err}"
+            );
         }
     }
 

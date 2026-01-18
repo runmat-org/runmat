@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
@@ -240,20 +240,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Map storage is host-resident; GPU inputs are gathered only when split into multiple entries.",
 };
 
-fn map_error(message: impl Into<String>, builtin: &'static str) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(builtin).build().into()
+fn map_error(message: impl Into<String>, builtin: &'static str) -> RuntimeError {
+    build_runtime_error(message).with_builtin(builtin).build()
 }
 
-fn attach_builtin_context(err: RuntimeControlFlow, builtin: &'static str) -> RuntimeControlFlow {
-    match err {
-        RuntimeControlFlow::Error(mut error) => {
-            if error.context.builtin.is_none() {
-                error.context = error.context.with_builtin(builtin);
-            }
-            RuntimeControlFlow::Error(error)
-        }
-        other => other,
+fn attach_builtin_context(mut error: RuntimeError, builtin: &'static str) -> RuntimeError {
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(builtin);
     }
+    error
 }
 
 #[runmat_macros::register_fusion_spec(
@@ -1606,12 +1601,9 @@ pub fn map_length(value: &Value) -> Option<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::RuntimeControlFlow;
 
-    fn error_message(err: RuntimeControlFlow) -> String {
-        match err {
-            RuntimeControlFlow::Error(err) => err.message.clone(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message.clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

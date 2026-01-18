@@ -26,7 +26,7 @@ use super::style::{
 };
 use std::convert::TryFrom;
 
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::BuiltinResult;
 
 #[cfg_attr(
     feature = "doc_export",
@@ -142,7 +142,7 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
                     figure.add_stairs_plot_on_axes(plot, axes);
                     return Ok(());
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("stairs GPU path unavailable: {err}");
                 }
             }

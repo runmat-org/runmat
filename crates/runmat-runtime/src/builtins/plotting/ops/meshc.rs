@@ -13,7 +13,6 @@ use super::contour::{
 use super::mesh::build_mesh_surface;
 use super::state::{render_active_plot, PlotRenderOptions};
 
-use crate::RuntimeControlFlow;
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot;
 use std::sync::Arc;
@@ -124,12 +123,12 @@ pub fn meshc_builtin(x: Tensor, y: Tensor, z: Value, rest: Vec<Value>) -> crate:
                             figure.add_contour_plot_on_axes(contour, axes);
                             return Ok(());
                         }
-                        Err(RuntimeControlFlow::Error(err)) => {
+                        Err(err) => {
                             warn!("meshc contour GPU path unavailable: {err}");
                         }
                     }
                 }
-                Err(RuntimeControlFlow::Error(err)) => {
+                Err(err) => {
                     warn!("meshc surface GPU path unavailable: {err}");
                 }
             }

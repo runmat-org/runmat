@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -215,11 +215,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "regexpi";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeControlFlow {
+fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
@@ -548,9 +547,7 @@ pub(crate) mod tests {
         let err = evaluate(Value::Cell(cell), Value::String("a".into()), &[])
             .err()
             .expect("expected regexpi to reject non-text cell elements");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("cell array elements"),
             "unexpected error message: {message}"

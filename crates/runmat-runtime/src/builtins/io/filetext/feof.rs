@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -183,28 +183,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O query; providers are not involved.",
 };
 
-fn feof_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn feof_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let message = err.message().to_string();
-            let identifier = err.identifier().map(|value| value.to_string());
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let message = err.message().to_string();
+    let identifier = err.identifier().map(|value| value.to_string());
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::feof")]
@@ -249,12 +243,10 @@ pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
         .map_err(|_| feof_error("feof: failed to lock file handle (poisoned mutex)"))?;
 
     let position = file.seek(SeekFrom::Current(0)).map_err(|err| {
-        RuntimeControlFlow::Error(
-            build_runtime_error(format!("feof: failed to query file position: {err}"))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err)
-                .build(),
-        )
+        build_runtime_error(format!("feof: failed to query file position: {err}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(err)
+            .build()
     })?;
 
     let end_position = match file.seek(SeekFrom::End(0)) {
@@ -264,24 +256,24 @@ pub fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
                 let _ = file.seek(SeekFrom::Start(position));
                 return Ok(false);
             }
-            return Err(RuntimeControlFlow::Error(
+            return Err(
                 build_runtime_error(format!("feof: failed to query file length: {err}"))
                     .with_builtin(BUILTIN_NAME)
                     .with_source(err)
                     .build(),
-            ));
+            );
         }
     };
 
     if let Err(err) = file.seek(SeekFrom::Start(position)) {
-        return Err(RuntimeControlFlow::Error(
+        return Err(
             build_runtime_error(format!(
                 "feof: failed to restore file position: {err}"
             ))
             .with_builtin(BUILTIN_NAME)
             .with_source(err)
             .build(),
-        ));
+        );
     }
 
     Ok(position >= end_position)
@@ -329,7 +321,7 @@ fn parse_scalar_fid(value: f64) -> BuiltinResult<i32> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
-    use crate::RuntimeControlFlow;
+    use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
     use runmat_filesystem::{self as fs, File};
@@ -338,10 +330,8 @@ pub(crate) mod tests {
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
 
-    fn unwrap_error_message(flow: RuntimeControlFlow) -> String {
-        match flow {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn unwrap_error_message(err: RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,7 +6,7 @@ use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -17,8 +17,8 @@ const NAME: &str = "histcounts2";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[cfg_attr(

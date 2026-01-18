@@ -21,7 +21,7 @@ use runmat_builtins::{Type, Value};
 use runmat_runtime::{
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    build_runtime_error, gather_if_needed, RuntimeControlFlow,
+    build_runtime_error, gather_if_needed, RuntimeError,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use runmat_thread_local::runmat_thread_local;
@@ -289,10 +289,10 @@ fn log_fusion_span_window(
 // Namespace used for error identifiers (e.g., "MATLAB:..." or "RunMat:...")
 const ERROR_NAMESPACE: &str = "MATLAB";
 
-type VmResult<T> = Result<T, RuntimeControlFlow>;
+type VmResult<T> = Result<T, RuntimeError>;
 
 #[inline]
-fn mex(id: &str, msg: &str) -> RuntimeControlFlow {
+fn mex(id: &str, msg: &str) -> RuntimeError {
     // Normalize identifier to always use the configured namespace prefix.
     // If caller passes "Namespace:suffix", strip the namespace and re-prefix with ERROR_NAMESPACE.
     let suffix = match id.find(':') {
@@ -302,10 +302,7 @@ fn mex(id: &str, msg: &str) -> RuntimeControlFlow {
     let ident = format!("{ERROR_NAMESPACE}:{suffix}");
     let pc = current_pc();
     let message = format!("{msg} (pc={pc})");
-    build_runtime_error(message)
-        .with_identifier(ident)
-        .build()
-        .into()
+    build_runtime_error(message).with_identifier(ident).build()
 }
 
 #[derive(Clone)]
@@ -1322,7 +1319,7 @@ async fn run_interpreter(
         current_function_name,
         call_counts,
         #[cfg(feature = "native-accel")]
-        fusion_plan,
+        fusion_plan: _,
         bytecode,
     } = state;
     CALL_COUNTS.with(|cc| {
@@ -1386,10 +1383,7 @@ async fn run_interpreter(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let flow: RuntimeControlFlow = $err.into();
-            let err = match flow {
-                RuntimeControlFlow::Error(err) => err,
-            };
+            let err: RuntimeError = $err.into();
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() {
@@ -1403,7 +1397,7 @@ async fn run_interpreter(
                 pc = catch_pc;
                 continue;
             } else {
-                return Err(RuntimeControlFlow::Error(err));
+                return Err(err);
             }
         }};
     }
@@ -2912,9 +2906,7 @@ async fn run_interpreter(
                 match call_builtin_vm!(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
-                        let e = match e {
-                            runmat_runtime::RuntimeControlFlow::Error(e) => e,
-                        };
+                        let e = e;
                         // Specific-import matches: import pkg.foo; name == foo
                         let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
                         for (path, wildcard) in &imports {
@@ -10307,9 +10299,7 @@ fn stochastic_evolution_dispatch(
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
     stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)
-        .map_err(|flow| match flow {
-            runmat_runtime::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        })?;
+        .map_err(|err| err.message().to_string())?;
     Ok(Value::Tensor(tensor_value))
 }
 
@@ -11331,25 +11321,20 @@ fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MExce
     }
 }
 
-fn map_slice_plan_error(context: &str, flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    let RuntimeControlFlow::Error(err) = flow;
+fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     let is_oob = err
         .identifier()
         .map(|id| id.contains("IndexOutOfBounds"))
         .unwrap_or_else(|| err.message().contains("IndexOutOfBounds"));
     if is_oob {
-        RuntimeControlFlow::Error(err)
+        err
     } else {
-        build_runtime_error(format!("{context}: {}", err.message()))
-            .build()
-            .into()
+        build_runtime_error(format!("{context}: {}", err.message())).build()
     }
 }
 
-fn flow_to_string(flow: RuntimeControlFlow) -> String {
-    match flow {
-        RuntimeControlFlow::Error(err) => err.message().to_string(),
-    }
+fn flow_to_string(err: RuntimeError) -> String {
+    err.message().to_string()
 }
 
 /// Interpret bytecode with default variable initialization

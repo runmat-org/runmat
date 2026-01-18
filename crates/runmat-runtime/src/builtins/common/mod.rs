@@ -24,12 +24,11 @@ pub use spec::DocTextInventory;
 pub mod test_support;
 
 pub(crate) fn map_control_flow_with_builtin(
-    flow: crate::RuntimeControlFlow,
+    mut err: crate::RuntimeError,
     builtin: &str,
-) -> crate::RuntimeControlFlow {
-    let mut err = crate::flow_to_error(flow);
+) -> crate::RuntimeError {
     if err.context.builtin.is_none() {
         err.context = err.context.with_builtin(builtin);
     }
-    crate::RuntimeControlFlow::Error(err)
+    err
 }

@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -192,8 +192,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers surface finite-difference kernels through `diff_dim`; the WGPU backend keeps tensors on the device.",
 };
 
-fn diff_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn diff_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::diff")]
@@ -632,7 +632,6 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(-1))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(err.message().contains("non-negative"));
     }
 
@@ -642,7 +641,6 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Num(1.5)];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(err.message().contains("non-negative integer"));
     }
 
@@ -652,7 +650,6 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(0))];
         let err = diff_builtin(Value::Tensor(tensor), args).unwrap_err();
-        let err = crate::flow_to_error(err);
         assert!(err.message().contains("dimension must be >= 1"));
     }
 

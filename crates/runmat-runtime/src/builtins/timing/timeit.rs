@@ -21,11 +21,10 @@ const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 const BUILTIN_NAME: &str = "timeit";
 
-fn timeit_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+fn timeit_error(message: impl Into<String>) -> crate::RuntimeError {
     crate::build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
 #[cfg_attr(
@@ -192,7 +191,7 @@ fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> 
     Ok(Value::Num(compute_median(samples)))
 }
 
-fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeControlFlow> {
+fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeError> {
     match rest.len() {
         0 => Ok(None),
         1 => parse_non_negative_integer(&rest[0]).map(Some),
@@ -200,7 +199,7 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeCont
     }
 }
 
-fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeControlFlow> {
+fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeError> {
     match value {
         Value::Int(iv) => {
             let raw = iv.to_i64();
@@ -231,7 +230,7 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeCont
     }
 }
 
-fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeControlFlow> {
+fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
     let mut loops = 1usize;
     loop {
         let elapsed = run_batch(callable, loops)?;
@@ -251,7 +250,7 @@ fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::Runti
 fn collect_samples(
     callable: &TimeitCallable,
     loop_count: usize,
-) -> Result<Vec<f64>, crate::RuntimeControlFlow> {
+) -> Result<Vec<f64>, crate::RuntimeError> {
     let mut samples = Vec::with_capacity(MIN_SAMPLE_COUNT);
     while samples.len() < MIN_SAMPLE_COUNT {
         let elapsed = run_batch(callable, loop_count)?;
@@ -264,7 +263,7 @@ fn collect_samples(
     Ok(samples)
 }
 
-fn run_batch(callable: &TimeitCallable, loop_count: usize) -> Result<f64, crate::RuntimeControlFlow> {
+fn run_batch(callable: &TimeitCallable, loop_count: usize) -> Result<f64, crate::RuntimeError> {
     let start = Instant::now();
     for _ in 0..loop_count {
         let value = callable.invoke()?;
@@ -304,7 +303,7 @@ struct TimeitCallable {
 }
 
 impl TimeitCallable {
-    fn invoke(&self) -> Result<Value, crate::RuntimeControlFlow> {
+    fn invoke(&self) -> Result<Value, crate::RuntimeError> {
         // The runtime currently treats all builtin invocations as returning a single `Value`.
         // The optional `num_outputs` flag is stored so future multi-output support can
         // request the correct number of outputs when dispatching through `feval`.
@@ -322,7 +321,7 @@ impl TimeitCallable {
 fn prepare_callable(
     func: Value,
     num_outputs: Option<usize>,
-) -> Result<TimeitCallable, crate::RuntimeControlFlow> {
+) -> Result<TimeitCallable, crate::RuntimeError> {
     match func {
         Value::String(text) => parse_handle_string(&text).map(|handle| TimeitCallable {
             handle: Value::String(handle),
@@ -367,7 +366,7 @@ fn prepare_callable(
     }
 }
 
-fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeControlFlow> {
+fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix('@') {
         if rest.trim().is_empty() {
@@ -435,17 +434,13 @@ pub(crate) mod tests {
         Value::String("@__timeit_helper_counter_default".to_string())
     }
 
-    fn assert_timeit_error_contains(err: crate::RuntimeControlFlow, needle: &str) {
-        match err {
-            crate::RuntimeControlFlow::Error(err) => {
-                let message = err.message().to_ascii_lowercase();
-                assert!(
-                    message.contains(&needle.to_ascii_lowercase()),
-                    "unexpected error text: {}",
-                    err.message()
-                );
-            }
-        }
+    fn assert_timeit_error_contains(err: crate::RuntimeError, needle: &str) {
+        let message = err.message().to_ascii_lowercase();
+        assert!(
+            message.contains(&needle.to_ascii_lowercase()),
+            "unexpected error text: {}",
+            err.message()
+        );
     }
 
     fn outputs_handle() -> Value {

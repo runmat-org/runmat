@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg_attr(
     feature = "doc_export",
@@ -176,27 +176,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "cd";
 
-fn cd_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn cd_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -350,7 +344,6 @@ fn emit_path_stdout(path: &Path) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use runmat_builtins::StringArray;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
@@ -377,11 +370,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -451,7 +439,7 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let missing = Value::from("this-directory-does-not-exist".to_string());
-        let err = unwrap_error(cd_builtin(vec![missing]).expect_err("error"));
+        let err = cd_builtin(vec![missing]).expect_err("error");
         assert!(err.message().contains("cd: unable to change directory"));
     }
 
@@ -483,7 +471,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let _guard = DirGuard::new();
 
-        let err = unwrap_error(cd_builtin(vec![Value::from("".to_string())]).expect_err("empty string error"));
+        let err = cd_builtin(vec![Value::from("".to_string())]).expect_err("empty string error");
         assert_eq!(err.message(), "cd: folder name must not be empty");
     }
 
@@ -497,9 +485,7 @@ pub(crate) mod tests {
 
         let strings =
             StringArray::new(vec!["foo".to_string(), "bar".to_string()], vec![2]).expect("array");
-        let err = unwrap_error(
-            cd_builtin(vec![Value::StringArray(strings)]).expect_err("string array error"),
-        );
+        let err = cd_builtin(vec![Value::StringArray(strings)]).expect_err("string array error");
         assert_eq!(
             err.message(),
             "cd: folder name must be a character vector or string scalar"
@@ -515,9 +501,7 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
-        let err = unwrap_error(
-            cd_builtin(vec![Value::CharArray(chars)]).expect_err("char array error"),
-        );
+        let err = cd_builtin(vec![Value::CharArray(chars)]).expect_err("char array error");
         assert_eq!(
             err.message(),
             "cd: folder name must be a character vector or string scalar"

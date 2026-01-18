@@ -3,7 +3,7 @@
 use runmat_builtins::{IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, RuntimeControlFlow, RuntimeError};
+use crate::{build_runtime_error, RuntimeError};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -180,10 +180,6 @@ fn horzcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("horzcat").build()
 }
 
-fn horzcat_err(message: impl Into<String>) -> RuntimeControlFlow {
-    horzcat_error(message).into()
-}
-
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
@@ -205,17 +201,14 @@ fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     forwarded.extend(args);
     match crate::call_builtin("cat", &forwarded) {
         Ok(value) => Ok(value),
-        Err(RuntimeControlFlow::Error(err)) => Err(adapt_cat_error(err).into()),
-        Err(_) => Err(RuntimeControlFlow::Error(
-            build_runtime_error("interaction pending").build(),
-        )),
+        Err(err) => Err(adapt_cat_error(err)),
     }
 }
 
 fn empty_double() -> crate::BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| horzcat_err(format!("horzcat: {e}")))
+        .map_err(|e| horzcat_error(format!("horzcat: {e}")))
 }
 
 fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {

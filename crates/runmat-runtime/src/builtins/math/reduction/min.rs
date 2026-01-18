@@ -7,7 +7,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "min";
 
@@ -194,8 +194,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_min_dim / reduce_min. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
-fn min_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(NAME).build().into()
+fn min_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(NAME).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min")]
@@ -1872,12 +1872,7 @@ pub(crate) mod tests {
             &[Value::Tensor(rhs), Value::from("omitnan")],
         )
         .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("only supported for reduction"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("only supported for reduction"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1931,14 +1926,9 @@ pub(crate) mod tests {
         });
         let err = evaluate(Value::Tensor(tensor), &[placeholder(), dim_handle])
             .expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err
-                    .message()
-                    .contains("dimension arguments must reside on the host"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err
+            .message()
+            .contains("dimension arguments must reside on the host"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1951,12 +1941,7 @@ pub(crate) mod tests {
             Value::from("chebyshev"),
         ];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("unsupported ComparisonMethod"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("unsupported ComparisonMethod"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2051,11 +2036,6 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![placeholder(), Value::Int(IntValue::I32(0))];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
-        match err {
-            RuntimeControlFlow::Error(err) => {
-                assert!(err.message().contains("dimension must be >= 1"));
-            }
-            RuntimeControlFlow::Suspend(_) => panic!("unexpected suspension"),
-        }
+        assert!(err.message().contains("dimension must be >= 1"));
     }
 }

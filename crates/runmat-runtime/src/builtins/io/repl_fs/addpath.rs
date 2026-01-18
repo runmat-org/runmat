@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
@@ -204,27 +204,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "addpath";
 
-fn addpath_error(message: impl Into<String>) -> RuntimeControlFlow {
-    RuntimeControlFlow::Error(
-        build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .build(),
-    )
+fn addpath_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(str::to_string);
-            let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            RuntimeControlFlow::Error(builder.build())
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(str::to_string);
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -549,7 +543,6 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
-    use crate::{RuntimeControlFlow, RuntimeError};
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
     use crate::builtins::common::test_support;
     use std::convert::TryFrom;
@@ -578,12 +571,6 @@ pub(crate) mod tests {
     fn canonical(dir: &Path) -> String {
         let normalized = normalize_pathbuf(dir);
         path_to_string(&normalized)
-    }
-
-    fn unwrap_error(flow: RuntimeControlFlow) -> RuntimeError {
-        match flow {
-            RuntimeControlFlow::Error(err) => err,
-        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -734,7 +721,7 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let missing = Value::String("this/folder/does/not/exist".into());
-        let err = unwrap_error(addpath_builtin(vec![missing]).expect_err("expected error"));
+        let err = addpath_builtin(vec![missing]).expect_err("expected error");
         assert!(
             err.message().contains("folder") && err.message().contains("not found"),
             "unexpected error message: {}",
@@ -800,7 +787,7 @@ pub(crate) mod tests {
             Value::String("-begin".into()),
             Value::String("-end".into()),
         ];
-        let err = unwrap_error(addpath_builtin(args).expect_err("expected error"));
+        let err = addpath_builtin(args).expect_err("expected error");
         assert!(err.message().contains("position option"));
     }
 

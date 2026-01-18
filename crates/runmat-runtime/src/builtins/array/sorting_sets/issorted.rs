@@ -233,11 +233,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
 
-fn issorted_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("issorted")
         .build()
-        .into()
 }
 
 #[runtime_builtin(

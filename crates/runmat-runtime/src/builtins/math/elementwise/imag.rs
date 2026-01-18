@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -200,8 +200,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "imag";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeControlFlow {
-    build_runtime_error(message).with_builtin(BUILTIN_NAME).build().into()
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message).with_builtin(BUILTIN_NAME).build()
 }
 
 #[runtime_builtin(
@@ -390,7 +390,6 @@ pub(crate) mod tests {
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
-        let err = crate::flow_to_error(err);
         assert!(err.message().contains("expected numeric"));
     }
 
@@ -400,7 +399,6 @@ pub(crate) mod tests {
         let arr =
             StringArray::new(vec!["a".to_string(), "b".to_string()], vec![2, 1]).expect("array");
         let err = imag_builtin(Value::StringArray(arr)).expect_err("imag should error");
-        let err = crate::flow_to_error(err);
         assert!(err.message().contains("expected numeric"));
     }
 

@@ -387,13 +387,8 @@ pub(crate) mod tests {
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-            crate::RuntimeControlFlow::Suspend(_) => {
-                panic!("expected error flow, got suspend")
-            }
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

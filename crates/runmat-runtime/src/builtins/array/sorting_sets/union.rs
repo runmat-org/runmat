@@ -250,11 +250,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`union` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn union_error(message: impl Into<String>) -> crate::RuntimeControlFlow {
+fn union_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("union")
         .build()
-        .into()
 }
 
 #[runtime_builtin(
@@ -1617,10 +1616,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor, Value};
 
-    fn error_message(flow: crate::RuntimeControlFlow) -> String {
-        match flow {
-            crate::RuntimeControlFlow::Error(err) => err.message().to_string(),
-        }
+    fn error_message(err: crate::RuntimeError) -> String {
+        err.message().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

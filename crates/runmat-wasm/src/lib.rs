@@ -69,7 +69,7 @@ use runmat_runtime::builtins::plotting::{
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 #[cfg(target_arch = "wasm32")]
-use runmat_runtime::RuntimeControlFlow;
+use runmat_runtime::RuntimeError;
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
     plotting::{set_scatter_target_points, set_surface_vertex_budget},
@@ -1139,17 +1139,12 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 gpu_status.adapter = capture_gpu_adapter_info();
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if let Err(flow) = plotting_context::ensure_context_from_provider() {
-                        let (log_message, status_message) = match flow {
-                            RuntimeControlFlow::Error(err) => {
-                                let message = err.message().to_string();
-                                (message.clone(), message)
-                            }
-                        };
+                    if let Err(err) = plotting_context::ensure_context_from_provider() {
+                        let message = err.message().to_string();
                         warn!(
-                            "RunMat wasm: unable to install shared plotting context: {log_message}"
+                            "RunMat wasm: unable to install shared plotting context: {message}"
                         );
-                        gpu_status.error = Some(status_message);
+                        gpu_status.error = Some(message);
                     }
                 }
             }
@@ -1376,10 +1371,8 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn runtime_flow_to_js(flow: RuntimeControlFlow) -> JsValue {
-    match flow {
-        RuntimeControlFlow::Error(err) => js_error(err.message()),
-    }
+fn runtime_flow_to_js(err: RuntimeError) -> JsValue {
+    js_error(err.message())
 }
 
 #[cfg(target_arch = "wasm32")]

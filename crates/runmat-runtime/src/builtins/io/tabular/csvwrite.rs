@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeControlFlow};
+use crate::{gather_if_needed, build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvwrite";
 
@@ -223,14 +223,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
-fn csvwrite_error(message: impl Into<String>) -> RuntimeControlFlow {
+fn csvwrite_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-        .into()
 }
 
-fn csvwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeControlFlow
+fn csvwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -238,23 +237,18 @@ where
         .with_builtin(BUILTIN_NAME)
         .with_source(source)
         .build()
-        .into()
 }
 
-fn map_control_flow(flow: RuntimeControlFlow) -> RuntimeControlFlow {
-    match flow {
-        RuntimeControlFlow::Error(err) => {
-            let identifier = err.identifier().map(|value| value.to_string());
-            let message = err.message().to_string();
-            let mut builder = build_runtime_error(message)
-                .with_builtin(BUILTIN_NAME)
-                .with_source(err);
-            if let Some(identifier) = identifier {
-                builder = builder.with_identifier(identifier);
-            }
-            builder.build().into()
-        }
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -670,9 +664,7 @@ pub(crate) mod tests {
             vec![Value::Num(-1.0), Value::Num(0.0)],
         )
         .expect_err("negative offsets should be rejected");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("row offset"),
             "unexpected error message: {message}"
@@ -743,9 +735,7 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .expect_err("csvwrite should fail");
-        let message = match err {
-            RuntimeControlFlow::Error(err) => err.message().to_string(),
-        };
+        let message = err.message().to_string();
         assert!(
             message.contains("csvwrite"),
             "unexpected error message: {message}"

@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{BuiltinResult, RuntimeControlFlow};
+use crate::{BuiltinResult, RuntimeError};
 use crate::gather_if_needed;
 use std::convert::TryFrom;
 
@@ -158,7 +158,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate
                         figure.add_scatter3_plot_on_axes(plot, axes);
                         return Ok(());
                     }
-                    Err(RuntimeControlFlow::Error(err)) => {
+                    Err(err) => {
                         warn!("scatter3 GPU path unavailable: {err}");
                     }
                 }
@@ -181,7 +181,7 @@ pub fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> crate
 const DEFAULT_POINT_SIZE: f32 = 6.0;
 const DEFAULT_SCATTER3_LABEL: &str = "Data";
 
-fn scatter3_err(message: impl Into<String>) -> RuntimeControlFlow {
+fn scatter3_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
 }
 
@@ -554,6 +554,7 @@ pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::RuntimeError;
     use runmat_builtins::Value;
 
     fn setup_plot_tests() {
@@ -586,16 +587,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn assert_plotting_unavailable(flow: &RuntimeControlFlow) {
-        match flow {
-            RuntimeControlFlow::Error(err) => {
-                let lower = err.to_string().to_lowercase();
-                assert!(
-                    lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
-                    "unexpected error: {err}"
-                );
-            }
-        }
+    fn assert_plotting_unavailable(err: &RuntimeError) {
+        let lower = err.to_string().to_lowercase();
+        assert!(
+            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
