@@ -6,7 +6,13 @@ use runmat_builtins::Value;
 use runmat_core::{InputHandlerAction, InputRequest, InputRequestKind, InputResponse, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn test_mutex() -> &'static Mutex<()> {
+    TEST_MUTEX.get_or_init(|| Mutex::new(()))
+}
 
 struct InteractiveGuard;
 
@@ -40,6 +46,7 @@ fn value_as_char_row(value: &Value) -> Option<String> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn input_prompts_return_value() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
     let prompts = Arc::new(Mutex::new(Vec::new()));
@@ -60,6 +67,7 @@ fn input_prompts_return_value() -> Result<()> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn multiple_inputs_call_handler_in_order() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
     let responses = Arc::new(Mutex::new(VecDeque::from([
@@ -86,6 +94,7 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_literal_round_trips() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
     let result = block_on(session.execute("'s'"))?;
@@ -97,6 +106,7 @@ fn char_literal_round_trips() -> Result<()> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn pause_uses_keypress_handler() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
     let kinds = Arc::new(Mutex::new(Vec::new()));
@@ -120,6 +130,7 @@ fn pause_uses_keypress_handler() -> Result<()> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn pending_handler_returns_error() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
     session.install_input_handler(|_| {

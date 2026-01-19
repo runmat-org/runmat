@@ -2,6 +2,7 @@ mod test_helpers;
 
 use runmat_hir::lower;
 use runmat_parser::parse;
+use std::thread;
 use test_helpers::{execute, interpret};
 
 #[test]
@@ -124,10 +125,17 @@ fn function_definition_and_calls() {
 
 #[test]
 fn nested_function_calls() {
-    let ast = parse("function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let result = execute(&hir);
-    assert!(result.is_ok());
+    let program = "function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);";
+    let handle = thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let ast = parse(program).unwrap();
+            let hir = lower(&ast).unwrap();
+            let result = execute(&hir);
+            assert!(result.is_ok());
+        })
+        .expect("spawn nested_function_calls thread");
+    handle.join().expect("nested_function_calls thread failed");
 }
 
 #[test]
