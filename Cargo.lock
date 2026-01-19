@@ -6205,6 +6205,7 @@ dependencies = [
  "anyhow",
  "futures",
  "log",
+ "miette",
  "once_cell",
  "runmat-accelerate",
  "runmat-accelerate-api",

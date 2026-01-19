@@ -75,25 +75,45 @@ impl RuntimeError {
     }
 
     pub fn format_diagnostic(&self) -> String {
+        self.format_diagnostic_with_source(None, None)
+    }
+
+    pub fn format_diagnostic_with_source(
+        &self,
+        source_name: Option<&str>,
+        source: Option<&str>,
+    ) -> String {
         let mut lines = Vec::new();
         lines.push(format!("error: {}", self.message));
-        if let Some(identifier) = self.identifier.as_deref() {
-            lines.push(format!("  = identifier: {identifier}"));
+        let identifier = self
+            .identifier
+            .as_deref()
+            .or_else(|| infer_identifier(&self.message));
+        if let Some(identifier) = identifier {
+            lines.push(format!("id: {identifier}"));
+        }
+        if let Some(((source_name, source), span)) =
+            source_name.zip(source).zip(self.span.as_ref())
+        {
+            let (line, col, line_text, caret) = render_span(source, span);
+            lines.push(format!("--> {source_name}:{line}:{col}"));
+            lines.push(format!("{line} | {line_text}"));
+            lines.push(format!("  | {caret}"));
         }
         if let Some(builtin) = self.context.builtin.as_deref() {
-            lines.push(format!("  = builtin: {builtin}"));
+            lines.push(format!("builtin: {builtin}"));
         }
         if let Some(task_id) = self.context.task_id.as_deref() {
-            lines.push(format!("  = task_id: {task_id}"));
+            lines.push(format!("task: {task_id}"));
         }
         if let Some(phase) = self.context.phase.as_deref() {
-            lines.push(format!("  = phase: {phase}"));
+            lines.push(format!("phase: {phase}"));
         }
         if !self.context.call_stack.is_empty() {
-            lines.push(format!(
-                "  = call stack: {}",
-                self.context.call_stack.join(" -> ")
-            ));
+            lines.push("stack:".to_string());
+            for frame in &self.context.call_stack {
+                lines.push(format!("  at {frame}"));
+            }
         }
         lines.join("\n")
     }
@@ -160,4 +180,38 @@ pub fn runtime_error(message: impl Into<String>) -> RuntimeErrorBuilder {
     RuntimeErrorBuilder {
         error: RuntimeError::new(message),
     }
+}
+
+fn infer_identifier(message: &str) -> Option<&'static str> {
+    if message.starts_with("Undefined function:") {
+        Some("MATLAB:UndefinedFunction")
+    } else {
+        None
+    }
+}
+
+fn render_span(source: &str, span: &SourceSpan) -> (usize, usize, String, String) {
+    let offset = span.offset();
+    let len = span.len();
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|rel| line_start + rel)
+        .unwrap_or(source.len());
+    let line_text = source[line_start..line_end].to_string();
+    let col = offset.saturating_sub(line_start) + 1;
+    let available = line_end.saturating_sub(offset).max(1);
+    let caret_len = len.max(1).min(available);
+    let caret = format!("{}{}", " ".repeat(col.saturating_sub(1)), "^".repeat(caret_len));
+    (line, col, line_text, caret)
 }

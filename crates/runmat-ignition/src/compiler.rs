@@ -773,21 +773,21 @@ impl Compiler {
                 }
             }
             HirStmt::Break(_) => {
-                if let Some(labels) = self.loop_stack.last_mut() {
-                    let idx = self.instructions.len();
-                    self.instructions.push(Instr::Jump(usize::MAX));
-                    labels.break_jumps.push(idx);
-                } else {
+                if self.loop_stack.is_empty() {
                     return Err("break outside loop".into());
+                }
+                let idx = self.emit(Instr::Jump(usize::MAX));
+                if let Some(labels) = self.loop_stack.last_mut() {
+                    labels.break_jumps.push(idx);
                 }
             }
             HirStmt::Continue(_) => {
-                if let Some(labels) = self.loop_stack.last_mut() {
-                    let idx = self.instructions.len();
-                    self.instructions.push(Instr::Jump(usize::MAX));
-                    labels.continue_jumps.push(idx);
-                } else {
+                if self.loop_stack.is_empty() {
                     return Err("continue outside loop".into());
+                }
+                let idx = self.emit(Instr::Jump(usize::MAX));
+                if let Some(labels) = self.loop_stack.last_mut() {
+                    labels.continue_jumps.push(idx);
                 }
             }
             HirStmt::Return(_) => {

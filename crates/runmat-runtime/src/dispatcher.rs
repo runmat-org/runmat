@@ -125,11 +125,11 @@ fn call_builtin_sync(name: &str, args: &[Value]) -> Result<Value, RuntimeError> 
             // Otherwise default-construct object
             return new_object_builtin(name.to_string());
         }
-        return Err(build_runtime_error(format!(
-            "{}: Undefined function: {name}",
-            "MATLAB:UndefinedFunction"
-        ))
-        .build());
+        return Err(
+            build_runtime_error(format!("Undefined function: {name}"))
+                .with_identifier("MATLAB:UndefinedFunction")
+                .build(),
+        );
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.

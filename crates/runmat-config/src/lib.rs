@@ -696,7 +696,7 @@ impl Default for KernelConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: LogLevel::Info,
+            level: LogLevel::Warn,
             debug: false,
             file: None,
         }

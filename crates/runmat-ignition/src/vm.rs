@@ -17,6 +17,7 @@ use runmat_accelerate::{
     active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
     ValueOrigin, VarKind,
 };
+use miette::{SourceOffset, SourceSpan};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
     builtins::common::tensor,
@@ -46,6 +47,26 @@ runmat_thread_local! {
 #[inline]
 fn set_vm_pc(pc: usize) {
     CURRENT_PC.with(|cell| cell.set(pc));
+}
+
+#[inline]
+fn current_vm_pc() -> usize {
+    CURRENT_PC.with(|cell| cell.get())
+}
+
+fn attach_span_at(bytecode: &Bytecode, pc: usize, mut err: RuntimeError) -> RuntimeError {
+    if err.span.is_none() {
+        if let Some(span) = bytecode.instr_spans.get(pc) {
+            let len = span.end.saturating_sub(span.start).max(1);
+            err.span = Some(SourceSpan::new(SourceOffset::from(span.start), len));
+        }
+    }
+    err
+}
+
+fn attach_span_from_pc(bytecode: &Bytecode, err: RuntimeError) -> RuntimeError {
+    let pc = current_vm_pc();
+    attach_span_at(bytecode, pc, err)
 }
 
 #[cfg(feature = "native-accel")]
@@ -1283,7 +1304,10 @@ pub async fn interpret_with_vars(
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
-    run_interpreter(state, initial_vars).await
+    match run_interpreter(state, initial_vars).await {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => Err(attach_span_from_pc(bytecode, err)),
+    }
 }
 
 async fn run_interpreter(
@@ -1378,6 +1402,7 @@ async fn run_interpreter(
     macro_rules! vm_bail {
         ($err:expr) => {{
             let err: RuntimeError = $err.into();
+            let err = attach_span_at(&bytecode, pc, err);
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() {

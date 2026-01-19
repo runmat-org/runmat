@@ -104,7 +104,7 @@ struct Cli {
     debug: bool,
 
     /// Set log level
-    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "info", value_parser = parse_log_level_env)]
+    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "warn", value_parser = parse_log_level_env)]
     log_level: LogLevel,
 
     /// Execution timeout in seconds
@@ -1103,7 +1103,10 @@ async fn process_repl_line(
         Ok(result) => {
             emit_execution_streams(&result.streams);
             if let Some(error) = result.error {
-                eprintln!("{}", error.format_diagnostic());
+                eprintln!(
+                    "{}",
+                    error.format_diagnostic_with_source(Some("<repl>"), Some(line))
+                );
             } else if result.value.is_some()
                 && config.runtime.verbose
                 && result.execution_time_ms > 10
@@ -1306,7 +1309,9 @@ async fn execute_script_with_args(
     let execution_time = start_time.elapsed();
 
     let provider_snapshot = capture_provider_snapshot();
-    let error_payload = result.error.as_ref().map(|err| err.format_diagnostic());
+    let error_payload = result.error.as_ref().map(|err| {
+        err.format_diagnostic_with_source(Some(script.to_string_lossy().as_ref()), Some(&content))
+    });
     let success = error_payload.is_none();
     emit_runtime_value(RuntimeTelemetryRecord {
         kind: TelemetryRunKind::Script,
@@ -1321,7 +1326,7 @@ async fn execute_script_with_args(
     });
 
     if let Some(error) = error_payload {
-        error!("Script execution failed: {error}");
+        eprintln!("{error}");
         std::process::exit(1);
     } else {
         if result.used_jit {
@@ -1591,7 +1596,11 @@ async fn execute_benchmark(
         let result = engine.execute(&content).await?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result.error.as_ref().map(|err| err.format_diagnostic()) {
+        if let Some(error) = result
+            .error
+            .as_ref()
+            .map(|err| err.format_diagnostic_with_source(Some(file.to_string_lossy().as_ref()), Some(&content)))
+        {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,

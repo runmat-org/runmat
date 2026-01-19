@@ -64,7 +64,7 @@ collect_stats = true
 ip = "127.0.0.1"
 
 [logging]
-level = "info"
+level = "warn"
 debug = false
 
 [plotting]
@@ -213,7 +213,7 @@ collect_stats = true
 ip = "127.0.0.1"
 
 [logging]
-level = "info"
+level = "warn"
 debug = false
 
 [plotting]

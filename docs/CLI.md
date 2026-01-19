@@ -43,7 +43,7 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 ## Global options
 
 - `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
-- `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `info`).
+- `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `warn`).
 - `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
 - `--config <path>` (env: `RUNMAT_CONFIG`): load configuration file.
 - `--no-jit` (env: `RUNMAT_JIT_DISABLE`): disable JIT (interpreter only).
