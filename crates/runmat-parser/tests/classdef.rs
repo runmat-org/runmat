@@ -15,6 +15,7 @@ fn classdef_minimal_empty() {
             name,
             super_class,
             members,
+            ..
         } => {
             assert_eq!(name, "A");
             assert!(super_class.is_none());
@@ -56,6 +57,7 @@ end
             name,
             super_class,
             members,
+            ..
         } => {
             assert_eq!(name, "MyClass");
             assert_eq!(super_class.as_deref(), Some("handle"));

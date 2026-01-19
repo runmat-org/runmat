@@ -15,6 +15,12 @@ pub struct ParserOptions {
     pub compat_mode: CompatMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
 impl Default for ParserOptions {
     fn default() -> Self {
         Self {
@@ -31,29 +37,80 @@ impl ParserOptions {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
-    Number(String),
-    String(String),
-    Ident(String),
-    EndKeyword, // 'end' used in indexing contexts
-    Unary(UnOp, Box<Expr>),
-    Binary(Box<Expr>, BinOp, Box<Expr>),
-    Tensor(Vec<Vec<Expr>>),
-    Cell(Vec<Vec<Expr>>),
-    Index(Box<Expr>, Vec<Expr>),
-    IndexCell(Box<Expr>, Vec<Expr>),
-    Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
-    Colon,
-    FuncCall(String, Vec<Expr>),
-    Member(Box<Expr>, String),
+    Number(String, Span),
+    String(String, Span),
+    Ident(String, Span),
+    EndKeyword(Span), // 'end' used in indexing contexts
+    Unary(UnOp, Box<Expr>, Span),
+    Binary(Box<Expr>, BinOp, Box<Expr>, Span),
+    Tensor(Vec<Vec<Expr>>, Span),
+    Cell(Vec<Vec<Expr>>, Span),
+    Index(Box<Expr>, Vec<Expr>, Span),
+    IndexCell(Box<Expr>, Vec<Expr>, Span),
+    Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>, Span),
+    Colon(Span),
+    FuncCall(String, Vec<Expr>, Span),
+    Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
-    MemberDynamic(Box<Expr>, Box<Expr>),
-    MethodCall(Box<Expr>, String, Vec<Expr>),
+    MemberDynamic(Box<Expr>, Box<Expr>, Span),
+    MethodCall(Box<Expr>, String, Vec<Expr>, Span),
     AnonFunc {
         params: Vec<String>,
         body: Box<Expr>,
+        span: Span,
     },
-    FuncHandle(String),
-    MetaClass(String),
+    FuncHandle(String, Span),
+    MetaClass(String, Span),
+}
+
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Number(_, span)
+            | Expr::String(_, span)
+            | Expr::Ident(_, span)
+            | Expr::EndKeyword(span)
+            | Expr::Unary(_, _, span)
+            | Expr::Binary(_, _, _, span)
+            | Expr::Tensor(_, span)
+            | Expr::Cell(_, span)
+            | Expr::Index(_, _, span)
+            | Expr::IndexCell(_, _, span)
+            | Expr::Range(_, _, _, span)
+            | Expr::Colon(span)
+            | Expr::FuncCall(_, _, span)
+            | Expr::Member(_, _, span)
+            | Expr::MemberDynamic(_, _, span)
+            | Expr::MethodCall(_, _, _, span)
+            | Expr::FuncHandle(_, span)
+            | Expr::MetaClass(_, span) => *span,
+            Expr::AnonFunc { span, .. } => *span,
+        }
+    }
+
+    pub fn with_span(self, span: Span) -> Expr {
+        match self {
+            Expr::Number(value, _) => Expr::Number(value, span),
+            Expr::String(value, _) => Expr::String(value, span),
+            Expr::Ident(value, _) => Expr::Ident(value, span),
+            Expr::EndKeyword(_) => Expr::EndKeyword(span),
+            Expr::Unary(op, expr, _) => Expr::Unary(op, expr, span),
+            Expr::Binary(lhs, op, rhs, _) => Expr::Binary(lhs, op, rhs, span),
+            Expr::Tensor(rows, _) => Expr::Tensor(rows, span),
+            Expr::Cell(rows, _) => Expr::Cell(rows, span),
+            Expr::Index(base, indices, _) => Expr::Index(base, indices, span),
+            Expr::IndexCell(base, indices, _) => Expr::IndexCell(base, indices, span),
+            Expr::Range(start, step, end, _) => Expr::Range(start, step, end, span),
+            Expr::Colon(_) => Expr::Colon(span),
+            Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
+            Expr::Member(base, name, _) => Expr::Member(base, name, span),
+            Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
+            Expr::MethodCall(base, name, args, _) => Expr::MethodCall(base, name, args, span),
+            Expr::AnonFunc { params, body, .. } => Expr::AnonFunc { params, body, span },
+            Expr::FuncHandle(name, _) => Expr::FuncHandle(name, span),
+            Expr::MetaClass(name, _) => Expr::MetaClass(name, span),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -95,55 +152,87 @@ pub enum UnOp {
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
-    ExprStmt(Expr, bool), // Expression and whether it's semicolon-terminated (suppressed)
-    Assign(String, Expr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
-    MultiAssign(Vec<String>, Expr, bool),
-    AssignLValue(LValue, Expr, bool),
+    ExprStmt(Expr, bool, Span), // Expression and whether it's semicolon-terminated (suppressed)
+    Assign(String, Expr, bool, Span), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
+    MultiAssign(Vec<String>, Expr, bool, Span),
+    AssignLValue(LValue, Expr, bool, Span),
     If {
         cond: Expr,
         then_body: Vec<Stmt>,
         elseif_blocks: Vec<(Expr, Vec<Stmt>)>,
         else_body: Option<Vec<Stmt>>,
+        span: Span,
     },
     While {
         cond: Expr,
         body: Vec<Stmt>,
+        span: Span,
     },
     For {
         var: String,
         expr: Expr,
         body: Vec<Stmt>,
+        span: Span,
     },
     Switch {
         expr: Expr,
         cases: Vec<(Expr, Vec<Stmt>)>,
         otherwise: Option<Vec<Stmt>>,
+        span: Span,
     },
     TryCatch {
         try_body: Vec<Stmt>,
         catch_var: Option<String>,
         catch_body: Vec<Stmt>,
+        span: Span,
     },
-    Global(Vec<String>),
-    Persistent(Vec<String>),
-    Break,
-    Continue,
-    Return,
+    Global(Vec<String>, Span),
+    Persistent(Vec<String>, Span),
+    Break(Span),
+    Continue(Span),
+    Return(Span),
     Function {
         name: String,
         params: Vec<String>,
         outputs: Vec<String>,
         body: Vec<Stmt>,
+        span: Span,
     },
     Import {
         path: Vec<String>,
         wildcard: bool,
+        span: Span,
     },
     ClassDef {
         name: String,
         super_class: Option<String>,
         members: Vec<ClassMember>,
+        span: Span,
     },
+}
+
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::ExprStmt(_, _, span)
+            | Stmt::Assign(_, _, _, span)
+            | Stmt::MultiAssign(_, _, _, span)
+            | Stmt::AssignLValue(_, _, _, span)
+            | Stmt::Global(_, span)
+            | Stmt::Persistent(_, span)
+            | Stmt::Break(span)
+            | Stmt::Continue(span)
+            | Stmt::Return(span) => *span,
+            Stmt::If { span, .. }
+            | Stmt::While { span, .. }
+            | Stmt::For { span, .. }
+            | Stmt::Switch { span, .. }
+            | Stmt::TryCatch { span, .. }
+            | Stmt::Function { span, .. }
+            | Stmt::Import { span, .. }
+            | Stmt::ClassDef { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -396,6 +485,34 @@ impl Parser {
         }
     }
 
+    fn span_from(&self, start: usize, end: usize) -> Span {
+        Span { start, end }
+    }
+
+    fn span_between(&self, start: Span, end: Span) -> Span {
+        Span {
+            start: start.start,
+            end: end.end,
+        }
+    }
+
+    fn last_token_end(&self) -> usize {
+        self.tokens
+            .get(self.pos.saturating_sub(1))
+            .map(|t| t.end)
+            .unwrap_or(self.input.len())
+    }
+
+    fn make_binary(&self, left: Expr, op: BinOp, right: Expr) -> Expr {
+        let span = self.span_between(left.span(), right.span());
+        Expr::Binary(Box::new(left), op, Box::new(right), span)
+    }
+
+    fn make_unary(&self, op: UnOp, operand: Expr, op_start: usize) -> Expr {
+        let span = self.span_from(op_start, operand.span().end);
+        Expr::Unary(op, Box::new(operand), span)
+    }
+
     fn is_simple_assignment_ahead(&self) -> bool {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
         self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
@@ -451,13 +568,17 @@ impl Parser {
         // Expression statements: semicolon indicates output suppression.
         // Assignments/lvalues are now suppressed whenever a semicolon is present, even at EOF.
         match stmt {
-            Stmt::ExprStmt(expr, _) => Ok(Stmt::ExprStmt(expr, is_semicolon_terminated)),
-            Stmt::Assign(name, expr, _) => Ok(Stmt::Assign(name, expr, is_semicolon_terminated)),
-            Stmt::MultiAssign(names, expr, _) => {
-                Ok(Stmt::MultiAssign(names, expr, is_semicolon_terminated))
+            Stmt::ExprStmt(expr, _, span) => {
+                Ok(Stmt::ExprStmt(expr, is_semicolon_terminated, span))
             }
-            Stmt::AssignLValue(lv, expr, _) => {
-                Ok(Stmt::AssignLValue(lv, expr, is_semicolon_terminated))
+            Stmt::Assign(name, expr, _, span) => {
+                Ok(Stmt::Assign(name, expr, is_semicolon_terminated, span))
+            }
+            Stmt::MultiAssign(names, expr, _, span) => {
+                Ok(Stmt::MultiAssign(names, expr, is_semicolon_terminated, span))
+            }
+            Stmt::AssignLValue(lv, expr, _, span) => {
+                Ok(Stmt::AssignLValue(lv, expr, is_semicolon_terminated, span))
             }
             other => Ok(other),
         }
@@ -475,16 +596,19 @@ impl Parser {
             Some(Token::Global) => self.parse_global().map_err(|e| e.into()),
             Some(Token::Persistent) => self.parse_persistent().map_err(|e| e.into()),
             Some(Token::Break) => {
+                let token = &self.tokens[self.pos];
                 self.pos += 1;
-                Ok(Stmt::Break)
+                Ok(Stmt::Break(self.span_from(token.position, token.end)))
             }
             Some(Token::Continue) => {
+                let token = &self.tokens[self.pos];
                 self.pos += 1;
-                Ok(Stmt::Continue)
+                Ok(Stmt::Continue(self.span_from(token.position, token.end)))
             }
             Some(Token::Return) => {
+                let token = &self.tokens[self.pos];
                 self.pos += 1;
-                Ok(Stmt::Return)
+                Ok(Stmt::Return(self.span_from(token.position, token.end)))
             }
             Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
             // Multi-assign like [a,b] = f()
@@ -496,30 +620,33 @@ impl Parser {
                     }
                 } else {
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::ExprStmt(expr, false))
+                    let span = expr.span();
+                    Ok(Stmt::ExprStmt(expr, false, span))
                 }
             }
             _ => {
                 if self.peek_token() == Some(&Token::Ident)
                     && self.peek_token_at(1) == Some(&Token::Assign)
                 {
-                    let name = self
+                    let name_token = self
                         .next()
-                        .ok_or_else(|| self.error("expected identifier"))?
-                        .lexeme;
+                        .ok_or_else(|| self.error("expected identifier"))?;
                     if !self.consume(&Token::Assign) {
                         return Err(self.error_with_expected("expected assignment operator", "'='"));
                     }
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
+                    let span = self.span_from(name_token.position, expr.span().end);
+                    Ok(Stmt::Assign(name_token.lexeme, expr, false, span))
                 } else if self.is_simple_assignment_ahead() {
                     // Fallback: treat as simple assignment if '=' appears before terminator
                     let name = self.expect_ident().map_err(|e| self.error(&e))?;
+                    let start = self.tokens[self.pos.saturating_sub(1)].position;
                     if !self.consume(&Token::Assign) {
                         return Err(self.error_with_expected("expected assignment operator", "'='"));
                     }
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::Assign(name, expr, false))
+                    let span = self.span_from(start, expr.span().end);
+                    Ok(Stmt::Assign(name, expr, false, span))
                 } else if self.peek_token() == Some(&Token::Ident) {
                     // First, try complex lvalue assignment starting from an identifier: A(1)=x, A{1}=x, s.f=x, s.(n)=x
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
@@ -533,12 +660,18 @@ impl Parser {
                                 "Command syntax is disabled in strict compatibility mode; call functions with parentheses.",
                             ));
                         }
-                        let name = self.next().unwrap().lexeme;
+                        let name_token = self.next().unwrap();
                         let mut args = self.parse_command_args();
-                        if let Some(command) = self.lookup_command(&name) {
+                        if let Some(command) = self.lookup_command(&name_token.lexeme) {
                             self.normalize_command_args(command, &mut args[..])?;
                         }
-                        Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
+                        let end = self.last_token_end();
+                        let span = self.span_from(name_token.position, end);
+                        Ok(Stmt::ExprStmt(
+                            Expr::FuncCall(name_token.lexeme, args, span),
+                            false,
+                            span,
+                        ))
                     } else {
                         // If we see Ident <space> Ident immediately followed by postfix opener,
                         // this is an ambiguous adjacency (e.g., "foo b(1)"). Emit a targeted error.
@@ -555,21 +688,17 @@ impl Parser {
                             )
                         {
                             return Err(self.error(
-                                "ambiguous command-form near identifier; use function syntax foo(b(...)) or quote argument",
+                                "Unexpected adjacency: interpret as function call? Use parentheses (e.g., foo(b(1))).",
                             ));
                         }
-                        // Fall back to full expression parse (e.g., foo(1), foo.bar, etc.)
                         let expr = self.parse_expr()?;
-                        Ok(Stmt::ExprStmt(expr, false))
+                        let span = expr.span();
+                        Ok(Stmt::ExprStmt(expr, false, span))
                     }
-                } else if let Some(lv) = self.try_parse_lvalue_assign()? {
-                    Ok(lv)
                 } else {
                     let expr = self.parse_expr()?;
-                    // Require statement terminator or EOF after a bare expression at statement level
-                    // Be permissive: allow subsequent tokens; ambiguity has been handled above by
-                    // can_start_command_form()/adjacency guard. Treat this as a normal expression statement.
-                    Ok(Stmt::ExprStmt(expr, false))
+                    let span = expr.span();
+                    Ok(Stmt::ExprStmt(expr, false, span))
                 }
             }
         }
@@ -658,21 +787,26 @@ impl Parser {
             }
             match self.peek_token() {
                 Some(Token::Ident) => {
-                    let ident = self.next().unwrap().lexeme;
-                    args.push(Expr::Ident(ident));
+                    let token = self.next().unwrap();
+                    let span = self.span_from(token.position, token.end);
+                    args.push(Expr::Ident(token.lexeme, span));
                 }
                 // In command-form, accept 'end' as a literal identifier token for compatibility
                 Some(Token::End) => {
+                    let token = &self.tokens[self.pos];
                     self.pos += 1;
-                    args.push(Expr::Ident("end".to_string()));
+                    let span = self.span_from(token.position, token.end);
+                    args.push(Expr::Ident("end".to_string(), span));
                 }
                 Some(Token::Integer) | Some(Token::Float) => {
-                    let num = self.next().unwrap().lexeme;
-                    args.push(Expr::Number(num));
+                    let token = self.next().unwrap();
+                    let span = self.span_from(token.position, token.end);
+                    args.push(Expr::Number(token.lexeme, span));
                 }
                 Some(Token::Str) => {
-                    let s = self.next().unwrap().lexeme;
-                    args.push(Expr::String(s));
+                    let token = self.next().unwrap();
+                    let span = self.span_from(token.position, token.end);
+                    args.push(Expr::String(token.lexeme, span));
                 }
                 // Stop on tokens that would start normal expression syntax
                 Some(Token::Slash)
@@ -729,7 +863,8 @@ impl Parser {
                     .iter()
                     .any(|candidate| candidate.eq_ignore_ascii_case(&keyword))
                 {
-                    args[0] = Expr::String(format!("\"{}\"", keyword));
+                    let span = args[0].span();
+                    args[0] = Expr::String(format!("\"{}\"", keyword), span);
                 } else {
                     return Err(self.error(&format!(
                         "'{}' command syntax does not support '{}'",
@@ -749,8 +884,9 @@ impl Parser {
         // Parse potential LValue: Member/Index/IndexCell
         let lvalue = if self.peek_token() == Some(&Token::Ident) {
             // Start with primary
-            let base_ident = self.next().unwrap().lexeme;
-            let mut base = Expr::Ident(base_ident);
+            let base_token = self.next().unwrap();
+            let base_span = self.span_from(base_token.position, base_token.end);
+            let mut base = Expr::Ident(base_token.lexeme, base_span);
             loop {
                 if self.consume(&Token::LParen) {
                     let mut args = Vec::new();
@@ -763,7 +899,9 @@ impl Parser {
                             return Err(self.error_with_expected("expected ')' after indices", ")"));
                         }
                     }
-                    base = Expr::Index(Box::new(base), args);
+                    let end = self.last_token_end();
+                    let span = self.span_from(base.span().start, end);
+                    base = Expr::Index(Box::new(base), args, span);
                 } else if self.consume(&Token::LBracket) {
                     let mut idxs = Vec::new();
                     idxs.push(self.parse_expr()?);
@@ -773,7 +911,9 @@ impl Parser {
                     if !self.consume(&Token::RBracket) {
                         return Err(self.error_with_expected("expected ']'", "]"));
                     }
-                    base = Expr::Index(Box::new(base), idxs);
+                    let end = self.last_token_end();
+                    let span = self.span_from(base.span().start, end);
+                    base = Expr::Index(Box::new(base), idxs, span);
                 } else if self.consume(&Token::LBrace) {
                     let mut idxs = Vec::new();
                     idxs.push(self.parse_expr()?);
@@ -783,7 +923,9 @@ impl Parser {
                     if !self.consume(&Token::RBrace) {
                         return Err(self.error_with_expected("expected '}'", "}"));
                     }
-                    base = Expr::IndexCell(Box::new(base), idxs);
+                    let end = self.last_token_end();
+                    let span = self.span_from(base.span().start, end);
+                    base = Expr::IndexCell(Box::new(base), idxs, span);
                 } else if self.peek_token() == Some(&Token::Dot) {
                     // If this is .', it's a non-conjugate transpose, not a member
                     if self.peek_token_at(1) == Some(&Token::Transpose) {
@@ -806,10 +948,14 @@ impl Parser {
                                 ")",
                             ));
                         }
-                        base = Expr::MemberDynamic(Box::new(base), Box::new(name_expr));
+                        let end = self.last_token_end();
+                        let span = self.span_from(base.span().start, end);
+                        base = Expr::MemberDynamic(Box::new(base), Box::new(name_expr), span);
                     } else {
                         let name = self.expect_ident()?;
-                        base = Expr::Member(Box::new(base), name);
+                        let end = self.last_token_end();
+                        let span = self.span_from(base.span().start, end);
+                        base = Expr::Member(Box::new(base), name, span);
                     }
                 } else {
                     break;
@@ -825,14 +971,21 @@ impl Parser {
             return Ok(None);
         }
         let rhs = self.parse_expr()?;
+        let stmt_span = self.span_between(lvalue.span(), rhs.span());
         let stmt = match lvalue {
-            Expr::Member(b, name) => Stmt::AssignLValue(LValue::Member(b, name), rhs, false),
-            Expr::MemberDynamic(b, n) => {
-                Stmt::AssignLValue(LValue::MemberDynamic(b, n), rhs, false)
+            Expr::Member(b, name, _) => {
+                Stmt::AssignLValue(LValue::Member(b, name), rhs, false, stmt_span)
             }
-            Expr::Index(b, idxs) => Stmt::AssignLValue(LValue::Index(b, idxs), rhs, false),
-            Expr::IndexCell(b, idxs) => Stmt::AssignLValue(LValue::IndexCell(b, idxs), rhs, false),
-            Expr::Ident(v) => Stmt::Assign(v, rhs, false),
+            Expr::MemberDynamic(b, n, _) => {
+                Stmt::AssignLValue(LValue::MemberDynamic(b, n), rhs, false, stmt_span)
+            }
+            Expr::Index(b, idxs, _) => {
+                Stmt::AssignLValue(LValue::Index(b, idxs), rhs, false, stmt_span)
+            }
+            Expr::IndexCell(b, idxs, _) => {
+                Stmt::AssignLValue(LValue::IndexCell(b, idxs), rhs, false, stmt_span)
+            }
+            Expr::Ident(v, _) => Stmt::Assign(v, rhs, false, stmt_span),
             _ => {
                 self.pos = save;
                 return Ok(None);
@@ -849,7 +1002,7 @@ impl Parser {
         let mut node = self.parse_logical_and()?;
         while self.consume(&Token::OrOr) {
             let rhs = self.parse_logical_and()?;
-            node = Expr::Binary(Box::new(node), BinOp::OrOr, Box::new(rhs));
+            node = self.make_binary(node, BinOp::OrOr, rhs);
         }
         Ok(node)
     }
@@ -858,7 +1011,7 @@ impl Parser {
         let mut node = self.parse_bitwise_or()?;
         while self.consume(&Token::AndAnd) {
             let rhs = self.parse_bitwise_or()?;
-            node = Expr::Binary(Box::new(node), BinOp::AndAnd, Box::new(rhs));
+            node = self.make_binary(node, BinOp::AndAnd, rhs);
         }
         Ok(node)
     }
@@ -867,7 +1020,7 @@ impl Parser {
         let mut node = self.parse_bitwise_and()?;
         while self.consume(&Token::Or) {
             let rhs = self.parse_bitwise_and()?;
-            node = Expr::Binary(Box::new(node), BinOp::BitOr, Box::new(rhs));
+            node = self.make_binary(node, BinOp::BitOr, rhs);
         }
         Ok(node)
     }
@@ -876,7 +1029,7 @@ impl Parser {
         let mut node = self.parse_range()?;
         while self.consume(&Token::And) {
             let rhs = self.parse_range()?;
-            node = Expr::Binary(Box::new(node), BinOp::BitAnd, Box::new(rhs));
+            node = self.make_binary(node, BinOp::BitAnd, rhs);
         }
         Ok(node)
     }
@@ -887,9 +1040,11 @@ impl Parser {
             let mid = self.parse_comparison()?;
             if self.consume(&Token::Colon) {
                 let end = self.parse_comparison()?;
-                node = Expr::Range(Box::new(node), Some(Box::new(mid)), Box::new(end));
+                let span = self.span_between(node.span(), end.span());
+                node = Expr::Range(Box::new(node), Some(Box::new(mid)), Box::new(end), span);
             } else {
-                node = Expr::Range(Box::new(node), None, Box::new(mid));
+                let span = self.span_between(node.span(), mid.span());
+                node = Expr::Range(Box::new(node), None, Box::new(mid), span);
             }
         }
         Ok(node)
@@ -909,7 +1064,7 @@ impl Parser {
             };
             self.pos += 1; // consume op
             let rhs = self.parse_add_sub()?;
-            node = Expr::Binary(Box::new(node), op, Box::new(rhs));
+            node = self.make_binary(node, op, rhs);
         }
         Ok(node)
     }
@@ -938,7 +1093,7 @@ impl Parser {
             };
             let Some(op) = op else { break };
             let rhs = self.parse_mul_div()?;
-            node = Expr::Binary(Box::new(node), op, Box::new(rhs));
+            node = self.make_binary(node, op, rhs);
         }
         Ok(node)
     }
@@ -953,9 +1108,12 @@ impl Parser {
                 let is_imag =
                     curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
                 if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
-                    let ident = self.next().unwrap().lexeme;
-                    let rhs = Expr::Ident(ident);
-                    node = Expr::Binary(Box::new(node), BinOp::Mul, Box::new(rhs));
+                    let token = self.next().unwrap();
+                    let rhs = Expr::Ident(
+                        token.lexeme,
+                        self.span_from(token.position, token.end),
+                    );
+                    node = self.make_binary(node, BinOp::Mul, rhs);
                     continue;
                 }
             }
@@ -970,7 +1128,7 @@ impl Parser {
             };
             self.pos += 1; // consume op
             let rhs = self.parse_unary()?;
-            node = Expr::Binary(Box::new(node), op, Box::new(rhs));
+            node = self.make_binary(node, op, rhs);
         }
         Ok(node)
     }
@@ -985,7 +1143,7 @@ impl Parser {
             };
             self.pos += 1; // consume
             let rhs = self.parse_pow()?; // right associative
-            Ok(Expr::Binary(Box::new(node), op, Box::new(rhs)))
+            Ok(self.make_binary(node, op, rhs))
         } else {
             Ok(node)
         }
@@ -994,6 +1152,7 @@ impl Parser {
     fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, String> {
         loop {
             if self.consume(&Token::LParen) {
+                let start = expr.span().start;
                 let mut args = Vec::new();
                 if !self.consume(&Token::RParen) {
                     args.push(self.parse_expr()?);
@@ -1004,17 +1163,20 @@ impl Parser {
                         return Err("expected ')' after arguments".into());
                     }
                 }
+                let end = self.last_token_end();
+                let span = self.span_from(start, end);
                 // Binder-based disambiguation:
                 // If the callee is an identifier, defer call vs. index to HIR binding.
                 // Parse as a function call now; HIR will rewrite to Index if a variable shadows the function.
-                if let Expr::Ident(ref name) = expr {
-                    expr = Expr::FuncCall(name.clone(), args);
+                if let Expr::Ident(ref name, _) = expr {
+                    expr = Expr::FuncCall(name.clone(), args, span);
                 } else {
                     // For non-ident bases (e.g., X(1), (A+B)(1)), this is indexing.
-                    expr = Expr::Index(Box::new(expr), args);
+                    expr = Expr::Index(Box::new(expr), args, span);
                 }
             } else if self.consume(&Token::LBracket) {
                 // Array indexing
+                let start = expr.span().start;
                 let mut indices = Vec::new();
                 indices.push(self.parse_expr()?);
                 while self.consume(&Token::Comma) {
@@ -1023,9 +1185,12 @@ impl Parser {
                 if !self.consume(&Token::RBracket) {
                     return Err("expected ']'".into());
                 }
-                expr = Expr::Index(Box::new(expr), indices);
+                let end = self.last_token_end();
+                let span = self.span_from(start, end);
+                expr = Expr::Index(Box::new(expr), indices, span);
             } else if self.consume(&Token::LBrace) {
                 // Cell content indexing
+                let start = expr.span().start;
                 let mut indices = Vec::new();
                 indices.push(self.parse_expr()?);
                 while self.consume(&Token::Comma) {
@@ -1034,12 +1199,16 @@ impl Parser {
                 if !self.consume(&Token::RBrace) {
                     return Err("expected '}'".into());
                 }
-                expr = Expr::IndexCell(Box::new(expr), indices);
+                let end = self.last_token_end();
+                let span = self.span_from(start, end);
+                expr = Expr::IndexCell(Box::new(expr), indices, span);
             } else if self.peek_token() == Some(&Token::Dot) {
                 // Could be .', .+ , .- or member access
                 if self.peek_token_at(1) == Some(&Token::Transpose) {
                     self.pos += 2; // '.' and '''
-                    expr = Expr::Unary(UnOp::NonConjugateTranspose, Box::new(expr));
+                    let end = self.last_token_end();
+                    let span = self.span_from(expr.span().start, end);
+                    expr = Expr::Unary(UnOp::NonConjugateTranspose, Box::new(expr), span);
                     continue;
                 }
                 if self.peek_token_at(1) == Some(&Token::Plus)
@@ -1050,12 +1219,13 @@ impl Parser {
                 }
                 // Otherwise, member access
                 self.pos += 1; // consume '.'
-                let name = match self.next() {
+                let name_token = match self.next() {
                     Some(TokenInfo {
                         token: Token::Ident,
                         lexeme,
-                        ..
-                    }) => lexeme,
+                        position,
+                        end,
+                    }) => (lexeme, position, end),
                     _ => return Err("expected member name after '.'".into()),
                 };
                 if self.consume(&Token::LParen) {
@@ -1069,13 +1239,18 @@ impl Parser {
                             return Err("expected ')' after method arguments".into());
                         }
                     }
-                    expr = Expr::MethodCall(Box::new(expr), name, args);
+                    let end = self.last_token_end();
+                    let span = self.span_from(expr.span().start, end);
+                    expr = Expr::MethodCall(Box::new(expr), name_token.0, args, span);
                 } else {
-                    expr = Expr::Member(Box::new(expr), name);
+                    let span = self.span_from(expr.span().start, name_token.2);
+                    expr = Expr::Member(Box::new(expr), name_token.0, span);
                 }
             } else if self.consume(&Token::Transpose) {
                 // Matrix transpose (postfix operator)
-                expr = Expr::Unary(UnOp::Transpose, Box::new(expr));
+                let end = self.last_token_end();
+                let span = self.span_from(expr.span().start, end);
+                expr = Expr::Unary(UnOp::Transpose, Box::new(expr), span);
             } else {
                 break;
             }
@@ -1089,13 +1264,24 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
-        if self.consume(&Token::Plus) {
-            Ok(Expr::Unary(UnOp::Plus, Box::new(self.parse_unary()?)))
-        } else if self.consume(&Token::Minus) {
-            Ok(Expr::Unary(UnOp::Minus, Box::new(self.parse_unary()?)))
-        } else if self.consume(&Token::Tilde) {
-            Ok(Expr::Unary(UnOp::Not, Box::new(self.parse_unary()?)))
-        } else if self.consume(&Token::Question) {
+        if self.peek_token() == Some(&Token::Plus) {
+            let start = self.tokens[self.pos].position;
+            self.pos += 1;
+            let expr = self.parse_unary()?;
+            Ok(self.make_unary(UnOp::Plus, expr, start))
+        } else if self.peek_token() == Some(&Token::Minus) {
+            let start = self.tokens[self.pos].position;
+            self.pos += 1;
+            let expr = self.parse_unary()?;
+            Ok(self.make_unary(UnOp::Minus, expr, start))
+        } else if self.peek_token() == Some(&Token::Tilde) {
+            let start = self.tokens[self.pos].position;
+            self.pos += 1;
+            let expr = self.parse_unary()?;
+            Ok(self.make_unary(UnOp::Not, expr, start))
+        } else if self.peek_token() == Some(&Token::Question) {
+            let start = self.tokens[self.pos].position;
+            self.pos += 1;
             // Meta-class query with controlled qualified name consumption to allow postfix chaining
             // Consume packages (lowercase-leading) and exactly one Class segment (uppercase-leading), then stop.
             let mut parts: Vec<String> = Vec::new();
@@ -1131,7 +1317,9 @@ impl Parser {
                     break;
                 }
             }
-            let base = Expr::MetaClass(parts.join("."));
+            let end = self.last_token_end();
+            let span = self.span_from(start, end);
+            let base = Expr::MetaClass(parts.join("."), span);
             self.parse_postfix_with_base(base)
         } else {
             self.parse_pow()
@@ -1141,14 +1329,33 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<Expr, String> {
         match self.next() {
             Some(info) => match info.token {
-                Token::Integer | Token::Float => Ok(Expr::Number(info.lexeme)),
-                Token::Str => Ok(Expr::String(info.lexeme)),
-                Token::True => Ok(Expr::Ident("true".into())),
-                Token::False => Ok(Expr::Ident("false".into())),
-                Token::Ident => Ok(Expr::Ident(info.lexeme)),
+                Token::Integer | Token::Float => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::Number(info.lexeme, span))
+                }
+                Token::Str => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::String(info.lexeme, span))
+                }
+                Token::True => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::Ident("true".into(), span))
+                }
+                Token::False => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::Ident("false".into(), span))
+                }
+                Token::Ident => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::Ident(info.lexeme, span))
+                }
                 // Treat 'end' as EndKeyword in expression contexts; in command-form we allow 'end' to be consumed as an identifier via command-args path.
-                Token::End => Ok(Expr::EndKeyword),
+                Token::End => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::EndKeyword(span))
+                }
                 Token::At => {
+                    let start = info.position;
                     // Anonymous function or function handle
                     if self.consume(&Token::LParen) {
                         let mut params = Vec::new();
@@ -1164,71 +1371,57 @@ impl Parser {
                             }
                         }
                         let body = self.parse_expr().map_err(|e| e.message)?;
+                        let span = self.span_from(start, body.span().end);
                         Ok(Expr::AnonFunc {
                             params,
                             body: Box::new(body),
+                            span,
                         })
                     } else {
                         // function handle @name
                         let name = self.expect_ident()?;
-                        Ok(Expr::FuncHandle(name))
+                        let end = self.last_token_end();
+                        let span = self.span_from(start, end);
+                        Ok(Expr::FuncHandle(name, span))
                     }
                 }
                 Token::LParen => {
+                    let start = info.position;
                     let expr = self.parse_expr()?;
                     if !self.consume(&Token::RParen) {
                         return Err("expected ')' to close parentheses".into());
                     }
-                    Ok(expr)
+                    let end = self.last_token_end();
+                    let span = self.span_from(start, end);
+                    Ok(expr.with_span(span))
                 }
                 Token::LBracket => {
+                    let start = info.position;
                     let matrix = self.parse_matrix()?;
                     if !self.consume(&Token::RBracket) {
                         return Err("expected ']' to close matrix literal".into());
                     }
-                    Ok(matrix)
+                    let end = self.last_token_end();
+                    let span = self.span_from(start, end);
+                    Ok(matrix.with_span(span))
                 }
                 Token::LBrace => {
+                    let start = info.position;
                     let cell = self.parse_cell()?;
                     if !self.consume(&Token::RBrace) {
                         return Err("expected '}' to close cell literal".into());
                     }
-                    Ok(cell)
+                    let end = self.last_token_end();
+                    let span = self.span_from(start, end);
+                    Ok(cell.with_span(span))
                 }
-                Token::Colon => Ok(Expr::Colon),
-                Token::ClassDef => {
-                    // Rewind one token and defer to statement parser for classdef blocks
-                    self.pos -= 1;
-                    Err("classdef in expression context".into())
+                Token::Colon => {
+                    let span = self.span_from(info.position, info.end);
+                    Ok(Expr::Colon(span))
                 }
-                _ => {
-                    // Provide detailed error message about what token was unexpected
-                    let token_desc = match info.token {
-                        Token::Semicolon => "semicolon ';' (statement separator)",
-                        Token::Comma => "comma ',' (list separator)",
-                        Token::RParen => {
-                            "closing parenthesis ')' (no matching opening parenthesis)"
-                        }
-                        Token::RBracket => "closing bracket ']' (no matching opening bracket)",
-                        Token::If => "keyword 'if' (expected in statement context)",
-                        Token::For => "keyword 'for' (expected in statement context)",
-                        Token::While => "keyword 'while' (expected in statement context)",
-                        Token::Function => "keyword 'function' (expected in statement context)",
-                        Token::End => "keyword 'end' (no matching control structure)",
-                        Token::Equal => "equality operator '==' (expected in comparison context)",
-                        Token::Assign => "assignment operator '=' (expected in assignment context)",
-                        Token::Error => "invalid character or symbol",
-                        _ => {
-                            return Err(format!(
-                                "unexpected token '{}' in expression context",
-                                info.lexeme
-                            ))
-                        }
-                    };
-                    Err(format!("unexpected {token_desc} in expression context"))
-                }
+                _ => Err(format!("unexpected token: {:?}", info.token)),
             },
-            None => Err("unexpected end of input, expected expression".into()),
+            None => Err("unexpected end of input".into()),
         }
     }
 
@@ -1236,7 +1429,7 @@ impl Parser {
         self.skip_newlines();
         let mut rows = Vec::new();
         if self.peek_token() == Some(&Token::RBracket) {
-            return Ok(Expr::Tensor(rows));
+            return Ok(Expr::Tensor(rows, Span::default()));
         }
         loop {
             self.skip_newlines();
@@ -1296,10 +1489,11 @@ impl Parser {
             }
         }
         self.skip_newlines();
-        Ok(Expr::Tensor(rows))
+        Ok(Expr::Tensor(rows, Span::default()))
     }
 
     fn parse_if(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::If);
         let cond = self.parse_expr()?;
         let then_body =
@@ -1319,25 +1513,34 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end'".into());
         }
+        let end = self.last_token_end();
         Ok(Stmt::If {
             cond,
             then_body,
             elseif_blocks,
             else_body,
+            span: self.span_from(start, end),
         })
     }
 
     fn parse_while(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::While);
         let cond = self.parse_expr()?;
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
             return Err("expected 'end'".into());
         }
-        Ok(Stmt::While { cond, body })
+        let end = self.last_token_end();
+        Ok(Stmt::While {
+            cond,
+            body,
+            span: self.span_from(start, end),
+        })
     }
 
     fn parse_for(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::For);
         let var = self.expect_ident()?;
         if !self.consume(&Token::Assign) {
@@ -1348,10 +1551,17 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end'".into());
         }
-        Ok(Stmt::For { var, expr, body })
+        let end = self.last_token_end();
+        Ok(Stmt::For {
+            var,
+            expr,
+            body,
+            span: self.span_from(start, end),
+        })
     }
 
     fn parse_function(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Function);
         let mut outputs = Vec::new();
         if self.consume(&Token::LBracket) {
@@ -1434,11 +1644,13 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end'".into());
         }
+        let end = self.last_token_end();
         Ok(Stmt::Function {
             name,
             params,
             outputs,
             body,
+            span: self.span_from(start, end),
         })
     }
 
@@ -1467,10 +1679,14 @@ impl Parser {
 
             // Only expression statements are display-suppressed by semicolon.
             let final_stmt = match stmt {
-                Stmt::ExprStmt(expr, _) => Stmt::ExprStmt(expr, is_semicolon_terminated),
-                Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, false),
-                Stmt::MultiAssign(names, expr, _) => Stmt::MultiAssign(names, expr, false),
-                Stmt::AssignLValue(lv, expr, _) => Stmt::AssignLValue(lv, expr, false),
+                Stmt::ExprStmt(expr, _, span) => {
+                    Stmt::ExprStmt(expr, is_semicolon_terminated, span)
+                }
+                Stmt::Assign(name, expr, _, span) => Stmt::Assign(name, expr, false, span),
+                Stmt::MultiAssign(names, expr, _, span) => {
+                    Stmt::MultiAssign(names, expr, false, span)
+                }
+                Stmt::AssignLValue(lv, expr, _, span) => Stmt::AssignLValue(lv, expr, false, span),
                 other => other,
             };
             body.push(final_stmt);
@@ -1482,7 +1698,7 @@ impl Parser {
         let mut rows = Vec::new();
         self.skip_newlines();
         if self.peek_token() == Some(&Token::RBrace) {
-            return Ok(Expr::Cell(rows));
+            return Ok(Expr::Cell(rows, Span::default()));
         }
         loop {
             self.skip_newlines();
@@ -1503,10 +1719,11 @@ impl Parser {
             }
         }
         self.skip_newlines();
-        Ok(Expr::Cell(rows))
+        Ok(Expr::Cell(rows, Span::default()))
     }
 
     fn parse_switch(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Switch);
         let control = self.parse_expr()?;
         let mut cases = Vec::new();
@@ -1532,38 +1749,42 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end' for switch".into());
         }
+        let end = self.last_token_end();
         Ok(Stmt::Switch {
             expr: control,
             cases,
             otherwise,
+            span: self.span_from(start, end),
         })
     }
 
     fn parse_try_catch(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Try);
         let try_body = self.parse_block(|t| matches!(t, Token::Catch | Token::End))?;
-        let (catch_var, catch_body) = if self.consume(&Token::Catch) {
-            let maybe_ident = if let Some(Token::Ident) = self.peek_token() {
-                Some(self.expect_ident()?)
-            } else {
-                None
-            };
-            let body = self.parse_block(|t| matches!(t, Token::End))?;
-            (maybe_ident, body)
-        } else {
-            (None, Vec::new())
-        };
-        if !self.consume(&Token::End) {
-            return Err("expected 'end' after try/catch".into());
+        if !self.consume(&Token::Catch) {
+            return Err("expected 'catch' after try".into());
         }
+        let catch_var = if self.peek_token() == Some(&Token::Ident) {
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+        let catch_body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end' after catch".into());
+        }
+        let end = self.last_token_end();
         Ok(Stmt::TryCatch {
             try_body,
             catch_var,
             catch_body,
+            span: self.span_from(start, end),
         })
     }
 
     fn parse_import(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Import);
         // import pkg.sub.Class or import pkg.*
         let mut path = Vec::new();
@@ -1585,10 +1806,16 @@ impl Parser {
             }
             break;
         }
-        Ok(Stmt::Import { path, wildcard })
+        let end = self.last_token_end();
+        Ok(Stmt::Import {
+            path,
+            wildcard,
+            span: self.span_from(start, end),
+        })
     }
 
     fn parse_classdef(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::ClassDef);
         let name = self.parse_qualified_name()?;
         let mut super_class = None;
@@ -1672,10 +1899,12 @@ impl Parser {
                 _ => break,
             }
         }
+        let end = self.last_token_end();
         Ok(Stmt::ClassDef {
             name,
             super_class,
             members,
+            span: self.span_from(start, end),
         })
     }
 
@@ -1769,6 +1998,7 @@ impl Parser {
     }
 
     fn parse_global(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Global);
         let mut names = Vec::new();
         names.push(self.expect_ident()?);
@@ -1783,10 +2013,12 @@ impl Parser {
             }
             break;
         }
-        Ok(Stmt::Global(names))
+        let end = self.last_token_end();
+        Ok(Stmt::Global(names, self.span_from(start, end)))
     }
 
     fn parse_persistent(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
         self.consume(&Token::Persistent);
         let mut names = Vec::new();
         names.push(self.expect_ident()?);
@@ -1801,13 +2033,15 @@ impl Parser {
             }
             break;
         }
-        Ok(Stmt::Persistent(names))
+        let end = self.last_token_end();
+        Ok(Stmt::Persistent(names, self.span_from(start, end)))
     }
 
     fn try_parse_multi_assign(&mut self) -> Result<Stmt, String> {
         if !self.consume(&Token::LBracket) {
             return Err("not a multi-assign".into());
         }
+        let start = self.tokens[self.pos.saturating_sub(1)].position;
         let mut names = Vec::new();
         names.push(self.expect_ident_or_tilde()?);
         while self.consume(&Token::Comma) {
@@ -1820,7 +2054,8 @@ impl Parser {
             return Err("expected '='".into());
         }
         let rhs = self.parse_expr().map_err(|e| e.message)?;
-        Ok(Stmt::MultiAssign(names, rhs, false))
+        let span = self.span_from(start, rhs.span().end);
+        Ok(Stmt::MultiAssign(names, rhs, false, span))
     }
 
     fn parse_qualified_name(&mut self) -> Result<String, String> {
@@ -1888,8 +2123,8 @@ impl Parser {
 
 fn extract_keyword(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Ident(s) => Some(s.clone()),
-        Expr::String(s) => Some(s.trim_matches(&['"', '\''][..]).to_string()),
+        Expr::Ident(s, _) => Some(s.clone()),
+        Expr::String(s, _) => Some(s.trim_matches(&['"', '\''][..]).to_string()),
         _ => None,
     }
 }

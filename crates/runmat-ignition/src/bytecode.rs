@@ -14,6 +14,7 @@ pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
     let fusion_groups = accel_graph.detect_fusion_groups();
     Ok(Bytecode {
         instructions: c.instructions,
+        instr_spans: c.instr_spans,
         var_count: c.var_count,
         functions: c.functions,
         var_types: c.var_types,
@@ -38,6 +39,7 @@ pub fn compile_with_functions(
     let fusion_groups = accel_graph.detect_fusion_groups();
     Ok(Bytecode {
         instructions: c.instructions,
+        instr_spans: c.instr_spans,
         var_count: c.var_count,
         functions: c.functions,
         var_types: c.var_types,

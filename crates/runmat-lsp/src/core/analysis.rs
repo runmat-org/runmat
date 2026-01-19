@@ -670,6 +670,7 @@ fn build_semantic_model(
             body: _,
             has_varargin: _,
             has_varargout: _,
+            ..
         } = stmt.clone()
         else {
             continue;

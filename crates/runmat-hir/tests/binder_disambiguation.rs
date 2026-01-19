@@ -7,7 +7,7 @@ fn ident_call_with_range_is_func_call_when_no_shadowing() {
     let hir = lower(&ast).expect("lower");
     assert_eq!(hir.body.len(), 1);
     match &hir.body[0] {
-        HirStmt::Assign(_, expr, _) => match &expr.kind {
+        HirStmt::Assign(_, expr, _, _) => match &expr.kind {
             HirExprKind::FuncCall(name, args) => {
                 assert_eq!(name, "single");
                 assert_eq!(args.len(), 1);
@@ -26,7 +26,7 @@ fn variable_shadowing_turns_ident_call_into_index() {
     let hir = lower(&ast).expect("lower");
     assert_eq!(hir.body.len(), 2);
     match &hir.body[1] {
-        HirStmt::Assign(_, expr, _) => match &expr.kind {
+        HirStmt::Assign(_, expr, _, _) => match &expr.kind {
             HirExprKind::Index(base, args) => {
                 // Base should be the Var for 'single'
                 assert!(matches!(base.kind, HirExprKind::Var(_)));
@@ -44,7 +44,7 @@ fn array_indexing_remains_index() {
     let hir = lower(&ast).expect("lower");
     assert_eq!(hir.body.len(), 2);
     match &hir.body[1] {
-        HirStmt::Assign(_, expr, _) => match &expr.kind {
+        HirStmt::Assign(_, expr, _, _) => match &expr.kind {
             HirExprKind::Index(base, args) => {
                 assert!(matches!(base.kind, HirExprKind::Var(_)));
                 assert_eq!(args.len(), 2);

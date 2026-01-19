@@ -10,13 +10,14 @@ pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_runtime::RuntimeError;
+use runmat_hir::SourceId;
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
-use runmat_turbine::{TurbineEngine, TurbineError};
+use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
@@ -59,6 +60,10 @@ pub struct RunMatSession {
     workspace_values: HashMap<String, Value>,
     /// User-defined functions context for session state
     function_definitions: HashMap<String, runmat_hir::HirStmt>,
+    /// Interned source pool for user-defined functions
+    source_pool: SourcePool,
+    /// Source IDs for user-defined functions keyed by name
+    function_source_ids: HashMap<String, SourceId>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
@@ -76,6 +81,46 @@ pub struct RunMatSession {
     workspace_version: u64,
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
+}
+
+#[derive(Debug, Clone)]
+struct SourceText {
+    name: Arc<str>,
+    text: Arc<str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SourceKey {
+    name: Arc<str>,
+    text: Arc<str>,
+}
+
+#[derive(Default)]
+struct SourcePool {
+    sources: Vec<SourceText>,
+    index: HashMap<SourceKey, SourceId>,
+}
+
+impl SourcePool {
+    fn intern(&mut self, name: &str, text: &str) -> SourceId {
+        let name: Arc<str> = Arc::from(name);
+        let text: Arc<str> = Arc::from(text);
+        let key = SourceKey {
+            name: Arc::clone(&name),
+            text: Arc::clone(&text),
+        };
+        if let Some(id) = self.index.get(&key) {
+            return *id;
+        }
+        let id = SourceId(self.sources.len());
+        self.sources.push(SourceText { name, text });
+        self.index.insert(key, id);
+        id
+    }
+
+    fn get(&self, id: SourceId) -> Option<&SourceText> {
+        self.sources.get(id.0)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -582,6 +627,8 @@ impl RunMatSession {
             variable_names: HashMap::new(),
             workspace_values: HashMap::new(),
             function_definitions: HashMap::new(),
+            source_pool: SourcePool::default(),
+            function_source_ids: HashMap::new(),
             snapshot,
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
@@ -938,7 +985,7 @@ impl RunMatSession {
 
         let (single_assign_var, single_stmt_non_assign) = if hir.body.len() == 1 {
             match &hir.body[0] {
-                runmat_hir::HirStmt::Assign(var_id, _, _) => (Some(var_id.0), false),
+                runmat_hir::HirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
                 _ => (None, true),
             }
         } else {
@@ -1059,7 +1106,7 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) =
+                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _, _)) =
                                 hir.body.first()
                             {
                                 if let Some(name) = id_to_name.get(&var_id.0) {
@@ -1151,7 +1198,7 @@ impl RunMatSession {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
-                        if let runmat_hir::HirStmt::Assign(var_id, _, _) = &hir.body[0] {
+                        if let runmat_hir::HirStmt::Assign(var_id, _, _, _) = &hir.body[0] {
                             if let Some(name) = id_to_name.get(&var_id.0) {
                                 assigned_this_execution.insert(name.clone());
                             }
@@ -1220,11 +1267,7 @@ impl RunMatSession {
 
                 Err(e) => {
                     debug!("Interpreter execution failed: {e}");
-                    let runtime_error = match e {
-                        TurbineError::ExecutionError(err) => err,
-                        other => build_runtime_error(format!("Execution failed: {other}")).build(),
-                    };
-                    error = Some(runtime_error);
+                    error = Some(e);
                 }
             }
         }
@@ -1301,6 +1344,15 @@ impl RunMatSession {
                             workspace_updates.push(workspace_entry(name, &value_clone));
                         }
                     }
+                }
+            }
+            let mut repl_source_id: Option<SourceId> = None;
+            for (name, stmt) in &updated_functions {
+                if matches!(stmt, runmat_hir::HirStmt::Function { .. }) {
+                    let source_id = *repl_source_id.get_or_insert_with(|| {
+                        self.source_pool.intern("<repl>", input)
+                    });
+                    self.function_source_ids.insert(name.clone(), source_id);
                 }
             }
             self.function_definitions = updated_functions;
@@ -1587,6 +1639,7 @@ impl RunMatSession {
                 body,
                 has_varargin: _,
                 has_varargout: _,
+                ..
             } = hir_stmt
             {
                 // Use the existing HIR utilities to calculate variable count
@@ -1594,6 +1647,12 @@ impl RunMatSession {
                     runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
                 let max_local_var = var_map.len();
 
+                let source_id = self.function_source_ids.get(name).copied();
+                if let Some(id) = source_id {
+                    if let Some(source) = self.source_pool.get(id) {
+                        let _ = (&source.name, &source.text);
+                    }
+                }
                 let user_func = runmat_ignition::UserFunction {
                     name: func_name.clone(),
                     params: params.clone(),
@@ -1603,6 +1662,7 @@ impl RunMatSession {
                     has_varargin: false,
                     has_varargout: false,
                     var_types: vec![Type::Unknown; max_local_var],
+                    source_id,
                 };
                 user_functions.insert(name.clone(), user_func);
             }
@@ -1697,11 +1757,12 @@ fn last_displayable_statement_emit_disposition(
 
     for stmt in body.iter().rev() {
         match stmt {
-            HirStmt::ExprStmt(expr, _) => return expr_emit_disposition(expr),
-            HirStmt::Assign(_, _, _) | HirStmt::MultiAssign(_, _, _) => {
-                return FinalStmtEmitDisposition::Inline
+            HirStmt::ExprStmt(expr, _, _) => return expr_emit_disposition(expr),
+            HirStmt::Assign(_, _, _, _) | HirStmt::MultiAssign(_, _, _, _) => {
+                return FinalStmtEmitDisposition::Suppressed
             }
-            HirStmt::AssignLValue(_, _, _) => return FinalStmtEmitDisposition::Suppressed,
+            HirStmt::AssignLValue(_, _, _, _) => return FinalStmtEmitDisposition::Suppressed,
+
             _ => continue,
         }
     }

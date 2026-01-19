@@ -12,7 +12,7 @@ fn expr_and_type_inference_arithmetic_and_comparisons() {
     assert_eq!(prog.body.len(), 4);
     // 1 + 2*3
     match &prog.body[0] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Binary(_, _, _)));
             assert_eq!(expr.ty, Type::Num);
         }
@@ -20,7 +20,7 @@ fn expr_and_type_inference_arithmetic_and_comparisons() {
     }
     // 4 .^ 2
     match &prog.body[1] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Binary(_, _, _)));
             assert_eq!(expr.ty, Type::Num);
         }
@@ -28,7 +28,7 @@ fn expr_and_type_inference_arithmetic_and_comparisons() {
     }
     // 5 < 6
     match &prog.body[2] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Binary(_, _, _)));
             assert_eq!(expr.ty, Type::Bool);
         }
@@ -36,7 +36,7 @@ fn expr_and_type_inference_arithmetic_and_comparisons() {
     }
     // 7 && 8
     match &prog.body[3] {
-        HirStmt::ExprStmt(expr, false) => {
+        HirStmt::ExprStmt(expr, false, _) => {
             assert!(matches!(expr.kind, HirExprKind::Binary(_, _, _)));
             assert_eq!(expr.ty, Type::Bool);
         }
@@ -49,26 +49,26 @@ fn matrices_cells_and_indexing() {
     let prog = lower_src("A = [1,2;3,4]; C = {A, 2}; A(1,2); C{1}");
     assert_eq!(prog.body.len(), 4);
     match &prog.body[0] {
-        HirStmt::Assign(_, expr, true) => {
+        HirStmt::Assign(_, expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Tensor(_)));
             assert!(matches!(expr.ty, Type::Tensor { .. }));
         }
         _ => panic!("expected matrix assignment"),
     }
     match &prog.body[1] {
-        HirStmt::Assign(_, expr, true) => {
+        HirStmt::Assign(_, expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Cell(_)));
         }
         _ => panic!("expected cell assignment"),
     }
     match &prog.body[2] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Index(_, _)));
         }
         _ => panic!("expected A(,) indexing"),
     }
     match &prog.body[3] {
-        HirStmt::ExprStmt(expr, false) => {
+        HirStmt::ExprStmt(expr, false, _) => {
             assert!(matches!(expr.kind, HirExprKind::IndexCell(_, _)));
         }
         _ => panic!("expected C indexing"),
@@ -80,21 +80,21 @@ fn end_colon_and_range() {
     let prog = lower_src("A = [1,2,3,4]; A(2:end); 1:2:5; :");
     assert_eq!(prog.body.len(), 4);
     match &prog.body[1] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             // A(2:end)
             assert!(matches!(expr.kind, HirExprKind::Index(_, _)));
         }
         _ => panic!("expected end indexing"),
     }
     match &prog.body[2] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::Range(_, _, _)));
             assert!(matches!(expr.ty, Type::Tensor { .. }));
         }
         _ => panic!("expected range"),
     }
     match &prog.body[3] {
-        HirStmt::ExprStmt(expr, false) => {
+        HirStmt::ExprStmt(expr, false, _) => {
             assert!(matches!(expr.kind, HirExprKind::Colon));
         }
         _ => panic!("expected colon"),
@@ -148,15 +148,15 @@ end
 #[test]
 fn globals_persistents_and_multiassign() {
     let prog = lower_src("global a,b; persistent p; [x,y]=deal(1,2)");
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Global(_))));
+    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Global(_, _))));
     assert!(prog
         .body
         .iter()
-        .any(|s| matches!(s, HirStmt::Persistent(_))));
+        .any(|s| matches!(s, HirStmt::Persistent(_, _))));
     assert!(prog
         .body
         .iter()
-        .any(|s| matches!(s, HirStmt::MultiAssign(_, _, _))));
+        .any(|s| matches!(s, HirStmt::MultiAssign(_, _, _, _))));
 }
 
 #[test]
@@ -181,9 +181,9 @@ z = f(3)
     let call_assign = prog
         .body
         .iter()
-        .find(|s| matches!(s, HirStmt::Assign(_, _, _)))
+        .find(|s| matches!(s, HirStmt::Assign(_, _, _, _)))
         .unwrap();
-    if let HirStmt::Assign(_, expr, _) = call_assign {
+    if let HirStmt::Assign(_, expr, _, _) = call_assign {
         // FuncCall return type should be numeric (Num) based on analysis
         assert_eq!(expr.ty, Type::Num);
     }
@@ -194,21 +194,21 @@ fn methods_members_handles_and_anon() {
     let prog = lower_src("obj = 1; obj.method(1); obj.field; @sin; @(x) x+1");
     assert_eq!(prog.body.len(), 5);
     match &prog.body[1] {
-        HirStmt::ExprStmt(expr, true) => {
+        HirStmt::ExprStmt(expr, true, _) => {
             assert!(matches!(expr.kind, HirExprKind::MethodCall(_, _, _)))
         }
         _ => panic!(),
     }
     match &prog.body[2] {
-        HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::Member(_, _))),
+        HirStmt::ExprStmt(expr, true, _) => assert!(matches!(expr.kind, HirExprKind::Member(_, _))),
         _ => panic!(),
     }
     match &prog.body[3] {
-        HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::FuncHandle(_))),
+        HirStmt::ExprStmt(expr, true, _) => assert!(matches!(expr.kind, HirExprKind::FuncHandle(_))),
         _ => panic!(),
     }
     match &prog.body[4] {
-        HirStmt::ExprStmt(expr, false) => {
+        HirStmt::ExprStmt(expr, false, _) => {
             assert!(matches!(expr.kind, HirExprKind::AnonFunc { .. }))
         }
         _ => panic!(),

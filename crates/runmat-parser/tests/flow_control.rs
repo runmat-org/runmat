@@ -9,8 +9,9 @@ fn switch_and_try_catch() {
             expr,
             cases,
             otherwise,
+            span: _,
         } => {
-            assert!(matches!(expr, Expr::Ident(ref n) if n == "x"));
+            assert!(matches!(expr, Expr::Ident(ref n, _) if n == "x"));
             assert_eq!(cases.len(), 1);
             assert!(otherwise.is_some());
         }
@@ -23,6 +24,7 @@ fn switch_and_try_catch() {
             try_body,
             catch_var,
             catch_body,
+            span: _,
         } => {
             assert!(!try_body.is_empty());
             assert_eq!(catch_var.as_deref(), Some("e"));

@@ -7,13 +7,19 @@ use std::collections::HashMap;
 // Re-export Type from builtins for consistency
 pub use runmat_builtins::Type;
 
+pub type Span = runmat_parser::Span;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VarId(pub usize);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SourceId(pub usize);
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirExpr {
     pub kind: HirExprKind,
     pub ty: Type,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -45,41 +51,46 @@ pub enum HirExprKind {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirStmt {
-    ExprStmt(HirExpr, bool), // Expression and whether it's semicolon-terminated (suppressed)
-    Assign(VarId, HirExpr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
-    MultiAssign(Vec<Option<VarId>>, HirExpr, bool),
-    AssignLValue(HirLValue, HirExpr, bool),
+    ExprStmt(HirExpr, bool, Span), // Expression and whether it's semicolon-terminated (suppressed)
+    Assign(VarId, HirExpr, bool, Span), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
+    MultiAssign(Vec<Option<VarId>>, HirExpr, bool, Span),
+    AssignLValue(HirLValue, HirExpr, bool, Span),
     If {
         cond: HirExpr,
         then_body: Vec<HirStmt>,
         elseif_blocks: Vec<(HirExpr, Vec<HirStmt>)>,
         else_body: Option<Vec<HirStmt>>,
+        span: Span,
     },
     While {
         cond: HirExpr,
         body: Vec<HirStmt>,
+        span: Span,
     },
     For {
         var: VarId,
         expr: HirExpr,
         body: Vec<HirStmt>,
+        span: Span,
     },
     Switch {
         expr: HirExpr,
         cases: Vec<(HirExpr, Vec<HirStmt>)>,
         otherwise: Option<Vec<HirStmt>>,
+        span: Span,
     },
     TryCatch {
         try_body: Vec<HirStmt>,
         catch_var: Option<VarId>,
         catch_body: Vec<HirStmt>,
+        span: Span,
     },
     // Carry both VarId and its canonical source name for cross-unit/global binding
-    Global(Vec<(VarId, String)>),
-    Persistent(Vec<(VarId, String)>),
-    Break,
-    Continue,
-    Return,
+    Global(Vec<(VarId, String)>, Span),
+    Persistent(Vec<(VarId, String)>, Span),
+    Break(Span),
+    Continue(Span),
+    Return(Span),
     Function {
         name: String,
         params: Vec<VarId>,
@@ -87,16 +98,49 @@ pub enum HirStmt {
         body: Vec<HirStmt>,
         has_varargin: bool,
         has_varargout: bool,
+        span: Span,
     },
     ClassDef {
         name: String,
         super_class: Option<String>,
         members: Vec<HirClassMember>,
+        span: Span,
     },
     Import {
         path: Vec<String>,
         wildcard: bool,
+        span: Span,
     },
+}
+
+impl HirExpr {
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl HirStmt {
+    pub fn span(&self) -> Span {
+        match self {
+            HirStmt::ExprStmt(_, _, span)
+            | HirStmt::Assign(_, _, _, span)
+            | HirStmt::MultiAssign(_, _, _, span)
+            | HirStmt::AssignLValue(_, _, _, span)
+            | HirStmt::Global(_, span)
+            | HirStmt::Persistent(_, span)
+            | HirStmt::Break(span)
+            | HirStmt::Continue(span)
+            | HirStmt::Return(span) => *span,
+            HirStmt::If { span, .. }
+            | HirStmt::While { span, .. }
+            | HirStmt::For { span, .. }
+            | HirStmt::Switch { span, .. }
+            | HirStmt::TryCatch { span, .. }
+            | HirStmt::Function { span, .. }
+            | HirStmt::ClassDef { span, .. }
+            | HirStmt::Import { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -411,11 +455,11 @@ pub fn infer_function_output_types(
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => {
+                HirStmt::Assign(var, expr, _, _) => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                 }
-                HirStmt::MultiAssign(vars, expr, _) => {
+                HirStmt::MultiAssign(vars, expr, _, _) => {
                     if let HirExprKind::FuncCall(ref name, _) = expr.kind {
                         // Start from summary
                         let mut per_out: Vec<Type> = returns.get(name).cloned().unwrap_or_default();
@@ -434,7 +478,7 @@ pub fn infer_function_output_types(
                                 // Single pass: collect direct assignments to outputs
                                 let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
                                 for s in &body {
-                                    if let HirStmt::Assign(var, rhs, _) = s {
+                                    if let HirStmt::Assign(var, rhs, _, _) = s {
                                         if let Some(pos) = outs.iter().position(|o| o == var) {
                                             let t = infer_expr_type(rhs, &penv, returns);
                                             out_types[pos] = out_types[pos].unify(&t);
@@ -466,8 +510,8 @@ pub fn infer_function_output_types(
                         }
                     }
                 }
-                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
-                HirStmt::Return => {
+                HirStmt::ExprStmt(_, _, _) | HirStmt::Break(_) | HirStmt::Continue(_) => {}
+                HirStmt::Return(_) => {
                     exits.push(env.clone());
                     return Analysis {
                         exits,
@@ -479,6 +523,7 @@ pub fn infer_function_output_types(
                     then_body,
                     elseif_blocks,
                     else_body,
+                    span: _,
                 } => {
                     // Try to refine struct field knowledge from the condition for the then-branch
                     fn trim_quotes(s: &str) -> String {
@@ -668,14 +713,14 @@ pub fn infer_function_output_types(
                     env = out_env;
                     exits.extend(all_exits);
                 }
-                HirStmt::While { cond: _, body } => {
+                HirStmt::While { cond: _, body, span: _ } => {
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
                     exits.extend(a.exits);
                 }
-                HirStmt::For { var, expr, body } => {
+                HirStmt::For { var, expr, body, span: _ } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
@@ -688,6 +733,7 @@ pub fn infer_function_output_types(
                     expr: _,
                     cases,
                     otherwise,
+                    span: _,
                 } => {
                     let mut out_env: Option<HashMap<VarId, Type>> = None;
                     for (_v, b) in cases {
@@ -723,6 +769,7 @@ pub fn infer_function_output_types(
                     try_body,
                     catch_var: _,
                     catch_body,
+                    span: _,
                 } => {
                     let a_try = analyze_stmts(_outputs, try_body, env.clone(), returns, func_defs);
                     let a_catch =
@@ -735,10 +782,10 @@ pub fn infer_function_output_types(
                     exits.extend(a_try.exits);
                     exits.extend(a_catch.exits);
                 }
-                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                HirStmt::Global(_, _) | HirStmt::Persistent(_, _) => {}
                 HirStmt::Function { .. } => {}
                 HirStmt::ClassDef { .. } => {}
-                HirStmt::AssignLValue(lv, expr, _) => {
+                HirStmt::AssignLValue(lv, expr, _, _) => {
                     // Update struct field knowledge if we see s.field = expr
                     if let HirLValue::Member(base, field) = lv {
                         // If base is a variable, mark it as Struct with this field
@@ -802,14 +849,14 @@ pub fn infer_function_output_types(
     let mut globals: std::collections::HashSet<VarId> = std::collections::HashSet::new();
     let mut persistents: std::collections::HashSet<VarId> = std::collections::HashSet::new();
     for stmt in &prog.body {
-        if let HirStmt::Global(vs) = stmt {
+        if let HirStmt::Global(vs, _) = stmt {
             for (v, _n) in vs {
                 globals.insert(*v);
             }
         }
     }
     for stmt in &prog.body {
-        if let HirStmt::Persistent(vs) = stmt {
+        if let HirStmt::Persistent(vs, _) = stmt {
             for (v, _n) in vs {
                 persistents.insert(*v);
             }
@@ -1191,11 +1238,11 @@ pub fn infer_function_variable_types(
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => {
+                HirStmt::Assign(var, expr, _, _) => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                 }
-                HirStmt::MultiAssign(vars, expr, _) => {
+                HirStmt::MultiAssign(vars, expr, _, _) => {
                     if let HirExprKind::FuncCall(ref name, _) = expr.kind {
                         // Start from summary
                         let mut per_out: Vec<Type> = returns.get(name).cloned().unwrap_or_default();
@@ -1214,7 +1261,7 @@ pub fn infer_function_variable_types(
                                 // Single pass: collect direct assignments to outputs
                                 let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
                                 for s in &body {
-                                    if let HirStmt::Assign(var, rhs, _) = s {
+                                    if let HirStmt::Assign(var, rhs, _, _) = s {
                                         if let Some(pos) = outs.iter().position(|o| o == var) {
                                             let t = infer_expr_type(rhs, &penv, returns);
                                             out_types[pos] = out_types[pos].unify(&t);
@@ -1246,8 +1293,8 @@ pub fn infer_function_variable_types(
                         }
                     }
                 }
-                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
-                HirStmt::Return => {
+                HirStmt::ExprStmt(_, _, _) | HirStmt::Break(_) | HirStmt::Continue(_) => {}
+                HirStmt::Return(_) => {
                     exits.push(env.clone());
                     return Analysis {
                         exits,
@@ -1259,6 +1306,7 @@ pub fn infer_function_variable_types(
                     then_body,
                     elseif_blocks,
                     else_body,
+                    span: _,
                 } => {
                     // Apply the same struct field refinement in the variable-type analysis
                     fn trim_quotes(s: &str) -> String {
@@ -1453,7 +1501,7 @@ pub fn infer_function_variable_types(
                     }
                     exits.extend(a.exits);
                 }
-                HirStmt::For { var, expr, body } => {
+                HirStmt::For { var, expr, body, span: _ } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                     let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
@@ -1511,10 +1559,10 @@ pub fn infer_function_variable_types(
                     exits.extend(a_try.exits);
                     exits.extend(a_catch.exits);
                 }
-                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                HirStmt::Global(_, _) | HirStmt::Persistent(_, _) => {}
                 HirStmt::Function { .. } => {}
                 HirStmt::ClassDef { .. } => {}
-                HirStmt::AssignLValue(_, expr, _) => {
+                HirStmt::AssignLValue(_, expr, _, _) => {
                     let _ = infer_expr_type(expr, &env, returns);
                 }
                 HirStmt::Import { .. } => {}
@@ -1578,7 +1626,7 @@ pub fn infer_function_variable_types(
 pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
     let mut imports = Vec::new();
     for stmt in &prog.body {
-        if let HirStmt::Import { path, wildcard } = stmt {
+        if let HirStmt::Import { path, wildcard, .. } = stmt {
             imports.push((path.clone(), *wildcard));
         }
     }
@@ -1600,7 +1648,7 @@ pub struct NormalizedImport {
 pub fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
     let mut out = Vec::new();
     for stmt in &prog.body {
-        if let HirStmt::Import { path, wildcard } = stmt {
+        if let HirStmt::Import { path, wildcard, .. } = stmt {
             // Support hierarchical aliases, including class paths (e.g., pkg.sub.Class)
             let path_str = path.join(".");
             let last = if *wildcard {
@@ -1678,6 +1726,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
             name,
             super_class,
             members,
+            ..
         } = stmt
         {
             if let Some(sup) = super_class {
@@ -1955,21 +2004,21 @@ pub mod remapping {
     /// Remap VarIds in a single HIR statement
     pub fn remap_stmt(stmt: &HirStmt, var_map: &HashMap<VarId, VarId>) -> HirStmt {
         match stmt {
-            HirStmt::ExprStmt(expr, suppressed) => {
-                HirStmt::ExprStmt(remap_expr(expr, var_map), *suppressed)
+            HirStmt::ExprStmt(expr, suppressed, span) => {
+                HirStmt::ExprStmt(remap_expr(expr, var_map), *suppressed, *span)
             }
-            HirStmt::Assign(var_id, expr, suppressed) => {
+            HirStmt::Assign(var_id, expr, suppressed, span) => {
                 let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
-                HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed)
+                HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed, *span)
             }
-            HirStmt::MultiAssign(var_ids, expr, suppressed) => {
+            HirStmt::MultiAssign(var_ids, expr, suppressed, span) => {
                 let mapped: Vec<Option<VarId>> = var_ids
                     .iter()
                     .map(|v| v.and_then(|vv| var_map.get(&vv).copied().or(Some(vv))))
                     .collect();
-                HirStmt::MultiAssign(mapped, remap_expr(expr, var_map), *suppressed)
+                HirStmt::MultiAssign(mapped, remap_expr(expr, var_map), *suppressed, *span)
             }
-            HirStmt::AssignLValue(lv, expr, suppressed) => {
+            HirStmt::AssignLValue(lv, expr, suppressed, span) => {
                 let remapped_lv = match lv {
                     super::HirLValue::Var(v) => {
                         super::HirLValue::Var(var_map.get(v).copied().unwrap_or(*v))
@@ -1990,13 +2039,14 @@ pub mod remapping {
                         idxs.iter().map(|e| remap_expr(e, var_map)).collect(),
                     ),
                 };
-                HirStmt::AssignLValue(remapped_lv, remap_expr(expr, var_map), *suppressed)
+                HirStmt::AssignLValue(remapped_lv, remap_expr(expr, var_map), *suppressed, *span)
             }
             HirStmt::If {
                 cond,
                 then_body,
                 elseif_blocks,
                 else_body,
+                span,
             } => HirStmt::If {
                 cond: remap_expr(cond, var_map),
                 then_body: remap_function_body(then_body, var_map),
@@ -2005,23 +2055,32 @@ pub mod remapping {
                     .map(|(c, b)| (remap_expr(c, var_map), remap_function_body(b, var_map)))
                     .collect(),
                 else_body: else_body.as_ref().map(|b| remap_function_body(b, var_map)),
+                span: *span,
             },
-            HirStmt::While { cond, body } => HirStmt::While {
+            HirStmt::While { cond, body, span } => HirStmt::While {
                 cond: remap_expr(cond, var_map),
                 body: remap_function_body(body, var_map),
+                span: *span,
             },
-            HirStmt::For { var, expr, body } => {
+            HirStmt::For {
+                var,
+                expr,
+                body,
+                span,
+            } => {
                 let new_var = var_map.get(var).copied().unwrap_or(*var);
                 HirStmt::For {
                     var: new_var,
                     expr: remap_expr(expr, var_map),
                     body: remap_function_body(body, var_map),
+                    span: *span,
                 }
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 otherwise,
+                span,
             } => HirStmt::Switch {
                 expr: remap_expr(expr, var_map),
                 cases: cases
@@ -2029,34 +2088,42 @@ pub mod remapping {
                     .map(|(c, b)| (remap_expr(c, var_map), remap_function_body(b, var_map)))
                     .collect(),
                 otherwise: otherwise.as_ref().map(|b| remap_function_body(b, var_map)),
+                span: *span,
             },
             HirStmt::TryCatch {
                 try_body,
                 catch_var,
                 catch_body,
+                span,
             } => HirStmt::TryCatch {
                 try_body: remap_function_body(try_body, var_map),
                 catch_var: catch_var
                     .as_ref()
                     .map(|v| var_map.get(v).copied().unwrap_or(*v)),
                 catch_body: remap_function_body(catch_body, var_map),
+                span: *span,
             },
-            HirStmt::Global(vars) => HirStmt::Global(
+            HirStmt::Global(vars, span) => HirStmt::Global(
                 vars.iter()
                     .map(|(v, name)| (var_map.get(v).copied().unwrap_or(*v), name.clone()))
                     .collect(),
+                *span,
             ),
-            HirStmt::Persistent(vars) => HirStmt::Persistent(
+            HirStmt::Persistent(vars, span) => HirStmt::Persistent(
                 vars.iter()
                     .map(|(v, name)| (var_map.get(v).copied().unwrap_or(*v), name.clone()))
                     .collect(),
+                *span,
             ),
-            HirStmt::Break | HirStmt::Continue | HirStmt::Return => stmt.clone(),
-            HirStmt::Function { .. } => stmt.clone(), // Functions shouldn't be nested in our current implementation
+            HirStmt::Break(span) => HirStmt::Break(*span),
+            HirStmt::Continue(span) => HirStmt::Continue(*span),
+            HirStmt::Return(span) => HirStmt::Return(*span),
+            HirStmt::Function { .. } => stmt.clone(),
             HirStmt::ClassDef {
                 name,
                 super_class,
                 members,
+                span,
             } => HirStmt::ClassDef {
                 name: name.clone(),
                 super_class: super_class.clone(),
@@ -2091,10 +2158,16 @@ pub mod remapping {
                         },
                     })
                     .collect(),
+                span: *span,
             },
-            HirStmt::Import { path, wildcard } => HirStmt::Import {
+            HirStmt::Import {
+                path,
+                wildcard,
+                span,
+            } => HirStmt::Import {
                 path: path.clone(),
                 wildcard: *wildcard,
+                span: *span,
             },
         }
     }
@@ -2166,6 +2239,7 @@ pub mod remapping {
         HirExpr {
             kind: new_kind,
             ty: expr.ty.clone(),
+            span: expr.span,
         }
     }
 
@@ -2182,12 +2256,12 @@ pub mod remapping {
 
     fn collect_stmt_variables(stmt: &HirStmt, vars: &mut std::collections::HashSet<VarId>) {
         match stmt {
-            HirStmt::ExprStmt(expr, _) => collect_expr_variables(expr, vars),
-            HirStmt::Assign(var_id, expr, _) => {
+            HirStmt::ExprStmt(expr, _, _) => collect_expr_variables(expr, vars),
+            HirStmt::Assign(var_id, expr, _, _) => {
                 vars.insert(*var_id);
                 collect_expr_variables(expr, vars);
             }
-            HirStmt::MultiAssign(var_ids, expr, _) => {
+            HirStmt::MultiAssign(var_ids, expr, _, _) => {
                 for v in var_ids.iter().flatten() {
                     vars.insert(*v);
                 }
@@ -2198,7 +2272,9 @@ pub mod remapping {
                 then_body,
                 elseif_blocks,
                 else_body,
+                span: _,
             } => {
+
                 collect_expr_variables(cond, vars);
                 for stmt in then_body {
                     collect_stmt_variables(stmt, vars);
@@ -2215,13 +2291,13 @@ pub mod remapping {
                     }
                 }
             }
-            HirStmt::While { cond, body } => {
+            HirStmt::While { cond, body, span: _ } => {
                 collect_expr_variables(cond, vars);
                 for stmt in body {
                     collect_stmt_variables(stmt, vars);
                 }
             }
-            HirStmt::For { var, expr, body } => {
+            HirStmt::For { var, expr, body, span: _ } => {
                 vars.insert(*var);
                 collect_expr_variables(expr, vars);
                 for stmt in body {
@@ -2232,6 +2308,7 @@ pub mod remapping {
                 expr,
                 cases,
                 otherwise,
+                span: _,
             } => {
                 collect_expr_variables(expr, vars);
                 for (v, b) in cases {
@@ -2250,6 +2327,7 @@ pub mod remapping {
                 try_body,
                 catch_var,
                 catch_body,
+                span: _,
             } => {
                 if let Some(v) = catch_var {
                     vars.insert(*v);
@@ -2261,12 +2339,12 @@ pub mod remapping {
                     collect_stmt_variables(s, vars);
                 }
             }
-            HirStmt::Global(vs) | HirStmt::Persistent(vs) => {
+            HirStmt::Global(vs, _) | HirStmt::Persistent(vs, _) => {
                 for (v, _name) in vs {
                     vars.insert(*v);
                 }
             }
-            HirStmt::AssignLValue(lv, expr, _) => {
+            HirStmt::AssignLValue(lv, expr, _, _) => {
                 match lv {
                     HirLValue::Var(v) => {
                         vars.insert(*v);
@@ -2285,7 +2363,7 @@ pub mod remapping {
                 }
                 collect_expr_variables(expr, vars);
             }
-            HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
+            HirStmt::Break(_) | HirStmt::Continue(_) | HirStmt::Return(_) => {}
             HirStmt::Function { .. } => {} // Nested functions not supported
             HirStmt::ClassDef { .. } => {}
             HirStmt::Import { .. } => {}
@@ -2509,12 +2587,14 @@ impl Ctx {
     }
 
     fn lower_stmt(&mut self, stmt: &AstStmt) -> Result<HirStmt, String> {
+        let span = stmt.span();
         match stmt {
-            AstStmt::ExprStmt(e, semicolon_terminated) => Ok(HirStmt::ExprStmt(
+            AstStmt::ExprStmt(e, semicolon_terminated, _) => Ok(HirStmt::ExprStmt(
                 self.lower_expr(e)?,
                 *semicolon_terminated,
+                span,
             )),
-            AstStmt::Assign(name, expr, semicolon_terminated) => {
+            AstStmt::Assign(name, expr, semicolon_terminated, _) => {
                 let id = match self.lookup(name) {
                     Some(id) => id,
                     None => self.define(name.clone()),
@@ -2523,9 +2603,9 @@ impl Ctx {
                 if id.0 < self.var_types.len() {
                     self.var_types[id.0] = value.ty.clone();
                 }
-                Ok(HirStmt::Assign(id, value, *semicolon_terminated))
+                Ok(HirStmt::Assign(id, value, *semicolon_terminated, span))
             }
-            AstStmt::MultiAssign(names, expr, semicolon_terminated) => {
+            AstStmt::MultiAssign(names, expr, semicolon_terminated, _) => {
                 let ids: Vec<Option<VarId>> = names
                     .iter()
                     .map(|n| {
@@ -2534,19 +2614,20 @@ impl Ctx {
                         } else {
                             Some(match self.lookup(n) {
                                 Some(id) => id,
-                                None => self.define(n.clone()),
+                                None => self.define(n.to_string()),
                             })
                         }
                     })
                     .collect();
                 let value = self.lower_expr(expr)?;
-                Ok(HirStmt::MultiAssign(ids, value, *semicolon_terminated))
+                Ok(HirStmt::MultiAssign(ids, value, *semicolon_terminated, span))
             }
             AstStmt::If {
                 cond,
                 then_body,
                 elseif_blocks,
                 else_body,
+                span: _,
             } => {
                 let cond = self.lower_expr(cond)?;
                 let then_body = self.lower_stmts(then_body)?;
@@ -2563,13 +2644,15 @@ impl Ctx {
                     then_body,
                     elseif_blocks: elseif_vec,
                     else_body,
+                    span,
                 })
             }
-            AstStmt::While { cond, body } => Ok(HirStmt::While {
+            AstStmt::While { cond, body, span: _ } => Ok(HirStmt::While {
                 cond: self.lower_expr(cond)?,
                 body: self.lower_stmts(body)?,
+                span,
             }),
-            AstStmt::For { var, expr, body } => {
+            AstStmt::For { var, expr, body, span: _ } => {
                 let id = match self.lookup(var) {
                     Some(id) => id,
                     None => self.define(var.clone()),
@@ -2580,12 +2663,14 @@ impl Ctx {
                     var: id,
                     expr,
                     body,
+                    span,
                 })
             }
             AstStmt::Switch {
                 expr,
                 cases,
                 otherwise,
+                span: _,
             } => {
                 let control = self.lower_expr(expr)?;
                 let mut cases_hir: Vec<(HirExpr, Vec<HirStmt>)> = Vec::new();
@@ -2602,12 +2687,14 @@ impl Ctx {
                     expr: control,
                     cases: cases_hir,
                     otherwise: otherwise_hir,
+                    span,
                 })
             }
             AstStmt::TryCatch {
                 try_body,
                 catch_var,
                 catch_body,
+                span: _,
             } => {
                 let try_hir = self.lower_stmts(try_body)?;
                 let catch_var_id = catch_var.as_ref().map(|name| match self.lookup(name) {
@@ -2619,42 +2706,44 @@ impl Ctx {
                     try_body: try_hir,
                     catch_var: catch_var_id,
                     catch_body: catch_hir,
+                    span,
                 })
             }
-            AstStmt::Global(names) => {
+            AstStmt::Global(names, _) => {
                 let pairs: Vec<(VarId, String)> = names
                     .iter()
                     .map(|n| {
                         let id = match self.lookup(n) {
                             Some(id) => id,
-                            None => self.define(n.clone()),
+                            None => self.define(n.to_string()),
                         };
                         (id, n.clone())
                     })
                     .collect();
-                Ok(HirStmt::Global(pairs))
+                Ok(HirStmt::Global(pairs, span))
             }
-            AstStmt::Persistent(names) => {
+            AstStmt::Persistent(names, _) => {
                 let pairs: Vec<(VarId, String)> = names
                     .iter()
                     .map(|n| {
                         let id = match self.lookup(n) {
                             Some(id) => id,
-                            None => self.define(n.clone()),
+                            None => self.define(n.to_string()),
                         };
                         (id, n.clone())
                     })
                     .collect();
-                Ok(HirStmt::Persistent(pairs))
+                Ok(HirStmt::Persistent(pairs, span))
             }
-            AstStmt::Break => Ok(HirStmt::Break),
-            AstStmt::Continue => Ok(HirStmt::Continue),
-            AstStmt::Return => Ok(HirStmt::Return),
+            AstStmt::Break(_) => Ok(HirStmt::Break(span)),
+            AstStmt::Continue(_) => Ok(HirStmt::Continue(span)),
+            AstStmt::Return(_) => Ok(HirStmt::Return(span)),
             AstStmt::Function {
                 name,
                 params,
                 outputs,
                 body,
+                span: _,
             } => {
                 self.push_scope();
                 let param_ids: Vec<VarId> = params.iter().map(|p| self.define(p.clone())).collect();
@@ -2679,6 +2768,7 @@ impl Ctx {
                     body: body_hir,
                     has_varargin,
                     has_varargout,
+                    span,
                 };
 
                 // Register the function in the context for future calls
@@ -2690,6 +2780,7 @@ impl Ctx {
                 name,
                 super_class,
                 members,
+                span: _,
             } => {
                 // Lightweight lowering of class blocks into HIR without deep semantic checks
                 let members_hir = members
@@ -2737,9 +2828,10 @@ impl Ctx {
                     name: name.clone(),
                     super_class: super_class.clone(),
                     members: members_hir,
+                    span,
                 })
             }
-            AstStmt::AssignLValue(lv, rhs, suppressed) => {
+            AstStmt::AssignLValue(lv, rhs, suppressed, _) => {
                 // Lower true lvalue assignment into HirStmt::AssignLValue
                 let hir_lv = self.lower_lvalue(lv)?;
                 let value = self.lower_expr(rhs)?;
@@ -2748,16 +2840,17 @@ impl Ctx {
                     if var_id.0 < self.var_types.len() {
                         self.var_types[var_id.0] = value.ty.clone();
                     }
-                    return Ok(HirStmt::Assign(var_id, value, *suppressed));
+                    return Ok(HirStmt::Assign(var_id, value, *suppressed, span));
                 }
-                Ok(HirStmt::AssignLValue(hir_lv, value, *suppressed))
+                Ok(HirStmt::AssignLValue(hir_lv, value, *suppressed, span))
             }
             AstStmt::Import { .. } => {
                 // Import statements have no runtime effect in HIR
-                if let AstStmt::Import { path, wildcard } = stmt {
+                if let AstStmt::Import { path, wildcard, .. } = stmt {
                     Ok(HirStmt::Import {
                         path: path.clone(),
                         wildcard: *wildcard,
+                        span,
                     })
                 } else {
                     unreachable!()
@@ -2768,10 +2861,11 @@ impl Ctx {
 
     fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, String> {
         use parser::Expr::*;
+        let span = expr.span();
         let (kind, ty) = match expr {
-            Number(n) => (HirExprKind::Number(n.clone()), Type::Num),
-            String(s) => (HirExprKind::String(s.clone()), Type::String),
-            Ident(name) => {
+            Number(n, _) => (HirExprKind::Number(n.clone()), Type::Num),
+            String(s, _) => (HirExprKind::String(s.clone()), Type::String),
+            Ident(name, _) => {
                 // First check if it's a variable in scope; variables shadow constants
                 if let Some(id) = self.lookup(name) {
                     let ty = if id.0 < self.var_types.len() {
@@ -2793,12 +2887,12 @@ impl Ctx {
                     ));
                 }
             }
-            Unary(op, e) => {
+            Unary(op, e, _) => {
                 let inner = self.lower_expr(e)?;
                 let ty = inner.ty.clone();
                 (HirExprKind::Unary(*op, Box::new(inner)), ty)
             }
-            Binary(a, op, b) => {
+            Binary(a, op, b, _) => {
                 let left = self.lower_expr(a)?;
                 let left_ty = left.ty.clone();
                 let right = self.lower_expr(b)?;
@@ -2844,7 +2938,7 @@ impl Ctx {
                     ty,
                 )
             }
-            AnonFunc { params, body } => {
+            AnonFunc { params, body, span: _ } => {
                 // Lower body in a fresh scope with parameters bound to local VarIds
                 let saved_len = self.scopes.len();
                 self.push_scope();
@@ -2865,8 +2959,8 @@ impl Ctx {
                     Type::Unknown,
                 )
             }
-            FuncHandle(name) => (HirExprKind::FuncHandle(name.clone()), Type::Unknown),
-            FuncCall(name, args) => {
+            FuncHandle(name, _) => (HirExprKind::FuncHandle(name.clone()), Type::Unknown),
+            FuncCall(name, args, _) => {
                 let arg_exprs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_exprs = arg_exprs?;
@@ -2883,6 +2977,7 @@ impl Ctx {
                     let var_expr = HirExpr {
                         kind: HirExprKind::Var(var_id),
                         ty: var_ty,
+                        span,
                     };
                     // Array indexing returns scalar for single element, matrix for slices
                     let index_result_type = Type::Num; // Both A(i) and A(i,j) return scalar
@@ -2896,7 +2991,7 @@ impl Ctx {
                     (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
                 }
             }
-            Tensor(rows) => {
+            Tensor(rows, _) => {
                 let mut hir_rows = Vec::new();
                 for row in rows {
                     let mut hir_row = Vec::new();
@@ -2907,7 +3002,7 @@ impl Ctx {
                 }
                 (HirExprKind::Tensor(hir_rows), Type::tensor())
             }
-            Cell(rows) => {
+            Cell(rows, _) => {
                 let mut hir_rows = Vec::new();
                 for row in rows {
                     let mut hir_row = Vec::new();
@@ -2918,7 +3013,7 @@ impl Ctx {
                 }
                 (HirExprKind::Cell(hir_rows), Type::Unknown)
             }
-            Index(expr, indices) => {
+            Index(expr, indices, _) => {
                 let base = self.lower_expr(expr)?;
                 let idx_exprs: Result<Vec<_>, _> =
                     indices.iter().map(|i| self.lower_expr(i)).collect();
@@ -2926,7 +3021,7 @@ impl Ctx {
                 let ty = base.ty.clone(); // Indexing preserves base type for now
                 (HirExprKind::Index(Box::new(base), idx_exprs), ty)
             }
-            IndexCell(expr, indices) => {
+            IndexCell(expr, indices, _) => {
                 let base = self.lower_expr(expr)?;
                 let idx_exprs: Result<Vec<_>, _> =
                     indices.iter().map(|i| self.lower_expr(i)).collect();
@@ -2936,7 +3031,7 @@ impl Ctx {
                     Type::Unknown,
                 )
             }
-            Range(start, step, end) => {
+            Range(start, step, end, _) => {
                 let start_hir = self.lower_expr(start)?;
                 let end_hir = self.lower_expr(end)?;
                 let step_hir = step.as_ref().map(|s| self.lower_expr(s)).transpose()?;
@@ -2949,16 +3044,16 @@ impl Ctx {
                     Type::tensor(),
                 )
             }
-            Colon => (HirExprKind::Colon, Type::tensor()),
-            EndKeyword => (HirExprKind::End, Type::Unknown),
-            Member(base, name) => {
+            Colon(_) => (HirExprKind::Colon, Type::tensor()),
+            EndKeyword(_) => (HirExprKind::End, Type::Unknown),
+            Member(base, name, _) => {
                 let b = self.lower_expr(base)?;
                 (
                     HirExprKind::Member(Box::new(b), name.clone()),
                     Type::Unknown,
                 )
             }
-            MemberDynamic(base, name_expr) => {
+            MemberDynamic(base, name_expr, _) => {
                 let b = self.lower_expr(base)?;
                 let n = self.lower_expr(name_expr)?;
                 (
@@ -2966,7 +3061,7 @@ impl Ctx {
                     Type::Unknown,
                 )
             }
-            MethodCall(base, name, args) => {
+            MethodCall(base, name, args, _) => {
                 let b = self.lower_expr(base)?;
                 let lowered_args: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
@@ -2975,9 +3070,9 @@ impl Ctx {
                     Type::Unknown,
                 )
             }
-            MetaClass(name) => (HirExprKind::MetaClass(name.clone()), Type::String),
+            MetaClass(name, _) => (HirExprKind::MetaClass(name.clone()), Type::String),
         };
-        Ok(HirExpr { kind, ty })
+        Ok(HirExpr { kind, ty, span })
     }
 
     fn lower_lvalue(&mut self, lv: &parser::LValue) -> Result<HirLValue, String> {
@@ -2992,8 +3087,8 @@ impl Ctx {
             }
             ALV::Member(base, name) => {
                 // Special-case unknown identifier base to allow struct-like creation semantics (e.g., s.f = 4)
-                if let parser::Expr::Ident(var_name) = &**base {
-                    let id = match self.lookup(var_name) {
+                if let parser::Expr::Ident(var_name, _) = &**base {
+                    let id = match self.lookup(&var_name) {
                         Some(id) => id,
                         None => self.define(var_name.clone()),
                     };
@@ -3005,6 +3100,7 @@ impl Ctx {
                     let b = HirExpr {
                         kind: HirExprKind::Var(id),
                         ty,
+                        span: base.span(),
                     };
                     HirLValue::Member(Box::new(b), name.clone())
                 } else {
@@ -3108,16 +3204,16 @@ impl Ctx {
             let mut i = 0usize;
             while i < stmts.len() {
                 match &stmts[i] {
-                    HirStmt::Assign(var, expr, _) => {
+                    HirStmt::Assign(var, expr, _, _) => {
                         env.insert(*var, expr.ty.clone());
                     }
-                    HirStmt::MultiAssign(vars, expr, _) => {
+                    HirStmt::MultiAssign(vars, expr, _, _) => {
                         for v in vars.iter().flatten() {
                             env.insert(*v, expr.ty.clone());
                         }
                     }
-                    HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
-                    HirStmt::Return => {
+                    HirStmt::ExprStmt(_, _, _) | HirStmt::Break(_) | HirStmt::Continue(_) => {}
+                    HirStmt::Return(_) => {
                         exits.push(env.clone());
                         return Analysis {
                             exits,
@@ -3129,6 +3225,7 @@ impl Ctx {
                         then_body,
                         elseif_blocks,
                         else_body,
+                        span: _,
                     } => {
                         let then_a = analyze_stmts(_outputs, then_body, env.clone());
                         let mut out_env = then_a.fallthrough.unwrap_or_else(|| env.clone());
@@ -3154,7 +3251,7 @@ impl Ctx {
                         env = out_env;
                         exits.extend(all_exits);
                     }
-                    HirStmt::While { cond: _, body } => {
+                    HirStmt::While { cond: _, body, span: _ } => {
                         // Approximate: analyze once and join with incoming env
                         let a = analyze_stmts(_outputs, body, env.clone());
                         if let Some(f) = a.fallthrough {
@@ -3162,7 +3259,7 @@ impl Ctx {
                         }
                         exits.extend(a.exits);
                     }
-                    HirStmt::For { var, expr, body } => {
+                    HirStmt::For { var, expr, body, span: _ } => {
                         // Assign loop var type from expr type
                         env.insert(*var, expr.ty.clone());
                         let a = analyze_stmts(_outputs, body, env.clone());
@@ -3175,6 +3272,7 @@ impl Ctx {
                         expr: _,
                         cases,
                         otherwise,
+                        span: _,
                     } => {
                         let mut out_env: Option<HashMap<VarId, Type>> = None;
                         for (_v, b) in cases {
@@ -3210,6 +3308,7 @@ impl Ctx {
                         try_body,
                         catch_var: _,
                         catch_body,
+                        span: _,
                     } => {
                         let a_try = analyze_stmts(_outputs, try_body, env.clone());
                         let a_catch = analyze_stmts(_outputs, catch_body, env.clone());
@@ -3221,10 +3320,10 @@ impl Ctx {
                         exits.extend(a_try.exits);
                         exits.extend(a_catch.exits);
                     }
-                    HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                    HirStmt::Global(_, _) | HirStmt::Persistent(_, _) => {}
                     HirStmt::Function { .. } => {}
                     HirStmt::ClassDef { .. } => {}
-                    HirStmt::AssignLValue(_, expr, _) => {
+                    HirStmt::AssignLValue(_, expr, _, _) => {
                         // Update env conservatively based on RHS type (specific lvalue target unknown)
                         // No binding updated unless it's a plain variable (handled elsewhere)
                         let _ = &expr.ty;

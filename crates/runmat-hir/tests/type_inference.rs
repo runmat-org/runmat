@@ -99,7 +99,7 @@ fn multi_lhs_resolution_from_summary() {
     let mut v_id = None;
     if let runmat_hir::HirStmt::Function { body, .. } = &prog.body[1] {
         for s in body {
-            if let runmat_hir::HirStmt::MultiAssign(vars, _, _) = s {
+            if let runmat_hir::HirStmt::MultiAssign(vars, _, _, _) = s {
                 u_id = vars[0];
                 v_id = vars[1];
             }
