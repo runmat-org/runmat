@@ -22,7 +22,7 @@ export function TryInBrowserButton({
           className={cn("inline-flex items-center gap-2 font-medium transition-all duration-200 text-sm px-3.5 py-2 rounded-md border border-[#8b5cf6]/50 text-[#a78bfa] hover:bg-[#8b5cf6]/10 hover:border-[#8b5cf6]/80 hover:text-[#c4b5fd]", className)}
           onClick={() =>
               openWorkspace(
-                  [{path: "/test.m", content: code || "disp('hello from docs');"}],
+                  [{path: "/example.m", content: code || "disp('hello from docs');"}],
                   {targetPath: "/sandbox", metadata: {source: "example-page"}}
               )
           }
