@@ -4,7 +4,7 @@ Geometric Brownian Motion (GBM) is a staple in intraday risk and options pricing
 
 We simulate `M` paths over `T` steps:
 
-```matlab
+```matlab:runnable
 M = 1000000; T = 256;
 drift = (mu - 0.5 * sigma^2) * dt;
 scale = sigma * sqrt(dt);

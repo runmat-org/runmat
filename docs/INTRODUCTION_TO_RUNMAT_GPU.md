@@ -31,7 +31,7 @@ Capturing the graph costs almost nothing, but gives RunMat a full view of what y
 
 For example, the following script:
 
-```matlab
+```matlab:runnable
 x = rand(1024, 1, 'single');
 
 y = sin(x) .* x + 0.5;

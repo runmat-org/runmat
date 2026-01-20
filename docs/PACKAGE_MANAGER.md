@@ -140,7 +140,7 @@ awesome_signals/
 
 ### Example `hann.m`
 
-```matlab
+```matlab:runnable
 function w = hann(n)
   if nargin < 1
     error('MATLAB:narginchk','hann requires n');

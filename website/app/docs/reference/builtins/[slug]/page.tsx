@@ -147,7 +147,7 @@ function renderExample(example: BuiltinDocExample): string[] {
     lines.push(`### ${escapeMarkdownText(description)}`);
     lines.push('');
   }
-  lines.push(...renderCodeBlock(example.input));
+  lines.push(...renderRunnableCodeBlock(example.input));
   if (hasText(example.output)) {
     lines.push('');
     lines.push('Expected output:');
@@ -216,6 +216,14 @@ function renderParagraphs(items: string[]): string[] {
     out.push(escapeMarkdownText(paragraph));
   }
   return out;
+}
+
+function renderRunnableCodeBlock(code: string): string[] {
+    const lines: string[] = [];
+    lines.push('```matlab:runnable');
+    lines.push(...splitMarkdown(code));
+    lines.push('```');
+    return lines;
 }
 
 function renderCodeBlock(code: string): string[] {

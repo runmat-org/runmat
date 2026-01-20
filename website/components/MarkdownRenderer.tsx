@@ -162,25 +162,49 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return <>{children}</>;
       }
 
-      // Check if this is a code block (has code child with hljs or language- class, or any code child)
-      // We look deeper or check for common plugin wrappers
-      const hasCodeBlock = React.Children.toArray(children).some(child => {
+      // Strict check for the runnable language tag in class names.
+      // Different plugins/configurations place the language class on the 'pre' or the 'code' child.
+      const childrenArray = React.Children.toArray(children);
+
+      const getLanguageSpec = (className?: string) => {
+        if (!className) return null;
+        return className
+          .split(/\s+/)
+          .map(cls => cls.startsWith('language-') ? cls.replace(/^language-/, '') : null)
+          .find(Boolean) as string | null;
+      };
+
+      const isRunnableLanguage = (className?: string) => {
+        const spec = getLanguageSpec(className);
+        if (!spec) return false;
+        const [language, ...tags] = spec.split(':');
+        return language === 'matlab' && tags.includes('runnable');
+      };
+
+      let isRunnable = isRunnableLanguage((props as { className?: string })?.className);
+
+      const hasCodeBlock = childrenArray.some((child) => {
         if (React.isValidElement(child)) {
           const childType = typeof child.type === 'string' ? child.type : null;
           const childProps = child.props as { className?: string; children?: React.ReactNode };
           
+          const childClassName = childProps?.className || '';
+          if (isRunnableLanguage(childClassName)) {
+            isRunnable = true;
+          }
+
           if (childType === 'code') {
             return true; 
           }
           
           // Check for wrappers added by rehype-prism-plus or other plugins
-          if (childProps?.className?.includes('code-highlight') || 
-              childProps?.className?.includes('rehype-code-wrapper')) {
+          if (childClassName.includes('code-highlight') || 
+              childClassName.includes('rehype-code-wrapper')) {
             return true;
           }
 
           // If child has a language class, it's likely a code block
-          if (childProps?.className?.includes('language-') || childProps?.className?.includes('hljs')) {
+          if (childClassName.includes('language-') || childClassName.includes('hljs')) {
             return true;
           }
         }
@@ -189,15 +213,11 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       
       if (hasCodeBlock) {
         const { className, ...rest } = props as { className?: string };
-        const rawCode = toPlainText(children);
-        // Check if the code starts with ZWSP (added in sanitizeMarkdown for expected output)
-        // We trim leading whitespace/newlines that might be added by React/MDX
-        const skipTryButton = rawCode.trimStart().startsWith('\u200B');
-        const code = (skipTryButton ? rawCode.replace('\u200B', '') : rawCode).trim();
-        
+        const code = toPlainText(children).trim();
+
         return (
           <div className="my-8 relative group">
-            {!skipTryButton && (
+            {isRunnable && (
               <div className="absolute top-3 right-3 z-10">
                 <TryInBrowserButton 
                   code={code} 
