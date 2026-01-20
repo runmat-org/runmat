@@ -1,7 +1,5 @@
 //! MATLAB-compatible `disp` builtin with GPU-aware formatting semantics.
 
-use std::io::{self, Write};
-
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor,
     Value,
@@ -245,14 +243,10 @@ fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let host_value = gather_if_needed(&value).map_err(|e| format!("disp: {e}"))?;
     let lines = format_for_disp(&host_value);
 
-    let mut stdout = io::stdout().lock();
     if lines.is_empty() {
-        writeln!(&mut stdout).map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
         record_console_output(ConsoleStream::Stdout, "");
     } else {
         for line in lines {
-            writeln!(&mut stdout, "{line}")
-                .map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
             record_console_output(ConsoleStream::Stdout, line.as_str());
         }
     }

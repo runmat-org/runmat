@@ -82,6 +82,8 @@ export interface RunMatInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  callstackLimit?: number;
+  errorNamespace?: string;
   language?: {
     compat?: LanguageCompatMode;
   };
@@ -248,7 +250,7 @@ export interface ExecuteResult {
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
-  error?: string;
+  error?: RunMatErrorDetails;
   executionTimeMs: number;
   usedJit: boolean;
   stdout: StdoutEntry[];
@@ -258,6 +260,45 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
+}
+
+export type RunMatErrorKind = "syntax" | "semantic" | "compile" | "runtime";
+
+export interface RunMatErrorSpan {
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+}
+
+export interface RunMatErrorDetails {
+  kind: RunMatErrorKind;
+  message: string;
+  identifier?: string;
+  diagnostic: string;
+  span?: RunMatErrorSpan;
+  callstack: string[];
+  callstackElided?: number;
+}
+
+export class RunMatExecutionError extends Error {
+  readonly kind: RunMatErrorKind;
+  readonly identifier?: string;
+  readonly diagnostic: string;
+  readonly span?: RunMatErrorSpan;
+  readonly callstack: string[];
+  readonly callstackElided?: number;
+
+  constructor(details: RunMatErrorDetails) {
+    super(details.message);
+    this.name = "RunMatExecutionError";
+    this.kind = details.kind;
+    this.identifier = details.identifier;
+    this.diagnostic = details.diagnostic;
+    this.span = details.span;
+    this.callstack = details.callstack;
+    this.callstackElided = details.callstackElided;
+  }
 }
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
@@ -424,6 +465,8 @@ interface NativeInitOptions {
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
   emitFusionPlan?: boolean;
+  callstackLimit?: number;
+  errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
 }
 
@@ -573,6 +616,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     scatterTargetPoints: options.scatterTargetPoints,
     surfaceVertexBudget: options.surfaceVertexBudget,
     emitFusionPlan: options.emitFusionPlan ?? false,
+    callstackLimit: options.callstackLimit,
+    errorNamespace: options.errorNamespace,
     languageCompat: options.language?.compat
   });
   return new WebRunMatSession(session);
@@ -785,7 +830,11 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   async execute(source: string): Promise<ExecuteResult> {
     this.ensureActive();
-    return await this.native.execute(source);
+    try {
+      return await this.native.execute(source);
+    } catch (error) {
+      throw coerceRunMatError(error);
+    }
   }
 
   async resetSession(): Promise<void> {
@@ -896,7 +945,11 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.fusionPlanForSource !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose fusionPlanForSource yet.");
     }
-    return this.native.fusionPlanForSource(source) ?? null;
+    try {
+      return this.native.fusionPlanForSource(source) ?? null;
+    } catch (error) {
+      throw coerceRunMatError(error);
+    }
   }
 }
 
@@ -925,14 +978,68 @@ function requireNativeFunction<T, K extends keyof T>(
 }
 
 type FigureErrorPayload = {
-  code?: string;
-  message?: string;
-  handle?: number;
-  rows?: number;
+    code?: string;
+    message?: string;
+    handle?: number;
+    rows?: number;
   cols?: number;
   index?: number;
   details?: string;
 };
+
+type RunMatErrorPayload = {
+  kind: RunMatErrorKind;
+  message: string;
+  identifier?: string;
+  diagnostic: string;
+  span?: RunMatErrorSpan;
+  callstack?: string[];
+  callstackElided?: number;
+};
+
+function isRunMatErrorPayload(value: unknown): value is RunMatErrorPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const payload = value as RunMatErrorPayload;
+  return (
+    typeof payload.kind === "string" &&
+    typeof payload.message === "string" &&
+    typeof payload.diagnostic === "string"
+  );
+}
+
+function coerceRunMatError(value: unknown): RunMatExecutionError {
+  if (isRunMatErrorPayload(value)) {
+    return new RunMatExecutionError({
+      kind: value.kind,
+      message: value.message,
+      identifier: value.identifier,
+      diagnostic: value.diagnostic,
+      span: value.span,
+      callstack: value.callstack ?? [],
+      callstackElided: value.callstackElided
+    });
+  }
+  if (value instanceof RunMatExecutionError) {
+    return value;
+  }
+  if (value instanceof Error) {
+    return new RunMatExecutionError({
+      kind: "runtime",
+      message: value.message,
+      diagnostic: value.message,
+      callstack: []
+    });
+  }
+  const message = String(value ?? "RunMat execution failed");
+  return new RunMatExecutionError({
+    kind: "runtime",
+    message,
+    diagnostic: message,
+    callstack: []
+  });
+}
 
 function isFigureErrorPayload(value: unknown): value is FigureErrorPayload {
   return (

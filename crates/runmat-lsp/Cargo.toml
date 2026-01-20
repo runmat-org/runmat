@@ -25,6 +25,7 @@ runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
+runmat-ignition = { workspace = true }
 runmat-core = { workspace = true }
 runmat-config = { workspace = true }
 runmat-runtime = { workspace = true }

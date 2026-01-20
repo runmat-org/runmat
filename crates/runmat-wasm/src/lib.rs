@@ -32,7 +32,6 @@ use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use serde_wasm_bindgen;
 use std::backtrace::Backtrace;
 use tracing::{info, info_span};
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -142,6 +141,10 @@ struct InitOptions {
     log_level: Option<String>,
     #[serde(default)]
     gpu_buffer_pool_max_per_key: Option<u32>,
+    #[serde(default)]
+    callstack_limit: Option<usize>,
+    #[serde(default)]
+    error_namespace: Option<String>,
 }
 
 runmat_thread_local! {
@@ -193,6 +196,8 @@ struct SessionConfig {
     emit_fusion_plan: bool,
     language_compat: CompatMode,
     gpu_buffer_pool_max_per_key: Option<u32>,
+    callstack_limit: usize,
+    error_namespace: String,
 }
 
 impl SessionConfig {
@@ -209,6 +214,13 @@ impl SessionConfig {
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
             language_compat: parse_language_compat(opts.language_compat.as_deref()),
             gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
+            callstack_limit: opts
+                .callstack_limit
+                .unwrap_or(runmat_ignition::DEFAULT_CALLSTACK_LIMIT),
+            error_namespace: opts
+                .error_namespace
+                .clone()
+                .unwrap_or_else(|| runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string()),
         }
     }
 
@@ -258,13 +270,13 @@ impl RunMatWasm {
         info!(target = "runmat.runtime", "Execution started");
         // We must not hold a RefCell borrow across `.await`, so temporarily move the session out.
         let mut slot = self.session.borrow_mut();
-        let session = std::mem::take(&mut *slot);
+        let mut session = std::mem::take(&mut *slot);
         drop(slot);
 
         let result = session
             .execute(&source)
             .await
-            .map_err(|err| js_error(&format_run_error(&err, &source)))?;
+            .map_err(|err| run_error_to_js(&err, &source))?;
 
         *self.session.borrow_mut() = session;
         info!(
@@ -273,10 +285,10 @@ impl RunMatWasm {
             stdout_entries = result.streams.len(),
             figures_touched = result.figures_touched.len(),
             used_jit = result.used_jit,
-            error = result.error.as_deref().unwrap_or(""),
+            error = result.error.as_ref().map(|err| err.message()).unwrap_or(""),
             "Execution finished"
         );
-        let payload = ExecutionPayload::from(result);
+        let payload = ExecutionPayload::from_result(result, &source);
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
     }
@@ -307,6 +319,9 @@ impl RunMatWasm {
         }
         session.set_emit_fusion_plan(config.emit_fusion_plan);
         session.set_compat_mode(config.language_compat);
+        session.set_callstack_limit(config.callstack_limit);
+        session.set_error_namespace(config.error_namespace.clone());
+        session.set_source_name_override(Some("<wasm>".to_string()));
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
@@ -389,7 +404,7 @@ impl RunMatWasm {
         let mut session = self.session.borrow_mut();
         let snapshot = session
             .compile_fusion_plan(&source)
-            .map_err(|err| js_error(&format_run_error(&err, &source)))?;
+            .map_err(|err| run_error_to_js(&err, &source))?;
         match snapshot {
             Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
                 .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),
@@ -549,13 +564,13 @@ pub fn deregister_figure_canvas(handle: u32) {
 #[wasm_bindgen(js_name = resizeFigureCanvas)]
 pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), JsValue> {
     runtime_resize_web_renderer(handle, width.max(1), height.max(1))
-        .map_err(|err| js_error(err.as_str()))
+        .map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = renderCurrentFigureScene)]
 pub fn render_current_figure_scene(handle: u32) -> Result<(), JsValue> {
-    runtime_render_current_scene(handle).map_err(|err| js_error(err.as_str()))
+    runtime_render_current_scene(handle).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1137,6 +1152,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     }
     session.set_emit_fusion_plan(config.emit_fusion_plan);
     session.set_compat_mode(config.language_compat);
+    session.set_callstack_limit(config.callstack_limit);
+    session.set_error_namespace(config.error_namespace.clone());
+    session.set_source_name_override(Some("<wasm>".to_string()));
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -1383,7 +1401,8 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
 
 #[cfg(target_arch = "wasm32")]
 fn runtime_flow_to_js(err: RuntimeError) -> JsValue {
-    js_error(err.message())
+    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None))
+        .unwrap_or_else(|_| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1590,6 +1609,32 @@ fn parse_power_preference(input: Option<&str>) -> AccelPowerPreference {
     }
 }
 
+fn line_col_from_offset(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    let col = offset.saturating_sub(line_start) + 1;
+    (line, col)
+}
+
+fn span_payload_from_source(source: &str, start: usize, end: usize) -> RunMatErrorSpanPayload {
+    let (line, column) = line_col_from_offset(source, start);
+    RunMatErrorSpanPayload {
+        start,
+        end,
+        line,
+        column,
+    }
+}
+
 fn format_run_error(err: &RunError, source: &str) -> String {
     match err {
         RunError::Syntax(err) => {
@@ -1645,6 +1690,95 @@ fn format_run_error(err: &RunError, source: &str) -> String {
         }
         RunError::Runtime(err) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
     }
+}
+
+fn runtime_error_payload(err: &RuntimeError, source: Option<&str>) -> RunMatErrorPayload {
+    let identifier = err.identifier().map(|id| id.to_string());
+    let span = match (source, err.span.as_ref()) {
+        (Some(source), Some(span)) => {
+            let start = span.offset();
+            let end = start + span.len();
+            Some(span_payload_from_source(source, start, end))
+        }
+        _ => None,
+    };
+    let diagnostic = match source {
+        Some(source) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
+        None => err.format_diagnostic(),
+    };
+    let callstack = if !err.context.call_stack.is_empty() {
+        err.context.call_stack.clone()
+    } else {
+        err.context
+            .call_frames
+            .iter()
+            .map(|frame| frame.function.clone())
+            .collect()
+    };
+    RunMatErrorPayload {
+        kind: RunMatErrorKind::Runtime,
+        message: err.message().to_string(),
+        identifier,
+        diagnostic,
+        span,
+        callstack,
+        callstack_elided: err.context.call_frames_elided,
+    }
+}
+
+fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayload {
+    let diagnostic = format_run_error(err, source);
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = span_payload_from_source(source, err.position, err.position + 1);
+            RunMatErrorPayload {
+                kind: RunMatErrorKind::Syntax,
+                message,
+                identifier: Some("RunMat:SyntaxError".to_string()),
+                diagnostic,
+                span: Some(span),
+                callstack: Vec::new(),
+                callstack_elided: 0,
+            }
+        }
+        RunError::Semantic(err) => RunMatErrorPayload {
+            kind: RunMatErrorKind::Semantic,
+            message: err.message.clone(),
+            identifier: err.identifier.clone(),
+            diagnostic,
+            span: err.span.map(|span| {
+                let end = span.end.max(span.start + 1);
+                span_payload_from_source(source, span.start, end)
+            }),
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        },
+        RunError::Compile(err) => RunMatErrorPayload {
+            kind: RunMatErrorKind::Compile,
+            message: err.message.clone(),
+            identifier: err.identifier.clone(),
+            diagnostic,
+            span: err.span.map(|span| {
+                let end = span.end.max(span.start + 1);
+                span_payload_from_source(source, span.start, end)
+            }),
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        },
+        RunError::Runtime(err) => runtime_error_payload(err, Some(source)),
+    }
+}
+
+fn run_error_to_js(err: &RunError, source: &str) -> JsValue {
+    serde_wasm_bindgen::to_value(&run_error_payload(err, source))
+        .unwrap_or_else(|_| JsValue::from_str("RunMat error"))
 }
 
 fn js_error(message: &str) -> JsValue {
@@ -1800,13 +1934,43 @@ struct MaterializeSlicePayload {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+enum RunMatErrorKind {
+    Syntax,
+    Semantic,
+    Compile,
+    Runtime,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunMatErrorSpanPayload {
+    start: usize,
+    end: usize,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunMatErrorPayload {
+    kind: RunMatErrorKind,
+    message: String,
+    identifier: Option<String>,
+    diagnostic: String,
+    span: Option<RunMatErrorSpanPayload>,
+    callstack: Vec<String>,
+    callstack_elided: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ExecutionPayload {
     value_text: Option<String>,
     value_json: Option<JsonValue>,
     type_info: Option<String>,
     execution_time_ms: u64,
     used_jit: bool,
-    error: Option<String>,
+    error: Option<RunMatErrorPayload>,
     stdout: Vec<ConsoleStreamPayload>,
     workspace: WorkspacePayload,
     figures_touched: Vec<u32>,
@@ -1823,11 +1987,14 @@ struct MemoryUsagePayload {
     pages: u32,
 }
 
-impl From<ExecutionResult> for ExecutionPayload {
-    fn from(result: ExecutionResult) -> Self {
+impl ExecutionPayload {
+    fn from_result(result: ExecutionResult, source: &str) -> Self {
         let value_text = result.value.as_ref().map(|v| v.to_string());
         let value_json = result.value.as_ref().map(|v| value_to_json(v, 0));
-        let error = result.error.map(|err| err.format_diagnostic());
+        let error = result
+            .error
+            .as_ref()
+            .map(|err| runtime_error_payload(err, Some(source)));
         Self {
             value_text,
             value_json,

@@ -78,6 +78,12 @@ pub struct RunMatSession {
     async_input_handler: Option<SharedAsyncInputHandler>,
     /// Maximum number of call stack frames to retain for diagnostics.
     callstack_limit: usize,
+    /// Namespace prefix for runtime/semantic error identifiers.
+    error_namespace: String,
+    /// Default source name used for diagnostics.
+    default_source_name: String,
+    /// Override source name for the current execution.
+    source_name_override: Option<String>,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
@@ -703,6 +709,9 @@ impl RunMatSession {
             input_handler: None,
             async_input_handler: None,
             callstack_limit: runmat_ignition::DEFAULT_CALLSTACK_LIMIT,
+            error_namespace: runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string(),
+            default_source_name: "<repl>".to_string(),
+            source_name_override: None,
             telemetry_consent: true,
             telemetry_client_id: None,
             workspace_preview_tokens: HashMap::new(),
@@ -726,6 +735,12 @@ impl RunMatSession {
         }
 
         Ok(session)
+    }
+
+    fn current_source_name(&self) -> &str {
+        self.source_name_override
+            .as_deref()
+            .unwrap_or(&self.default_source_name)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -933,7 +948,8 @@ impl RunMatSession {
     }
 
     fn compile_input(&mut self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
-        let source_id = self.source_pool.intern("<repl>", input);
+        let source_name = self.current_source_name().to_string();
+        let source_id = self.source_pool.intern(&source_name, input);
         let ast = {
             let _span = info_span!("runtime.parse").entered();
             parse_with_options(input, ParserOptions::new(self.compat_mode))?
@@ -988,6 +1004,17 @@ impl RunMatSession {
         error.context.call_stack = rendered;
     }
 
+    fn normalize_error_namespace(&self, error: &mut RuntimeError) {
+        let Some(identifier) = error.identifier.clone() else {
+            return;
+        };
+        let suffix = identifier
+            .split_once(':')
+            .map(|(_, suffix)| suffix)
+            .unwrap_or(identifier.as_str());
+        error.identifier = Some(format!("{}:{suffix}", self.error_namespace));
+    }
+
     /// Compile the input and produce a fusion plan snapshot without executing.
     pub fn compile_fusion_plan(
         &mut self,
@@ -1010,6 +1037,8 @@ impl RunMatSession {
         let _active = ActiveExecutionGuard::new(self)
             .map_err(|err| RunError::Runtime(build_runtime_error(err.to_string()).build()))?;
         runmat_ignition::set_call_stack_limit(self.callstack_limit);
+        runmat_ignition::set_error_namespace(&self.error_namespace);
+        runmat_hir::set_error_namespace(&self.error_namespace);
         let exec_span = info_span!(
             "runtime.execute",
             input_len = input.len(),
@@ -1529,6 +1558,7 @@ impl RunMatSession {
         let warnings = runmat_runtime::warning_store::take_all();
 
         if let Some(runtime_error) = &mut error {
+            self.normalize_error_namespace(runtime_error);
             self.populate_callstack(runtime_error);
         }
 
@@ -1591,6 +1621,22 @@ impl RunMatSession {
     pub fn set_callstack_limit(&mut self, limit: usize) {
         self.callstack_limit = limit;
         runmat_ignition::set_call_stack_limit(limit);
+    }
+
+    pub fn set_error_namespace(&mut self, namespace: impl Into<String>) {
+        let namespace = namespace.into();
+        let namespace = if namespace.trim().is_empty() {
+            runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string()
+        } else {
+            namespace
+        };
+        self.error_namespace = namespace.clone();
+        runmat_ignition::set_error_namespace(&namespace);
+        runmat_hir::set_error_namespace(&namespace);
+    }
+
+    pub fn set_source_name_override(&mut self, name: Option<String>) {
+        self.source_name_override = name;
     }
 
     /// Materialize a workspace variable for inspection (optionally identified by preview token).
@@ -1670,8 +1716,13 @@ impl RunMatSession {
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
     ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeError> {
-        runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>"))
-            .await
+        let source_name = self.current_source_name().to_string();
+        runmat_ignition::interpret_with_vars(
+            bytecode,
+            &mut self.variable_array,
+            Some(source_name.as_str()),
+        )
+        .await
     }
 
     /// Prepare variable array for execution by populating with existing values

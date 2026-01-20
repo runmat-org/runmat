@@ -160,6 +160,7 @@ Environment Variables:
   RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
   RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
+  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix
   RUNMAT_CONFIG=<path>        Path to configuration file
   RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
@@ -193,6 +194,10 @@ struct Cli {
     /// Maximum number of call stack frames to record
     #[arg(long, env = "RUNMAT_CALLSTACK_LIMIT", default_value = "200")]
     callstack_limit: usize,
+
+    /// Error identifier namespace prefix
+    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE", default_value = "RunMat")]
+    error_namespace: String,
 
     /// Configuration file path
     #[arg(long, env = "RUNMAT_CONFIG")]
@@ -816,6 +821,7 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
     // Runtime settings
     config.runtime.timeout = cli.timeout;
     config.runtime.callstack_limit = cli.callstack_limit;
+    config.runtime.error_namespace = cli.error_namespace.clone();
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
@@ -1043,6 +1049,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1054,6 +1061,21 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     use rustyline::DefaultEditor;
 
     let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
+
+    let stdin_is_tty = atty::is(atty::Stream::Stdin);
+    if !stdin_is_tty {
+        let mut buffer = String::new();
+        io::stdin()
+            .read_to_string(&mut buffer)
+            .context("Failed to read piped input")?;
+        for raw_line in buffer.lines() {
+            if !process_repl_line(raw_line, &mut engine, config).await? {
+                break;
+            }
+        }
+        finalize_repl_session(&engine, config, session_start);
+        return Ok(());
+    }
 
     println!(
         "RunMat v{} by Dystr (https://dystr.com)",
@@ -1085,21 +1107,6 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     }
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
-
-    let stdin_is_tty = atty::is(atty::Stream::Stdin);
-    if !stdin_is_tty {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read piped input")?;
-        for raw_line in buffer.lines() {
-            if !process_repl_line(raw_line, &mut engine, config).await? {
-                break;
-            }
-        }
-        finalize_repl_session(&engine, config, session_start);
-        return Ok(());
-    }
 
     loop {
         let readline = rl.readline("runmat> ");
@@ -1386,9 +1393,12 @@ async fn execute_script_with_args(
     .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
     let start_time = Instant::now();
     let result = match engine.execute(&content).await {
         Ok(result) => result,
@@ -1405,6 +1415,7 @@ async fn execute_script_with_args(
     };
 
     let execution_time = start_time.elapsed();
+    emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
     let error_payload = result.error.as_ref().map(|err| {
@@ -1440,6 +1451,8 @@ async fn execute_script_with_args(
             }
         }
     }
+
+    engine.set_source_name_override(None);
 
     #[cfg(feature = "wgpu")]
     dump_provider_telemetry_if_requested();
@@ -1675,9 +1688,12 @@ async fn execute_benchmark(
         .context("Failed to create execution engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
+    engine.set_error_namespace(config.runtime.error_namespace.clone());
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
+    engine.set_source_name_override(Some(file.to_string_lossy().to_string()));
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -1758,6 +1774,8 @@ async fn execute_benchmark(
         counters: Some(counters),
         provider: capture_provider_snapshot(),
     });
+
+    engine.set_source_name_override(None);
 
     Ok(())
 }

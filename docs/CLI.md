@@ -45,6 +45,8 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 - `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
 - `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `warn`).
 - `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
+- `--callstack-limit <n>` (env: `RUNMAT_CALLSTACK_LIMIT`, default: `200`): call stack frames retained.
+- `--error-namespace <name>` (env: `RUNMAT_ERROR_NAMESPACE`, default: `RunMat`): error identifier prefix.
 - `--config <path>` (env: `RUNMAT_CONFIG`): load configuration file.
 - `--no-jit` (env: `RUNMAT_JIT_DISABLE`): disable JIT (interpreter only).
 - `--jit-threshold <n>` (env: `RUNMAT_JIT_THRESHOLD`, default: `10`): hotspot threshold.

@@ -21,6 +21,7 @@ runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+runmat-ignition = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true }

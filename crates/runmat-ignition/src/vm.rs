@@ -91,6 +91,26 @@ fn callstack_limit() -> usize {
     CALL_STACK_LIMIT.with(|limit| limit.get())
 }
 
+fn error_namespace() -> String {
+    let ns = ERROR_NAMESPACE.with(|ns| ns.borrow().clone());
+    if ns.trim().is_empty() {
+        DEFAULT_ERROR_NAMESPACE.to_string()
+    } else {
+        ns
+    }
+}
+
+pub fn set_error_namespace(namespace: &str) {
+    let namespace = if namespace.trim().is_empty() {
+        DEFAULT_ERROR_NAMESPACE
+    } else {
+        namespace
+    };
+    ERROR_NAMESPACE.with(|ns| {
+        *ns.borrow_mut() = namespace.to_string();
+    });
+}
+
 pub fn set_call_stack_limit(limit: usize) {
     CALL_STACK_LIMIT.with(|cell| cell.set(limit));
     CALL_STACK.with(|stack| {
@@ -416,20 +436,20 @@ fn log_fusion_span_window(
     );
 }
 
-// Namespace used for error identifiers (e.g., "MATLAB:..." or "RunMat:...")
-const ERROR_NAMESPACE: &str = "MATLAB";
+// Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
+pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
 type VmResult<T> = Result<T, RuntimeError>;
 
 #[inline]
 fn mex(id: &str, msg: &str) -> RuntimeError {
     // Normalize identifier to always use the configured namespace prefix.
-    // If caller passes "Namespace:suffix", strip the namespace and re-prefix with ERROR_NAMESPACE.
+    // If caller passes "Namespace:suffix", strip the namespace and re-prefix with error_namespace().
     let suffix = match id.find(':') {
         Some(pos) => &id[pos + 1..],
         None => id,
     };
-    let ident = format!("{ERROR_NAMESPACE}:{suffix}");
+    let ident = format!("{}:{suffix}", error_namespace());
     let message = msg.to_string();
     build_runtime_error(message).with_identifier(ident).build()
 }
@@ -1315,6 +1335,9 @@ runmat_thread_local! {
         })
     };
     static CALL_STACK_LIMIT: Cell<usize> = const { Cell::new(DEFAULT_CALLSTACK_LIMIT) };
+    static ERROR_NAMESPACE: RefCell<String> = const {
+        RefCell::new(String::new())
+    };
 }
 
 #[derive(Debug)]
@@ -11555,7 +11578,7 @@ fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MExce
         let (id, msg) = message.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
-            format!("{ERROR_NAMESPACE}:error")
+            format!("{}:error", error_namespace())
         } else {
             id.trim().to_string()
         };
@@ -11566,13 +11589,16 @@ fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MExce
         let (id, msg) = message.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
-            format!("{ERROR_NAMESPACE}:error")
+            format!("{}:error", error_namespace())
         } else {
             id.trim().to_string()
         };
         runmat_builtins::MException::new(ident, message)
     } else {
-        runmat_builtins::MException::new(format!("{ERROR_NAMESPACE}:error"), message.to_string())
+        runmat_builtins::MException::new(
+            format!("{}:error", error_namespace()),
+            message.to_string(),
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 //! MATLAB-compatible `fprintf` builtin enabling formatted text output to files and standard streams.
 
-use std::io::{self, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use runmat_builtins::Value;
@@ -469,18 +469,10 @@ impl OutputTarget {
     fn write(&self, bytes: &[u8]) -> Result<(), String> {
         match self {
             OutputTarget::Stdout => {
-                let mut stdout = io::stdout().lock();
-                stdout
-                    .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))?;
                 record_console_chunk(ConsoleStream::Stdout, bytes);
                 Ok(())
             }
             OutputTarget::Stderr => {
-                let mut stderr = io::stderr().lock();
-                stderr
-                    .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))?;
                 record_console_chunk(ConsoleStream::Stderr, bytes);
                 Ok(())
             }

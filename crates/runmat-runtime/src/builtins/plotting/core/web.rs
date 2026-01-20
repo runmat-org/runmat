@@ -86,7 +86,7 @@ pub(crate) mod wasm {
             let mut map = map_cell.borrow_mut();
             if let Some(renderer) = map.get_mut(&handle) {
                 return f(renderer)
-                    .map_err(|err| web_error_with_source("Plotting failed.", err));
+                    .map_err(|err| web_error(format!("Plotting failed: {err}")));
             }
             drop(map);
             DEFAULT_RENDERER.with(|default_cell| {
@@ -96,7 +96,7 @@ pub(crate) mod wasm {
                         "RunMat plotting canvas not registered. Call registerPlotCanvas() before plotting.",
                     )
                 })?;
-                f(renderer).map_err(|err| web_error_with_source("Plotting failed.", err))
+                f(renderer).map_err(|err| web_error(format!("Plotting failed: {err}")))
             })
         })
     }

@@ -8,6 +8,7 @@ use lsp_types::{
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{HirStmt, LoweringContext, LoweringResult, SemanticError};
+use runmat_ignition::{compile, CompileError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
@@ -19,6 +20,7 @@ pub struct DocumentAnalysis {
     pub tokens: Vec<SpannedToken>,
     pub syntax_error: Option<SyntaxErrorInfo>,
     pub lowering_error: Option<SemanticError>,
+    pub compile_error: Option<CompileError>,
     pub semantic: Option<SemanticModel>,
 }
 
@@ -29,6 +31,9 @@ impl DocumentAnalysis {
         }
         if let Some(se) = &self.syntax_error {
             return format!("Syntax error: {}", se.message);
+        }
+        if let Some(err) = &self.compile_error {
+            return format!("Compile error: {}", err.message);
         }
         if let Some(sem) = &self.semantic {
             return sem.status_message.clone();
@@ -77,10 +82,20 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                         tokens,
                         syntax_error: None,
                         lowering_error: Some(err),
+                        compile_error: None,
                         semantic: None,
                     };
                 }
             };
+            if let Err(err) = compile(&lowering.hir, &HashMap::new()) {
+                return DocumentAnalysis {
+                    tokens,
+                    syntax_error: None,
+                    lowering_error: None,
+                    compile_error: Some(err),
+                    semantic: None,
+                };
+            }
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
@@ -88,6 +103,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                 tokens,
                 syntax_error: None,
                 lowering_error: None,
+                compile_error: None,
                 semantic: Some(semantic),
             }
         }
@@ -107,6 +123,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                     position: err.position,
                 }),
                 lowering_error: None,
+                compile_error: None,
                 semantic: None,
             }
         }
@@ -133,6 +150,9 @@ pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<
             &analysis.tokens,
             text,
         )];
+    }
+    if let Some(compile_err) = &analysis.compile_error {
+        return vec![diagnostic_for_compile_error(compile_err, text)];
     }
     if let Some(semantic) = &analysis.semantic {
         if !semantic.status_message.is_empty() {
@@ -438,6 +458,35 @@ fn diagnostic_for_lowering_error(
         code: None,
         code_description: None,
         source: Some("runmat-hir".into()),
+        message,
+        related_information: None,
+        tags: None,
+        data: None,
+    }
+}
+
+fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic {
+    let message = error.message.clone();
+    let range = if let Some(span) = error.span {
+        let end = span.end.max(span.start + 1);
+        TextRange {
+            start: span.start,
+            end,
+        }
+        .to_lsp_range(text)
+    } else {
+        Range {
+            start: Position::new(0, 0),
+            end: Position::new(0, 0),
+        }
+    };
+
+    Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: None,
+        code_description: None,
+        source: Some("runmat-ignition".into()),
         message,
         related_information: None,
         tags: None,

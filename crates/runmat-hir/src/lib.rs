@@ -3,12 +3,37 @@ use runmat_parser::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 // Re-export Type from builtins for consistency
 pub use runmat_builtins::Type;
 
 pub type Span = runmat_parser::Span;
+
+const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
+static ERROR_NAMESPACE: OnceLock<RwLock<String>> = OnceLock::new();
+
+fn error_namespace_store() -> &'static RwLock<String> {
+    ERROR_NAMESPACE.get_or_init(|| RwLock::new(DEFAULT_ERROR_NAMESPACE.to_string()))
+}
+
+pub fn set_error_namespace(namespace: &str) {
+    let namespace = if namespace.trim().is_empty() {
+        DEFAULT_ERROR_NAMESPACE.to_string()
+    } else {
+        namespace.to_string()
+    };
+    if let Ok(mut guard) = error_namespace_store().write() {
+        *guard = namespace;
+    }
+}
+
+fn error_namespace() -> String {
+    error_namespace_store()
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| DEFAULT_ERROR_NAMESPACE.to_string())
+}
 
 #[derive(Debug, Clone)]
 pub struct SemanticError {
@@ -2978,8 +3003,9 @@ impl Ctx {
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
+                    let ident = format!("{}:UndefinedVariable", error_namespace());
                     return Err(SemanticError::new(format!("Undefined variable: {name}"))
-                        .with_identifier("MATLAB:UndefinedVariable")
+                        .with_identifier(ident)
                         .with_span(span));
                 }
             }
