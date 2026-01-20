@@ -446,7 +446,10 @@ fn test_debug_function_context() {
                 let result3 = block_on(engine.execute("user_func_test = test_func(10)"));
                 assert!(result3.is_ok(), "Function call should succeed");
                 let exec_result = result3.unwrap();
-                assert!(exec_result.error.is_none(), "Function call should not error");
+                assert!(
+                    exec_result.error.is_none(),
+                    "Function call should not error"
+                );
             });
         })
         .expect("spawn debug function thread");

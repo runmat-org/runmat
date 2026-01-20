@@ -47,6 +47,8 @@ pub struct Bytecode {
     pub instructions: Vec<Instr>,
     #[serde(default)]
     pub instr_spans: Vec<runmat_hir::Span>,
+    #[serde(default)]
+    pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     pub functions: HashMap<String, UserFunction>,
     #[serde(default)]
@@ -66,6 +68,7 @@ impl Bytecode {
         Self {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
+            source_id: None,
             var_count: 0,
             functions: HashMap::new(),
             var_types: Vec::new(),

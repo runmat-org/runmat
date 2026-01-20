@@ -124,6 +124,22 @@ impl SourcePool {
     }
 }
 
+fn line_col_from_offset(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    let col = offset.saturating_sub(line_start) + 1;
+    (line, col)
+}
+
 #[derive(Debug)]
 pub enum RunError {
     Syntax(SyntaxError),
@@ -911,7 +927,8 @@ impl RunMatSession {
         self.snapshot.is_some()
     }
 
-    fn compile_input(&self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
+    fn compile_input(&mut self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
+        let source_id = self.source_pool.intern("<repl>", input);
         let ast = {
             let _span = info_span!("runtime.parse").entered();
             parse_with_options(input, ParserOptions::new(self.compat_mode))?
@@ -924,10 +941,17 @@ impl RunMatSession {
             )?
         };
         let existing_functions = self.convert_hir_functions_to_user_functions();
-        let bytecode = {
+        let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
             runmat_ignition::compile(&lowering.hir, &existing_functions)?
         };
+        bytecode.source_id = Some(source_id);
+        let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
+        for (name, func) in bytecode.functions.iter_mut() {
+            if new_function_names.contains(name) {
+                func.source_id = Some(source_id);
+            }
+        }
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -935,9 +959,27 @@ impl RunMatSession {
         })
     }
 
+    fn populate_callstack(&self, error: &mut RuntimeError) {
+        if !error.context.call_stack.is_empty() || error.context.call_frames.is_empty() {
+            return;
+        }
+        let mut rendered = Vec::new();
+        for frame in error.context.call_frames.iter().rev() {
+            let mut line = frame.function.clone();
+            if let (Some(source_id), Some((start, _end))) = (frame.source_id, frame.span) {
+                if let Some(source) = self.source_pool.get(SourceId(source_id)) {
+                    let (line_num, col) = line_col_from_offset(&source.text, start);
+                    line = format!("{} @ {}:{}:{}", frame.function, source.name, line_num, col);
+                }
+            }
+            rendered.push(line);
+        }
+        error.context.call_stack = rendered;
+    }
+
     /// Compile the input and produce a fusion plan snapshot without executing.
     pub fn compile_fusion_plan(
-        &self,
+        &mut self,
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
@@ -1473,6 +1515,10 @@ impl RunMatSession {
             .unwrap_or_default();
 
         let warnings = runmat_runtime::warning_store::take_all();
+
+        if let Some(runtime_error) = &mut error {
+            self.populate_callstack(runtime_error);
+        }
 
         let public_value = if is_semicolon_suppressed {
             None

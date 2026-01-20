@@ -23,7 +23,9 @@ pub mod workspace;
 /// Standard result type for runtime builtins.
 pub type BuiltinResult<T> = Result<T, RuntimeError>;
 
-pub use runtime_error::{build_runtime_error, ErrorContext, RuntimeError, RuntimeErrorBuilder};
+pub use runtime_error::{
+    build_runtime_error, CallFrame, ErrorContext, RuntimeError, RuntimeErrorBuilder,
+};
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;

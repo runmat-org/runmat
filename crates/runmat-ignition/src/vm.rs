@@ -25,7 +25,7 @@ use runmat_runtime::{
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
     gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
-    RuntimeError,
+    CallFrame, RuntimeError,
 };
 use runmat_thread_local::runmat_thread_local;
 #[cfg(not(target_arch = "wasm32"))]
@@ -69,6 +69,59 @@ fn attach_span_at(bytecode: &Bytecode, pc: usize, mut err: RuntimeError) -> Runt
 fn attach_span_from_pc(bytecode: &Bytecode, err: RuntimeError) -> RuntimeError {
     let pc = current_vm_pc();
     attach_span_at(bytecode, pc, err)
+}
+
+struct CallFrameGuard;
+
+impl Drop for CallFrameGuard {
+    fn drop(&mut self) {
+        CALL_FRAMES.with(|frames| {
+            let _ = frames.borrow_mut().pop();
+        });
+    }
+}
+
+fn push_call_frame(name: &str, bytecode: &Bytecode, pc: usize) -> CallFrameGuard {
+    let span = bytecode
+        .instr_spans
+        .get(pc)
+        .map(|span| (span.start, span.end));
+    let frame = CallFrame {
+        function: name.to_string(),
+        source_id: bytecode.source_id.map(|id| id.0),
+        span,
+    };
+    CALL_FRAMES.with(|frames| {
+        frames.borrow_mut().push(frame);
+    });
+    CallFrameGuard
+}
+
+fn attach_call_frames(
+    bytecode: &Bytecode,
+    current_function_name: &str,
+    mut err: RuntimeError,
+) -> RuntimeError {
+    if !err.context.call_frames.is_empty() || !err.context.call_stack.is_empty() {
+        return err;
+    }
+    let mut frames = CALL_FRAMES.with(|frames| frames.borrow().clone());
+    if frames.is_empty() {
+        let span = err.span.as_ref().map(|span| {
+            let start = span.offset();
+            let end = start + span.len();
+            (start, end)
+        });
+        if span.is_some() || !current_function_name.is_empty() {
+            frames.push(CallFrame {
+                function: current_function_name.to_string(),
+                source_id: bytecode.source_id.map(|id| id.0),
+                span,
+            });
+        }
+    }
+    err.context.call_frames = frames;
+    err
 }
 
 #[cfg(feature = "native-accel")]
@@ -1196,6 +1249,7 @@ pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet
 runmat_thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+    static CALL_FRAMES: RefCell<Vec<CallFrame>> = const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Debug)]
@@ -1299,7 +1353,11 @@ pub async fn interpret_with_vars(
     let state = InterpreterState::new(bytecode.clone(), initial_vars, current_function_name);
     match run_interpreter(state, initial_vars).await {
         Ok(outcome) => Ok(outcome),
-        Err(err) => Err(attach_span_from_pc(bytecode, err)),
+        Err(err) => {
+            let err = attach_span_from_pc(bytecode, err);
+            let current_name = current_function_name.unwrap_or("<main>");
+            Err(attach_call_frames(bytecode, current_name, err))
+        }
     }
 }
 
@@ -3609,7 +3667,9 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
+                let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
+                func_bytecode.source_id = func.source_id;
+                let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
                 // Make nested closures visible to outer frames
                 for (k, v) in func_bytecode.functions.iter() {
                     context.functions.insert(k.clone(), v.clone());
@@ -3948,7 +4008,9 @@ async fn run_interpreter(
                     body: remapped_body,
                     var_types: func_var_types,
                 };
-                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
+                let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
+                func_bytecode.source_id = func.source_id;
+                let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
                 let func_result_vars = match interpret_function_with_counts(
                     &func_bytecode,
                     func_vars,

@@ -7,8 +7,16 @@ use thiserror::Error;
 pub struct ErrorContext {
     pub builtin: Option<String>,
     pub task_id: Option<String>,
+    pub call_frames: Vec<CallFrame>,
     pub call_stack: Vec<String>,
     pub phase: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallFrame {
+    pub function: String,
+    pub source_id: Option<usize>,
+    pub span: Option<(usize, usize)>,
 }
 
 impl ErrorContext {
@@ -24,6 +32,11 @@ impl ErrorContext {
 
     pub fn with_call_stack(mut self, call_stack: Vec<String>) -> Self {
         self.call_stack = call_stack;
+        self
+    }
+
+    pub fn with_call_frames(mut self, call_frames: Vec<CallFrame>) -> Self {
+        self.call_frames = call_frames;
         self
     }
 
@@ -108,9 +121,14 @@ impl RuntimeError {
             lines.push(format!("phase: {phase}"));
         }
         if !self.context.call_stack.is_empty() {
-            lines.push("stack:".to_string());
+            lines.push("callstack:".to_string());
             for frame in &self.context.call_stack {
-                lines.push(format!("  at {frame}"));
+                lines.push(format!("  {frame}"));
+            }
+        } else if !self.context.call_frames.is_empty() {
+            lines.push("callstack:".to_string());
+            for frame in &self.context.call_frames {
+                lines.push(format!("  {}", frame.function));
             }
         }
         lines.join("\n")
@@ -151,6 +169,11 @@ impl RuntimeErrorBuilder {
 
     pub fn with_call_stack(mut self, call_stack: Vec<String>) -> Self {
         self.error.context = self.error.context.with_call_stack(call_stack);
+        self
+    }
+
+    pub fn with_call_frames(mut self, call_frames: Vec<CallFrame>) -> Self {
+        self.error.context = self.error.context.with_call_frames(call_frames);
         self
     }
 

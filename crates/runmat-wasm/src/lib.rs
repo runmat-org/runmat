@@ -386,7 +386,7 @@ impl RunMatWasm {
     /// Compile-only fusion plan snapshot (no execution).
     #[wasm_bindgen(js_name = fusionPlanForSource)]
     pub fn fusion_plan_for_source(&self, source: String) -> Result<JsValue, JsValue> {
-        let session = self.session.borrow();
+        let mut session = self.session.borrow_mut();
         let snapshot = session
             .compile_fusion_plan(&source)
             .map_err(|err| js_error(&format_run_error(&err, &source)))?;
