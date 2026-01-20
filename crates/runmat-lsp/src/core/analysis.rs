@@ -7,7 +7,7 @@ use lsp_types::{
     SignatureHelp,
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
-use runmat_hir::{HirStmt, LoweringResult};
+use runmat_hir::{HirStmt, LoweringResult, SemanticError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
@@ -17,18 +17,18 @@ use std::fmt::Write;
 #[derive(Clone)]
 pub struct DocumentAnalysis {
     pub tokens: Vec<SpannedToken>,
-    pub parse_error: Option<ParseErrorInfo>,
-    pub lowering_error: Option<String>,
+    pub syntax_error: Option<SyntaxErrorInfo>,
+    pub lowering_error: Option<SemanticError>,
     pub semantic: Option<SemanticModel>,
 }
 
 impl DocumentAnalysis {
     pub fn status_message(&self) -> String {
         if let Some(err) = &self.lowering_error {
-            return format!("Lowering failed: {err}");
+            return format!("Lowering failed: {}", err.message);
         }
-        if let Some(pe) = &self.parse_error {
-            return format!("Parse error: {}", pe.message);
+        if let Some(se) = &self.syntax_error {
+            return format!("Syntax error: {}", se.message);
         }
         if let Some(sem) = &self.semantic {
             return sem.status_message.clone();
@@ -38,7 +38,7 @@ impl DocumentAnalysis {
 }
 
 #[derive(Clone)]
-pub struct ParseErrorInfo {
+pub struct SyntaxErrorInfo {
     pub message: String,
     pub position: usize,
 }
@@ -76,7 +76,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                     Err(err) => {
                         return DocumentAnalysis {
                             tokens,
-                            parse_error: None,
+                            syntax_error: None,
                             lowering_error: Some(err),
                             semantic: None,
                         };
@@ -87,7 +87,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 
             DocumentAnalysis {
                 tokens,
-                parse_error: None,
+                syntax_error: None,
                 lowering_error: None,
                 semantic: Some(semantic),
             }
@@ -103,7 +103,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 
             DocumentAnalysis {
                 tokens,
-                parse_error: Some(ParseErrorInfo {
+                syntax_error: Some(SyntaxErrorInfo {
                     message,
                     position: err.position,
                 }),
@@ -115,14 +115,14 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 }
 
 pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<Diagnostic> {
-    if let Some(parse_err) = &analysis.parse_error {
+    if let Some(syntax_err) = &analysis.syntax_error {
         return vec![Diagnostic {
-            range: diagnostic_range_for_parse_error(parse_err, &analysis.tokens, text),
+            range: diagnostic_range_for_parse_error(syntax_err, &analysis.tokens, text),
             severity: Some(DiagnosticSeverity::ERROR),
             code: None,
             code_description: None,
             source: Some("runmat-parser".into()),
-            message: parse_err.message.clone(),
+            message: syntax_err.message.clone(),
             related_information: None,
             tags: None,
             data: None,
@@ -382,7 +382,7 @@ pub fn formatting_edits(text: &str, _analysis: &DocumentAnalysis) -> Vec<lsp_typ
 }
 
 fn diagnostic_range_for_parse_error(
-    error: &ParseErrorInfo,
+    error: &SyntaxErrorInfo,
     tokens: &[SpannedToken],
     text: &str,
 ) -> Range {
@@ -400,23 +400,36 @@ fn diagnostic_range_for_parse_error(
     }
 }
 
-fn diagnostic_for_lowering_error(error: &str, tokens: &[SpannedToken], text: &str) -> Diagnostic {
-    let message = error.to_string();
-    let undefined_var = error
-        .split(':')
-        .next_back()
-        .map(str::trim)
-        .and_then(|s| s.split_whitespace().last())
-        .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'));
-
-    let range = if let Some(name) = undefined_var {
-        find_symbol_range(tokens, name, None)
-            .unwrap_or(TextRange { start: 0, end: 1 })
-            .to_lsp_range(text)
+fn diagnostic_for_lowering_error(
+    error: &SemanticError,
+    tokens: &[SpannedToken],
+    text: &str,
+) -> Diagnostic {
+    let message = error.message.clone();
+    let range = if let Some(span) = error.span {
+        let end = span.end.max(span.start + 1);
+        TextRange {
+            start: span.start,
+            end,
+        }
+        .to_lsp_range(text)
     } else {
-        Range {
-            start: Position::new(0, 0),
-            end: Position::new(0, 0),
+        let undefined_var = error
+            .message
+            .split(':')
+            .next_back()
+            .map(str::trim)
+            .and_then(|s| s.split_whitespace().last())
+            .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'));
+        if let Some(name) = undefined_var {
+            find_symbol_range(tokens, name, None)
+                .unwrap_or(TextRange { start: 0, end: 1 })
+                .to_lsp_range(text)
+        } else {
+            Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 0),
+            }
         }
     };
 
@@ -777,7 +790,7 @@ mod tests {
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
         let analysis = analyze_document(text);
-        if let Some(err) = &analysis.parse_error {
+        if let Some(err) = &analysis.syntax_error {
             panic!(
                 "unexpected parse error at {}: {}",
                 err.position, err.message

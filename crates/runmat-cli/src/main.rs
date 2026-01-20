@@ -7,13 +7,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info, warn};
+use miette::{SourceOffset, SourceSpan};
 use std::env;
 
 mod telemetry;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
-use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunMatSession};
+use runmat_core::{ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession};
+use runmat_runtime::build_runtime_error;
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
@@ -35,6 +37,82 @@ fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode 
         config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
     }
+}
+
+fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Option<String> {
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = SourceSpan::new(SourceOffset::from(err.position), 1);
+            Some(format_diagnostic(
+                &message,
+                Some("RunMat:SyntaxError"),
+                Some(span),
+                source_name,
+                source,
+            ))
+        }
+        RunError::Semantic(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let identifier = err.identifier.as_deref().or(Some("RunMat:SemanticError"));
+            Some(format_diagnostic(
+                &err.message,
+                identifier,
+                span,
+                source_name,
+                source,
+            ))
+        }
+        RunError::Compile(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let identifier = err.identifier.as_deref().or(Some("RunMat:CompileError"));
+            Some(format_diagnostic(
+                &err.message,
+                identifier,
+                span,
+                source_name,
+                source,
+            ))
+        }
+        RunError::Runtime(err) => Some(
+            err.format_diagnostic_with_source(Some(source_name), Some(source)),
+        ),
+    }
+}
+
+fn format_diagnostic(
+    message: &str,
+    identifier: Option<&str>,
+    span: Option<SourceSpan>,
+    source_name: &str,
+    source: &str,
+) -> String {
+    let mut builder = build_runtime_error(message);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    if let Some(span) = span {
+        builder = builder.with_span(span);
+    }
+    builder
+        .build()
+        .format_diagnostic_with_source(Some(source_name), Some(source))
 }
 #[derive(Parser)]
 #[command(
@@ -1123,7 +1201,11 @@ async fn process_repl_line(
             }
         }
         Err(e) => {
-            eprintln!("Execution error: {e}");
+            if let Some(diag) = format_frontend_error(&e, "<repl>", line) {
+                eprintln!("{diag}");
+            } else {
+                eprintln!("Execution error: {e}");
+            }
         }
     }
 
@@ -1301,10 +1383,17 @@ async fn execute_script_with_args(
         engine.set_telemetry_client_id(Some(cid));
     }
     let start_time = Instant::now();
-    let result = engine
-        .execute(&content)
-        .await
-        .context("Failed to execute script")?;
+    let result = match engine.execute(&content).await {
+        Ok(result) => result,
+        Err(err) => {
+            if let Some(diag) = format_frontend_error(&err, script.to_string_lossy().as_ref(), &content) {
+                eprintln!("{diag}");
+            } else {
+                eprintln!("Execution error: {err}");
+            }
+            std::process::exit(1);
+        }
+    };
 
     let execution_time = start_time.elapsed();
 
@@ -1588,12 +1677,18 @@ async fn execute_benchmark(
     println!("Warming up...");
     // Warmup runs
     for _ in 0..3 {
-        let _ = engine.execute(&content).await?;
+        let _ = engine
+            .execute(&content)
+            .await
+            .map_err(anyhow::Error::new)?;
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = engine.execute(&content).await?;
+        let result = engine
+            .execute(&content)
+            .await
+            .map_err(anyhow::Error::new)?;
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
         if let Some(error) = result

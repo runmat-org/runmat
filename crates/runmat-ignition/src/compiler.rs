@@ -1,5 +1,6 @@
 use crate::functions::UserFunction;
 use crate::instr::{EmitLabel, Instr};
+use crate::CompileError;
 use once_cell::sync::OnceCell;
 use runmat_builtins::{self, Type};
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
@@ -164,7 +165,7 @@ impl Compiler {
     fn compile_stochastic_evolution(
         &mut self,
         plan: StochasticEvolutionPlan<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<(), CompileError> {
         self.emit(Instr::LoadVar(plan.state.0));
         self.compile_expr(plan.drift)?;
         self.compile_expr(plan.scale)?;
@@ -572,7 +573,15 @@ impl Compiler {
         self.instructions[idx] = instr;
     }
 
-    pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
+    fn compile_error(&self, message: impl Into<String>) -> CompileError {
+        let mut err = CompileError::new(message);
+        if let Some(span) = self.current_span {
+            err = err.with_span(span);
+        }
+        err
+    }
+
+    pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), CompileError> {
         // Validate imports early for duplicate/specific-name ambiguities
         runmat_hir::validate_imports(prog)?;
         // Validate class definitions for attribute correctness and name conflicts
@@ -609,7 +618,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), String> {
+    pub fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span());
         match stmt {
             HirStmt::ExprStmt(expr, suppressed, _) => {
@@ -769,12 +778,12 @@ impl Compiler {
                         self.patch(j, Instr::Jump(end_pc));
                     }
                 } else {
-                    return Err("for loop expects range".into());
+                    return Err(self.compile_error("for loop expects range"));
                 }
             }
             HirStmt::Break(_) => {
                 if self.loop_stack.is_empty() {
-                    return Err("break outside loop".into());
+                    return Err(self.compile_error("break outside loop"));
                 }
                 let idx = self.emit(Instr::Jump(usize::MAX));
                 if let Some(labels) = self.loop_stack.last_mut() {
@@ -783,7 +792,7 @@ impl Compiler {
             }
             HirStmt::Continue(_) => {
                 if self.loop_stack.is_empty() {
-                    return Err("continue outside loop".into());
+                    return Err(self.compile_error("continue outside loop"));
                 }
                 let idx = self.emit(Instr::Jump(usize::MAX));
                 if let Some(labels) = self.loop_stack.last_mut() {
@@ -1486,10 +1495,9 @@ impl Compiler {
                                 self.emit(Instr::StoreVar(root_var.0));
                             }
                         } else {
-                            return Err(
-                                "unsupported lvalue target (index on non-variable/non-member)"
-                                    .into(),
-                            );
+                            return Err(self.compile_error(
+                                "unsupported lvalue target (index on non-variable/non-member)",
+                            ));
                         }
                     }
                     runmat_hir::HirLValue::IndexCell(base, indices) => {
@@ -1557,7 +1565,7 @@ impl Compiler {
                             self.emit(Instr::StoreMemberDynamic);
                         }
                     }
-                    _ => return Err("unsupported lvalue target".into()),
+                    _ => return Err(self.compile_error("unsupported lvalue target")),
                 }
             }
             HirStmt::Global(vars, _) => {
@@ -1713,7 +1721,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<(), String> {
+    pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, expr.span);
         match &expr.kind {
             HirExprKind::Number(n) => {
@@ -1757,7 +1765,9 @@ impl Compiler {
                             self.emit(Instr::LoadBool(*b));
                         }
                         _ => {
-                            return Err(format!("Constant {name} is not a number or boolean"));
+                            return Err(self.compile_error(format!(
+                                "Constant {name} is not a number or boolean"
+                            )));
                         }
                     }
                 } else {
@@ -1784,17 +1794,19 @@ impl Compiler {
                         }
                     }
                     if classes.len() > 1 {
-                        return Err(format!(
+                        return Err(self.compile_error(format!(
                             "ambiguous unqualified static property '{}' via Class.* imports: {}",
                             name,
                             classes.join(", ")
-                        ));
+                        )));
                     }
                     if classes.len() == 1 {
                         self.emit(Instr::LoadStaticProperty(classes.remove(0), name.clone()));
                         return Ok(());
                     }
-                    return Err(format!("Unknown constant or static property: {name}"));
+                    return Err(self.compile_error(format!(
+                        "Unknown constant or static property: {name}"
+                    )));
                 }
             }
             HirExprKind::Unary(op, e) => {
@@ -1920,7 +1932,7 @@ impl Compiler {
                                 self.emit(Instr::GreaterEqual);
                             }
                             BinOp::Colon => {
-                                return Err("colon operator not supported".into());
+                                return Err(self.compile_error("colon operator not supported"));
                             }
                             _ => unreachable!(),
                         }
@@ -1942,7 +1954,7 @@ impl Compiler {
                 // Special-case: feval(f, a1, a2, ...) compiles to VM feval to access user functions/closures
                 if name == "feval" {
                     if args.is_empty() {
-                        return Err("feval: missing function argument".into());
+                        return Err(self.compile_error("feval: missing function argument"));
                     }
                     // Push function value first
                     self.compile_expr(&args[0])?;
@@ -2069,11 +2081,11 @@ impl Compiler {
                             }
                         }
                         if specific_candidates.len() > 1 {
-                            return Err(format!(
+                            return Err(self.compile_error(format!(
                                 "ambiguous unqualified reference '{}' via imports: {}",
                                 name,
                                 specific_candidates.join(", ")
-                            ));
+                            )));
                         }
                         if specific_candidates.len() == 1 {
                             resolved = specific_candidates.remove(0);
@@ -2120,11 +2132,11 @@ impl Compiler {
                                 }
                             }
                             if wildcard_candidates.len() > 1 {
-                                return Err(format!(
+                                return Err(self.compile_error(format!(
                                     "ambiguous unqualified reference '{}' via wildcard imports: {}",
                                     name,
                                     wildcard_candidates.join(", ")
-                                ));
+                                )));
                             }
                             if wildcard_candidates.len() == 1 {
                                 resolved = wildcard_candidates.remove(0);
@@ -2218,7 +2230,7 @@ impl Compiler {
                         .any(|b| b.name == resolved)
                         && static_candidates.len() > 1
                     {
-                        return Err(format!(
+                        return Err(self.compile_error(format!(
                             "ambiguous unqualified static method '{}' via Class.* imports: {}",
                             name,
                             static_candidates
@@ -2226,7 +2238,7 @@ impl Compiler {
                                 .map(|(c, _)| c.clone())
                                 .collect::<Vec<_>>()
                                 .join(", ")
-                        ));
+                        )));
                     }
                     // Existing propagation path and builtin call
                     if !has_any_expand {

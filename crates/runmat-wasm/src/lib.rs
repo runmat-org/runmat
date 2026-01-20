@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use js_sys::{Error as JsError, Reflect, Uint8Array};
 use log::warn;
+use miette::{SourceOffset, SourceSpan};
 use runmat_accelerate::{
     initialize_acceleration_provider_with, AccelPowerPreference, AccelerateInitOptions,
     AccelerateProviderPreference, AutoOffloadOptions,
@@ -18,10 +19,11 @@ use runmat_core::{
     matlab_class_name, value_shape, CompatMode, ExecutionProfiling, ExecutionResult,
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputHandlerAction, InputRequest, InputRequestKind,
-    InputResponse, MaterializedVariable, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
-    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSliceOptions,
-    WorkspaceSnapshot,
+    InputResponse, MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind,
+    WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceSliceOptions, WorkspaceSnapshot,
 };
+use runmat_runtime::build_runtime_error;
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
@@ -262,7 +264,7 @@ impl RunMatWasm {
         let result = session
             .execute(&source)
             .await
-            .map_err(|err| js_error(&format!("RunMat execution failed: {err}")))?;
+            .map_err(|err| js_error(&format_run_error(&err, &source)))?;
 
         *self.session.borrow_mut() = session;
         info!(
@@ -386,7 +388,7 @@ impl RunMatWasm {
         let session = self.session.borrow();
         let snapshot = session
             .compile_fusion_plan(&source)
-            .map_err(|err| js_error(&format!("Failed to compile fusion plan: {err}")))?;
+            .map_err(|err| js_error(&format_run_error(&err, &source)))?;
         match snapshot {
             Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
                 .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),
@@ -1576,6 +1578,63 @@ fn parse_power_preference(input: Option<&str>) -> AccelPowerPreference {
         Some(ref value) if value.contains("low") => AccelPowerPreference::LowPower,
         Some(ref value) if value.contains("high") => AccelPowerPreference::HighPerformance,
         _ => AccelPowerPreference::Auto,
+    }
+}
+
+fn format_run_error(err: &RunError, source: &str) -> String {
+    match err {
+        RunError::Syntax(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+            let span = SourceSpan::new(SourceOffset::from(err.position), 1);
+            build_runtime_error(message)
+                .with_identifier("RunMat:SyntaxError")
+                .with_span(span)
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Semantic(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let mut builder = build_runtime_error(err.message.clone());
+            if let Some(identifier) = err.identifier.as_deref() {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            builder
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Compile(err) => {
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            let mut builder = build_runtime_error(err.message.clone());
+            if let Some(identifier) = err.identifier.as_deref() {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            builder
+                .build()
+                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+        }
+        RunError::Runtime(err) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
     }
 }
 

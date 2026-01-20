@@ -56,7 +56,8 @@ fn input_prompts_return_value() -> Result<()> {
         InputHandlerAction::Respond(Ok(InputResponse::Line("41".into())))
     });
 
-    let result = block_on(session.execute("value = input('Enter value: '); value = value + 1; value"))?;
+    let result = block_on(session.execute("value = input('Enter value: '); value = value + 1; value"))
+        .map_err(anyhow::Error::new)?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(42.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -84,7 +85,8 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
         InputHandlerAction::Respond(Ok(response))
     });
 
-    let result = block_on(session.execute("first = input('First: '); second = input('Second: ', \"s\"); second"))?;
+    let result = block_on(session.execute("first = input('First: '); second = input('Second: ', \"s\"); second"))
+        .map_err(anyhow::Error::new)?;
     let value = result.value.expect("final execution should produce a value");
     assert_eq!(value_as_char_row(&value), Some("code-42".to_string()));
     assert_eq!(result.stdin_events.len(), 2);
@@ -97,7 +99,8 @@ fn char_literal_round_trips() -> Result<()> {
     let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    let result = block_on(session.execute("'s'"))?;
+    let result = block_on(session.execute("'s'"))
+        .map_err(anyhow::Error::new)?;
     let value = result.value.expect("char literal should return a value");
     assert_eq!(value_as_char_row(&value), Some("s".to_string()));
     Ok(())
@@ -116,7 +119,8 @@ fn pause_uses_keypress_handler() -> Result<()> {
         InputHandlerAction::Respond(Ok(InputResponse::KeyPress))
     });
 
-    let result = block_on(session.execute("pause; value = 1; value"))?;
+    let result = block_on(session.execute("pause; value = 1; value"))
+        .map_err(anyhow::Error::new)?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(1.0));
     assert_eq!(result.stdin_events.len(), 1);

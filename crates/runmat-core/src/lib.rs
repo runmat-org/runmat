@@ -7,11 +7,12 @@ use tracing::{debug, info, info_span, warn};
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
-use runmat_parser::{parse_with_options, ParserOptions};
+use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
 use runmat_runtime::builtins::common::gpu_helpers;
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_runtime::RuntimeError;
-use runmat_hir::SourceId;
+use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_hir::{LoweringResult, SemanticError, SourceId};
+use runmat_ignition::CompileError;
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -121,6 +122,57 @@ impl SourcePool {
     fn get(&self, id: SourceId) -> Option<&SourceText> {
         self.sources.get(id.0)
     }
+}
+
+#[derive(Debug)]
+pub enum RunError {
+    Syntax(SyntaxError),
+    Semantic(SemanticError),
+    Compile(CompileError),
+    Runtime(RuntimeError),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunError::Syntax(err) => write!(f, "{err}"),
+            RunError::Semantic(err) => write!(f, "{err}"),
+            RunError::Compile(err) => write!(f, "{err}"),
+            RunError::Runtime(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+impl From<SyntaxError> for RunError {
+    fn from(value: SyntaxError) -> Self {
+        RunError::Syntax(value)
+    }
+}
+
+impl From<SemanticError> for RunError {
+    fn from(value: SemanticError) -> Self {
+        RunError::Semantic(value)
+    }
+}
+
+impl From<CompileError> for RunError {
+    fn from(value: CompileError) -> Self {
+        RunError::Compile(value)
+    }
+}
+
+impl From<RuntimeError> for RunError {
+    fn from(value: RuntimeError) -> Self {
+        RunError::Runtime(value)
+    }
+}
+
+struct PreparedExecution {
+    ast: runmat_parser::Program,
+    lowering: LoweringResult,
+    bytecode: runmat_ignition::Bytecode,
 }
 
 #[derive(Debug, Default)]
@@ -862,48 +914,77 @@ impl RunMatSession {
         self.snapshot.is_some()
     }
 
-    /// Compile the input and produce a fusion plan snapshot without executing.
-    pub fn compile_fusion_plan(&self, input: &str) -> Result<Option<FusionPlanSnapshot>> {
-        // Parse the input (reuses the same pipeline as full execution).
+    fn parse(&self, input: &str) -> std::result::Result<runmat_parser::Program, SyntaxError> {
+        parse_with_options(input, ParserOptions::new(self.compat_mode))
+    }
+
+    fn lower(
+        &self,
+        ast: &runmat_parser::Program,
+    ) -> std::result::Result<LoweringResult, SemanticError> {
+        runmat_hir::lower_with_full_context(
+            ast,
+            &self.variable_names,
+            &self.function_definitions,
+        )
+    }
+
+    fn compile(
+        &self,
+        hir: &runmat_hir::HirProgram,
+        existing_functions: &HashMap<String, runmat_ignition::UserFunction>,
+    ) -> std::result::Result<runmat_ignition::Bytecode, CompileError> {
+        runmat_ignition::compile_with_functions(hir, existing_functions)
+    }
+
+    fn prepare(&self, input: &str) -> std::result::Result<PreparedExecution, RunError> {
         let ast = {
             let _span = info_span!("runtime.parse").entered();
-            parse_with_options(input, ParserOptions::new(self.compat_mode))
-                .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
+            self.parse(input)?
         };
-
-        // Lower to HIR with existing variable and function context.
-        let lowering_result = {
+        let lowering = {
             let _span = info_span!("runtime.lower").entered();
-            runmat_hir::lower_with_full_context(
-                &ast,
-                &self.variable_names,
-                &self.function_definitions,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?
+            self.lower(&ast)?
         };
-
-        // Compile to bytecode to surface the accelerator graph + fusion groups.
-        let hir = lowering_result.hir;
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_ignition::compile_with_functions(&hir, &existing_functions)
-                .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?
+            self.compile(&lowering.hir, &existing_functions)?
         };
+        Ok(PreparedExecution {
+            ast,
+            lowering,
+            bytecode,
+        })
+    }
 
+    /// Compile the input and produce a fusion plan snapshot without executing.
+    pub fn compile_fusion_plan(
+        &self,
+        input: &str,
+    ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
+        let prepared = self.prepare(input)?;
         Ok(build_fusion_snapshot(
-            bytecode.accel_graph.as_ref(),
-            &bytecode.fusion_groups,
+            prepared.bytecode.accel_graph.as_ref(),
+            &prepared.bytecode.fusion_groups,
         ))
     }
 
     /// Execute MATLAB/Octave code
-    pub async fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
-        let _active = ActiveExecutionGuard::new(self)?;
-        self.execute_internal(input).await
+    pub async fn execute(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<ExecutionResult, RunError> {
+        self.run(input).await
     }
 
-    async fn execute_internal(&mut self, input: &str) -> Result<ExecutionResult> {
+    /// Parse, lower, compile, and execute input.
+    pub async fn run(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<ExecutionResult, RunError> {
+        let _active = ActiveExecutionGuard::new(self)
+            .map_err(|err| RunError::Runtime(build_runtime_error(err.to_string()).build()))?;
         let exec_span = info_span!(
             "runtime.execute",
             input_len = input.len(),
@@ -928,31 +1009,19 @@ impl RunMatSession {
             debug!("Executing: {}", input.trim());
         }
 
-        // Parse the input
-        let ast = {
-            let _span = info_span!("runtime.parse").entered();
-            parse_with_options(input, ParserOptions::new(self.compat_mode))
-                .map_err(|e| anyhow::anyhow!("Failed to parse input '{}': {}", input, e))?
-        };
+        let PreparedExecution {
+            ast,
+            lowering,
+            mut bytecode,
+        } = self.prepare(input)?;
         if self.verbose {
             debug!("AST: {ast:?}");
         }
-
-        // Lower to HIR with existing variable and function context
-        let lowering_result = {
-            let _span = info_span!("runtime.lower").entered();
-            runmat_hir::lower_with_full_context(
-                &ast,
-                &self.variable_names,
-                &self.function_definitions,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?
-        };
         let (hir, updated_vars, updated_functions, var_names_map) = (
-            lowering_result.hir,
-            lowering_result.variables,
-            lowering_result.functions,
-            lowering_result.var_names,
+            lowering.hir,
+            lowering.variables,
+            lowering.functions,
+            lowering.var_names,
         );
         let max_var_id = updated_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
@@ -992,13 +1061,6 @@ impl RunMatSession {
             (None, false)
         };
 
-        // Compile to bytecode with existing function definitions
-        let existing_functions = self.convert_hir_functions_to_user_functions();
-        let mut bytecode = {
-            let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_ignition::compile_with_functions(&hir, &existing_functions)
-                .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?
-        };
         bytecode.var_names = id_to_name.clone();
         if self.verbose {
             debug!(

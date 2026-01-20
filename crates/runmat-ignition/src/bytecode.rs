@@ -2,10 +2,11 @@
 use crate::accel_graph::build_accel_graph;
 use crate::compiler::Compiler;
 use crate::functions::{Bytecode, UserFunction};
+use crate::CompileError;
 use runmat_hir::HirProgram;
 use std::collections::HashMap;
 
-pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
+pub fn compile(prog: &HirProgram) -> Result<Bytecode, CompileError> {
     let mut c = Compiler::new(prog);
     c.compile_program(prog)?;
     #[cfg(feature = "native-accel")]
@@ -29,7 +30,7 @@ pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
 pub fn compile_with_functions(
     prog: &HirProgram,
     existing_functions: &HashMap<String, UserFunction>,
-) -> Result<Bytecode, String> {
+) -> Result<Bytecode, CompileError> {
     let mut c = Compiler::new(prog);
     c.functions = existing_functions.clone();
     c.compile_program(prog)?;

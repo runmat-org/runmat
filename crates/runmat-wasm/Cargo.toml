@@ -32,6 +32,7 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "console"] }
 log = { workspace = true }
 anyhow = { workspace = true }
+miette = { workspace = true }
 console_error_panic_hook = "0.1"
 thiserror = { workspace = true }
 getrandom = { version = "0.2", features = ["js"] }

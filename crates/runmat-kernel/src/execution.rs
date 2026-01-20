@@ -5,7 +5,7 @@
 
 use crate::Result;
 use runmat_builtins::Value;
-use runmat_core::RunMatSession;
+use runmat_core::{RunError, RunMatSession};
 use runmat_time::Instant;
 use std::path::Path;
 use std::time::Duration;
@@ -169,17 +169,11 @@ impl ExecutionEngine {
             }
             Err(e) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
-                let error_msg = e.to_string();
-
-                // Determine error type based on error message content
-                let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
-                    "ParseError"
-                } else if error_msg.contains("undefined") || error_msg.contains("variable") {
-                    "RuntimeError"
-                } else if error_msg.contains("lower") || error_msg.contains("HIR") {
-                    "CompileError"
-                } else {
-                    "ExecutionError"
+                let (error_type, message) = match e {
+                    RunError::Syntax(err) => ("SyntaxError", err.to_string()),
+                    RunError::Semantic(err) => ("SemanticError", err.to_string()),
+                    RunError::Compile(err) => ("CompileError", err.to_string()),
+                    RunError::Runtime(err) => ("RuntimeError", err.format_diagnostic()),
                 };
 
                 Ok(ExecutionResult {
@@ -190,7 +184,7 @@ impl ExecutionEngine {
                     execution_time_ms,
                     error: Some(ExecutionError {
                         error_type: error_type.to_string(),
-                        message: error_msg,
+                        message,
                         traceback: vec!["Error during code execution".to_string()],
                     }),
                 })
@@ -324,7 +318,8 @@ mod tests {
         assert!(result.error.is_some());
 
         let error = result.error.unwrap();
-        assert_eq!(error.error_type, "ParseError");
+        assert_eq!(error.error_type,                     "SyntaxError"
+);
         assert!(!error.message.is_empty());
     }
 

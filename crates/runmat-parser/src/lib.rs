@@ -288,18 +288,18 @@ struct TokenInfo {
 }
 
 #[derive(Debug)]
-pub struct ParseError {
+pub struct SyntaxError {
     pub message: String,
     pub position: usize,
     pub found_token: Option<String>,
     pub expected: Option<String>,
 }
 
-pub fn parse(input: &str) -> Result<Program, ParseError> {
+pub fn parse(input: &str) -> Result<Program, SyntaxError> {
     parse_with_options(input, ParserOptions::default())
 }
 
-pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program, ParseError> {
+pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program, SyntaxError> {
     use runmat_lexer::tokenize_detailed;
 
     let toks = tokenize_detailed(input);
@@ -307,7 +307,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
 
     for t in toks {
         if matches!(t.token, Token::Error) {
-            return Err(ParseError {
+            return Err(SyntaxError {
                 message: format!("Invalid token: '{}'", t.lexeme),
                 position: t.start,
                 found_token: Some(t.lexeme),
@@ -340,11 +340,11 @@ pub fn parse_simple(input: &str) -> Result<Program, String> {
     parse(input).map_err(|e| format!("{e}"))
 }
 
-impl std::fmt::Display for ParseError {
+impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Parse error at position {}: {}",
+            "Syntax error at position {}: {}",
             self.position, self.message
         )?;
         if let Some(found) = &self.found_token {
@@ -357,12 +357,12 @@ impl std::fmt::Display for ParseError {
     }
 }
 
-impl std::error::Error for ParseError {}
+impl std::error::Error for SyntaxError {}
 
-impl From<String> for ParseError {
-    fn from(message: String) -> Self {
-        ParseError {
-            message,
+impl From<String> for SyntaxError {
+    fn from(value: String) -> Self {
+        SyntaxError {
+            message: value,
             position: 0,
             found_token: None,
             expected: None,
@@ -370,9 +370,9 @@ impl From<String> for ParseError {
     }
 }
 
-impl From<ParseError> for String {
-    fn from(error: ParseError) -> Self {
-        format!("{error}")
+impl From<SyntaxError> for String {
+    fn from(error: SyntaxError) -> Self {
+        error.to_string()
     }
 }
 
@@ -517,7 +517,7 @@ impl Parser {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
         self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
     }
-    fn parse_program(&mut self) -> Result<Program, ParseError> {
+    fn parse_program(&mut self) -> Result<Program, SyntaxError> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
             if self.consume(&Token::Semicolon)
@@ -531,37 +531,25 @@ impl Parser {
         Ok(Program { body })
     }
 
-    fn error(&self, message: &str) -> ParseError {
-        let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
-            (token_info.position, Some(token_info.lexeme.clone()))
-        } else {
-            (self.input.len(), None)
-        };
-
-        ParseError {
+    fn error(&self, message: &str) -> SyntaxError {
+        SyntaxError {
             message: message.to_string(),
-            position,
-            found_token,
+            position: self.current_position(),
+            found_token: self.peek().map(|t| t.lexeme.clone()),
             expected: None,
         }
     }
 
-    fn error_with_expected(&self, message: &str, expected: &str) -> ParseError {
-        let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
-            (token_info.position, Some(token_info.lexeme.clone()))
-        } else {
-            (self.input.len(), None)
-        };
-
-        ParseError {
+    fn error_with_expected(&self, message: &str, expected: &str) -> SyntaxError {
+        SyntaxError {
             message: message.to_string(),
-            position,
-            found_token,
+            position: self.current_position(),
+            found_token: self.peek().map(|t| t.lexeme.clone()),
             expected: Some(expected.to_string()),
         }
     }
 
-    fn parse_stmt_with_semicolon(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_stmt_with_semicolon(&mut self) -> Result<Stmt, SyntaxError> {
         let stmt = self.parse_stmt()?;
         let is_semicolon_terminated = self.consume(&Token::Semicolon);
 
@@ -584,7 +572,7 @@ impl Parser {
         }
     }
 
-    fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_stmt(&mut self) -> Result<Stmt, SyntaxError> {
         match self.peek_token() {
             Some(Token::If) => self.parse_if().map_err(|e| e.into()),
             Some(Token::For) => self.parse_for().map_err(|e| e.into()),
@@ -835,7 +823,7 @@ impl Parser {
         &self,
         command: &CommandVerb,
         args: &mut [Expr],
-    ) -> Result<(), ParseError> {
+    ) -> Result<(), SyntaxError> {
         match command.arg_kind {
             CommandArgKind::Keyword { allowed, optional } => {
                 if args.is_empty() {
@@ -879,7 +867,7 @@ impl Parser {
         Ok(())
     }
 
-    fn try_parse_lvalue_assign(&mut self) -> Result<Option<Stmt>, ParseError> {
+    fn try_parse_lvalue_assign(&mut self) -> Result<Option<Stmt>, SyntaxError> {
         let save = self.pos;
         // Parse potential LValue: Member/Index/IndexCell
         let lvalue = if self.peek_token() == Some(&Token::Ident) {
@@ -994,11 +982,11 @@ impl Parser {
         Ok(Some(stmt))
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
         self.parse_logical_or()
     }
 
-    fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
+    fn parse_logical_or(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_logical_and()?;
         while self.consume(&Token::OrOr) {
             let rhs = self.parse_logical_and()?;
@@ -1007,7 +995,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
+    fn parse_logical_and(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_bitwise_or()?;
         while self.consume(&Token::AndAnd) {
             let rhs = self.parse_bitwise_or()?;
@@ -1016,7 +1004,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_bitwise_or(&mut self) -> Result<Expr, ParseError> {
+    fn parse_bitwise_or(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_bitwise_and()?;
         while self.consume(&Token::Or) {
             let rhs = self.parse_bitwise_and()?;
@@ -1025,7 +1013,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_bitwise_and(&mut self) -> Result<Expr, ParseError> {
+    fn parse_bitwise_and(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_range()?;
         while self.consume(&Token::And) {
             let rhs = self.parse_range()?;
@@ -1034,7 +1022,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_range(&mut self) -> Result<Expr, ParseError> {
+    fn parse_range(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_comparison()?;
         if self.consume(&Token::Colon) {
             let mid = self.parse_comparison()?;
@@ -1050,7 +1038,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+    fn parse_comparison(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_add_sub()?;
         loop {
             let op = match self.peek_token() {
@@ -2091,6 +2079,16 @@ impl Parser {
             }) => Ok("~".to_string()),
             _ => Err("expected identifier or '~'".into()),
         }
+    }
+
+    fn peek(&self) -> Option<&TokenInfo> {
+        self.tokens.get(self.pos)
+    }
+
+    fn current_position(&self) -> usize {
+        self.peek()
+            .map(|t| t.position)
+            .unwrap_or_else(|| self.input.len())
     }
 
     fn peek_token(&self) -> Option<&Token> {

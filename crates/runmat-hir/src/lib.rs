@@ -9,6 +9,47 @@ pub use runmat_builtins::Type;
 
 pub type Span = runmat_parser::Span;
 
+#[derive(Debug, Clone)]
+pub struct SemanticError {
+    pub message: String,
+    pub span: Option<Span>,
+    pub identifier: Option<String>,
+}
+
+impl SemanticError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+            identifier: None,
+        }
+    }
+
+    pub fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
+        self.identifier = Some(identifier.into());
+        self
+    }
+}
+
+impl std::fmt::Display for SemanticError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for SemanticError {}
+
+impl From<String> for SemanticError {
+    fn from(value: String) -> Self {
+        SemanticError::new(value)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VarId(pub usize);
 
@@ -193,7 +234,7 @@ pub struct LoweringResult {
     pub var_names: HashMap<VarId, String>,
 }
 
-pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
+pub fn lower(prog: &AstProgram) -> Result<HirProgram, SemanticError> {
     let mut ctx = Ctx::new();
     let body = ctx.lower_stmts(&prog.body)?;
     let var_types = ctx.var_types.clone();
@@ -1669,17 +1710,17 @@ pub fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
 /// Validate for obvious import ambiguities:
 /// - Duplicate specific imports (same fully-qualified path)
 /// - Specific imports that introduce the same unqualified name from different packages
-pub fn validate_imports(prog: &HirProgram) -> Result<(), String> {
+pub fn validate_imports(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::{HashMap, HashSet};
     let norms = normalize_imports(prog);
     let mut seen_exact: HashSet<(String, bool)> = HashSet::new();
     for n in &norms {
         if !seen_exact.insert((n.path.clone(), n.wildcard)) {
-            return Err(format!(
+            return Err(SemanticError::new(format!(
                 "duplicate import '{}{}'",
                 n.path,
                 if n.wildcard { ".*" } else { "" }
-            ));
+            )));
         }
     }
     // Ambiguity among specifics with same unqualified name
@@ -1693,11 +1734,11 @@ pub fn validate_imports(prog: &HirProgram) -> Result<(), String> {
     }
     for (uq, sources) in by_name {
         if sources.len() > 1 {
-            return Err(format!(
+            return Err(SemanticError::new(format!(
                 "ambiguous import for '{}': {}",
                 uq,
                 sources.join(", ")
-            ));
+            )));
         }
     }
     Ok(())
@@ -1706,19 +1747,19 @@ pub fn validate_imports(prog: &HirProgram) -> Result<(), String> {
 /// Validate classdef declarations for basic semantic correctness
 /// Checks: duplicate property/method names within the same class,
 /// conflicts between property and method names, and trivial superclass cycles (self parent)
-pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
+pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::HashSet;
     fn norm_attr_value(v: &str) -> String {
         let t = v.trim();
         let t = t.trim_matches('\'');
         t.to_ascii_lowercase()
     }
-    fn validate_access_value(ctx: &str, v: &str) -> Result<(), String> {
+    fn validate_access_value(ctx: &str, v: &str) -> Result<(), SemanticError> {
         match v {
             "public" | "private" => Ok(()),
-            other => Err(format!(
+            other => Err(SemanticError::new(format!(
                 "invalid access value '{other}' in {ctx} (allowed: public, private)",
-            )),
+            ))),
         }
     }
     for stmt in &prog.body {
@@ -1731,7 +1772,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
         {
             if let Some(sup) = super_class {
                 if sup == name {
-                    return Err(format!("Class '{name}' cannot inherit from itself"));
+                    return Err(SemanticError::new(format!(
+                        "Class '{name}' cannot inherit from itself"
+                    )));
                 }
             }
             let mut prop_names: HashSet<String> = HashSet::new();
@@ -1807,22 +1850,28 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             }
                         }
                         if has_static && has_dependent {
-                            return Err(format!("class '{name}' properties: attributes 'Static' and 'Dependent' cannot be combined"));
+                            return Err(SemanticError::new(format!(
+                                "class '{name}' properties: attributes 'Static' and 'Dependent' cannot be combined"
+                            )));
                         }
                         if has_constant && has_dependent {
-                            return Err(format!("class '{name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"));
+                            return Err(SemanticError::new(format!(
+                                "class '{name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
+                            )));
                         }
                         // If Access provided without Get/Set overrides, it's fine; if overrides provided, also fine.
                         let _ = (access_default, get_access, set_access);
                         // Enforce property attribute semantics minimal subset: ensure no duplicate Static flags in conflict (placeholder)
                         for p in props {
                             if !prop_names.insert(p.clone()) {
-                                return Err(format!("Duplicate property '{p}' in class {name}"));
+                                return Err(SemanticError::new(format!(
+                                    "Duplicate property '{p}' in class {name}"
+                                )));
                             }
                             if method_names.contains(p) {
-                                return Err(format!(
+                                return Err(SemanticError::new(format!(
                                     "Name '{p}' used for both property and method in class {name}"
-                                ));
+                                )));
                             }
                         }
                     }
@@ -1861,18 +1910,22 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             }
                         }
                         if has_abstract && has_sealed {
-                            return Err(format!("class '{name}' methods: attributes 'Abstract' and 'Sealed' cannot be combined"));
+                            return Err(SemanticError::new(format!(
+                                "class '{name}' methods: attributes 'Abstract' and 'Sealed' cannot be combined"
+                            )));
                         }
                         // Extract method function names at top-level of methods block
                         for s in body {
                             if let HirStmt::Function { name: fname, .. } = s {
                                 if !method_names.insert(fname.clone()) {
-                                    return Err(format!(
+                                    return Err(SemanticError::new(format!(
                                         "Duplicate method '{fname}' in class {name}"
-                                    ));
+                                    )));
                                 }
                                 if prop_names.contains(fname) {
-                                    return Err(format!("Name '{fname}' used for both property and method in class {name}"));
+                                    return Err(SemanticError::new(format!(
+                                        "Name '{fname}' used for both property and method in class {name}"
+                                    )));
                                 }
                             }
                         }
@@ -1881,13 +1934,17 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         // Events: currently no attributes enforced; names must be unique within class
                         for ev in names {
                             if method_names.contains(ev) || prop_names.contains(ev) {
-                                return Err(format!("Name '{ev}' used for event conflicts with existing member in class {name}"));
+                                return Err(SemanticError::new(format!(
+                                    "Name '{ev}' used for event conflicts with existing member in class {name}"
+                                )));
                             }
                         }
                         let mut seen = std::collections::HashSet::new();
                         for ev in names {
                             if !seen.insert(ev) {
-                                return Err(format!("Duplicate event '{ev}' in class {name}"));
+                                return Err(SemanticError::new(format!(
+                                    "Duplicate event '{ev}' in class {name}"
+                                )));
                             }
                         }
                         let _ = attributes; // placeholder for future attribute validation
@@ -1896,15 +1953,17 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         // Enumeration: unique names; no conflicts with props/methods
                         for en in names {
                             if method_names.contains(en) || prop_names.contains(en) {
-                                return Err(format!("Name '{en}' used for enumeration conflicts with existing member in class {name}"));
+                                return Err(SemanticError::new(format!(
+                                    "Name '{en}' used for enumeration conflicts with existing member in class {name}"
+                                )));
                             }
                         }
                         let mut seen = std::collections::HashSet::new();
                         for en in names {
                             if !seen.insert(en) {
-                                return Err(format!(
+                                return Err(SemanticError::new(format!(
                                     "Duplicate enumeration '{en}' in class {name}"
-                                ));
+                                )));
                             }
                         }
                         let _ = attributes;
@@ -1913,7 +1972,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         // Arguments: ensure no conflicts with props/methods
                         for ar in names {
                             if method_names.contains(ar) || prop_names.contains(ar) {
-                                return Err(format!("Name '{ar}' used for arguments conflicts with existing member in class {name}"));
+                                return Err(SemanticError::new(format!(
+                                    "Name '{ar}' used for arguments conflicts with existing member in class {name}"
+                                )));
                             }
                         }
                         let _ = attributes;
@@ -1929,7 +1990,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
 pub fn lower_with_context(
     prog: &AstProgram,
     existing_vars: &HashMap<String, usize>,
-) -> Result<(HirProgram, HashMap<String, usize>), String> {
+) -> Result<(HirProgram, HashMap<String, usize>), SemanticError> {
     let empty_functions = HashMap::new();
     let result = lower_with_full_context(prog, existing_vars, &empty_functions)?;
     Ok((result.hir, result.variables))
@@ -1940,7 +2001,7 @@ pub fn lower_with_full_context(
     prog: &AstProgram,
     existing_vars: &HashMap<String, usize>,
     existing_functions: &HashMap<String, HirStmt>,
-) -> Result<LoweringResult, String> {
+) -> Result<LoweringResult, SemanticError> {
     let mut ctx = Ctx::new();
 
     // Pre-populate the context with existing variables
@@ -2582,11 +2643,11 @@ impl Ctx {
         self.is_user_defined_function(name) || self.is_builtin_function(name)
     }
 
-    fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, String> {
+    fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, SemanticError> {
         stmts.iter().map(|s| self.lower_stmt(s)).collect()
     }
 
-    fn lower_stmt(&mut self, stmt: &AstStmt) -> Result<HirStmt, String> {
+    fn lower_stmt(&mut self, stmt: &AstStmt) -> Result<HirStmt, SemanticError> {
         let span = stmt.span();
         match stmt {
             AstStmt::ExprStmt(e, semicolon_terminated, _) => Ok(HirStmt::ExprStmt(
@@ -2859,7 +2920,7 @@ impl Ctx {
         }
     }
 
-    fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, String> {
+    fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, SemanticError> {
         use parser::Expr::*;
         let span = expr.span();
         let (kind, ty) = match expr {
@@ -2881,10 +2942,11 @@ impl Ctx {
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
-                    return Err(format!(
-                        "{}: Undefined variable: {name}",
-                        "MATLAB:UndefinedVariable"
-                    ));
+                    return Err(
+                        SemanticError::new(format!("Undefined variable: {name}"))
+                            .with_identifier("MATLAB:UndefinedVariable")
+                            .with_span(span),
+                    );
                 }
             }
             Unary(op, e, _) => {
@@ -3075,7 +3137,7 @@ impl Ctx {
         Ok(HirExpr { kind, ty, span })
     }
 
-    fn lower_lvalue(&mut self, lv: &parser::LValue) -> Result<HirLValue, String> {
+    fn lower_lvalue(&mut self, lv: &parser::LValue) -> Result<HirLValue, SemanticError> {
         use parser::LValue as ALV;
         Ok(match lv {
             ALV::Var(name) => {
