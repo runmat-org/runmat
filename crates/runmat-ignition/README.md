@@ -6,7 +6,6 @@ Sibling docs for deep dives:
 - INSTR_SET.md - opcode semantics, stack effects, failure modes
 - COMPILER_PIPELINE.md - HIR → bytecode lowering strategy
 - INDEXING_AND_SLICING.md - column-major rules, `end` arithmetic, N-D gather/scatter, expansion
-- ERROR_MODEL.md - MException and mex identifier normalization
 - OOP_SEMANTICS.md - objects, properties/methods, `subsref`/`subsasgn`, operator overloading
 
 ## Module structure

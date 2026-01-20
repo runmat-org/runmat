@@ -11,8 +11,9 @@ pub use bytecode::compile;
 pub use functions::{Bytecode, ExecutionContext, UserFunction};
 pub use instr::Instr;
 pub use vm::{
-    interpret, interpret_with_vars, push_pending_workspace, take_updated_workspace_state,
-    InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
+    interpret, interpret_with_vars, push_pending_workspace, set_call_stack_limit,
+    take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
+    DEFAULT_CALLSTACK_LIMIT,
 };
 
 use miette::{SourceOffset, SourceSpan};

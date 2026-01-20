@@ -76,6 +76,8 @@ pub struct RunMatSession {
     /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
     /// internally by `ExecuteFuture` rather than being surfaced as "pending requests".
     async_input_handler: Option<SharedAsyncInputHandler>,
+    /// Maximum number of call stack frames to retain for diagnostics.
+    callstack_limit: usize,
     telemetry_consent: bool,
     telemetry_client_id: Option<String>,
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
@@ -700,6 +702,7 @@ impl RunMatSession {
             is_executing: false,
             input_handler: None,
             async_input_handler: None,
+            callstack_limit: runmat_ignition::DEFAULT_CALLSTACK_LIMIT,
             telemetry_consent: true,
             telemetry_client_id: None,
             workspace_preview_tokens: HashMap::new(),
@@ -707,6 +710,8 @@ impl RunMatSession {
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
         };
+
+        runmat_ignition::set_call_stack_limit(session.callstack_limit);
 
         // Cache the shared plotting context (if a GPU provider is active) so the
         // runtime can wire zero-copy render paths without instantiating another
@@ -964,6 +969,12 @@ impl RunMatSession {
             return;
         }
         let mut rendered = Vec::new();
+        if error.context.call_frames_elided > 0 {
+            rendered.push(format!(
+                "... {} frames elided ...",
+                error.context.call_frames_elided
+            ));
+        }
         for frame in error.context.call_frames.iter().rev() {
             let mut line = frame.function.clone();
             if let (Some(source_id), Some((start, _end))) = (frame.source_id, frame.span) {
@@ -998,6 +1009,7 @@ impl RunMatSession {
     pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self)
             .map_err(|err| RunError::Runtime(build_runtime_error(err.to_string()).build()))?;
+        runmat_ignition::set_call_stack_limit(self.callstack_limit);
         let exec_span = info_span!(
             "runtime.execute",
             input_len = input.len(),
@@ -1574,6 +1586,11 @@ impl RunMatSession {
     /// Set the language compatibility mode (`matlab` or `strict`).
     pub fn set_compat_mode(&mut self, mode: CompatMode) {
         self.compat_mode = mode;
+    }
+
+    pub fn set_callstack_limit(&mut self, limit: usize) {
+        self.callstack_limit = limit;
+        runmat_ignition::set_call_stack_limit(limit);
     }
 
     /// Materialize a workspace variable for inspection (optionally identified by preview token).

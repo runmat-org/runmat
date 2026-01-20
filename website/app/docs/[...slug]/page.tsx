@@ -172,7 +172,7 @@ function fallbackForSlug(slug: string[]) {
       "compiler-pipeline": "crates/runmat-ignition/COMPILER_PIPELINE.md",
       "instr-set": "crates/runmat-ignition/INSTR_SET.md",
       "indexing-and-slicing": "crates/runmat-ignition/INDEXING_AND_SLICING.md",
-      "error-model": "crates/runmat-ignition/ERROR_MODEL.md",
+      "error-model": "docs/ERROR_MODEL.md",
       "oop-semantics": "crates/runmat-ignition/OOP_SEMANTICS.md",
     };
     const file = map[slug[1]];

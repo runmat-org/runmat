@@ -159,6 +159,7 @@ Environment Variables:
   RUNMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
   RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
+  RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
   RUNMAT_CONFIG=<path>        Path to configuration file
   RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
@@ -188,6 +189,10 @@ struct Cli {
     /// Execution timeout in seconds
     #[arg(long, env = "RUNMAT_TIMEOUT", default_value = "300")]
     timeout: u64,
+
+    /// Maximum number of call stack frames to record
+    #[arg(long, env = "RUNMAT_CALLSTACK_LIMIT", default_value = "200")]
+    callstack_limit: usize,
 
     /// Configuration file path
     #[arg(long, env = "RUNMAT_CONFIG")]
@@ -810,6 +815,7 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
 
     // Runtime settings
     config.runtime.timeout = cli.timeout;
+    config.runtime.callstack_limit = cli.callstack_limit;
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
@@ -1036,6 +1042,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     .context("Failed to create REPL engine")?;
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_compat_mode(parser_compat(config.language.compat));
+    engine.set_callstack_limit(config.runtime.callstack_limit);
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }

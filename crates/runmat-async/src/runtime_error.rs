@@ -8,6 +8,7 @@ pub struct ErrorContext {
     pub builtin: Option<String>,
     pub task_id: Option<String>,
     pub call_frames: Vec<CallFrame>,
+    pub call_frames_elided: usize,
     pub call_stack: Vec<String>,
     pub phase: Option<String>,
 }
@@ -37,6 +38,11 @@ impl ErrorContext {
 
     pub fn with_call_frames(mut self, call_frames: Vec<CallFrame>) -> Self {
         self.call_frames = call_frames;
+        self
+    }
+
+    pub fn with_call_frames_elided(mut self, count: usize) -> Self {
+        self.call_frames_elided = count;
         self
     }
 
@@ -127,6 +133,12 @@ impl RuntimeError {
             }
         } else if !self.context.call_frames.is_empty() {
             lines.push("callstack:".to_string());
+            if self.context.call_frames_elided > 0 {
+                lines.push(format!(
+                    "  ... {} frames elided ...",
+                    self.context.call_frames_elided
+                ));
+            }
             for frame in &self.context.call_frames {
                 lines.push(format!("  {}", frame.function));
             }
@@ -174,6 +186,11 @@ impl RuntimeErrorBuilder {
 
     pub fn with_call_frames(mut self, call_frames: Vec<CallFrame>) -> Self {
         self.error.context = self.error.context.with_call_frames(call_frames);
+        self
+    }
+
+    pub fn with_call_frames_elided(mut self, count: usize) -> Self {
+        self.error.context = self.error.context.with_call_frames_elided(count);
         self
     }
 

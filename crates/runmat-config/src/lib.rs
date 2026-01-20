@@ -63,6 +63,9 @@ pub struct RuntimeConfig {
     /// Execution timeout in seconds
     #[serde(default = "default_timeout")]
     pub timeout: u64,
+    /// Maximum number of call stack frames to record
+    #[serde(default = "default_callstack_limit")]
+    pub callstack_limit: usize,
     /// Enable verbose output
     #[serde(default)]
     pub verbose: bool,
@@ -573,6 +576,10 @@ pub enum LogLevel {
 fn default_timeout() -> u64 {
     300
 }
+
+fn default_callstack_limit() -> usize {
+    200
+}
 fn default_true() -> bool {
     true
 }
@@ -930,6 +937,12 @@ impl ConfigLoader {
         if let Some(timeout) = env_value("RUNMAT_TIMEOUT", &[]) {
             if let Ok(timeout) = timeout.parse() {
                 config.runtime.timeout = timeout;
+            }
+        }
+
+        if let Some(limit) = env_value("RUNMAT_CALLSTACK_LIMIT", &[]) {
+            if let Ok(limit) = limit.parse() {
+                config.runtime.callstack_limit = limit;
             }
         }
 

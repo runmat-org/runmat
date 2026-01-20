@@ -66,6 +66,8 @@ fn attach_span_at(bytecode: &Bytecode, pc: usize, mut err: RuntimeError) -> Runt
     err
 }
 
+pub const DEFAULT_CALLSTACK_LIMIT: usize = 200;
+
 fn attach_span_from_pc(bytecode: &Bytecode, err: RuntimeError) -> RuntimeError {
     let pc = current_vm_pc();
     attach_span_at(bytecode, pc, err)
@@ -75,10 +77,32 @@ struct CallFrameGuard;
 
 impl Drop for CallFrameGuard {
     fn drop(&mut self) {
-        CALL_FRAMES.with(|frames| {
-            let _ = frames.borrow_mut().pop();
-        });
+        pop_call_frame();
     }
+}
+
+#[derive(Default, Clone)]
+struct CallStackState {
+    frames: Vec<CallFrame>,
+    depth: usize,
+}
+
+fn callstack_limit() -> usize {
+    CALL_STACK_LIMIT.with(|limit| limit.get())
+}
+
+pub fn set_call_stack_limit(limit: usize) {
+    CALL_STACK_LIMIT.with(|cell| cell.set(limit));
+    CALL_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if limit == 0 {
+            stack.frames.clear();
+        } else if stack.frames.len() > limit {
+            while stack.frames.len() > limit {
+                stack.frames.remove(0);
+            }
+        }
+    });
 }
 
 fn push_call_frame(name: &str, bytecode: &Bytecode, pc: usize) -> CallFrameGuard {
@@ -91,10 +115,31 @@ fn push_call_frame(name: &str, bytecode: &Bytecode, pc: usize) -> CallFrameGuard
         source_id: bytecode.source_id.map(|id| id.0),
         span,
     };
-    CALL_FRAMES.with(|frames| {
-        frames.borrow_mut().push(frame);
+    CALL_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        stack.depth = stack.depth.saturating_add(1);
+        let limit = callstack_limit();
+        if limit == 0 {
+            return;
+        }
+        if stack.frames.len() == limit {
+            stack.frames.remove(0);
+        }
+        stack.frames.push(frame);
     });
     CallFrameGuard
+}
+
+fn pop_call_frame() {
+    CALL_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack.depth > 0 {
+            stack.depth -= 1;
+        }
+        if !stack.frames.is_empty() {
+            stack.frames.pop();
+        }
+    });
 }
 
 fn attach_call_frames(
@@ -105,8 +150,16 @@ fn attach_call_frames(
     if !err.context.call_frames.is_empty() || !err.context.call_stack.is_empty() {
         return err;
     }
-    let mut frames = CALL_FRAMES.with(|frames| frames.borrow().clone());
+    let (mut frames, depth) = CALL_STACK.with(|stack| {
+        let stack = stack.borrow();
+        let frames = stack.frames.clone();
+        (frames, stack.depth)
+    });
+    let limit = callstack_limit();
     if frames.is_empty() {
+        if limit == 0 {
+            return err;
+        }
         let span = err.span.as_ref().map(|span| {
             let start = span.offset();
             let end = start + span.len();
@@ -120,7 +173,13 @@ fn attach_call_frames(
             });
         }
     }
+    let elided = if frames.is_empty() {
+        0
+    } else {
+        depth.saturating_sub(frames.len())
+    };
     err.context.call_frames = frames;
+    err.context.call_frames_elided = elided;
     err
 }
 
@@ -1249,7 +1308,13 @@ pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet
 runmat_thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
-    static CALL_FRAMES: RefCell<Vec<CallFrame>> = const { RefCell::new(Vec::new()) };
+    static CALL_STACK: RefCell<CallStackState> = const {
+        RefCell::new(CallStackState {
+            frames: Vec::new(),
+            depth: 0,
+        })
+    };
+    static CALL_STACK_LIMIT: Cell<usize> = const { Cell::new(DEFAULT_CALLSTACK_LIMIT) };
 }
 
 #[derive(Debug)]
