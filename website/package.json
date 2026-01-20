@@ -7,7 +7,8 @@
     "prebuild": "cp -r ../crates/runmat-runtime/src/builtins/builtins-json ./content && echo 'Copied builtins-json' || echo 'Failed to copy builtins-json. Skipping.'",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:matlab-online": "node scripts/check-matlab-online-jsonld.js"
   },
   "dependencies": {
     "@mdx-js/loader": "^3.1.0",
